@@ -72,7 +72,7 @@ const context = OptionRowHideTagsContext.inject()
                   <div
                     flex="~ items-center justify-center"
                     border="1 primary"
-                    bg="primary op30"
+                    text="primary"
                     mx-1 h-5 w-5 rounded-md
                   >
                     <Icon v-if="cell.row.data.matcher === 'contains'" i-codicon-whole-word label="Contains" />

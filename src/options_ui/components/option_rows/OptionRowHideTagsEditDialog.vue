@@ -89,9 +89,10 @@ const typeModel = computed({
                 h-6
                 w-6 cursor-pointer
                 rounded-md
-                border="1 transparent state-on:primary"
-                bg="hover:input state-on:primary! state-on:op30!"
-                @update:pressed="(v: string) => matcher = v ? value : 'exact'"
+                border="1 border state-on:primary"
+                bg="hover:input"
+                text="muted-fg state-on:primary"
+                @update:pressed="(v: boolean) => matcher.value = v ? value : 'exact'"
               >
                 <Tooltip>
                   <div>
