@@ -17,8 +17,8 @@
     </OptionRow>
     <OptionDivider />
     <OptionRow
-      title="Tag exclude toolbar"
-      subtitle="Show a button when hovering a tag on a works listing to add it to (or remove it from) the &quot;Other tags to exclude&quot; filter."
+      title="Tag include/exclude toolbar"
+      subtitle="Show include (+) and exclude (−) buttons when hovering a tag on a works listing, to add it to (or remove it from) the filter. Uses the existing sidebar checkbox when there is one."
     >
       <OptionSwitch option-id="tagToolbar" />
     </OptionRow>

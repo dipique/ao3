@@ -1,4 +1,5 @@
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
+import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 
 import { ADDON_CLASS } from '#common'
 import { Unit } from '#content_script/Unit.js'
@@ -7,6 +8,8 @@ import React from '#dom'
 const TOOLBAR_CLASS = `${ADDON_CLASS}--tag-toolbar`
 const BUTTON_CLASS = `${ADDON_CLASS}--tag-toolbar--button`
 const ACTIVE_CLASS = `${ADDON_CLASS}--tag-toolbar--active`
+const INCLUDE_CLASS = `${ADDON_CLASS}--tag-toolbar--include`
+const EXCLUDE_CLASS = `${ADDON_CLASS}--tag-toolbar--exclude`
 
 /**
  * Blurb tag links we decorate. These are the text-based tags (relationships,
@@ -15,13 +18,70 @@ const ACTIVE_CLASS = `${ADDON_CLASS}--tag-toolbar--active`
  */
 const TAG_LINK_SELECTOR = '.blurb ul.tags a.tag'
 
-/**
- * The free-text "Other tags to exclude" control in the filter sidebar. Its
- * value is the comma-separated list of excluded tag names that gets submitted
- * (`work_search[excluded_tag_names]`). Since tags are matched by name, we can
- * add/remove purely from the displayed tag text — no id lookup needed.
- */
-const EXCLUDE_FIELD_ID = 'work_search_excluded_tag_names'
+type Direction = 'include' | 'exclude'
+
+interface DirectionConfig {
+  /** The free-text autocomplete input that submits comma-joined tag names. */
+  fieldId: string
+  /** The `name=` prefix of this direction's pre-built filter checkboxes. */
+  checkboxPrefix: string
+}
+
+const DIRECTIONS: Record<Direction, DirectionConfig> = {
+  include: { fieldId: 'work_search_other_tag_names', checkboxPrefix: 'include_work_search' },
+  exclude: { fieldId: 'work_search_excluded_tag_names', checkboxPrefix: 'exclude_work_search' },
+}
+
+// ---------------------------------------------------------------------------
+// Pre-built filter checkboxes (the include/exclude lists in the sidebar).
+// These are preferred over free-text entry: if a tag already has a checkbox we
+// just (un)check it, matching how a user would use the sidebar.
+// ---------------------------------------------------------------------------
+
+/** Strips the trailing work-count, e.g. "Fluff (37)" -> "Fluff". */
+const TRAILING_COUNT = /\s*\(\d+\)\s*$/
+
+function checkboxTagName(input: HTMLInputElement): string {
+  const label = input.closest('label')
+  // The label holds: <input> <span.indicator> <span>NAME (count)</span>
+  const nameSpan = label?.querySelector('span:not(.indicator)')
+  const text = (nameSpan?.textContent ?? label?.textContent ?? '').trim()
+  return text.replace(TRAILING_COUNT, '').trim()
+}
+
+/** name (lowercased) -> checkbox, per direction. Built once per page, cached. */
+let checkboxIndex: Record<Direction, Map<string, HTMLInputElement>> | null = null
+
+function getCheckboxIndex(): Record<Direction, Map<string, HTMLInputElement>> {
+  if (checkboxIndex)
+    return checkboxIndex
+
+  const index: Record<Direction, Map<string, HTMLInputElement>> = {
+    include: new Map(),
+    exclude: new Map(),
+  }
+
+  for (const direction of Object.keys(DIRECTIONS) as Direction[]) {
+    const { checkboxPrefix } = DIRECTIONS[direction]
+    const inputs = document.querySelectorAll(`input[type="checkbox"][name^="${checkboxPrefix}["]`)
+    for (const input of inputs) {
+      const key = checkboxTagName(input).toLowerCase()
+      if (key && !index[direction].has(key))
+        index[direction].set(key, input)
+    }
+  }
+
+  checkboxIndex = index
+  return index
+}
+
+function findCheckbox(direction: Direction, name: string): HTMLInputElement | null {
+  return getCheckboxIndex()[direction].get(name.trim().toLowerCase()) ?? null
+}
+
+// ---------------------------------------------------------------------------
+// Free-text tag fields (fallback when a tag has no pre-built checkbox).
+// ---------------------------------------------------------------------------
 
 interface FilterField {
   /** The original input that actually submits the comma-joined tag names. */
@@ -91,7 +151,7 @@ function buildToken(filterField: FilterField, name: string): HTMLLIElement {
   return li
 }
 
-function addExcludedTag(filterField: FilterField, name: string): void {
+function addTagToField(filterField: FilterField, name: string): void {
   if (isListed(filterField, name))
     return
 
@@ -107,7 +167,7 @@ function addExcludedTag(filterField: FilterField, name: string): void {
   }
 }
 
-function removeExcludedTag(filterField: FilterField, name: string): void {
+function removeTagFromField(filterField: FilterField, name: string): void {
   const { field, list } = filterField
   const lower = name.toLowerCase()
   if (list) {
@@ -122,26 +182,39 @@ function removeExcludedTag(filterField: FilterField, name: string): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Combined state: a tag is "selected" in a direction if its checkbox is checked,
+// or (failing a checkbox) it's present in that direction's free-text field.
+// ---------------------------------------------------------------------------
+
+function isSelected(direction: Direction, name: string): boolean {
+  const checkbox = findCheckbox(direction, name)
+  if (checkbox)
+    return checkbox.checked
+
+  const filterField = getFilterField(DIRECTIONS[direction].fieldId)
+  return filterField ? isListed(filterField, name) : false
+}
+
 /**
  * Every toolbar button on the page, so a change to one tag's state is reflected
  * on every blurb showing that same tag. Rebuilt on each `ready()`.
  */
-const buttons: { button: HTMLElement, name: string }[] = []
+const buttons: { button: HTMLElement, name: string, direction: Direction }[] = []
 
-function setButtonState(button: HTMLElement, excluded: boolean): void {
-  button.classList.toggle(ACTIVE_CLASS, excluded)
-  button.setAttribute('aria-pressed', String(excluded))
-  const label = excluded ? 'Remove tag from excluded tags' : 'Exclude this tag from the filter'
+function setButtonState(button: HTMLElement, direction: Direction, selected: boolean): void {
+  button.classList.toggle(ACTIVE_CLASS, selected)
+  button.setAttribute('aria-pressed', String(selected))
+  const verb = direction === 'include' ? 'included' : 'excluded'
+  const action = direction === 'include' ? 'Include this tag in' : 'Exclude this tag from'
+  const label = selected ? `Remove tag from ${verb} tags` : `${action} the filter`
   button.title = label
   button.setAttribute('aria-label', label)
 }
 
 function refreshAll(): void {
-  const filterField = getFilterField(EXCLUDE_FIELD_ID)
-  if (!filterField)
-    return
-  for (const { button, name } of buttons)
-    setButtonState(button, isListed(filterField, name))
+  for (const { button, name, direction } of buttons)
+    setButtonState(button, direction, isSelected(direction, name))
 }
 
 export class TagToolbar extends Unit {
@@ -150,13 +223,16 @@ export class TagToolbar extends Unit {
 
   static override async clean(): Promise<void> {
     buttons.length = 0
+    checkboxIndex = null
   }
 
   override async ready(): Promise<void> {
     buttons.length = 0
+    checkboxIndex = null
 
-    if (!getFilterField(EXCLUDE_FIELD_ID)) {
-      this.logger.debug('No exclude-tags field on this page; skipping tag toolbars.')
+    const hasFilter = !!getFilterField(DIRECTIONS.exclude.fieldId) || !!getFilterField(DIRECTIONS.include.fieldId)
+    if (!hasFilter) {
+      this.logger.debug('No filter sidebar on this page; skipping tag toolbars.')
       return
     }
 
@@ -173,38 +249,52 @@ export class TagToolbar extends Unit {
     }
 
     refreshAll()
-    this.logger.debug(`Added exclude toolbars to ${buttons.length} tag links.`)
+    this.logger.debug(`Added include/exclude toolbars to ${buttons.length / 2} tag links.`)
   }
 
   buildToolbar(name: string): HTMLElement {
+    return (
+      <span class={`${ADDON_CLASS} ${TOOLBAR_CLASS}`}>
+        {this.buildButton('include', name)}
+        {this.buildButton('exclude', name)}
+      </span>
+    )
+  }
+
+  buildButton(direction: Direction, name: string): HTMLElement {
+    const Icon = direction === 'include' ? MdiPlusCircle : MdiMinusCircle
+    const directionClass = direction === 'include' ? INCLUDE_CLASS : EXCLUDE_CLASS
+
     const button: HTMLElement = (
-      <button type="button" class={BUTTON_CLASS} aria-pressed="false">
-        <MdiMinusCircle />
+      <button type="button" class={`${BUTTON_CLASS} ${directionClass}`} aria-pressed="false">
+        <Icon />
       </button>
     )
 
     button.addEventListener('click', (e) => {
       e.preventDefault()
-      const filterField = getFilterField(EXCLUDE_FIELD_ID)
-      if (!filterField) {
-        this.logger.warn('Exclude-tags field disappeared; cannot update filter.')
-        return
-      }
 
-      if (isListed(filterField, name))
-        removeExcludedTag(filterField, name)
-      else
-        addExcludedTag(filterField, name)
+      const checkbox = findCheckbox(direction, name)
+      if (checkbox) {
+        // Prefer the pre-built sidebar checkbox over free-text entry.
+        checkbox.checked = !checkbox.checked
+      }
+      else {
+        const filterField = getFilterField(DIRECTIONS[direction].fieldId)
+        if (!filterField) {
+          this.logger.warn(`No ${direction} checkbox or field for "${name}"; cannot update filter.`)
+          return
+        }
+        if (isListed(filterField, name))
+          removeTagFromField(filterField, name)
+        else
+          addTagToField(filterField, name)
+      }
 
       refreshAll()
     })
 
-    buttons.push({ button, name })
-
-    return (
-      <span class={`${ADDON_CLASS} ${TOOLBAR_CLASS}`}>
-        {button}
-      </span>
-    )
+    buttons.push({ button, name, direction })
+    return button
   }
 }

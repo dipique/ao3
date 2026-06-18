@@ -81,6 +81,7 @@ dd.finish-at {
   top: 50%;
   transform: translateY(-50%);
   z-index: 5;
+  gap: 3px;
   padding-left: 3px;
   white-space: nowrap;
 }
@@ -112,6 +113,13 @@ dd.finish-at {
 
 .AO3E--tag-toolbar--button.AO3E--tag-toolbar--active {
   opacity: 1;
+}
+
+.AO3E--tag-toolbar--button.AO3E--tag-toolbar--include.AO3E--tag-toolbar--active {
+  color: #0a7a0a;
+}
+
+.AO3E--tag-toolbar--button.AO3E--tag-toolbar--exclude.AO3E--tag-toolbar--active {
   color: #9a0000;
 }
 
