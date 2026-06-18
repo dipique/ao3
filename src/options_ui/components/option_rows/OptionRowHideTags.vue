@@ -24,6 +24,9 @@ OptionRowHideTagsContext.provide({
         <DialogTitle>
           Tag filtering notes
         </DialogTitle>
+        <DialogDescription class="sr-only">
+          Notes on how tag filtering works and its current limitations.
+        </DialogDescription>
         <div flex="~ col" class="[&_h2]:text-lg [&_p]:text-sm [&_h2]:font-medium">
           <h2 py-1>
             How to use

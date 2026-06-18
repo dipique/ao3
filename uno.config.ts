@@ -2,7 +2,8 @@ import type { Preset, PresetWind3Theme, UserConfig, UserShortcuts, VariantObject
 
 import { objectKeys, objectPick } from '@antfu/utils'
 import { parseCssColor, variantGetParameter } from '@unocss/rule-utils'
-import { resolve } from 'node:path'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import * as svgo from 'svgo'
 import { presetAttributify, presetIcons, presetWind3, transformerDirectives } from 'unocss'
 import unocssPresetAnimations from 'unocss-preset-animations'
@@ -56,8 +57,17 @@ export const COLORS = {
   },
 } as const
 
+// Load installed @iconify-json/* collections explicitly. autoInstall/FS auto-discovery
+// is unreliable here (pnpm's nested store + Windows), so we provide them directly.
+const iconifyRequire = createRequire(import.meta.url)
+const iconifyCollection = (name: string) => () => iconifyRequire(`@iconify-json/${name}/icons.json`)
+
 export const ICONS_CUSTOM_COLLECTIONS = {
-  ao3e: FileSystemIconLoader(resolve(new URL('./src/icons', import.meta.url).pathname)),
+  ao3e: FileSystemIconLoader(fileURLToPath(new URL('./src/icons', import.meta.url))),
+  'codicon': iconifyCollection('codicon'),
+  'mdi': iconifyCollection('mdi'),
+  'tabler': iconifyCollection('tabler'),
+  'line-md': iconifyCollection('line-md'),
 }
 
 export const ICONS_TRANSFORM = (svg: string) => svgo.optimize(svg, SVGO_CONFIG).data

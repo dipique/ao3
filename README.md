@@ -52,6 +52,25 @@ Start by installing the required packages by `pnpm install`. Then continue to ei
 
 Use `pnpm run server:dev:firefox` (will compile src/ to build/firefox/ and keep watching source files) and then when files have built `pnpm run start:firefox` (will launch firefox-developer-edition with the built extension and reload when the built files change - most of the time, pressing R may be required).
 
+**In Windows:**
+```powershell
+npm install -g pnpm
+pnpm install
+$env:BROWSER="chrome"; $env:NODE_ENV="production"; node scripts/builder/build.ts build
+# or
+$env:BROWSER="chrome"; $env:NODE_ENV="development"; node --localstorage-file=.localstorage-build scripts/builder/build.ts build
+```
+
+### Testing
+
+End-to-end tests live in `test/e2e/` and run the real built options UI in headless Chrome, with `browser.storage` mocked in-memory so the actual save path is exercised:
+
+```
+pnpm test:e2e
+```
+
+The test auto-builds `dist/chrome` (production) if it's missing, then drives the options page (e.g. creating/editing tag filters) and asserts what gets written to storage. It uses your installed Chrome — set `CHROME_PATH` if it isn't found automatically. Requires `puppeteer-core` (installed as a dev dependency).
+
 ### Releasing
 
 First make sure to bump the version number using `pnpm version VERSION`. The version number in `package.json` will be updated and a git tag will be created. The version number should somewhat follow semver for major.minor.patch. To create a pre-release version, add a dash and a pre-release identifier (e.g. `1.2.3-beta.1`). Only beta versions are supported for now. The beta version will be listed as `x.x.x.PRERELEASE_IDENTIFIER`. This necessitates bumping the minor version number when releasing a stable version.

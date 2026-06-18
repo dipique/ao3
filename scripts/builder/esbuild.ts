@@ -2,7 +2,7 @@ import { hasOwnProperty } from '@antfu/utils'
 import * as esbuild from 'esbuild'
 import { Buffer } from 'node:buffer'
 import fs from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import * as svgo from 'svgo'
 
 import { ICONS_CUSTOM_COLLECTIONS, ICONS_TRANSFORM, SVGO_CONFIG } from '#uno.config'
@@ -69,8 +69,8 @@ function AssetPlugin(asset: AssetMain) {
           for (const [outputPath, meta] of Object.entries(metafile?.outputs ?? {})) {
             if (meta.entryPoint) {
               delete metafile?.outputs[outputPath]
-              outputFiles = outputFiles?.filter(f => f.path !== join(asset.opts.root, outputPath))
-              outputFiles = outputFiles?.filter(f => f.path !== join(asset.opts.root, `${outputPath}.map`))
+              outputFiles = outputFiles?.filter(f => f.path !== resolve(asset.opts.root, outputPath))
+              outputFiles = outputFiles?.filter(f => f.path !== resolve(asset.opts.root, `${outputPath}.map`))
             }
           }
         }
@@ -119,9 +119,12 @@ function AssetPlugin(asset: AssetMain) {
         for (const [outputPath, meta] of Object.entries(metafile?.outputs ?? {})) {
           if (
             (meta.entryPoint && join(asset.opts.root, meta.entryPoint) === asset.inputPath)
-            || (asset.type === 'other' && relative(asset.opts.src, asset.inputPath) === relative(asset.opts.dist, outputPath))
+            // 'other' assets (e.g. icons) are copied via the file loader, which may
+            // flatten the output dir; match on filename so the manifest is rewritten
+            // to the real output location rather than the (possibly stale) source path.
+            || (asset.type === 'other' && basename(asset.inputPath) === basename(outputPath))
           ) {
-            asset.outputPath.value = join(asset.opts.root, outputPath)
+            asset.outputPath.value = resolve(asset.opts.root, outputPath)
           }
         }
 

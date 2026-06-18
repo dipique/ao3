@@ -56,6 +56,9 @@ function save() {
       <DialogTitle>
         {{ creating ? 'Create' : 'Edit' }} author filter
       </DialogTitle>
+      <DialogDescription class="sr-only">
+        Configure an author filter by user ID and optional pseud, and whether it hides or force-shows matching works.
+      </DialogDescription>
       <div flex="~ col gap-4" pt-4>
         <label flex="~ col gap-1">
           <span text="sm muted-fg">User ID filter</span>

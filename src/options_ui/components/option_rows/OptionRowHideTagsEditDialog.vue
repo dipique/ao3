@@ -72,6 +72,9 @@ const typeModel = computed({
       <DialogTitle>
         {{ creating ? 'Create' : 'Edit' }} tag filter
       </DialogTitle>
+      <DialogDescription class="sr-only">
+        Configure a tag filter: the text to match, how it matches, the tag type to restrict to, and whether it hides or force-shows matching works.
+      </DialogDescription>
       <div flex="~ col gap-4" pt-4>
         <label flex="~ col gap-1">
           <span text="sm muted-fg">Name filter</span>
@@ -84,7 +87,7 @@ const typeModel = computed({
               <RekaToggle
                 v-for="[value, label, tooltip, icon] in MatcherTypes"
                 :key="value"
-                :pressed="matcher === value"
+                :model-value="matcher === value"
                 flex="~ items-center justify-center"
                 h-6
                 w-6 cursor-pointer
@@ -92,7 +95,7 @@ const typeModel = computed({
                 border="1 border state-on:primary"
                 bg="hover:input"
                 text="muted-fg state-on:primary"
-                @update:pressed="(v: boolean) => matcher.value = v ? value : 'exact'"
+                @update:model-value="(v: boolean) => matcher = v ? value : 'exact'"
               >
                 <Tooltip>
                   <div>

@@ -6,13 +6,12 @@ import { hasOwnProperty } from '@antfu/utils'
 import unocss from '@unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import { Buffer } from 'node:buffer'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import RekaResolver from 'reka-ui/resolver'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { builtinPresets } from 'unimport'
 import autoImport from 'unplugin-auto-import/vite'
 import vueComponents from 'unplugin-vue-components/vite'
-import vueDevTools from 'vite-plugin-vue-devtools'
 
 import { ICONS_CUSTOM_COLLECTIONS, ICONS_TRANSFORM } from '#uno.config'
 
@@ -27,6 +26,12 @@ const ORIGIN_PLACEHOLDER = '__VITE_ORIGIN__'
 export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], origin?: Ref<string | null>) {
   const { opts: { root, src, command } } = asset
   const dist = dirname(join(asset.opts.dist, relative(src, asset.inputPath)))
+
+  // Imported lazily: vite-plugin-vue-devtools pulls in @vue/devtools-kit, which
+  // touches `localStorage` at import time and crashes under Node. Only load it in dev.
+  const devtoolsPlugins = process.env.NODE_ENV === 'development'
+    ? [(await import('vite-plugin-vue-devtools')).default({ appendTo: inputs[0]!.inputPath })]
+    : []
 
   return {
     configFile: false,
@@ -119,11 +124,7 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
       visualizer({
         filename: join(asset.opts.dist, relative(src, asset.inputPath).replace(/\.html?$/, '.stats.html')),
       }),
-      ...(process.env.NODE_ENV === 'development'
-        ? [vueDevTools({
-            appendTo: inputs[0]!.inputPath,
-          })]
-        : []),
+      ...devtoolsPlugins,
     ],
   } as vite.InlineConfig
 
@@ -164,7 +165,9 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
         // Update asset paths
         for (const [fileName, chunk] of Object.entries(bundle)) {
           for (const input of inputs) {
-            if (chunk.type === 'chunk' && chunk.facadeModuleId === input.inputPath) {
+            // Rollup normalizes facadeModuleId to forward slashes; input.inputPath
+            // uses OS separators. Compare via resolve() so they match on Windows.
+            if (chunk.type === 'chunk' && chunk.facadeModuleId && resolve(chunk.facadeModuleId) === resolve(input.inputPath)) {
               input.setAttrs(join(dist, fileName), true)
               if (chunk.viteMetadata?.importedCss)
                 input.cssBundlePaths = [...chunk.viteMetadata.importedCss].map(p => join(dist, p))
