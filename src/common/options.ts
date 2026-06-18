@@ -23,6 +23,8 @@ export interface Options {
   hideAuthors: { enabled: boolean, filters: AuthorFilter[] }
   hideTags: { enabled: boolean, filters: TagFilter[] }
 
+  compressSearchUrls: boolean
+
   styleWidthEnabled: boolean
   styleWidth: number
   showStatsColumns: boolean
@@ -55,6 +57,8 @@ export const options = createStorage<Options>({
     hideLanguages: { enabled: false, show: [] },
     hideAuthors: { enabled: false, filters: [] },
     hideTags: { enabled: false, filters: [] },
+
+    compressSearchUrls: false,
 
     styleWidthEnabled: true,
     styleWidth: 40,

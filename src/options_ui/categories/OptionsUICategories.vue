@@ -6,6 +6,7 @@ import Advanced from './Advanced.vue'
 import BlurbStats from './BlurbStats.vue'
 import ChapterStats from './ChapterStats.vue'
 import HideWorks from './HideWorks.vue'
+import Search from './Search.vue'
 import StyleTweaks from './StyleTweaks.vue'
 
 const lastRef = ref<ComponentPublicInstance | null>(null)
@@ -22,6 +23,7 @@ const { height: lastHeight } = useElementSize(computed(() => lastRef.value?.$el)
     <BlurbStats />
     <ChapterStats />
     <HideWorks />
+    <Search />
     <StyleTweaks />
     <Advanced ref="lastRef" />
   </div>
