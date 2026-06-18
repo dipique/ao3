@@ -15,5 +15,12 @@
     >
       <OptionSwitch option-id="compressSearchUrls" />
     </OptionRow>
+    <OptionDivider />
+    <OptionRow
+      title="Tag exclude toolbar"
+      subtitle="Show a button when hovering a tag on a works listing to add it to (or remove it from) the &quot;Other tags to exclude&quot; filter."
+    >
+      <OptionSwitch option-id="tagToolbar" />
+    </OptionRow>
   </OptionCategory>
 </template>

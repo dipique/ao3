@@ -24,6 +24,7 @@ export interface Options {
   hideTags: { enabled: boolean, filters: TagFilter[] }
 
   compressSearchUrls: boolean
+  tagToolbar: boolean
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -59,6 +60,7 @@ export const options = createStorage<Options>({
     hideTags: { enabled: false, filters: [] },
 
     compressSearchUrls: false,
+    tagToolbar: false,
 
     styleWidthEnabled: true,
     styleWidth: 40,

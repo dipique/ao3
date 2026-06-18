@@ -67,6 +67,54 @@ dd.finish-at {
   padding-top: 0.5em;
 }
 
+/* Establish a positioning context so the floating toolbar anchors to its tag. */
+.blurb ul.tags li {
+  position: relative;
+}
+
+.AO3E--tag-toolbar {
+  display: none;
+  /* Float just past the end of the tag, out of normal flow, so showing it
+     never shifts the tags around or pushes the icon onto the next line. */
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  padding-left: 3px;
+  white-space: nowrap;
+}
+
+.blurb ul.tags li:hover > .AO3E--tag-toolbar,
+.blurb ul.tags a.tag:focus + .AO3E--tag-toolbar,
+.AO3E--tag-toolbar:focus-within {
+  display: flex;
+}
+
+.AO3E--tag-toolbar--button {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.55;
+}
+
+.AO3E--tag-toolbar--button:hover,
+.AO3E--tag-toolbar--button:focus {
+  opacity: 1;
+}
+
+.AO3E--tag-toolbar--button.AO3E--tag-toolbar--active {
+  opacity: 1;
+  color: #9a0000;
+}
+
 .AO3E--tools {
   a.dropdown-toggle {
     display: flex !important;
