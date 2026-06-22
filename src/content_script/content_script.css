@@ -67,6 +67,58 @@ dd.finish-at {
   padding-top: 0.5em;
 }
 
+/* The eye icon + grouped reasons, left of the Show/Hide button. Kept as inline
+   flow (not flex) so the reasons wrap naturally beneath the leading icon. */
+.AO3E--hide-works--reason-line {
+  min-width: 0;
+  margin-right: 0.5em;
+}
+
+.AO3E--hide-works--reason-line > span[title] {
+  margin-right: 0.35em;
+}
+
+.AO3E--hide-works--reason-label {
+  font-style: normal;
+  font-weight: 600;
+}
+
+/* Each matched value carries the rule on hover (native title tooltip). */
+.AO3E--hide-works--reason-value {
+  cursor: help;
+}
+
+/* Inline "exclude from filter" button shown after each matched value. */
+.AO3E--hide-works--exclude {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 0 0 0.15em !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.55;
+  vertical-align: middle;
+}
+
+.AO3E--hide-works--exclude:hover,
+.AO3E--hide-works--exclude:focus {
+  opacity: 1;
+}
+
+.AO3E--hide-works--exclude.AO3E--hide-works--exclude-active {
+  opacity: 1;
+  color: #9a0000;
+}
+
+.AO3E--hide-works--exclude:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
 /* Establish a positioning context so the floating toolbar anchors to its tag. */
 .blurb ul.tags li {
   position: relative;

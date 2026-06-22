@@ -16,6 +16,13 @@
       <OptionHideReason />
     </OptionRow>
     <OptionDivider />
+    <OptionRow
+      title="Show matched values"
+      subtitle="On a collapsed work, show the actual tag/fandom/author that matched (instead of the rule that hid it) and hover any value to see the matching rule. Each value gets an exclude (−) button that adds it straight to the filter sidebar."
+    >
+      <OptionSwitch option-id="hideShowMatchedValues" />
+    </OptionRow>
+    <OptionDivider />
     <OptionRowHideCrossovers />
     <OptionDivider />
     <OptionRowHideLanguages />

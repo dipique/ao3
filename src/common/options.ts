@@ -18,6 +18,7 @@ export interface Options {
   showKudosHitsRatio: boolean
 
   hideShowReason: boolean
+  hideShowMatchedValues: boolean
   hideCrossovers: { enabled: boolean, maxFandoms: number }
   hideLanguages: { enabled: boolean, show: Language[] }
   hideAuthors: { enabled: boolean, filters: AuthorFilter[] }
@@ -55,6 +56,7 @@ export const options = createStorage<Options>({
     showKudosHitsRatio: true,
 
     hideShowReason: true,
+    hideShowMatchedValues: true,
     hideCrossovers: { enabled: true, maxFandoms: 7 },
     hideLanguages: { enabled: false, show: [] },
     hideAuthors: { enabled: false, filters: [] },

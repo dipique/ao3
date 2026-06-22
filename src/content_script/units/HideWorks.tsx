@@ -1,28 +1,131 @@
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
+import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
 import { type Tag, type TagFilter, TagType } from '#common'
 import { ADDON_CLASS } from '#common'
+import {
+  type CheckboxGroup,
+  hasCheckboxGroupFields,
+  hasFandomFilterFields,
+  hasTagFilterFields,
+  isCheckboxGroupSelected,
+  isFandomSelected,
+  isTagSelected,
+  loadFandomIdLookup,
+  onFilterChange,
+  resetFilterSidebarCaches,
+  resolveFandomIdSync,
+  resolveFandomIdWithFetch,
+  toggleCheckboxGroupFilter,
+  toggleFandomFilter,
+  toggleTagFilter,
+} from '#content_script/filterSidebar.js'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
 import React from '#dom'
 
 const BLURB_WRAPPER_CLASS = `${ADDON_CLASS}--hide-works--wrapper`
+const REASONS_CLASS = `${ADDON_CLASS}--hide-works--reasons`
+const LABEL_CLASS = `${ADDON_CLASS}--hide-works--reason-label`
+const VALUE_CLASS = `${ADDON_CLASS}--hide-works--reason-value`
+const EXCLUDE_CLASS = `${ADDON_CLASS}--hide-works--exclude`
+const EXCLUDE_ACTIVE_CLASS = `${ADDON_CLASS}--hide-works--exclude-active`
+
+/** A blurb tag, plus the fandom link href (needed to resolve a fandom's id). */
+type BlurbTag = Tag & { href?: string }
 
 interface Blurb {
   language?: string | null
   fandoms: string[]
   authors: { userId: string, pseud?: string }[]
-  tags: Tag[]
+  tags: BlurbTag[]
 }
 
-type HideReasons = Record<string, string[]>
+/**
+ * Where an inline "exclude" button adds the value in the filter sidebar:
+ * - `tag`: text tags (relationship/character/freeform), by name.
+ * - `fandom`: id-based, resolved from the name/href.
+ * - `checkbox`: a fixed group (rating/warning/category) whose full set of
+ *   checkboxes is always present, matched by name.
+ */
+type ExcludeTarget
+  = | { kind: 'tag', name: string }
+    | { kind: 'fandom', name: string, href?: string }
+    | { kind: 'checkbox', group: CheckboxGroup, name: string }
 
-function addHideReason(reasons: HideReasons, key: string, reason: string) {
-  if (!(key in reasons))
-    reasons[key] = []
-  reasons[key]!.push(reason)
+interface ReasonItem {
+  /** The actual matched value (tag/fandom/author/language) to display. */
+  value: string
+  /**
+   * Human description of the rule that matched, shown on hover (and as the
+   * primary text when "show matched values" is off).
+   */
+  rule: string
+  /** If set, an inline exclude button is offered for this value. */
+  exclude?: ExcludeTarget
 }
+
+/** Reason items grouped by display label, e.g. `Relationship` -> [items]. */
+type HideReasons = Record<string, ReasonItem[]>
+
+function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
+  if (!(label in reasons))
+    reasons[label] = []
+  reasons[label]!.push(item)
+}
+
+// ---------------------------------------------------------------------------
+// Inline exclude buttons. Registered across all hidden works on the page so a
+// filter change made anywhere (here, or a tag/fandom toolbar) re-syncs them.
+// ---------------------------------------------------------------------------
+
+const excludeButtons: { button: HTMLButtonElement, target: ExcludeTarget }[] = []
+
+const CHECKBOX_GROUP_NOUNS: Record<CheckboxGroup, string> = {
+  rating: 'rating',
+  archive_warning: 'warning',
+  category: 'category',
+}
+
+function excludeNoun(target: ExcludeTarget): string {
+  switch (target.kind) {
+    case 'fandom': return 'fandom'
+    case 'checkbox': return CHECKBOX_GROUP_NOUNS[target.group]
+    default: return 'tag'
+  }
+}
+
+function setExcludeButtonState(button: HTMLButtonElement, target: ExcludeTarget, selected: boolean): void {
+  button.classList.toggle(EXCLUDE_ACTIVE_CLASS, selected)
+  button.setAttribute('aria-pressed', String(selected))
+  const label = selected
+    ? `Remove "${target.name}" from the excluded ${excludeNoun(target)}s`
+    : `Exclude "${target.name}" from the results`
+  button.title = label
+  button.setAttribute('aria-label', label)
+}
+
+function excludeTargetSelected(target: ExcludeTarget): boolean {
+  switch (target.kind) {
+    case 'tag':
+      return isTagSelected('exclude', target.name)
+    case 'checkbox':
+      return isCheckboxGroupSelected('exclude', target.group, target.name)
+    case 'fandom': {
+      const id = resolveFandomIdSync(target.name)
+      return id != null && isFandomSelected('exclude', id)
+    }
+  }
+}
+
+function refreshExcludeButtons(): void {
+  for (const { button, target } of excludeButtons)
+    setExcludeButtonState(button, target, excludeTargetSelected(target))
+}
+
+// Registered once; iterating an empty registry between page runs is a no-op.
+onFilterChange(refreshExcludeButtons)
 
 export class HideWorks extends Unit {
   static override get name() { return 'HideWorks' }
@@ -36,6 +139,8 @@ export class HideWorks extends Unit {
   }
 
   static override async clean(): Promise<void> {
+    excludeButtons.length = 0
+    resetFilterSidebarCaches()
     const wrappers = document.querySelectorAll(`.${BLURB_WRAPPER_CLASS}`)
     this.logger.debug('Cleaning wrappers', wrappers)
     for (const wrapper of wrappers) {
@@ -48,9 +153,11 @@ export class HideWorks extends Unit {
 
   override async ready(): Promise<void> {
     this.logger.debug('Hiding works...')
+    excludeButtons.length = 0
 
     const blurbElements = document.querySelectorAll('.blurb')
 
+    let usedFandomExclude = false
     for (const blurbElement of blurbElements) {
       const blurb = getBlurb(blurbElement)
       const hideReasons = this.processBlurb(blurb)
@@ -58,69 +165,83 @@ export class HideWorks extends Unit {
       if (Object.keys(hideReasons).length === 0)
         continue
 
-      this.hideWork(blurbElement, hideReasons)
+      if (this.hideWork(blurbElement, hideReasons))
+        usedFandomExclude = true
     }
+
+    // Fandom exclude buttons need the id lookup to show their initial state and
+    // to filter on click. Load it lazily, then re-sync any buttons we built.
+    if (usedFandomExclude)
+      void loadFandomIdLookup().then(refreshExcludeButtons)
   }
 
-  processBlurb(blurb: Blurb) {
+  processBlurb(blurb: Blurb): HideReasons {
     const { options: { hideLanguages, hideAuthors, hideCrossovers, hideTags } } = this
-    const hideReasons: HideReasons = {}
+    const reasons: HideReasons = {}
 
     if (
       hideLanguages?.enabled
       && blurb.language
       && !hideLanguages.show.some(e => e.label === blurb.language)
     ) {
-      addHideReason(hideReasons, 'Language', blurb.language)
+      addReason(reasons, 'Language', { value: blurb.language, rule: `Language is "${blurb.language}"` })
     }
 
     if (
       hideCrossovers?.enabled
       && blurb.fandoms.length > hideCrossovers.maxFandoms
     ) {
-      addHideReason(hideReasons, 'Too many fandoms', `${blurb.fandoms.length} > ${hideCrossovers.maxFandoms}`)
+      addReason(reasons, 'Too many fandoms', {
+        value: `${blurb.fandoms.length} fandoms`,
+        rule: `More than ${hideCrossovers.maxFandoms} fandoms`,
+      })
     }
 
     const tagMatches = hideTags?.enabled
-      ? blurb.tags.map((tag) => {
-          return hideTags.filters.find(filter => tagFilterMatchesTag(filter, tag))
-        }).filter(e => e !== undefined)
+      ? blurb.tags.flatMap((tag) => {
+          const filter = hideTags.filters.find(f => tagFilterMatchesTag(f, tag))
+          return filter ? [{ tag, filter }] : []
+        })
       : []
 
-    const authorFilters = hideAuthors?.enabled
-      ? blurb.authors.map((author) => {
-          return hideAuthors.filters.find((filter) => {
-            return filter.userId === author.userId && (filter.pseud === undefined || filter.pseud === author.pseud)
-          })
-        }).filter(e => e !== undefined)
+    const authorMatches = hideAuthors?.enabled
+      ? blurb.authors.flatMap((author) => {
+          const filter = hideAuthors.filters.find(f =>
+            f.userId === author.userId && (f.pseud === undefined || f.pseud === author.pseud))
+          return filter ? [{ author, filter }] : []
+        })
       : []
 
-    const pseudMatches = hideAuthors?.enabled
-      ? blurb.authors.map((author) => {
-          return hideAuthors.filters.find((filter) => {
-            return filter.userId === author.userId && filter.pseud !== undefined && filter.pseud === author.pseud
-          })
-        }).filter(e => e !== undefined)
-      : []
+    // If any matching filter is inverted (a force-show rule), the work is not
+    // hidden at all — return with no reasons.
+    if ([...tagMatches, ...authorMatches].some(m => m.filter.invert))
+      return reasons
 
-    // if any inverted filter matches, return early
-    if ([...tagMatches, ...authorFilters, ...pseudMatches].some(f => f?.invert)) {
-      return hideReasons
+    for (const { tag, filter } of tagMatches) {
+      const type = filter.type ?? tag.type
+      const label = type ? TagType.toDisplayString(type) : 'Tag'
+      addReason(reasons, label, {
+        value: tag.name,
+        rule: describeTagFilter(filter),
+        exclude: tagExcludeTarget(tag),
+      })
     }
 
-    for (const tagFilter of tagMatches)
-      addHideReason(hideReasons, tagFilter.type ? TagType.toDisplayString(tagFilter!.type) : 'Tag', tagFilter!.name)
+    for (const { author, filter } of authorMatches) {
+      const value = author.pseud ? `${author.userId} (${author.pseud})` : author.userId
+      const rule = filter.pseud ? `Author ${filter.userId} (${filter.pseud})` : `Author ${filter.userId}`
+      addReason(reasons, 'Author', { value, rule })
+    }
 
-    for (const authorFilter of authorFilters)
-      addHideReason(hideReasons, 'Author', authorFilter!.userId)
-
-    for (const authorFilter of pseudMatches)
-      addHideReason(hideReasons, 'Author', `${authorFilter!.userId} (${authorFilter!.pseud})`)
-
-    return hideReasons
+    return reasons
   }
 
-  hideWork(blurb: Element, reasons: HideReasons): void {
+  /**
+   * Collapse the work and prepend the reason message. Returns true if it
+   * rendered at least one fandom exclude button (so the caller knows to load
+   * the fandom id lookup).
+   */
+  hideWork(blurb: Element, reasons: HideReasons): boolean {
     this.logger.debug('Hiding:', blurb)
     const wrapper = (
       <div class={BLURB_WRAPPER_CLASS} data-ao3e-hidden></div>
@@ -131,10 +252,11 @@ export class HideWorks extends Unit {
     // If reasons should not be shown, just hide the entire <li>
     if (!this.options.hideShowReason) {
       (blurb as HTMLLIElement).hidden = true
-      return
+      return false
     }
 
-    const reasonText = Object.entries(reasons).map(([key, vals]) => `${key}: ${vals.join(', ')}`).join(' | ')
+    const showValues = this.options.hideShowMatchedValues
+    const reasonsNode = this.buildReasons(reasons, showValues)
 
     const isHiddenSpan: HTMLSpanElement = <span title="This work is hidden."><MdiEyeOff /></span>
     const wasHiddenSpan: HTMLSpanElement = <span title="This work was hidden."><MdiEye /></span>
@@ -155,9 +277,9 @@ export class HideWorks extends Unit {
     const toggleButton = <button>{showButtonSpan}</button>
     const msg = (
       <div class={`${ADDON_CLASS}  ${ADDON_CLASS}--hide-works--msg`}>
-        <div>
+        <div class={`${ADDON_CLASS}--hide-works--reason-line`}>
           {isHiddenSpan}
-          <em>{reasonText}</em>
+          {reasonsNode.node}
         </div>
         <div class="actions">{toggleButton}</div>
       </div>
@@ -178,6 +300,93 @@ export class HideWorks extends Unit {
     })
 
     blurb.insertBefore(msg, blurb.childNodes[0]!)
+    return reasonsNode.usedFandomExclude
+  }
+
+  buildReasons(reasons: HideReasons, showValues: boolean): { node: HTMLElement, usedFandomExclude: boolean } {
+    const container: HTMLElement = <em class={REASONS_CLASS}></em>
+    let usedFandomExclude = false
+
+    Object.entries(reasons).forEach(([label, items], groupIndex) => {
+      if (groupIndex > 0)
+        container.append(document.createTextNode(' | '))
+      container.append(<span class={LABEL_CLASS}>{`${label}: `}</span>)
+
+      items.forEach((item, i) => {
+        if (i > 0)
+          container.append(document.createTextNode(', '))
+
+        const text = showValues ? item.value : item.rule
+        const title = showValues ? item.rule : item.value
+        container.append(<span class={VALUE_CLASS} title={title}>{text}</span>)
+
+        const excludeButton = item.exclude ? this.buildExcludeButton(item.exclude) : null
+        if (excludeButton) {
+          container.append(excludeButton)
+          if (item.exclude!.kind === 'fandom')
+            usedFandomExclude = true
+        }
+      })
+    })
+
+    return { node: container, usedFandomExclude }
+  }
+
+  /**
+   * Build an inline exclude button, or null when this page has no matching
+   * filter sidebar to add the value to.
+   */
+  buildExcludeButton(target: ExcludeTarget): HTMLButtonElement | null {
+    if (target.kind === 'tag' && !hasTagFilterFields())
+      return null
+    if (target.kind === 'fandom' && !hasFandomFilterFields())
+      return null
+    if (target.kind === 'checkbox' && !hasCheckboxGroupFields(target.group))
+      return null
+
+    const button = (
+      <button type="button" class={EXCLUDE_CLASS} aria-pressed="false">
+        <MdiMinusCircle />
+      </button>
+    ) as HTMLElement as HTMLButtonElement
+
+    setExcludeButtonState(button, target, excludeTargetSelected(target))
+
+    button.addEventListener('click', (e) => {
+      e.preventDefault()
+      void this.onExcludeClick(button, target)
+    })
+
+    excludeButtons.push({ button, target })
+    return button
+  }
+
+  async onExcludeClick(button: HTMLButtonElement, target: ExcludeTarget): Promise<void> {
+    if (target.kind === 'tag') {
+      if (!toggleTagFilter('exclude', target.name))
+        this.logger.warn(`No exclude field for tag "${target.name}"; cannot update filter.`)
+      return
+    }
+
+    if (target.kind === 'checkbox') {
+      if (!toggleCheckboxGroupFilter('exclude', target.group, target.name))
+        this.logger.warn(`No exclude checkbox for ${target.group} "${target.name}"; cannot update filter.`)
+      return
+    }
+
+    // Fandoms filter by id, which may require an async lookup/fetch.
+    button.disabled = true
+    await loadFandomIdLookup()
+    let id = resolveFandomIdSync(target.name)
+    if (id == null && target.href)
+      id = await resolveFandomIdWithFetch(target.name, target.href)
+    button.disabled = false
+
+    if (id == null) {
+      this.logger.warn(`Could not resolve an id for fandom "${target.name}"; cannot filter.`)
+      return
+    }
+    toggleFandomFilter('exclude', id, target.name)
   }
 }
 
@@ -198,7 +407,7 @@ function getBlurb(blurbElement: Element): Blurb {
     }
   })
 
-  const tags: Tag[] = [
+  const tags: BlurbTag[] = [
     ...Array.from(blurbElement.querySelector('.required-tags .rating')?.textContent?.split(',') || []).map(name => ({
       name: name.trim(),
       type: 'r' as TagType,
@@ -210,6 +419,7 @@ function getBlurb(blurbElement: Element): Blurb {
     ...Array.from(blurbElement.querySelectorAll('.fandoms .tag')).map(tag => ({
       name: tag.textContent!,
       type: 'f' as TagType,
+      href: tag instanceof HTMLAnchorElement ? tag.href : undefined,
     })),
     ...Array.from(
       blurbElement.querySelectorAll(':not(.own) > ul.tags .tag'),
@@ -219,6 +429,39 @@ function getBlurb(blurbElement: Element): Blurb {
   ]
 
   return { language, fandoms, authors, tags }
+}
+
+/** Human description of a tag filter's matching rule, for hover/rule display. */
+function describeTagFilter(filter: TagFilter): string {
+  switch (filter.matcher) {
+    case 'contains':
+      return `contains "${filter.name}"`
+    case 'regex':
+      return `matches /${filter.name}/`
+    default:
+      return `"${filter.name}"`
+  }
+}
+
+/** Where a matched tag should be added if the user clicks its exclude button. */
+function tagExcludeTarget(tag: BlurbTag): ExcludeTarget | undefined {
+  switch (tag.type) {
+    // Fandoms are filtered by id (resolved from the name and link).
+    case TagType.Fandom:
+      return { kind: 'fandom', name: tag.name, href: tag.href }
+    // Ratings, warnings and categories have a fixed set of exclude checkboxes
+    // present on every works-filter page, matched by name.
+    case TagType.Rating:
+      return { kind: 'checkbox', group: 'rating', name: tag.name }
+    case TagType.ArchiveWarning:
+      return { kind: 'checkbox', group: 'archive_warning', name: tag.name }
+    case TagType.Category:
+      return { kind: 'checkbox', group: 'category', name: tag.name }
+    // Relationships, characters, additional tags (and untyped tags) are
+    // excludable by name through the excluded-tag-names field.
+    default:
+      return { kind: 'tag', name: tag.name }
+  }
 }
 
 function tagFilterMatchesTag(filter: TagFilter, tag: Tag): boolean {

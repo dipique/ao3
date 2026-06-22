@@ -2,6 +2,14 @@ import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 
 import { ADDON_CLASS } from '#common'
+import {
+  type Direction,
+  hasTagFilterFields,
+  isTagSelected,
+  onFilterChange,
+  resetFilterSidebarCaches,
+  toggleTagFilter,
+} from '#content_script/filterSidebar.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -17,184 +25,6 @@ const EXCLUDE_CLASS = `${ADDON_CLASS}--tag-toolbar--exclude`
  * fandom tags in `h5.fandoms`, which are id-based and handled separately.
  */
 const TAG_LINK_SELECTOR = '.blurb ul.tags a.tag'
-
-type Direction = 'include' | 'exclude'
-
-interface DirectionConfig {
-  /** The free-text autocomplete input that submits comma-joined tag names. */
-  fieldId: string
-  /** The `name=` prefix of this direction's pre-built filter checkboxes. */
-  checkboxPrefix: string
-}
-
-const DIRECTIONS: Record<Direction, DirectionConfig> = {
-  include: { fieldId: 'work_search_other_tag_names', checkboxPrefix: 'include_work_search' },
-  exclude: { fieldId: 'work_search_excluded_tag_names', checkboxPrefix: 'exclude_work_search' },
-}
-
-// ---------------------------------------------------------------------------
-// Pre-built filter checkboxes (the include/exclude lists in the sidebar).
-// These are preferred over free-text entry: if a tag already has a checkbox we
-// just (un)check it, matching how a user would use the sidebar.
-// ---------------------------------------------------------------------------
-
-/** Strips the trailing work-count, e.g. "Fluff (37)" -> "Fluff". */
-const TRAILING_COUNT = /\s*\(\d+\)\s*$/
-
-function checkboxTagName(input: HTMLInputElement): string {
-  const label = input.closest('label')
-  // The label holds: <input> <span.indicator> <span>NAME (count)</span>
-  const nameSpan = label?.querySelector('span:not(.indicator)')
-  const text = (nameSpan?.textContent ?? label?.textContent ?? '').trim()
-  return text.replace(TRAILING_COUNT, '').trim()
-}
-
-/** name (lowercased) -> checkbox, per direction. Built once per page, cached. */
-let checkboxIndex: Record<Direction, Map<string, HTMLInputElement>> | null = null
-
-function getCheckboxIndex(): Record<Direction, Map<string, HTMLInputElement>> {
-  if (checkboxIndex)
-    return checkboxIndex
-
-  const index: Record<Direction, Map<string, HTMLInputElement>> = {
-    include: new Map(),
-    exclude: new Map(),
-  }
-
-  for (const direction of Object.keys(DIRECTIONS) as Direction[]) {
-    const { checkboxPrefix } = DIRECTIONS[direction]
-    const inputs = document.querySelectorAll(`input[type="checkbox"][name^="${checkboxPrefix}["]`)
-    for (const input of inputs) {
-      const key = checkboxTagName(input).toLowerCase()
-      if (key && !index[direction].has(key))
-        index[direction].set(key, input)
-    }
-  }
-
-  checkboxIndex = index
-  return index
-}
-
-function findCheckbox(direction: Direction, name: string): HTMLInputElement | null {
-  return getCheckboxIndex()[direction].get(name.trim().toLowerCase()) ?? null
-}
-
-// ---------------------------------------------------------------------------
-// Free-text tag fields (fallback when a tag has no pre-built checkbox).
-// ---------------------------------------------------------------------------
-
-interface FilterField {
-  /** The original input that actually submits the comma-joined tag names. */
-  field: HTMLInputElement
-  /**
-   * AO3's autocomplete token UI (`ul.autocomplete`), if it has been built yet.
-   * It's created lazily by AO3's own script, so we re-derive it on each access
-   * rather than caching, and fall back to editing `field.value` directly.
-   */
-  list: HTMLUListElement | null
-}
-
-function getFilterField(fieldId: string): FilterField | null {
-  const field = document.getElementById(fieldId)
-  if (!(field instanceof HTMLInputElement))
-    return null
-
-  const container = field.closest('dd, p, fieldset, form')
-  const list = (container?.querySelector('ul.autocomplete') ?? null) as HTMLUListElement | null
-  return { field, list }
-}
-
-/** The visible name of an AO3 token `<li class="added tag">NAME <span.delete>…</li>`. */
-function tokenName(li: Element): string {
-  return (li.firstChild?.textContent ?? '').trim()
-}
-
-function listedNames({ field, list }: FilterField): string[] {
-  if (list) {
-    return Array.from(list.querySelectorAll('li.added.tag')).map(tokenName).filter(Boolean)
-  }
-  return field.value.split(',').map(name => name.trim()).filter(Boolean)
-}
-
-function isListed(filterField: FilterField, name: string): boolean {
-  const lower = name.toLowerCase()
-  return listedNames(filterField).some(listed => listed.toLowerCase() === lower)
-}
-
-/** Rebuild the submitted field value from the currently shown tokens. */
-function syncFieldFromTokens({ field, list }: FilterField): void {
-  if (!list)
-    return
-  field.value = Array.from(list.querySelectorAll('li.added.tag')).map(tokenName).filter(Boolean).join(',')
-}
-
-function buildToken(filterField: FilterField, name: string): HTMLLIElement {
-  const li = document.createElement('li')
-  li.className = 'added tag'
-  li.append(document.createTextNode(`${name} `))
-
-  const remove = document.createElement('a')
-  remove.href = '#'
-  remove.title = `remove ${name}`
-  remove.textContent = '×' // ×
-  remove.addEventListener('click', (e) => {
-    e.preventDefault()
-    li.remove()
-    syncFieldFromTokens(filterField)
-    refreshAll()
-  })
-
-  const span = document.createElement('span')
-  span.className = 'delete'
-  span.append(remove)
-  li.append(span)
-  return li
-}
-
-function addTagToField(filterField: FilterField, name: string): void {
-  if (isListed(filterField, name))
-    return
-
-  const { field, list } = filterField
-  if (list) {
-    // Mirror AO3's token UI, inserting before the typing input so it stays last.
-    const inputLi = list.querySelector('li:last-child input')?.closest('li')
-    list.insertBefore(buildToken(filterField, name), inputLi ?? null)
-    syncFieldFromTokens(filterField)
-  }
-  else {
-    field.value = [...listedNames(filterField), name].join(',')
-  }
-}
-
-function removeTagFromField(filterField: FilterField, name: string): void {
-  const { field, list } = filterField
-  const lower = name.toLowerCase()
-  if (list) {
-    for (const li of Array.from(list.querySelectorAll('li.added.tag'))) {
-      if (tokenName(li).toLowerCase() === lower)
-        li.remove()
-    }
-    syncFieldFromTokens(filterField)
-  }
-  else {
-    field.value = listedNames(filterField).filter(listed => listed.toLowerCase() !== lower).join(',')
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Combined state: a tag is "selected" in a direction if its checkbox is checked,
-// or (failing a checkbox) it's present in that direction's free-text field.
-// ---------------------------------------------------------------------------
-
-function isSelected(direction: Direction, name: string): boolean {
-  const checkbox = findCheckbox(direction, name)
-  if (checkbox)
-    return checkbox.checked
-
-  const filterField = getFilterField(DIRECTIONS[direction].fieldId)
-  return filterField ? isListed(filterField, name) : false
-}
 
 /**
  * Every toolbar button on the page, so a change to one tag's state is reflected
@@ -214,8 +44,13 @@ function setButtonState(button: HTMLElement, direction: Direction, selected: boo
 
 function refreshAll(): void {
   for (const { button, name, direction } of buttons)
-    setButtonState(button, direction, isSelected(direction, name))
+    setButtonState(button, direction, isTagSelected(direction, name))
 }
+
+// Re-sync when any control (this toolbar, or a hidden-work exclude button)
+// mutates the filter. Registered once; refreshAll over an empty registry is a
+// harmless no-op between page runs.
+onFilterChange(refreshAll)
 
 export class TagToolbar extends Unit {
   static override get name() { return 'TagToolbar' }
@@ -223,15 +58,13 @@ export class TagToolbar extends Unit {
 
   static override async clean(): Promise<void> {
     buttons.length = 0
-    checkboxIndex = null
+    resetFilterSidebarCaches()
   }
 
   override async ready(): Promise<void> {
     buttons.length = 0
-    checkboxIndex = null
 
-    const hasFilter = !!getFilterField(DIRECTIONS.exclude.fieldId) || !!getFilterField(DIRECTIONS.include.fieldId)
-    if (!hasFilter) {
+    if (!hasTagFilterFields()) {
       this.logger.debug('No filter sidebar on this page; skipping tag toolbars.')
       return
     }
@@ -273,25 +106,8 @@ export class TagToolbar extends Unit {
 
     button.addEventListener('click', (e) => {
       e.preventDefault()
-
-      const checkbox = findCheckbox(direction, name)
-      if (checkbox) {
-        // Prefer the pre-built sidebar checkbox over free-text entry.
-        checkbox.checked = !checkbox.checked
-      }
-      else {
-        const filterField = getFilterField(DIRECTIONS[direction].fieldId)
-        if (!filterField) {
-          this.logger.warn(`No ${direction} checkbox or field for "${name}"; cannot update filter.`)
-          return
-        }
-        if (isListed(filterField, name))
-          removeTagFromField(filterField, name)
-        else
-          addTagToField(filterField, name)
-      }
-
-      refreshAll()
+      if (!toggleTagFilter(direction, name))
+        this.logger.warn(`No ${direction} checkbox or field for "${name}"; cannot update filter.`)
     })
 
     buttons.push({ button, name, direction })
