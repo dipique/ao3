@@ -255,8 +255,8 @@ export class TagToolbar extends Unit {
   buildToolbar(name: string): HTMLElement {
     return (
       <span class={`${ADDON_CLASS} ${TOOLBAR_CLASS}`}>
-        {this.buildButton('include', name)}
         {this.buildButton('exclude', name)}
+        {this.buildButton('include', name)}
       </span>
     )
   }

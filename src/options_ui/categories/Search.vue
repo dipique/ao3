@@ -22,5 +22,14 @@
     >
       <OptionSwitch option-id="tagToolbar" />
     </OptionRow>
+    <OptionDivider />
+    <OptionRow
+      title="Fandom include/exclude toolbar"
+      subtitle="Show include (+) and exclude (−) buttons when hovering a fandom on a works listing. Fandoms are filtered by id, looked up from a bundled list (with an on-demand fallback), so any fandom can be filtered — not just the sidebar's top ten."
+    >
+      <OptionSwitch option-id="fandomToolbar" />
+    </OptionRow>
+    <OptionDivider />
+    <OptionRowFandomExport />
   </OptionCategory>
 </template>

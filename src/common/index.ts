@@ -5,6 +5,8 @@ export { api } from './api.ts'
 export { cache } from './cache.ts'
 
 export type { Cache } from './cache.ts'
+export { fandomCache } from './fandomCache.ts'
+export type { FandomCache, ScrapedTag, ScrapedTagType } from './fandomCache.ts'
 export { ADDON_CLASS } from './constants.ts'
 export * from './data.ts'
 export { type Logger as BaseLogger, createLogger, logger } from './logger.ts'

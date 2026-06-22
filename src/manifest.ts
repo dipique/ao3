@@ -48,6 +48,7 @@ export default function (): PartialDeep<browser._manifest.WebExtensionManifest> 
         resources: [
           './icons/icon.svg',
           './options_ui/options_ui.html',
+          './data/fandom-index.json',
         ],
         matches: ['*://*.archiveofourown.org/*'],
       },

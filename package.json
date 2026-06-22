@@ -16,6 +16,7 @@
   },
   "scripts": {
     "clean": "rm -rf build",
+    "gen:fandom-index": "node scripts/generate-fandom-index.mjs",
     "build": "pnpm run build:prod:firefox && pnpm run build:prod:chrome",
     "dist": "node scripts/dist.ts",
     "dist:lint": "pnpm run dist:firefox:lint",

@@ -33,6 +33,7 @@ declare module 'vue' {
     OptionLanguage: typeof import('./../options_ui/components/options/OptionLanguage.vue')['default']
     OptionRow: typeof import('./../options_ui/components/option_rows/OptionRow.vue')['default']
     OptionRowCollapsable: typeof import('./../options_ui/components/option_rows/OptionRowCollapsable.vue')['default']
+    OptionRowFandomExport: typeof import('./../options_ui/components/option_rows/OptionRowFandomExport.vue')['default']
     OptionRowHideAuthors: typeof import('./../options_ui/components/option_rows/OptionRowHideAuthors.vue')['default']
     OptionRowHideAuthorsEditDialog: typeof import('./../options_ui/components/option_rows/OptionRowHideAuthorsEditDialog.vue')['default']
     OptionRowHideAuthorsTable: typeof import('./../options_ui/components/option_rows/OptionRowHideAuthorsTable.vue')['default']

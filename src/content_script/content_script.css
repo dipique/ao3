@@ -123,6 +123,63 @@ dd.finish-at {
   color: #9a0000;
 }
 
+/* ---------------------------------------------------------------------------
+   Fandom toolbar. Fandom links are inline, comma-separated siblings inside
+   h5.fandoms (not each in their own positioned <li> like tags), so this toolbar
+   flows inline and reveals on hover rather than floating absolutely.
+   --------------------------------------------------------------------------- */
+.AO3E--fandom-toolbar {
+  display: none;
+  gap: 3px;
+  /* Padding (not margin) so the toolbar's own hover area abuts the link with no
+     dead gap to cross. Visibility is toggled from JS via the --visible class. */
+  padding: 0 3px 0 5px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.AO3E--fandom-toolbar.AO3E--fandom-toolbar--visible,
+h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
+.AO3E--fandom-toolbar:focus-within {
+  display: inline-flex;
+}
+
+.AO3E--fandom-toolbar--button {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.55;
+}
+
+.AO3E--fandom-toolbar--button:hover,
+.AO3E--fandom-toolbar--button:focus {
+  opacity: 1;
+}
+
+.AO3E--fandom-toolbar--button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.AO3E--fandom-toolbar--button.AO3E--fandom-toolbar--active {
+  opacity: 1;
+}
+
+.AO3E--fandom-toolbar--button.AO3E--fandom-toolbar--include.AO3E--fandom-toolbar--active {
+  color: #0a7a0a;
+}
+
+.AO3E--fandom-toolbar--button.AO3E--fandom-toolbar--exclude.AO3E--fandom-toolbar--active {
+  color: #9a0000;
+}
+
 .AO3E--tools {
   a.dropdown-toggle {
     display: flex !important;

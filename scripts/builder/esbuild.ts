@@ -40,6 +40,7 @@ export async function createEsbuildContext(asset: AssetMain) {
 
     plugins: [
       SvgPlugin({ svgoConfig: SVGO_CONFIG }),
+      DataFilePlugin(),
       InlineCssPlugin(asset),
       IconsPlugin.esbuild({
         customCollections: ICONS_CUSTOM_COLLECTIONS,
@@ -129,6 +130,35 @@ function AssetPlugin(asset: AssetMain) {
         }
 
         asset.onEsbuildEnd()
+      })
+    },
+  } as esbuild.Plugin
+}
+
+/**
+ * Copies data JSON files (e.g. the fandom id index) verbatim using the `file`
+ * loader so they can be loaded at runtime via browser.runtime.getURL() instead
+ * of being bundled. The `file` loader is used rather than `copy` because the
+ * AssetPlugin cleanup deletes any `other`-type entry-point output, and a
+ * `copy`-loaded file *is* that entry-point output. With `file`, esbuild keeps
+ * the copied asset and only the (deleted) JS stub is the entry point — the same
+ * mechanism that makes the SvgPlugin work for icon.svg.
+ */
+function DataFilePlugin() {
+  return {
+    name: 'data-file',
+    setup(build) {
+      build.onResolve(
+        { filter: /[\\/]data[\\/][^\\/]+\.json$/ },
+        ({ path, resolveDir }) => ({ path: resolve(resolveDir, path), pluginData: { resolveDir } }),
+      )
+      build.onLoad({ filter: /[\\/]data[\\/][^\\/]+\.json$/ }, async ({ path, pluginData }) => {
+        const contents = await fs.readFile(path)
+        return {
+          contents,
+          loader: 'file' as const,
+          resolveDir: (pluginData as { resolveDir: string }).resolveDir,
+        }
       })
     },
   } as esbuild.Plugin
