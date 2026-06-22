@@ -27,6 +27,12 @@
     <OptionDivider />
     <OptionRowHideLanguages />
     <OptionDivider />
+    <OptionRow
+      title="Hide author button"
+      subtitle="Show a button after each author's name (on works listings, work pages, etc.) to add or remove them from your hidden authors list with one click."
+    >
+      <OptionSwitch option-id="hideAuthorToolbar" />
+    </OptionRow>
     <OptionRowHideAuthors />
     <OptionDivider />
     <OptionRowHideTags />

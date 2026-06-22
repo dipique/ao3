@@ -27,6 +27,7 @@ export interface Options {
   compressSearchUrls: boolean
   tagToolbar: boolean
   fandomToolbar: boolean
+  hideAuthorToolbar: boolean
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -65,6 +66,7 @@ export const options = createStorage<Options>({
     compressSearchUrls: false,
     tagToolbar: false,
     fandomToolbar: false,
+    hideAuthorToolbar: false,
 
     styleWidthEnabled: true,
     styleWidth: 40,

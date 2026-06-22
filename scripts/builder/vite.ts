@@ -23,15 +23,44 @@ import { logBuild, makeHash, writeFile } from './utils.ts'
 
 const ORIGIN_PLACEHOLDER = '__VITE_ORIGIN__'
 
+/**
+ * Guarantee a usable `localStorage` global before vue-devtools loads. Node 25
+ * defines `localStorage` by default but leaves its methods unavailable unless
+ * `--localstorage-file` is set, which makes @vue/devtools-kit throw at import.
+ * A tiny in-memory shim is all the build/serve process needs.
+ */
+function ensureLocalStorage(): void {
+  const current = (globalThis as { localStorage?: { getItem?: unknown } }).localStorage
+  if (current && typeof current.getItem === 'function')
+    return
+
+  const store = new Map<string, string>()
+  const shim = {
+    get length() { return store.size },
+    clear() { store.clear() },
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string) => { store.delete(key) },
+    setItem: (key: string, value: string) => { store.set(key, String(value)) },
+  }
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: shim })
+}
+
 export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], origin?: Ref<string | null>) {
   const { opts: { root, src, command } } = asset
   const dist = dirname(join(asset.opts.dist, relative(src, asset.inputPath)))
 
   // Imported lazily: vite-plugin-vue-devtools pulls in @vue/devtools-kit, which
-  // touches `localStorage` at import time and crashes under Node. Only load it in dev.
-  const devtoolsPlugins = process.env.NODE_ENV === 'development'
-    ? [(await import('vite-plugin-vue-devtools')).default({ appendTo: inputs[0]!.inputPath })]
-    : []
+  // reads `localStorage` at import time. Node 25 defines a `localStorage` global
+  // (and `navigator`, so the lib assumes a browser) but leaves its methods
+  // unavailable without `--localstorage-file`, so the import otherwise throws
+  // "localStorage.getItem is not a function". Shim it, and only load in dev.
+  let devtoolsPlugins: vite.PluginOption[] = []
+  if (process.env.NODE_ENV === 'development') {
+    ensureLocalStorage()
+    const { default: VueDevtools } = await import('vite-plugin-vue-devtools')
+    devtoolsPlugins = [VueDevtools({ appendTo: inputs[0]!.inputPath })]
+  }
 
   return {
     configFile: false,

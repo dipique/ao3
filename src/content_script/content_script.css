@@ -232,6 +232,36 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   color: #9a0000;
 }
 
+/* ---------------------------------------------------------------------------
+   Hide-author button. A single toggle shown after each author byline that adds
+   or removes the author from the persistent hidden-authors list. Always visible
+   (authors are few per work), but faint until hovered, and tinted when active.
+   --------------------------------------------------------------------------- */
+.AO3E--hide-author-toolbar {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 0 0 0.25em !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.4;
+  vertical-align: middle;
+}
+
+.AO3E--hide-author-toolbar:hover,
+.AO3E--hide-author-toolbar:focus {
+  opacity: 1;
+}
+
+.AO3E--hide-author-toolbar.AO3E--hide-author-toolbar--active {
+  opacity: 1;
+  color: #9a0000;
+}
+
 .AO3E--tools {
   a.dropdown-toggle {
     display: flex !important;

@@ -2,6 +2,7 @@ import type { Unit } from '#content_script/Unit.js'
 
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { FandomToolbar } from './FandomToolbar.tsx'
+import { HideAuthorToolbar } from './HideAuthorToolbar.tsx'
 import { HideWorks } from './HideWorks.tsx'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { Stats } from './Stats/Stats.ts'
@@ -15,6 +16,7 @@ export const UNITS = [
   CompressSearchUrls,
   TagToolbar,
   FandomToolbar,
+  HideAuthorToolbar,
   Tools,
   Stats,
   OptionsUpdater,
