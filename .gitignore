@@ -4,3 +4,6 @@ dist/
 
 # Node Web Storage file used for dev builds (vue-devtools localStorage shim)
 .localstorage-build*
+
+# ignore a local copy of the upstream branch
+ao3-enhancements/
