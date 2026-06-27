@@ -5,6 +5,7 @@ import { FandomToolbar } from './FandomToolbar.tsx'
 import { HideAuthorToolbar } from './HideAuthorToolbar.tsx'
 import { HideWorks } from './HideWorks.tsx'
 import { HighlightTags } from './HighlightTags.ts'
+import { MarkForLaterToolbar } from './MarkForLaterToolbar.tsx'
 import { MuteAuthorToolbar } from './MuteAuthorToolbar.tsx'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { Stats } from './Stats/Stats.ts'
@@ -23,6 +24,7 @@ export const UNITS = [
   HideAuthorToolbar,
   SubscribeAuthorToolbar,
   MuteAuthorToolbar,
+  MarkForLaterToolbar,
   Tools,
   Stats,
   OptionsUpdater,

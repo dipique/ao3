@@ -331,6 +331,40 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
 }
 
 /* ---------------------------------------------------------------------------
+   Save-for-later button. A toggle shown just after each work title on a listing
+   that adds / removes the work from your Marked for Later list. Faint until
+   hovered; tinted green once the work is saved this session.
+   --------------------------------------------------------------------------- */
+.AO3E--mark-for-later-toolbar {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 0 0 0.35em !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.4;
+  vertical-align: middle;
+}
+
+.AO3E--mark-for-later-toolbar:hover,
+.AO3E--mark-for-later-toolbar:focus {
+  opacity: 1;
+}
+
+.AO3E--mark-for-later-toolbar.AO3E--mark-for-later-toolbar--active {
+  opacity: 1;
+  color: #2f8f4e;
+}
+
+.AO3E--mark-for-later-toolbar:disabled {
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------------------
    Favourite / highlighted tags. Applied to native tag links that match a
    highlight filter; the colour comes from a per-filter CSS variable so each
    favourite can have its own shade. Kept subtle so it reads as a marker, not a

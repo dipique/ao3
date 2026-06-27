@@ -9,7 +9,7 @@ const context = OptionRowHideTagsContext.inject()
 const { filters, defaultHighlightColor } = useOption('hideTags')
 
 /** The configured default highlight colour, used when a filter sets none. */
-const resolvedDefault = computed(() => defaultHighlightColor.value || DEFAULT_HIGHLIGHT_COLOR)
+const resolvedDefault = computed(() => defaultHighlightColor?.value || DEFAULT_HIGHLIGHT_COLOR)
 
 const open = ref(false)
 
@@ -158,7 +158,7 @@ const typeModel = computed({
               Hide works with matching tags
             </SelectItem>
             <SelectItem value="invert">
-              Always show works with matching tags (even if hidden by another rule)
+              Always show (even if hidden by another rule)
             </SelectItem>
             <SelectItem value="highlight">
               Highlight the tag (does not hide)

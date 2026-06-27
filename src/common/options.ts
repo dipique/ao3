@@ -33,6 +33,7 @@ export interface Options {
   compressSearchUrls: boolean
   tagToolbar: boolean
   fandomToolbar: boolean
+  markForLaterToolbar: boolean
   hideAuthorToolbar: boolean
   subscribeAuthorToolbar: boolean
   muteAuthorToolbar: boolean
@@ -74,6 +75,7 @@ export const options = createStorage<Options>({
     compressSearchUrls: false,
     tagToolbar: false,
     fandomToolbar: false,
+    markForLaterToolbar: false,
     hideAuthorToolbar: false,
     subscribeAuthorToolbar: false,
     muteAuthorToolbar: false,

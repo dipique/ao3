@@ -30,6 +30,13 @@
       <OptionSwitch option-id="fandomToolbar" />
     </OptionRow>
     <OptionDivider />
+    <OptionRow
+      title="Save for later button"
+      subtitle="Show a one-click button next to each work title on a listing that adds it to (or removes it from) your Marked for Later list, without opening the work."
+    >
+      <OptionSwitch option-id="markForLaterToolbar" />
+    </OptionRow>
+    <OptionDivider />
     <OptionRowFandomExport />
   </OptionCategory>
 </template>
