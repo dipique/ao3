@@ -476,3 +476,229 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
     }
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Search Marked for Later. A button on the to-read page swaps the native paged
+   list for an in-memory, filterable/sortable view (search-view, below). These
+   rules cover the button, the native-list hide, and the scrape progress panel.
+   --------------------------------------------------------------------------- */
+.AO3E--search-marked-for-later--native-hidden {
+  display: none !important;
+}
+
+.AO3E--search-marked-for-later--button {
+  cursor: pointer;
+}
+
+.AO3E--search-marked-for-later--progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  max-width: 28em;
+  margin: 3em auto;
+  text-align: center;
+}
+
+.AO3E--search-marked-for-later--progress-track {
+  height: 0.6em;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.25);
+  overflow: hidden;
+}
+
+.AO3E--search-marked-for-later--progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #2f8f4e;
+  transition: width 0.2s ease;
+}
+
+.AO3E--search-marked-for-later--progress-cancel {
+  align-self: center;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   In-memory search view. A two-column layout (filter sidebar + results) shown
+   in place of a native listing. Reusable for any aggregated AO3 work list, so
+   it's namespaced separately from the Marked-for-Later feature above. Colours
+   lean on currentColor / translucent greys so it adapts to AO3 skins.
+   --------------------------------------------------------------------------- */
+.AO3E--search-view--toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  flex-wrap: wrap;
+  margin-bottom: 1em;
+}
+
+.AO3E--search-view--count {
+  font-weight: 600;
+}
+
+.AO3E--search-view--updating {
+  display: none;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.AO3E--search-view--updating.AO3E--search-view--updating-on {
+  display: inline;
+}
+
+.AO3E--search-view--refresh {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.AO3E--search-view--back {
+  cursor: pointer;
+}
+
+.AO3E--search-view--layout {
+  display: grid;
+  grid-template-columns: minmax(13em, 17em) 1fr;
+  gap: 1.5em;
+  align-items: start;
+}
+
+@media (max-width: 62em) {
+  .AO3E--search-view--layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.AO3E--search-view--sidebar {
+  position: sticky;
+  top: 1em;
+  max-height: calc(100vh - 2em);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  font-size: 0.9em;
+}
+
+.AO3E--search-view--field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.AO3E--search-view--label {
+  font-weight: 600;
+}
+
+.AO3E--search-view--input,
+.AO3E--search-view--select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.AO3E--search-view--sort-row {
+  display: flex;
+  gap: 0.3em;
+}
+
+.AO3E--search-view--sort-row .AO3E--search-view--select {
+  flex: 1;
+}
+
+.AO3E--search-view--dir {
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.AO3E--search-view--words {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+
+.AO3E--search-view--words .AO3E--search-view--input {
+  width: 5em;
+}
+
+.AO3E--search-view--reset {
+  cursor: pointer;
+}
+
+.AO3E--search-view--group {
+  border-top: 1px solid rgba(128, 128, 128, 0.3);
+  padding-top: 0.4em;
+}
+
+.AO3E--search-view--group-title {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.AO3E--search-view--group-count {
+  opacity: 0.6;
+  font-weight: normal;
+}
+
+.AO3E--search-view--group-body {
+  margin-top: 0.3em;
+  max-height: 16em;
+  overflow-y: auto;
+}
+
+.AO3E--search-view--row {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.1em 0;
+}
+
+.AO3E--search-view--row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.AO3E--search-view--row-count {
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.AO3E--search-view--row-toggles {
+  display: inline-flex;
+  gap: 0.1em;
+}
+
+.AO3E--search-view--toggle {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.4;
+}
+
+.AO3E--search-view--toggle:hover,
+.AO3E--search-view--toggle:focus {
+  opacity: 1;
+}
+
+.AO3E--search-view--toggle-include.AO3E--search-view--active {
+  opacity: 1;
+  color: #0a7a0a;
+}
+
+.AO3E--search-view--toggle-exclude.AO3E--search-view--active {
+  opacity: 1;
+  color: #9a0000;
+}
+
+/* A work filtered out by the in-memory search. */
+.AO3E--search-view--hidden {
+  display: none !important;
+}

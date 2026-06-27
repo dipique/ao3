@@ -44,6 +44,8 @@ export interface Options {
   hideAuthorToolbar: boolean
   subscribeAuthorToolbar: boolean
   muteAuthorToolbar: boolean
+  /** On your own Marked for Later page, add a button that loads every page into one filterable view. */
+  searchMarkedForLater: boolean
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -88,6 +90,7 @@ export const options = createStorage<Options>({
     hideAuthorToolbar: false,
     subscribeAuthorToolbar: false,
     muteAuthorToolbar: false,
+    searchMarkedForLater: true,
 
     styleWidthEnabled: true,
     styleWidth: 40,

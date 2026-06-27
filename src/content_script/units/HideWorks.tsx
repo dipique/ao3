@@ -2,8 +2,9 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import { type Tag, type TagFilter, TagType } from '#common'
+import { type TagFilter, TagType } from '#common'
 import { ADDON_CLASS, authorFilterMatchesAuthor, tagFilterMatchesTag } from '#common'
+import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import {
   type CheckboxGroup,
   hasCheckboxGroupFields,
@@ -22,7 +23,6 @@ import {
   toggleTagFilter,
 } from '#content_script/filterSidebar.js'
 import { Unit } from '#content_script/Unit.js'
-import { getTagFromElement } from '#content_script/utils.js'
 import React from '#dom'
 
 const BLURB_WRAPPER_CLASS = `${ADDON_CLASS}--hide-works--wrapper`
@@ -31,16 +31,6 @@ const LABEL_CLASS = `${ADDON_CLASS}--hide-works--reason-label`
 const VALUE_CLASS = `${ADDON_CLASS}--hide-works--reason-value`
 const EXCLUDE_CLASS = `${ADDON_CLASS}--hide-works--exclude`
 const EXCLUDE_ACTIVE_CLASS = `${ADDON_CLASS}--hide-works--exclude-active`
-
-/** A blurb tag, plus the fandom link href (needed to resolve a fandom's id). */
-type BlurbTag = Tag & { href?: string }
-
-interface Blurb {
-  language?: string | null
-  fandoms: string[]
-  authors: { userId: string, pseud?: string }[]
-  tags: BlurbTag[]
-}
 
 /**
  * Where an inline "exclude" button adds the value in the filter sidebar:
@@ -410,47 +400,6 @@ export class HideWorks extends Unit {
     }
     toggleFandomFilter('exclude', id, target.name)
   }
-}
-
-function getBlurb(blurbElement: Element): Blurb {
-  const language = blurbElement.querySelector('dd.language')?.textContent
-
-  const fandoms = Array.from(blurbElement.querySelectorAll('.fandoms a')).map(
-    fandom => fandom.textContent!,
-  )
-
-  const authors = Array.from(
-    blurbElement.querySelectorAll('.heading a[rel=author]'),
-  ).map((author) => {
-    const parts = new URL(author.href).pathname.split('/')
-    return {
-      userId: parts[2]!,
-      pseud: parts[4],
-    }
-  })
-
-  const tags: BlurbTag[] = [
-    ...Array.from(blurbElement.querySelector('.required-tags .rating')?.textContent?.split(',') || []).map(name => ({
-      name: name.trim(),
-      type: 'r' as TagType,
-    })),
-    ...Array.from(blurbElement.querySelector('.required-tags .category')?.textContent?.split(',') || []).map(name => ({
-      name: name.trim(),
-      type: 'c' as TagType,
-    })),
-    ...Array.from(blurbElement.querySelectorAll('.fandoms .tag')).map(tag => ({
-      name: tag.textContent!,
-      type: 'f' as TagType,
-      href: tag instanceof HTMLAnchorElement ? tag.href : undefined,
-    })),
-    ...Array.from(
-      blurbElement.querySelectorAll(':not(.own) > ul.tags .tag'),
-    ).map((tag) => {
-      return getTagFromElement(tag)
-    }),
-  ]
-
-  return { language, fandoms, authors, tags }
 }
 
 /** Human description of a tag filter's matching rule, for hover/rule display. */

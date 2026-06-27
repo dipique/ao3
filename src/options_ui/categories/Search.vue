@@ -44,6 +44,13 @@
       <OptionSwitch option-id="filterToolbar" />
     </OptionRow>
     <OptionDivider />
+    <OptionRow
+      title="Search Marked for Later"
+      subtitle="On your own Marked for Later page, add a button that loads every page of your to-read list into one view you can instantly filter and sort by tags, fandoms, rating, length, kudos and more."
+    >
+      <OptionSwitch option-id="searchMarkedForLater" />
+    </OptionRow>
+    <OptionDivider />
     <OptionRowFandomExport />
   </OptionCategory>
 </template>

@@ -10,6 +10,7 @@ import { HighlightTags } from './HighlightTags.ts'
 import { MarkForLaterToolbar } from './MarkForLaterToolbar.tsx'
 import { MuteAuthorToolbar } from './MuteAuthorToolbar.tsx'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
+import { SearchMarkedForLater } from './SearchMarkedForLater.tsx'
 import { Stats } from './Stats/Stats.ts'
 import { StyleTweaks } from './StyleTweaks.tsx'
 import { SubscribeAuthorToolbar } from './SubscribeAuthorToolbar.tsx'
@@ -32,6 +33,7 @@ export const UNITS = [
   SubscribeAuthorToolbar,
   MuteAuthorToolbar,
   MarkForLaterToolbar,
+  SearchMarkedForLater,
   Tools,
   Stats,
   OptionsUpdater,
