@@ -69,6 +69,13 @@ interface ReasonItem {
 /** Reason items grouped by display label, e.g. `Relationship` -> [items]. */
 type HideReasons = Record<string, ReasonItem[]>
 
+/**
+ * Which categories of filter contributed to hiding a work. Recorded on the
+ * blurb (as `data-ao3e-hidden-by`) so the floating filter toolbar can reveal
+ * just the works hidden by, say, tag filters.
+ */
+type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages'
+
 function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
   if (!(label in reasons))
     reasons[label] = []
@@ -146,6 +153,7 @@ export class HideWorks extends Unit {
     for (const wrapper of wrappers) {
       const parent = wrapper.parentNode! as HTMLLIElement
       delete parent.dataset.ao3eHidden
+      delete parent.dataset.ao3eHiddenBy
       wrapper.parentNode!.append(...wrapper.childNodes)
       wrapper.remove()
     }
@@ -160,12 +168,12 @@ export class HideWorks extends Unit {
     let usedFandomExclude = false
     for (const blurbElement of blurbElements) {
       const blurb = getBlurb(blurbElement)
-      const hideReasons = this.processBlurb(blurb)
+      const { reasons, kinds } = this.processBlurb(blurb)
 
-      if (Object.keys(hideReasons).length === 0)
+      if (Object.keys(reasons).length === 0)
         continue
 
-      if (this.hideWork(blurbElement, hideReasons))
+      if (this.hideWork(blurbElement, reasons, kinds))
         usedFandomExclude = true
     }
 
@@ -175,9 +183,10 @@ export class HideWorks extends Unit {
       void loadFandomIdLookup().then(refreshExcludeButtons)
   }
 
-  processBlurb(blurb: Blurb): HideReasons {
+  processBlurb(blurb: Blurb): { reasons: HideReasons, kinds: Set<HideKind> } {
     const { options: { hideLanguages, hideAuthors, hideCrossovers, hideTags } } = this
     const reasons: HideReasons = {}
+    const kinds = new Set<HideKind>()
 
     if (
       hideLanguages?.enabled
@@ -185,6 +194,7 @@ export class HideWorks extends Unit {
       && !hideLanguages.show.some(e => e.label === blurb.language)
     ) {
       addReason(reasons, 'Language', { value: blurb.language, rule: `Language is "${blurb.language}"` })
+      kinds.add('languages')
     }
 
     if (
@@ -195,6 +205,7 @@ export class HideWorks extends Unit {
         value: `${blurb.fandoms.length} fandoms`,
         rule: `More than ${hideCrossovers.maxFandoms} fandoms`,
       })
+      kinds.add('crossovers')
     }
 
     // Highlight filters are purely visual (handled by HighlightTags) and never
@@ -219,8 +230,10 @@ export class HideWorks extends Unit {
     const forceShow = tagMatches.some(m => m.filter.behavior === 'invert')
       || authorMatches.some(m => m.filter.invert)
     if (forceShow)
-      return reasons
+      return { reasons, kinds }
 
+    if (tagMatches.length > 0)
+      kinds.add('tags')
     for (const { tag, filter } of tagMatches) {
       const type = filter.type ?? tag.type
       const label = type ? TagType.toDisplayString(type) : 'Tag'
@@ -231,13 +244,15 @@ export class HideWorks extends Unit {
       })
     }
 
+    if (authorMatches.length > 0)
+      kinds.add('authors')
     for (const { author, filter } of authorMatches) {
       const value = author.pseud ? `${author.userId} (${author.pseud})` : author.userId
       const rule = filter.pseud ? `Author ${filter.userId} (${filter.pseud})` : `Author ${filter.userId}`
       addReason(reasons, 'Author', { value, rule })
     }
 
-    return reasons
+    return { reasons, kinds }
   }
 
   /**
@@ -245,8 +260,10 @@ export class HideWorks extends Unit {
    * rendered at least one fandom exclude button (so the caller knows to load
    * the fandom id lookup).
    */
-  hideWork(blurb: Element, reasons: HideReasons): boolean {
+  hideWork(blurb: Element, reasons: HideReasons, kinds: Set<HideKind>): boolean {
     this.logger.debug('Hiding:', blurb)
+    if (blurb instanceof HTMLElement && kinds.size > 0)
+      blurb.dataset.ao3eHiddenBy = [...kinds].join(' ')
     const wrapper = (
       <div class={BLURB_WRAPPER_CLASS} data-ao3e-hidden></div>
     )

@@ -1,4 +1,4 @@
-import type { AuthorFilter, Language, TagFilter } from './data.ts'
+import type { AuthorFilter, Language, TagFilter, TextReplacement } from './data.ts'
 
 import { DEFAULT_HIGHLIGHT_COLOR } from './data.ts'
 import { createStorage } from './storage.ts'
@@ -34,6 +34,8 @@ export interface Options {
   tagToolbar: boolean
   fandomToolbar: boolean
   markForLaterToolbar: boolean
+  /** Floating control on listings to temporarily reveal tag-filtered works. */
+  filterToolbar: boolean
   hideAuthorToolbar: boolean
   subscribeAuthorToolbar: boolean
   muteAuthorToolbar: boolean
@@ -42,6 +44,7 @@ export interface Options {
   styleWidth: number
   showStatsColumns: boolean
   forceAlignment: null | 'start' | 'end' | 'justified'
+  textReplacements: { enabled: boolean, rules: TextReplacement[] }
 
   theme: ThemeOption
   user: { userId?: string }
@@ -76,6 +79,7 @@ export const options = createStorage<Options>({
     tagToolbar: false,
     fandomToolbar: false,
     markForLaterToolbar: false,
+    filterToolbar: false,
     hideAuthorToolbar: false,
     subscribeAuthorToolbar: false,
     muteAuthorToolbar: false,
@@ -84,6 +88,7 @@ export const options = createStorage<Options>({
     styleWidth: 40,
     showStatsColumns: true,
     forceAlignment: null,
+    textReplacements: { enabled: false, rules: [] },
 
     theme: { chosen: 'inherit', current: 'light' },
     user: { },

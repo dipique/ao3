@@ -209,3 +209,64 @@ export interface AuthorFilter {
   /** If true, the filter will be inverted - excluding rather than including from the hide list - therefore force-showing. */
   invert?: boolean
 }
+
+/**
+ * A find/replace rule applied to the displayed text of a work's chapters.
+ */
+export interface TextReplacement {
+  /** The text to search for. */
+  find: string
+  /** The text to substitute in for each match. */
+  replace: string
+  /** Match only where the case matches `find` exactly. */
+  caseSensitive?: boolean
+  /**
+   * A case-insensitive convenience: when a match starts with an uppercase
+   * letter, capitalise the replacement's first letter to match. Lets one rule
+   * cover both "word" and "Word". Ignored when {@link caseSensitive} is set.
+   */
+  matchCasing?: boolean
+  /** Match only whole words — `find` must not be flanked by word characters. */
+  wholeWord?: boolean
+}
+
+/** Escape a literal string for safe use inside a RegExp. */
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Whether a string's first character is an uppercase letter. */
+function startsUppercase(input: string): boolean {
+  const first = input.charAt(0)
+  return first !== first.toLowerCase() && first === first.toUpperCase()
+}
+
+/** Apply a single replacement rule to a string, returning the new string. */
+export function applyTextReplacement(text: string, rule: TextReplacement): string {
+  if (!rule.find)
+    return text
+
+  // The simplest case — case-sensitive, anywhere — needs no regex.
+  if (rule.caseSensitive && !rule.wholeWord) {
+    if (!text.includes(rule.find))
+      return text
+    return text.split(rule.find).join(rule.replace)
+  }
+
+  // `\b` keys off `\w`, so flanking lookarounds give whole-word matches that
+  // work even when `find` starts or ends with punctuation.
+  const body = escapeRegExp(rule.find)
+  const pattern = rule.wholeWord ? `(?<!\\w)${body}(?!\\w)` : body
+  const matcher = new RegExp(pattern, rule.caseSensitive ? 'g' : 'gi')
+  return text.replace(matcher, (match) => {
+    // Mirror a leading capital from the match onto the replacement.
+    if (rule.matchCasing && rule.replace && !rule.caseSensitive && startsUppercase(match))
+      return rule.replace.charAt(0).toUpperCase() + rule.replace.slice(1)
+    return rule.replace
+  })
+}
+
+/** Apply every rule, in order, to a string (later rules see earlier results). */
+export function applyTextReplacements(text: string, rules: TextReplacement[]): string {
+  return rules.reduce((acc, rule) => applyTextReplacement(acc, rule), text)
+}

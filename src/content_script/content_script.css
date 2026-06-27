@@ -119,6 +119,69 @@ dd.finish-at {
   cursor: default;
 }
 
+/* ---------------------------------------------------------------------------
+   Tag-filter "peek". When the floating filter toolbar turns on peek mode, works
+   hidden (at least partly) by a tag filter are revealed in place and faintly
+   outlined so it's clear they were filtered. Reverting the toggle re-hides them;
+   none of this touches the saved filters.
+   --------------------------------------------------------------------------- */
+body.AO3E--peek-tag-hidden li[data-ao3e-hidden-by~="tags"] {
+  opacity: 0.75;
+  outline: 1px dashed currentColor;
+  outline-offset: 2px;
+}
+
+body.AO3E--peek-tag-hidden li[data-ao3e-hidden-by~="tags"][hidden] {
+  display: block !important;
+}
+
+body.AO3E--peek-tag-hidden li[data-ao3e-hidden-by~="tags"] > .AO3E--hide-works--wrapper[data-ao3e-hidden] {
+  display: block !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Floating filter toolbar. A single pill, fixed to the bottom-right on listing
+   pages where tag filters hid works, that toggles the peek above.
+   --------------------------------------------------------------------------- */
+.AO3E--filter-toolbar {
+  position: fixed;
+  right: 1em;
+  bottom: 1em;
+  z-index: 1000;
+}
+
+.AO3E--filter-toolbar--button {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.45em 0.8em !important;
+  border: 1px solid rgba(0, 0, 0, 0.25) !important;
+  border-radius: 999px !important;
+  background: #fff !important;
+  color: #111 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+  cursor: pointer;
+  font-size: 0.875rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.AO3E--filter-toolbar--button:hover,
+.AO3E--filter-toolbar--button:focus {
+  border-color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.AO3E--filter-toolbar--button[aria-pressed="true"] {
+  background: #2f8f4e !important;
+  border-color: #2f8f4e !important;
+  color: #fff !important;
+}
+
+.AO3E--filter-toolbar--icon {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* Establish a positioning context so the floating toolbar anchors to its tag. */
 .blurb ul.tags li {
   position: relative;

@@ -37,6 +37,13 @@
       <OptionSwitch option-id="markForLaterToolbar" />
     </OptionRow>
     <OptionDivider />
+    <OptionRow
+      title="Tag filter peek toolbar"
+      subtitle="On listing pages that hid works via your tag filters, show a small floating button to temporarily reveal those works (and hide them again). Does not change your saved filters."
+    >
+      <OptionSwitch option-id="filterToolbar" />
+    </OptionRow>
+    <OptionDivider />
     <OptionRowFandomExport />
   </OptionCategory>
 </template>

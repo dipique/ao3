@@ -33,5 +33,7 @@
     >
       <OptionSwitch option-id="showStatsColumns" />
     </OptionRow>
+    <OptionDivider />
+    <OptionRowTextReplacements />
   </OptionCategory>
 </template>
