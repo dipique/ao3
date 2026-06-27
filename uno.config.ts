@@ -1,10 +1,9 @@
-import type { Preset, PresetWind3Theme, UserConfig, UserShortcuts, VariantObject } from 'unocss'
-
 import { objectKeys, objectPick } from '@antfu/utils'
 import { parseCssColor, variantGetParameter } from '@unocss/rule-utils'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import * as svgo from 'svgo'
+import type { Preset, PresetWind3Theme, UserConfig, UserShortcuts, VariantObject } from 'unocss'
 import { presetAttributify, presetIcons, presetWind3, transformerDirectives } from 'unocss'
 import unocssPresetAnimations from 'unocss-preset-animations'
 import { FileSystemIconLoader } from 'unplugin-icons/loaders'
