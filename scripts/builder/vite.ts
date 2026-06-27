@@ -3,6 +3,7 @@ import unocss from '@unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import type { Ref } from '@vue/reactivity'
 import { Buffer } from 'node:buffer'
+import { realpathSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import RekaResolver from 'reka-ui/resolver'
 import { visualizer } from 'rollup-plugin-visualizer'
@@ -21,6 +22,20 @@ import { ALIAS, DEFINE, ESBUILD, ESBUILD_TARGET, IconsPlugin, LIGHTNING_CSS_TARG
 import { logBuild, makeHash, writeFile } from './utils.ts'
 
 const ORIGIN_PLACEHOLDER = '__VITE_ORIGIN__'
+
+/**
+ * Canonicalize a path for comparison: resolve symlinks/junctions and normalize
+ * casing/separators via the OS realpath. Falls back to resolve() if the path
+ * does not exist on disk (realpath throws otherwise).
+ */
+function realPath(p: string): string {
+  try {
+    return realpathSync.native(p)
+  }
+  catch {
+    return resolve(p)
+  }
+}
 
 /**
  * Guarantee a usable `localStorage` global before vue-devtools loads. Node 25
@@ -203,9 +218,12 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
         // Update asset paths
         for (const [fileName, chunk] of Object.entries(bundle)) {
           for (const input of inputs) {
-            // Rollup normalizes facadeModuleId to forward slashes; input.inputPath
-            // uses OS separators. Compare via resolve() so they match on Windows.
-            if (chunk.type === 'chunk' && chunk.facadeModuleId && resolve(chunk.facadeModuleId) === resolve(input.inputPath)) {
+            // Rolldown reports facadeModuleId as the real, symlink/junction-resolved
+            // path, while input.inputPath keeps the path the build was invoked with.
+            // When the project lives behind a junction (e.g. C:\dev -> another volume),
+            // resolve() alone never matches because it normalizes separators but not
+            // junctions. realPath() canonicalizes both so the rewrite actually fires.
+            if (chunk.type === 'chunk' && chunk.facadeModuleId && realPath(chunk.facadeModuleId) === realPath(input.inputPath)) {
               input.setAttrs(join(dist, fileName), true)
               if (chunk.viteMetadata?.importedCss)
                 input.cssBundlePaths = [...chunk.viteMetadata.importedCss].map(p => join(dist, p))

@@ -11,7 +11,7 @@ import type { AssetMain } from './AssetMain.ts'
 import type { File } from './utils.ts'
 
 import { ALIAS, DEFINE, ESBUILD, IconsPlugin } from './common.ts'
-import { inlineMap, logBuild, writeFile } from './utils.ts'
+import { inlineMap, logBuild, realPath, writeFile } from './utils.ts'
 
 export async function createEsbuildContext(asset: AssetMain) {
   const context = {
@@ -119,7 +119,9 @@ function AssetPlugin(asset: AssetMain) {
         // Update asset paths
         for (const [outputPath, meta] of Object.entries(metafile?.outputs ?? {})) {
           if (
-            (meta.entryPoint && join(asset.opts.root, meta.entryPoint) === asset.inputPath)
+            // realPath() on both sides so a junction in the project path (e.g.
+            // C:\dev -> another volume) can't make the entry-point compare fail.
+            (meta.entryPoint && realPath(join(asset.opts.root, meta.entryPoint)) === realPath(asset.inputPath))
             // 'other' assets (e.g. icons) are copied via the file loader, which may
             // flatten the output dir; match on filename so the manifest is rewritten
             // to the real output location rather than the (possibly stale) source path.
