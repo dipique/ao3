@@ -1,6 +1,6 @@
 import type { TagFilter } from '#common'
 
-import { ADDON_CLASS, tagFilterHighlightColor, tagFilterMatchesTag } from '#common'
+import { ADDON_CLASS, filterHighlightColor, tagFilterMatchesTag } from '#common'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
 
@@ -34,7 +34,7 @@ export class HighlightTags extends Unit {
     const { filters, defaultHighlightColor } = this.options.hideTags
     const highlights: { filter: TagFilter, color: string }[] = []
     for (const filter of filters) {
-      const color = tagFilterHighlightColor(filter, defaultHighlightColor)
+      const color = filterHighlightColor(filter, defaultHighlightColor)
       if (color !== null)
         highlights.push({ filter, color })
     }

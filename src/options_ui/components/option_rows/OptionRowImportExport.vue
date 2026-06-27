@@ -2,7 +2,7 @@
 import { objectMap } from '@antfu/utils'
 import { useFileDialog } from '@vueuse/core'
 
-import { api, saveAs, toast } from '#common'
+import { api, filterWithInvert, saveAs, toast } from '#common'
 
 const EXPORT_VARIANTS = [{
   fileSuffix: '',
@@ -20,6 +20,25 @@ const EXPORT_VARIANTS = [{
   title: 'Export cache only',
   subtitle: 'Not generally useful/recommended',
 }] as const
+
+/**
+ * Option keys holding filter lists. On export we add a legacy `invert` flag to
+ * each filter mirroring its `behavior`, so the file still force-shows correctly
+ * if loaded by the original (upstream) extension, which reads `invert` rather
+ * than `behavior`. Importing an upstream file is handled the other way round, by
+ * the migrations (see {@link filterFromInvert}).
+ */
+const FILTER_OPTION_KEYS = ['option.hideTags', 'option.hideAuthors']
+
+function addInvertFlags(items: Record<string, any>): Record<string, any> {
+  const out = { ...items }
+  for (const key of FILTER_OPTION_KEYS) {
+    const opt = out[key]
+    if (opt && Array.isArray(opt.filters))
+      out[key] = { ...opt, filters: opt.filters.map(filterWithInvert) }
+  }
+  return out
+}
 
 const { open: startImport, onChange: onImportFilesChanged } = useFileDialog({
   accept: 'application/json',
@@ -61,6 +80,7 @@ async function startExport({ keyPrefix, fileSuffix }: typeof EXPORT_VARIANTS[num
   let items = await browser.storage.local.get()
   if (keyPrefix)
     items = objectMap(items, (k, v) => k.startsWith(keyPrefix) ? [k, v] as [any, any] : undefined)
+  items = addInvertFlags(items)
   const now = new Date()
   const time = `${now.toISOString().slice(0, 10)}_${now.toISOString().slice(11, 19).replace(/:/g, '-')}`
   const name = `AO3-Enhancements${fileSuffix}_${time}.json`

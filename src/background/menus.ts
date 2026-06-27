@@ -140,8 +140,8 @@ if (browser.contextMenus) {
       async () => (await options.get('hideAuthors')).filters,
       async () => ({ userId: parts[1]! }),
       authorFilterPredicate,
-      (f: AuthorFilter) => !!f.invert,
-      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, ...(shown ? { invert: true } : {}) }),
+      (f: AuthorFilter) => f.behavior === 'invert',
+      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, ...(shown ? { behavior: 'invert' } : {}) }),
       async (filters: AuthorFilter[]) => await options.set({
         hideAuthors: { enabled: true, filters },
       }),
@@ -154,8 +154,8 @@ if (browser.contextMenus) {
       async () => (await options.get('hideAuthors')).filters,
       async () => ({ userId: parts[1]!, pseud: parts[3] } as AuthorFilter),
       authorPseudFilterPredicate,
-      (f: AuthorFilter) => !!f.invert,
-      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, pseud: author.pseud, ...(shown ? { invert: true } : {}) }),
+      (f: AuthorFilter) => f.behavior === 'invert',
+      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, pseud: author.pseud, ...(shown ? { behavior: 'invert' } : {}) }),
       async (filters: AuthorFilter[]) => await options.set({
         hideAuthors: { enabled: true, filters },
       }),
@@ -214,7 +214,7 @@ if (browser.contextMenus) {
         async () => (await options.get('hideAuthors')).filters,
         async () => ({ userId: parts[1] } as AuthorFilter),
         authorFilterPredicate,
-        (f: AuthorFilter) => !!f.invert,
+        (f: AuthorFilter) => f.behavior === 'invert',
       )
 
       await onMenuShownForHideWorks(
@@ -223,7 +223,7 @@ if (browser.contextMenus) {
         async () => (await options.get('hideAuthors')).filters,
         async () => ({ userId: parts[1], pseud: parts[3] } as AuthorFilter),
         authorPseudFilterPredicate,
-        (f: AuthorFilter) => !!f.invert,
+        (f: AuthorFilter) => f.behavior === 'invert',
       )
 
       // Abort if the menu got closed

@@ -25,13 +25,14 @@ interface AuthorLink {
 const buttons: { button: HTMLButtonElement, userId: string }[] = []
 
 /**
- * Whether the author (by userId, across all pseuds) is currently hidden. An
- * inverted filter is a force-show rule, so it does not count as hidden — this
- * mirrors the "Hide author" context menu's notion of the author being hidden.
+ * Whether the author (by userId, across all pseuds) is currently hidden. Only a
+ * hide-behavior filter counts: a force-show (`'invert'`) or `'highlight'` rule
+ * doesn't hide the author — this mirrors the "Hide author" context menu's notion
+ * of the author being hidden.
  */
 function isAuthorHidden(filters: AuthorFilter[], userId: string): boolean {
   const filter = filters.find(f => f.userId === userId && f.pseud === undefined)
-  return !!filter && !filter.invert
+  return !!filter && (filter.behavior === undefined || filter.behavior === 'hide')
 }
 
 function setButtonState(button: HTMLButtonElement, userId: string, hidden: boolean): void {
@@ -107,14 +108,15 @@ export class HideAuthorToolbar extends Unit {
     // options page or the context menu editing it at the same time).
     const { filters } = await options.get('hideAuthors')
 
+    const wasHidden = isAuthorHidden(filters, userId)
     const index = filters.findIndex(f => f.userId === userId && f.pseud === undefined)
-    const existing = index !== -1 ? filters[index] : undefined
-    if (existing)
+    if (index !== -1)
       filters.splice(index, 1)
 
-    // Toggle "hide": add a hide rule unless a (non-inverted) one already existed,
-    // in which case removing it above unhides the author.
-    const nowHidden = !existing || !!existing.invert
+    // Toggle "hide": if the author wasn't already hidden (no rule, or a
+    // force-show/highlight rule we just removed), add a hide rule; otherwise the
+    // splice above already unhid them.
+    const nowHidden = !wasHidden
     if (nowHidden)
       filters.push({ userId })
 

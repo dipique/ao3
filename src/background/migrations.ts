@@ -1,6 +1,6 @@
 import type { AuthorFilter, cache, Language, TagFilter } from '#common'
 
-import { TagType } from '#common'
+import { filterFromInvert, TagType } from '#common'
 
 export async function migrate() {
   // Removed in 0.4.0
@@ -132,18 +132,18 @@ export async function migrate() {
     }
   }
 
-  // Tag filters moved from `invert: boolean` to a `behavior` field (which also
-  // introduces 'highlight'). Idempotent: only rewrites filters still on the old
-  // shape, so re-running after conversion is a no-op.
-  const hideTagsNow = (await browser.storage.local.get('option.hideTags'))['option.hideTags'] as
-    { enabled: boolean, filters: Array<Record<string, unknown>> } | undefined
-  if (hideTagsNow && Array.isArray(hideTagsNow.filters) && hideTagsNow.filters.some(f => 'invert' in f)) {
-    const filters = hideTagsNow.filters.map((f) => {
-      if (!('invert' in f))
-        return f
-      const { invert, ...rest } = f
-      return invert ? { ...rest, behavior: 'invert' } : rest
-    })
-    await browser.storage.local.set({ 'option.hideTags': { ...hideTagsNow, filters } })
+  // Tag and author filters moved from a boolean `invert` flag to a `behavior`
+  // field (which also introduces 'highlight'). `filterFromInvert` maps any
+  // leftover `invert` onto `behavior` without overriding an existing behavior,
+  // and is idempotent on filters that have none — so re-running after conversion
+  // is a no-op. This is also the path that normalises upstream-shaped data on
+  // import (the import flow runs these migrations after loading the file).
+  for (const key of ['option.hideTags', 'option.hideAuthors'] as const) {
+    const stored = (await browser.storage.local.get(key))[key] as
+      { enabled: boolean, filters: Array<Record<string, unknown>> } | undefined
+    if (stored && Array.isArray(stored.filters) && stored.filters.some(f => 'invert' in f)) {
+      const filters = stored.filters.map(f => filterFromInvert(f))
+      await browser.storage.local.set({ [key]: { ...stored, filters } })
+    }
   }
 }

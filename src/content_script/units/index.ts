@@ -5,6 +5,7 @@ import { FandomToolbar } from './FandomToolbar.tsx'
 import { FilterToolbar } from './FilterToolbar.tsx'
 import { HideAuthorToolbar } from './HideAuthorToolbar.tsx'
 import { HideWorks } from './HideWorks.tsx'
+import { HighlightAuthors } from './HighlightAuthors.ts'
 import { HighlightTags } from './HighlightTags.ts'
 import { MarkForLaterToolbar } from './MarkForLaterToolbar.tsx'
 import { MuteAuthorToolbar } from './MuteAuthorToolbar.tsx'
@@ -23,6 +24,7 @@ export const UNITS = [
   // Runs after HideWorks so it can count the works HideWorks marked as hidden.
   FilterToolbar,
   HighlightTags,
+  HighlightAuthors,
   CompressSearchUrls,
   TagToolbar,
   FandomToolbar,

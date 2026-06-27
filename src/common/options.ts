@@ -1,6 +1,6 @@
 import type { AuthorFilter, Language, TagFilter, TextReplacement } from './data.ts'
 
-import { DEFAULT_HIGHLIGHT_COLOR } from './data.ts'
+import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR } from './data.ts'
 import { createStorage } from './storage.ts'
 
 export interface ThemeOption {
@@ -22,7 +22,12 @@ export interface Options {
   hideShowMatchedValues: boolean
   hideCrossovers: { enabled: boolean, maxFandoms: number }
   hideLanguages: { enabled: boolean, show: Language[] }
-  hideAuthors: { enabled: boolean, filters: AuthorFilter[] }
+  hideAuthors: {
+    enabled: boolean
+    filters: AuthorFilter[]
+    /** Highlight colour used by author filters (and force-shown authors) that don't set their own. */
+    defaultHighlightColor?: string
+  }
   hideTags: {
     enabled: boolean
     filters: TagFilter[]
@@ -72,7 +77,7 @@ export const options = createStorage<Options>({
     hideShowMatchedValues: true,
     hideCrossovers: { enabled: true, maxFandoms: 7 },
     hideLanguages: { enabled: false, show: [] },
-    hideAuthors: { enabled: false, filters: [] },
+    hideAuthors: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_AUTHOR_HIGHLIGHT_COLOR },
     hideTags: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_HIGHLIGHT_COLOR },
 
     compressSearchUrls: false,

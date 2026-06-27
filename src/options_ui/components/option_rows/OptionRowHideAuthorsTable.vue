@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { AuthorFilter } from '#common'
 
+import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR } from '#common'
+
 const FiltersDataTable = useDataTable<AuthorFilter>()
 
-const { filters } = useOption('hideAuthors')
+const { filters, defaultHighlightColor } = useOption('hideAuthors')
+const resolvedDefault = computed(() => defaultHighlightColor.value || DEFAULT_AUTHOR_HIGHLIGHT_COLOR)
 function renderData(filters: AuthorFilter[]) {
   return filters
     .map((filter, index) => [index, filter] as [number, AuthorFilter])
@@ -41,16 +44,23 @@ const context = OptionRowHideAuthorsContext.inject()
             <Render :render="inner" />
           </tr>
         </template>
-        <FiltersDataTable.Column accessor="invert">
+        <FiltersDataTable.Column accessor="behavior">
           <template #cell="cell">
             <th w-1 scope="row">
               <Tooltip>
                 <div flex="~ items-center justify-center" text="4" h-full w-min px-2>
-                  <Icon v-if="cell.value" i-tabler-eye-exclamation op100 label="Show" />
+                  <Icon
+                    v-if="cell.value === 'highlight'"
+                    i-mdi-star
+                    :style="{ color: cell.row.data.color || resolvedDefault }"
+                    label="Highlight"
+                  />
+                  <Icon v-else-if="cell.value === 'invert'" i-tabler-eye-exclamation op100 label="Show" />
                   <Icon v-else i-tabler-eye-off op40 label="Hide" />
                 </div>
                 <template #content>
-                  <span v-if="cell.value">Always show works with matching authors - even if matched by other filters.</span>
+                  <span v-if="cell.value === 'highlight'">Highlight matching authors on results (does not hide).</span>
+                  <span v-else-if="cell.value === 'invert'">Always show works with matching authors - even if matched by other filters.</span>
                   <span v-else>Hide works with matching authors.</span>
                 </template>
               </Tooltip>

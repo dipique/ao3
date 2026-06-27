@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ComponentInstance, GlobalComponents } from 'vue'
 
-import type { TagFilter, TagFilterBehavior } from '#common'
+import type { FilterBehavior, TagFilter } from '#common'
 
 import { DEFAULT_HIGHLIGHT_COLOR, TagType } from '#common'
 
@@ -29,7 +29,7 @@ const initial = ref(Blank)
 const name = ref(Blank.name)
 const type = ref(Blank.type)
 const matcher = ref(Blank.matcher)
-const behavior = ref<TagFilterBehavior>('hide')
+const behavior = ref<FilterBehavior>('hide')
 const color = ref(DEFAULT_HIGHLIGHT_COLOR)
 // Invert filters highlight by default; this opts out (stored as a 'transparent' colour).
 const noHighlight = ref(false)

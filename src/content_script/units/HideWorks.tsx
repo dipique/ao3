@@ -3,7 +3,7 @@ import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
 import { type Tag, type TagFilter, TagType } from '#common'
-import { ADDON_CLASS, tagFilterMatchesTag } from '#common'
+import { ADDON_CLASS, authorFilterMatchesAuthor, tagFilterMatchesTag } from '#common'
 import {
   type CheckboxGroup,
   hasCheckboxGroupFields,
@@ -217,18 +217,19 @@ export class HideWorks extends Unit {
         })
       : []
 
+    // Highlight-only author filters never hide or force-show (HighlightAuthors
+    // handles them), so they're excluded from the hide decision here too.
     const authorMatches = hideAuthors?.enabled
       ? blurb.authors.flatMap((author) => {
-          const filter = hideAuthors.filters.find(f =>
-            f.userId === author.userId && (f.pseud === undefined || f.pseud === author.pseud))
+          const filter = hideAuthors.filters.find(f => f.behavior !== 'highlight' && authorFilterMatchesAuthor(f, author))
           return filter ? [{ author, filter }] : []
         })
       : []
 
     // If any matching filter is a force-show rule, the work is not hidden at all
-    // — return with no reasons. Tags express this via behavior, authors via invert.
+    // — return with no reasons. Tags and authors both express this via behavior.
     const forceShow = tagMatches.some(m => m.filter.behavior === 'invert')
-      || authorMatches.some(m => m.filter.invert)
+      || authorMatches.some(m => m.filter.behavior === 'invert')
     if (forceShow)
       return { reasons, kinds }
 

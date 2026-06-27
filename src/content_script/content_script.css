@@ -442,6 +442,19 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   -webkit-box-decoration-break: clone;
 }
 
+/* Favourite / highlighted authors. The author analogue of --highlight-tag,
+   applied to native byline links (a[rel=author]) that match a highlight filter.
+   Its own default colour is bluer than the tag default so highlighted authors
+   read as distinct from highlighted tags. */
+.AO3E--highlight-author {
+  background-color: var(--ao3e-highlight-color, #82b4ff9e);
+  border-radius: 0.25em;
+  padding: 0 0.3em;
+  font-weight: 600;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 .AO3E--tools {
   a.dropdown-toggle {
     display: flex !important;
