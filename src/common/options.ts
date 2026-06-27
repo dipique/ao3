@@ -29,6 +29,7 @@ export interface Options {
   fandomToolbar: boolean
   hideAuthorToolbar: boolean
   subscribeAuthorToolbar: boolean
+  muteAuthorToolbar: boolean
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -69,6 +70,7 @@ export const options = createStorage<Options>({
     fandomToolbar: false,
     hideAuthorToolbar: false,
     subscribeAuthorToolbar: false,
+    muteAuthorToolbar: false,
 
     styleWidthEnabled: true,
     styleWidth: 40,

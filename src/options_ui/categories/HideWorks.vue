@@ -39,6 +39,12 @@
     >
       <OptionSwitch option-id="subscribeAuthorToolbar" />
     </OptionRow>
+    <OptionRow
+      title="Mute author button"
+      subtitle="Show a button after each author's name (next to the subscribe button) to mute or unmute that author with one click — muting completely hides all of their works, series, bookmarks, and comments from you. Hover the button to load your current mute status. Requires being logged in to AO3."
+    >
+      <OptionSwitch option-id="muteAuthorToolbar" />
+    </OptionRow>
     <OptionRowHideAuthors />
     <OptionDivider />
     <OptionRowHideTags />

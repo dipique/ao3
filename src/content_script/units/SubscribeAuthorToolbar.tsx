@@ -1,7 +1,8 @@
 import MdiBellOutline from '~icons/mdi/bell-outline.jsx'
 import MdiBell from '~icons/mdi/bell.jsx'
 
-import { ADDON_CLASS, fetchAndParseDocument, getArchiveLink, toast } from '#common'
+import { ADDON_CLASS, getArchiveLink, toast } from '#common'
+import { getAuthorPage, resetAuthorPageCache } from '#content_script/authorPage.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -163,6 +164,7 @@ export class SubscribeAuthorToolbar extends Unit {
 
   static override async clean(): Promise<void> {
     entries.clear()
+    resetAuthorPageCache()
   }
 
   override async ready(): Promise<void> {
@@ -239,7 +241,7 @@ export class SubscribeAuthorToolbar extends Unit {
     entry.resolving = true
     refresh(entry)
     try {
-      const doc = await fetchAndParseDocument(entry.href)
+      const doc = await getAuthorPage(entry.href)
       const sub = parseSubscription(doc)
       if (sub)
         entry.subscription = sub

@@ -296,6 +296,40 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   cursor: default;
 }
 
+/* ---------------------------------------------------------------------------
+   Mute-author button. A toggle shown after each author byline (next to the
+   subscribe button) that mutes / unmutes that user, hiding all of their works
+   from you. Faint until hovered; tinted amber once you've muted them.
+   --------------------------------------------------------------------------- */
+.AO3E--mute-author-toolbar {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 0 0 0.25em !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.4;
+  vertical-align: middle;
+}
+
+.AO3E--mute-author-toolbar:hover,
+.AO3E--mute-author-toolbar:focus {
+  opacity: 1;
+}
+
+.AO3E--mute-author-toolbar.AO3E--mute-author-toolbar--active {
+  opacity: 1;
+  color: #a8560c;
+}
+
+.AO3E--mute-author-toolbar:disabled {
+  cursor: default;
+}
+
 .AO3E--tools {
   a.dropdown-toggle {
     display: flex !important;
