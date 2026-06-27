@@ -33,6 +33,12 @@
     >
       <OptionSwitch option-id="hideAuthorToolbar" />
     </OptionRow>
+    <OptionRow
+      title="Subscribe to author button"
+      subtitle="Show a button after each author's name (next to the hide-author button) to subscribe to or unsubscribe from that author with one click. Hover the button to load your current subscription status. Requires being logged in to AO3."
+    >
+      <OptionSwitch option-id="subscribeAuthorToolbar" />
+    </OptionRow>
     <OptionRowHideAuthors />
     <OptionDivider />
     <OptionRowHideTags />

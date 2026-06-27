@@ -262,6 +262,40 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   color: #9a0000;
 }
 
+/* ---------------------------------------------------------------------------
+   Subscribe-author button. A toggle shown after each author byline (next to the
+   hide-author button) that subscribes to / unsubscribes from that user. Faint
+   until hovered; tinted and filled (bell) once you're subscribed.
+   --------------------------------------------------------------------------- */
+.AO3E--subscribe-author-toolbar {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 0 0 0.25em !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.4;
+  vertical-align: middle;
+}
+
+.AO3E--subscribe-author-toolbar:hover,
+.AO3E--subscribe-author-toolbar:focus {
+  opacity: 1;
+}
+
+.AO3E--subscribe-author-toolbar.AO3E--subscribe-author-toolbar--active {
+  opacity: 1;
+  color: #1b6ec2;
+}
+
+.AO3E--subscribe-author-toolbar:disabled {
+  cursor: default;
+}
+
 .AO3E--tools {
   a.dropdown-toggle {
     display: flex !important;

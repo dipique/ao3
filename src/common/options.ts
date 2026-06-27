@@ -28,6 +28,7 @@ export interface Options {
   tagToolbar: boolean
   fandomToolbar: boolean
   hideAuthorToolbar: boolean
+  subscribeAuthorToolbar: boolean
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -67,6 +68,7 @@ export const options = createStorage<Options>({
     tagToolbar: false,
     fandomToolbar: false,
     hideAuthorToolbar: false,
+    subscribeAuthorToolbar: false,
 
     styleWidthEnabled: true,
     styleWidth: 40,
