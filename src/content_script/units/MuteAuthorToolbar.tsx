@@ -2,7 +2,7 @@ import MdiAccountCancelOutline from '~icons/mdi/account-cancel-outline.jsx'
 import MdiAccountCancel from '~icons/mdi/account-cancel.jsx'
 
 import { ADDON_CLASS, fetchAndParseDocument, getArchiveLink, toast } from '#common'
-import { getAuthorPage, resetAuthorPageCache } from '#content_script/authorPage.js'
+import { getAuthorPage, isOrphanAccount, resetAuthorPageCache } from '#content_script/authorPage.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -153,6 +153,9 @@ export class MuteAuthorToolbar extends Unit {
         continue
       const userId = parseAuthorUserId(link)
       if (!userId)
+        continue
+      // The orphan account isn't a real user and has no mute control.
+      if (isOrphanAccount(userId))
         continue
       // No point offering to mute yourself.
       if (me && userId.toLowerCase() === me)

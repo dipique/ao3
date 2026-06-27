@@ -1,6 +1,18 @@
 import { fetchAndParseDocument } from '#common'
 
 /**
+ * AO3's catch-all account that owns orphaned works. It isn't a real user, so its
+ * page offers no subscribe/mute control and there's nobody to hide — the author
+ * toolbars skip it rather than render buttons that can only error out.
+ */
+export const ORPHAN_ACCOUNT_USER_ID = 'orphan_account'
+
+/** Whether a parsed byline userId is the orphaned-works account. */
+export function isOrphanAccount(userId: string): boolean {
+  return userId.toLowerCase() === ORPHAN_ACCOUNT_USER_ID
+}
+
+/**
  * Per-run cache of fetched author pages, keyed by URL. Both the subscribe and
  * mute toolbars need the same byline page (a user/pseud page) to read their
  * respective controls, so sharing the fetch avoids requesting it twice when both

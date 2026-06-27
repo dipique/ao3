@@ -3,6 +3,7 @@ import MdiAccountOff from '~icons/mdi/account-off.jsx'
 import type { AuthorFilter } from '#common'
 
 import { ADDON_CLASS, options, toast } from '#common'
+import { isOrphanAccount } from '#content_script/authorPage.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -69,6 +70,9 @@ export class HideAuthorToolbar extends Unit {
         continue
       const author = parseAuthorLink(link)
       if (!author)
+        continue
+      // The orphan account isn't a real user; there's nobody to hide.
+      if (isOrphanAccount(author.userId))
         continue
       // clean() already removed previous buttons, but guard against duplicates.
       if (link.nextElementSibling?.classList.contains(TOOLBAR_CLASS))
