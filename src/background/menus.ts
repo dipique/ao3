@@ -78,14 +78,15 @@ if (browser.contextMenus) {
 
     async function onMenuClickForHideWorks<
       Item extends Record<string, any>,
-      Filter extends Item & { invert?: boolean },
+      Filter,
     >(
       hideId: string | number,
       showId: string | number,
       getFilters: () => Promise<Filter[]>,
       getItem: () => Promise<Item>,
       predicate: (f: Item) => (f: Filter) => boolean,
-      createFilter: (f: Item) => Filter,
+      isShown: (f: Filter) => boolean,
+      createFilter: (f: Item, shown: boolean) => Filter,
       setFilters: (filters: Filter[]) => Promise<void>,
       formatItem: (f: Item) => string,
     ) {
@@ -94,24 +95,24 @@ if (browser.contextMenus) {
         const filters = await getFilters()
         const filterIndex = filters.findIndex(predicate(item))
         const oldFilter = filterIndex !== -1 ? filters[filterIndex] : undefined
-        const newFilter = createFilter(item)
+        const wasShown = oldFilter ? isShown(oldFilter) : undefined
 
         if (oldFilter) {
           filters.splice(filterIndex, 1)
         }
 
         if (info.menuItemId === hideId) {
-          sendHideToast(tab, 'hide', formatItem(item), !!oldFilter, oldFilter?.invert)
+          sendHideToast(tab, 'hide', formatItem(item), !!oldFilter, wasShown)
 
-          if (!oldFilter || (oldFilter && oldFilter.invert)) {
-            filters.push({ ...newFilter })
+          if (!oldFilter || wasShown) {
+            filters.push(createFilter(item, false))
           }
         }
         else if (info.menuItemId === showId) {
-          sendHideToast(tab, 'show', formatItem(item), !!oldFilter, oldFilter?.invert)
+          sendHideToast(tab, 'show', formatItem(item), !!oldFilter, wasShown)
 
-          if (!oldFilter || (oldFilter && !oldFilter.invert)) {
-            filters.push({ ...newFilter, invert: true })
+          if (!oldFilter || !wasShown) {
+            filters.push(createFilter(item, true))
           }
         }
 
@@ -125,7 +126,8 @@ if (browser.contextMenus) {
       async () => (await options.get('hideTags')).filters,
       async () => api.getTag.sendToTab(tab.id!, info.linkUrl!),
       exactTagFilterPredicate,
-      (tag: Tag) => ({ ...tag, matcher: 'exact' as const }),
+      (f: TagFilter) => f.behavior === 'invert',
+      (tag: Tag, shown: boolean): TagFilter => ({ ...tag, matcher: 'exact', ...(shown ? { behavior: 'invert' } : {}) }),
       async (filters: TagFilter[]) => await options.set({
         hideTags: { enabled: true, filters },
       }),
@@ -138,7 +140,8 @@ if (browser.contextMenus) {
       async () => (await options.get('hideAuthors')).filters,
       async () => ({ userId: parts[1]! }),
       authorFilterPredicate,
-      (author: AuthorFilter) => ({ userId: author.userId }),
+      (f: AuthorFilter) => !!f.invert,
+      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, ...(shown ? { invert: true } : {}) }),
       async (filters: AuthorFilter[]) => await options.set({
         hideAuthors: { enabled: true, filters },
       }),
@@ -151,7 +154,8 @@ if (browser.contextMenus) {
       async () => (await options.get('hideAuthors')).filters,
       async () => ({ userId: parts[1]!, pseud: parts[3] } as AuthorFilter),
       authorPseudFilterPredicate,
-      (author: AuthorFilter) => ({ userId: author.userId, pseud: author.pseud }),
+      (f: AuthorFilter) => !!f.invert,
+      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, pseud: author.pseud, ...(shown ? { invert: true } : {}) }),
       async (filters: AuthorFilter[]) => await options.set({
         hideAuthors: { enabled: true, filters },
       }),
@@ -172,25 +176,25 @@ if (browser.contextMenus) {
 
       async function onMenuShownForHideWorks<
         Item extends Record<string, any>,
-        Filter extends Item & { invert?: boolean },
+        Filter,
       >(
         hideId: string | number,
         showId: string | number,
         getFilters: () => Promise<Filter[]>,
         getItem: () => Promise<Item>,
         predicate: (f: Item) => (f: Filter) => boolean,
+        isShown: (f: Filter) => boolean,
       ) {
         if (info.menuIds.includes(hideId) || info.menuIds.includes(showId)) {
           const filters = await getFilters()
           const filter = filters.find(predicate(await getItem()))
-
-          console.log('filter', filter)
+          const shown = filter ? isShown(filter) : false
 
           await browser.contextMenus.update(hideId, {
-            checked: (!!filter && !filter.invert) || false,
+            checked: !!filter && !shown,
           })
           await browser.contextMenus.update(showId, {
-            checked: (!!filter && filter.invert) || false,
+            checked: !!filter && shown,
           })
         }
       }
@@ -201,6 +205,7 @@ if (browser.contextMenus) {
         async () => (await options.get('hideTags')).filters,
         async () => api.getTag.sendToTab(tab.id!, info.linkUrl!),
         exactTagFilterPredicate,
+        (f: TagFilter) => f.behavior === 'invert',
       )
 
       await onMenuShownForHideWorks(
@@ -209,6 +214,7 @@ if (browser.contextMenus) {
         async () => (await options.get('hideAuthors')).filters,
         async () => ({ userId: parts[1] } as AuthorFilter),
         authorFilterPredicate,
+        (f: AuthorFilter) => !!f.invert,
       )
 
       await onMenuShownForHideWorks(
@@ -217,6 +223,7 @@ if (browser.contextMenus) {
         async () => (await options.get('hideAuthors')).filters,
         async () => ({ userId: parts[1], pseud: parts[3] } as AuthorFilter),
         authorPseudFilterPredicate,
+        (f: AuthorFilter) => !!f.invert,
       )
 
       // Abort if the menu got closed

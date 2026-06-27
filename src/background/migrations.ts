@@ -131,4 +131,19 @@ export async function migrate() {
       })
     }
   }
+
+  // Tag filters moved from `invert: boolean` to a `behavior` field (which also
+  // introduces 'highlight'). Idempotent: only rewrites filters still on the old
+  // shape, so re-running after conversion is a no-op.
+  const hideTagsNow = (await browser.storage.local.get('option.hideTags'))['option.hideTags'] as
+    { enabled: boolean, filters: Array<Record<string, unknown>> } | undefined
+  if (hideTagsNow && Array.isArray(hideTagsNow.filters) && hideTagsNow.filters.some(f => 'invert' in f)) {
+    const filters = hideTagsNow.filters.map((f) => {
+      if (!('invert' in f))
+        return f
+      const { invert, ...rest } = f
+      return invert ? { ...rest, behavior: 'invert' } : rest
+    })
+    await browser.storage.local.set({ 'option.hideTags': { ...hideTagsNow, filters } })
+  }
 }

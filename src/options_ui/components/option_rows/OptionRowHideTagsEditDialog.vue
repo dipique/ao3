@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import type { ComponentInstance, GlobalComponents } from 'vue'
 
-import type { TagFilter } from '#common'
+import type { TagFilter, TagFilterBehavior } from '#common'
 
-import { TagType } from '#common'
+import { DEFAULT_HIGHLIGHT_COLOR, TagType } from '#common'
 
 const context = OptionRowHideTagsContext.inject()
-const { filters } = useOption('hideTags')
+const { filters, defaultHighlightColor } = useOption('hideTags')
+
+/** The configured default highlight colour, used when a filter sets none. */
+const resolvedDefault = computed(() => defaultHighlightColor.value || DEFAULT_HIGHLIGHT_COLOR)
 
 const open = ref(false)
 
@@ -18,25 +21,36 @@ const MatcherTypes = [
 const Blank: TagFilter = {
   name: '',
   type: undefined,
-  invert: false,
   matcher: 'exact',
 }
 
 const initial = ref(Blank)
 const name = ref(Blank.name)
 const type = ref(Blank.type)
-const invert = ref(Blank.invert)
 const matcher = ref(Blank.matcher)
+const behavior = ref<TagFilterBehavior>('hide')
+const color = ref(DEFAULT_HIGHLIGHT_COLOR)
+// Invert filters highlight by default; this opts out (stored as a 'transparent' colour).
+const noHighlight = ref(false)
 
 const creating = computed(() => toRaw(initial.value) === Blank)
+
+// The colour picker is shown whenever the filter will highlight: any highlight
+// filter, or an invert filter that hasn't opted out via "No highlight".
+const showColor = computed(() =>
+  behavior.value === 'highlight' || (behavior.value === 'invert' && !noHighlight.value))
 
 context.edit = (value?: TagFilter) => {
   open.value = true
   initial.value = value ?? toRaw(Blank)
   name.value = initial.value.name
   type.value = initial.value.type
-  invert.value = initial.value.invert
   matcher.value = initial.value.matcher
+  behavior.value = initial.value.behavior ?? 'hide'
+  noHighlight.value = initial.value.behavior === 'invert' && initial.value.color === 'transparent'
+  color.value = initial.value.color && initial.value.color !== 'transparent'
+    ? initial.value.color
+    : resolvedDefault.value
 }
 
 context.remove = (value: TagFilter) => {
@@ -48,14 +62,26 @@ function setDialogRef(ref: unknown) {
 }
 
 function save() {
+  // Store the default ('hide') as missing, and only keep a colour when the
+  // filter highlights. For invert, "No highlight" persists as 'transparent'.
+  // When the picked colour just matches the configured default, store nothing so
+  // the filter keeps inheriting it (and tracks future changes to the default).
+  const behaviorValue = behavior.value === 'hide' ? undefined : behavior.value
+  const colorValue
+    = behavior.value === 'invert' && noHighlight.value
+      ? 'transparent'
+      : showColor.value && color.value !== resolvedDefault.value
+        ? color.value
+        : undefined
   if (creating.value) {
-    filters.value.push({ name: name.value, type: type.value, invert: invert.value, matcher: matcher.value })
+    filters.value.push({ name: name.value, type: type.value, matcher: matcher.value, behavior: behaviorValue, color: colorValue })
   }
   else {
     initial.value.name = name.value
     initial.value.type = type.value
-    initial.value.invert = invert.value
     initial.value.matcher = matcher.value
+    initial.value.behavior = behaviorValue
+    initial.value.color = colorValue
   }
   open.value = false
 }
@@ -73,7 +99,7 @@ const typeModel = computed({
         {{ creating ? 'Create' : 'Edit' }} tag filter
       </DialogTitle>
       <DialogDescription class="sr-only">
-        Configure a tag filter: the text to match, how it matches, the tag type to restrict to, and whether it hides or force-shows matching works.
+        Configure a tag filter: the text to match, how it matches, the tag type to restrict to, and whether matching works are hidden, force-shown, or have the tag highlighted.
       </DialogDescription>
       <div flex="~ col gap-4" pt-4>
         <label flex="~ col gap-1">
@@ -125,9 +151,31 @@ const typeModel = computed({
           </p>
         </label>
 
-        <label text="sm">
-          <span>Invert filter (will unhide works that match)</span>
-          <input v-model="invert" type="checkbox">
+        <label flex="~ col gap-1">
+          <span text="sm muted-fg">Behavior</span>
+          <Select v-model="behavior" h-10 w-full>
+            <SelectItem value="hide">
+              Hide works with matching tags
+            </SelectItem>
+            <SelectItem value="invert">
+              Always show works with matching tags (even if hidden by another rule)
+            </SelectItem>
+            <SelectItem value="highlight">
+              Highlight the tag (does not hide)
+            </SelectItem>
+          </Select>
+        </label>
+
+        <label v-if="behavior === 'invert'" flex="~ items-center gap-2" text="sm">
+          <input v-model="noHighlight" type="checkbox">
+          <span text="muted-fg">No highlight (don't colour the matching tag)</span>
+        </label>
+
+        <label v-if="showColor" flex="~ col gap-1">
+          <span text="sm muted-fg">Highlight color</span>
+          <ColorInput v-model="color">
+            <span text="xs muted-fg">Shown as a highlight behind the tag on results.</span>
+          </ColorInput>
         </label>
 
         <div flex="~ gap-4 justify-end">

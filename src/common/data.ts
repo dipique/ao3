@@ -124,6 +124,25 @@ export interface User {
   userId: string
 }
 
+/**
+ * What a tag filter does with works/tags it matches:
+ * - `'hide'` (or missing): hide the work. The default.
+ * - `'invert'`: force-show the work even if another filter would hide it. Also
+ *   highlights the matching tag by default (a force-shown work usually wants to
+ *   stand out); opt out by setting `color` to `'transparent'`.
+ * - `'highlight'`: visually highlight the matching tag, without affecting whether
+ *   the work is hidden.
+ */
+export type TagFilterBehavior = 'hide' | 'invert' | 'highlight'
+
+/**
+ * A pleasant, visible-but-not-loud default highlight colour: a translucent
+ * amber (`#rrggbbaa`, ~62% opacity) so it reads as a gentle wash rather than a
+ * loud block. Users can override the default in options (see
+ * `Options.hideTags.defaultHighlightColor`), and any filter can set its own.
+ */
+export const DEFAULT_HIGHLIGHT_COLOR = '#ffe0829e'
+
 export interface TagFilter {
   /** Value of the filter. Will be Tag.name if matcher === exact */
   name: string
@@ -131,8 +150,55 @@ export interface TagFilter {
   type?: TagType
   /** How to match */
   matcher: 'exact' | 'contains' | 'regex'
-  /** If true, the filter will be inverted - excluding rather than including from the hide list - therefore force-showing. */
-  invert?: boolean
+  /** What to do with matching works/tags. Missing is treated as `'hide'`. */
+  behavior?: TagFilterBehavior
+  /**
+   * Highlight colour (any CSS color) used when the filter highlights its
+   * matching tag — i.e. when `behavior === 'highlight'`, or `behavior ===
+   * 'invert'` and not opted out. The literal `'transparent'` on an invert
+   * filter means "no highlight". See {@link tagFilterHighlightColor}.
+   */
+  color?: string
+}
+
+/**
+ * The colour a filter should highlight its matching tags with, or `null` if it
+ * does not highlight. Highlight filters always highlight; invert filters
+ * highlight too (so force-shown works stand out) unless their colour is the
+ * sentinel `'transparent'` ("No highlight"). A filter with no explicit colour
+ * falls back to `defaultColor` (the user-configurable default highlight colour),
+ * which itself defaults to {@link DEFAULT_HIGHLIGHT_COLOR}.
+ */
+export function tagFilterHighlightColor(filter: TagFilter, defaultColor: string = DEFAULT_HIGHLIGHT_COLOR): string | null {
+  switch (filter.behavior) {
+    case 'highlight':
+      return filter.color || defaultColor
+    case 'invert':
+      return filter.color === 'transparent' ? null : filter.color || defaultColor
+    default:
+      return null
+  }
+}
+
+/** Whether a tag filter matches a given tag (by type, then name/contains/regex). */
+export function tagFilterMatchesTag(filter: TagFilter, tag: Tag): boolean {
+  if (filter.type !== undefined && filter.type !== tag.type)
+    return false
+
+  if (filter.matcher === 'contains')
+    return tag.name.toLowerCase().includes(filter.name.toLowerCase())
+
+  if (filter.matcher === 'regex') {
+    try {
+      return new RegExp(filter.name.toLowerCase()).test(tag.name.toLowerCase())
+    }
+    catch {
+      // An invalid regex matches nothing rather than throwing mid-render.
+      return false
+    }
+  }
+
+  return filter.name === tag.name
 }
 
 export interface AuthorFilter {

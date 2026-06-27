@@ -1,5 +1,6 @@
 import type { AuthorFilter, Language, TagFilter } from './data.ts'
 
+import { DEFAULT_HIGHLIGHT_COLOR } from './data.ts'
 import { createStorage } from './storage.ts'
 
 export interface ThemeOption {
@@ -22,7 +23,12 @@ export interface Options {
   hideCrossovers: { enabled: boolean, maxFandoms: number }
   hideLanguages: { enabled: boolean, show: Language[] }
   hideAuthors: { enabled: boolean, filters: AuthorFilter[] }
-  hideTags: { enabled: boolean, filters: TagFilter[] }
+  hideTags: {
+    enabled: boolean
+    filters: TagFilter[]
+    /** Highlight colour used by filters (and force-shown tags) that don't set their own. */
+    defaultHighlightColor?: string
+  }
 
   compressSearchUrls: boolean
   tagToolbar: boolean
@@ -63,7 +69,7 @@ export const options = createStorage<Options>({
     hideCrossovers: { enabled: true, maxFandoms: 7 },
     hideLanguages: { enabled: false, show: [] },
     hideAuthors: { enabled: false, filters: [] },
-    hideTags: { enabled: false, filters: [] },
+    hideTags: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_HIGHLIGHT_COLOR },
 
     compressSearchUrls: false,
     tagToolbar: false,

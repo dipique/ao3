@@ -330,6 +330,21 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   cursor: default;
 }
 
+/* ---------------------------------------------------------------------------
+   Favourite / highlighted tags. Applied to native tag links that match a
+   highlight filter; the colour comes from a per-filter CSS variable so each
+   favourite can have its own shade. Kept subtle so it reads as a marker, not a
+   button.
+   --------------------------------------------------------------------------- */
+.AO3E--highlight-tag {
+  background-color: var(--ao3e-highlight-color, #ffe0829e);
+  border-radius: 0.25em;
+  padding: 0 0.3em;
+  font-weight: 600;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 .AO3E--tools {
   a.dropdown-toggle {
     display: flex !important;

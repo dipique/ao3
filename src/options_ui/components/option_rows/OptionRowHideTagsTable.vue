@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { TagFilter } from '#common'
 
-import { TagType } from '#common'
+import { DEFAULT_HIGHLIGHT_COLOR, TagType } from '#common'
 
 const FiltersDataTable = useDataTable<TagFilter>()
 
-const { filters } = useOption('hideTags')
+const { filters, defaultHighlightColor } = useOption('hideTags')
+const resolvedDefault = computed(() => defaultHighlightColor.value || DEFAULT_HIGHLIGHT_COLOR)
 function renderData(filters: TagFilter[]) {
   return filters
     .map((filter, index) => [index, filter] as [number, TagFilter])
@@ -43,16 +44,23 @@ const context = OptionRowHideTagsContext.inject()
             <Render :render="inner" />
           </tr>
         </template>
-        <FiltersDataTable.Column accessor="invert">
+        <FiltersDataTable.Column accessor="behavior">
           <template #cell="cell">
             <td w-1>
               <Tooltip>
                 <div flex="~ items-center justify-center" h-full px-2 text="4">
-                  <Icon v-if="cell.value" i-tabler-eye-exclamation op100 label="Show" />
+                  <Icon
+                    v-if="cell.value === 'highlight'"
+                    i-mdi-star
+                    :style="{ color: cell.row.data.color || resolvedDefault }"
+                    label="Highlight"
+                  />
+                  <Icon v-else-if="cell.value === 'invert'" i-tabler-eye-exclamation op100 label="Show" />
                   <Icon v-else i-tabler-eye-off op40 label="Hide" />
                 </div>
                 <template #content>
-                  <span v-if="cell.value">Always show works with matching tags - even if matched by other filters.</span>
+                  <span v-if="cell.value === 'highlight'">Highlight matching tags on results (does not hide).</span>
+                  <span v-else-if="cell.value === 'invert'">Always show works with matching tags - even if matched by other filters.</span>
                   <span v-else>Hide works with matching tags.</span>
                 </template>
               </Tooltip>

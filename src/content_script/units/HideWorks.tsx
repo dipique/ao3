@@ -3,7 +3,7 @@ import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
 import { type Tag, type TagFilter, TagType } from '#common'
-import { ADDON_CLASS } from '#common'
+import { ADDON_CLASS, tagFilterMatchesTag } from '#common'
 import {
   type CheckboxGroup,
   hasCheckboxGroupFields,
@@ -197,9 +197,11 @@ export class HideWorks extends Unit {
       })
     }
 
+    // Highlight filters are purely visual (handled by HighlightTags) and never
+    // hide or force-show, so they're excluded from the hide decision here.
     const tagMatches = hideTags?.enabled
       ? blurb.tags.flatMap((tag) => {
-          const filter = hideTags.filters.find(f => tagFilterMatchesTag(f, tag))
+          const filter = hideTags.filters.find(f => f.behavior !== 'highlight' && tagFilterMatchesTag(f, tag))
           return filter ? [{ tag, filter }] : []
         })
       : []
@@ -212,9 +214,11 @@ export class HideWorks extends Unit {
         })
       : []
 
-    // If any matching filter is inverted (a force-show rule), the work is not
-    // hidden at all — return with no reasons.
-    if ([...tagMatches, ...authorMatches].some(m => m.filter.invert))
+    // If any matching filter is a force-show rule, the work is not hidden at all
+    // — return with no reasons. Tags express this via behavior, authors via invert.
+    const forceShow = tagMatches.some(m => m.filter.behavior === 'invert')
+      || authorMatches.some(m => m.filter.invert)
+    if (forceShow)
       return reasons
 
     for (const { tag, filter } of tagMatches) {
@@ -462,19 +466,4 @@ function tagExcludeTarget(tag: BlurbTag): ExcludeTarget | undefined {
     default:
       return { kind: 'tag', name: tag.name }
   }
-}
-
-function tagFilterMatchesTag(filter: TagFilter, tag: Tag): boolean {
-  if (filter.type !== undefined && filter.type !== tag.type) {
-    return false
-  }
-
-  if (filter.matcher === 'contains') {
-    return tag.name.toLowerCase().includes(filter.name.toLowerCase())
-  }
-  else if (filter.matcher === 'regex') {
-    return new RegExp(filter.name.toLowerCase()).test(tag.name.toLowerCase())
-  }
-
-  return filter.name === tag.name
 }

@@ -1,5 +1,14 @@
 <script setup lang="ts">
-const { enabled } = useOption('hideTags')
+import { DEFAULT_HIGHLIGHT_COLOR } from '#common'
+
+const { enabled, defaultHighlightColor } = useOption('hideTags')
+
+// Backed by an optional stored value; fall back to the built-in default for
+// display so the colour control always has a concrete value to show.
+const defaultColor = computed({
+  get: () => defaultHighlightColor.value || DEFAULT_HIGHLIGHT_COLOR,
+  set: (v: string) => defaultHighlightColor.value = v,
+})
 
 OptionRowHideTagsContext.provide({
   editDialog: ref(null),
@@ -13,6 +22,15 @@ OptionRowHideTagsContext.provide({
     subtitle="Hide tags based on the tags of the work"
   >
     <OptionRowHideTagsTable />
+
+    <label flex="~ items-center gap-3 justify-between" mt-3 text="sm">
+      <span flex="~ col gap-0.5">
+        <span>Default highlight color</span>
+        <span text="xs muted-fg">Used by highlight filters, and force-shown (invert) tags, that don't set their own colour.</span>
+      </span>
+      <ColorInput v-model="defaultColor" />
+    </label>
+
     <OptionRowHideTagsEditDialog />
     <Dialog>
       <DialogTrigger as-child>
@@ -35,6 +53,8 @@ OptionRowHideTagsContext.provide({
             Tag filtering works by hiding works that have tags that match the filters you set.
             Filtering works by first hiding works marked as <Icon i-tabler-eye-off op40 label="Hide" title="Hide" />,
             then explicitly unhiding marked as <Icon i-tabler-eye-exclamation op100 label="Show" title="Show" />.
+            Tags marked as <Icon i-mdi-star op100 label="Highlight" title="Highlight" /> are instead highlighted on results in a colour of your choice, without changing what is hidden.
+            Force-shown (<Icon i-tabler-eye-exclamation op100 label="Show" title="Show" />) tags are highlighted too by default so they stand out; you can turn that off per filter or change the default colour below.
           </p>
           <h2 mt-6 py-1>
             Limitations

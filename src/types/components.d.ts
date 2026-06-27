@@ -13,6 +13,7 @@ declare module 'vue' {
     ArchiveLink: typeof import('./../options_ui/components/basic/ArchiveLink.vue')['default']
     ArchivePreferenceLink: typeof import('./../options_ui/components/basic/ArchivePreferenceLink.vue')['default']
     Button: typeof import('./../options_ui/components/basic/Button.vue')['default']
+    ColorInput: typeof import('./../options_ui/components/basic/ColorInput.vue')['default']
     Dialog: typeof import('./../options_ui/components/basic/Dialog/Dialog.vue')['default']
     DialogContent: typeof import('./../options_ui/components/basic/Dialog/DialogContent.vue')['default']
     DialogDescription: typeof import('./../options_ui/components/basic/Dialog/DialogDescription.vue')['default']

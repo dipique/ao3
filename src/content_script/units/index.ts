@@ -4,6 +4,7 @@ import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { FandomToolbar } from './FandomToolbar.tsx'
 import { HideAuthorToolbar } from './HideAuthorToolbar.tsx'
 import { HideWorks } from './HideWorks.tsx'
+import { HighlightTags } from './HighlightTags.ts'
 import { MuteAuthorToolbar } from './MuteAuthorToolbar.tsx'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { Stats } from './Stats/Stats.ts'
@@ -15,6 +16,7 @@ import { Tools } from './Tools.tsx'
 export const UNITS = [
   StyleTweaks,
   HideWorks,
+  HighlightTags,
   CompressSearchUrls,
   TagToolbar,
   FandomToolbar,
