@@ -39,7 +39,7 @@ export interface Options {
   tagToolbar: boolean
   fandomToolbar: boolean
   markForLaterToolbar: boolean
-  /** Floating control on listings to temporarily reveal tag-filtered works. */
+  /** Floating control on listings to temporarily reveal works hidden by any filter. */
   filterToolbar: boolean
   hideAuthorToolbar: boolean
   subscribeAuthorToolbar: boolean

@@ -120,28 +120,28 @@ dd.finish-at {
 }
 
 /* ---------------------------------------------------------------------------
-   Tag-filter "peek". When the floating filter toolbar turns on peek mode, works
-   hidden (at least partly) by a tag filter are revealed in place and faintly
-   outlined so it's clear they were filtered. Reverting the toggle re-hides them;
-   none of this touches the saved filters.
+   Filter "peek". When the floating filter toolbar turns on peek mode, works
+   hidden (at least partly) by any filter — tag, author, crossover or language —
+   are revealed in place and faintly outlined so it's clear they were filtered.
+   Reverting the toggle re-hides them; none of this touches the saved filters.
    --------------------------------------------------------------------------- */
-body.AO3E--peek-tag-hidden li[data-ao3e-hidden-by~="tags"] {
+body.AO3E--peek-hidden li[data-ao3e-hidden-by] {
   opacity: 0.75;
   outline: 1px dashed currentColor;
   outline-offset: 2px;
 }
 
-body.AO3E--peek-tag-hidden li[data-ao3e-hidden-by~="tags"][hidden] {
+body.AO3E--peek-hidden li[data-ao3e-hidden-by][hidden] {
   display: block !important;
 }
 
-body.AO3E--peek-tag-hidden li[data-ao3e-hidden-by~="tags"] > .AO3E--hide-works--wrapper[data-ao3e-hidden] {
+body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data-ao3e-hidden] {
   display: block !important;
 }
 
 /* ---------------------------------------------------------------------------
    Floating filter toolbar. A single pill, fixed to the bottom-right on listing
-   pages where tag filters hid works, that toggles the peek above.
+   pages where any filter hid works, that toggles the peek above.
    --------------------------------------------------------------------------- */
 .AO3E--filter-toolbar {
   position: fixed;

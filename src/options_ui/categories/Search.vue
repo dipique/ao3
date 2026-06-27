@@ -38,8 +38,8 @@
     </OptionRow>
     <OptionDivider />
     <OptionRow
-      title="Tag filter peek toolbar"
-      subtitle="On listing pages that hid works via your tag filters, show a small floating button to temporarily reveal those works (and hide them again). Does not change your saved filters."
+      title="Filter peek toolbar"
+      subtitle="On listing pages where your filters hid works, show a small floating button to temporarily reveal those works (and hide them again). Works for tag, author, crossover and language filters. Does not change your saved filters."
     >
       <OptionSwitch option-id="filterToolbar" />
     </OptionRow>

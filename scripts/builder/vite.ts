@@ -3,8 +3,7 @@ import unocss from '@unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import type { Ref } from '@vue/reactivity'
 import { Buffer } from 'node:buffer'
-import { realpathSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import RekaResolver from 'reka-ui/resolver'
 import { visualizer } from 'rollup-plugin-visualizer'
 import type { ImportCommon } from 'unimport'
@@ -19,23 +18,9 @@ import type { AssetPage, ViteInput } from './AssetPage.ts'
 import type { File } from './utils.ts'
 
 import { ALIAS, DEFINE, ESBUILD, ESBUILD_TARGET, IconsPlugin, LIGHTNING_CSS_TARGET } from './common.ts'
-import { logBuild, makeHash, writeFile } from './utils.ts'
+import { logBuild, makeHash, realPath, writeFile } from './utils.ts'
 
 const ORIGIN_PLACEHOLDER = '__VITE_ORIGIN__'
-
-/**
- * Canonicalize a path for comparison: resolve symlinks/junctions and normalize
- * casing/separators via the OS realpath. Falls back to resolve() if the path
- * does not exist on disk (realpath throws otherwise).
- */
-function realPath(p: string): string {
-  try {
-    return realpathSync.native(p)
-  }
-  catch {
-    return resolve(p)
-  }
-}
 
 /**
  * Guarantee a usable `localStorage` global before vue-devtools loads. Node 25

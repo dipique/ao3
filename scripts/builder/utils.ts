@@ -3,8 +3,9 @@ import type { ChokidarOptions } from 'chokidar'
 import * as esbuild from 'esbuild'
 import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { dirname, relative } from 'node:path'
+import { dirname, relative, resolve } from 'node:path'
 import type * as parse5 from 'parse5'
 import type { EmptyObject } from 'type-fest'
 
@@ -84,6 +85,26 @@ export function colorizePath(root: string, path: string, dir: string, color: (s:
 
 const externalRE = /^(?:https?:)?\/\//
 export const isExternalUrl = (url: string): boolean => externalRE.test(url)
+
+/**
+ * Canonicalize a path for comparison: resolve symlinks/junctions and normalize
+ * casing/separators via the OS realpath. Falls back to resolve() if the path
+ * does not exist on disk (realpath throws otherwise).
+ *
+ * Build tools disagree on whether they report a module's path as given or as the
+ * real on-disk path: rolldown canonicalizes `facadeModuleId`, esbuild does not.
+ * When the project lives behind a junction (e.g. C:\dev -> another volume), a
+ * plain string/`resolve()` compare of those two forms never matches. Run both
+ * sides through this first so path-equality checks are junction-safe.
+ */
+export function realPath(p: string): string {
+  try {
+    return realpathSync.native(p)
+  }
+  catch {
+    return resolve(p)
+  }
+}
 
 const numberFormatter = new Intl.NumberFormat('en', {
   maximumFractionDigits: 2,
