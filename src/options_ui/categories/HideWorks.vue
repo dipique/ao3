@@ -19,7 +19,7 @@ import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from '#c
     <OptionDivider />
     <OptionRow
       title="Show matched values"
-      subtitle="On a collapsed work, show the actual tag/fandom/author that matched (instead of the rule that hid it) and hover any value to see the matching rule. Each value gets an exclude (−) button that adds it straight to the filter sidebar."
+      subtitle="On a collapsed work, show the actual tag/fandom/author that matched (instead of the rule that hid it); hover a value (or tap/long-press it on touch) to see the matching rule. Each value gets an exclude (−) button that adds it straight to the filter sidebar."
     >
       <OptionSwitch option-id="hideShowMatchedValues" />
     </OptionRow>
@@ -29,20 +29,20 @@ import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from '#c
     <OptionRowHideLanguages />
     <OptionDivider />
     <OptionRow
-      title="Hide author button"
-      subtitle="Show a button after each author's name (on works listings, work pages, etc.) to add or remove them from your hidden authors list with one click."
+      title="Hide author in the author menu"
+      subtitle="Add hide / always-show / highlight actions to an author's right-click (or long-press) menu, so you can manage your hidden authors list from any byline. A hidden/highlight indicator shows next to the name when active."
     >
       <OptionSwitch option-id="hideAuthorToolbar" />
     </OptionRow>
     <OptionRow
-      title="Subscribe to author button"
-      subtitle="Show a button after each author's name (next to the hide-author button) to subscribe to or unsubscribe from that author with one click. Hover the button to load your current subscription status. Requires being logged in to AO3."
+      title="Subscribe to author in the author menu"
+      subtitle="Add a subscribe / unsubscribe action to the author's right-click (or long-press) menu. Your current subscription status is loaded when the menu opens. Requires being logged in to AO3."
     >
       <OptionSwitch option-id="subscribeAuthorToolbar" />
     </OptionRow>
     <OptionRow
-      title="Mute author button"
-      subtitle="Show a button after each author's name (next to the subscribe button) to mute or unmute that author with one click — muting completely hides all of their works, series, bookmarks, and comments from you. Hover the button to load your current mute status. Requires being logged in to AO3."
+      title="Mute author in the author menu"
+      subtitle="Add a mute / unmute action to the author's right-click (or long-press) menu — muting completely hides all of their works, series, bookmarks, and comments from you. Your current mute status is loaded when the menu opens. Requires being logged in to AO3."
     >
       <OptionSwitch option-id="muteAuthorToolbar" />
     </OptionRow>

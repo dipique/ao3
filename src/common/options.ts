@@ -56,6 +56,12 @@ export interface Options {
   hideAuthorToolbar: boolean
   subscribeAuthorToolbar: boolean
   muteAuthorToolbar: boolean
+  /**
+   * Master switch for the extension's in-page right-click / long-press context
+   * menus. When off, our menus stay out of the way and the browser's native menu
+   * shows on links again (the on-page indicators still open their menus).
+   */
+  contextMenusEnabled: boolean
   /** On your own Marked for Later page, add a button that loads every page into one filterable view. */
   searchMarkedForLater: boolean
 
@@ -106,6 +112,7 @@ export const options = createStorage<Options>({
     hideAuthorToolbar: false,
     subscribeAuthorToolbar: false,
     muteAuthorToolbar: false,
+    contextMenusEnabled: true,
     searchMarkedForLater: true,
 
     styleWidthEnabled: true,

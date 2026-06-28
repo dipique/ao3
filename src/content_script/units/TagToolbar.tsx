@@ -1,116 +1,192 @@
+import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
+import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
+import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
+import MdiStar from '~icons/mdi/star.jsx'
 
-import { ADDON_CLASS } from '#common'
+import type { Tag } from '#common'
+import type { MenuItem } from '#content_script/contextMenu.js'
+
+import { DEFAULT_HIGHLIGHT_COLOR, options } from '#common'
 import {
-  type Direction,
+  attachMenuTrigger,
+  buildIndicators,
+  clearMenuTriggers,
+  type IndicatorState,
+  standardLinkItems,
+} from '#content_script/contextTrigger.js'
+import {
   hasTagFilterFields,
   isTagSelected,
   onFilterChange,
   resetFilterSidebarCaches,
   toggleTagFilter,
 } from '#content_script/filterSidebar.js'
+import { clearTagBehavior, tagBehavior, toggleTagBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
+import { getTagFromElement } from '#content_script/utils.js'
 import React from '#dom'
-
-const TOOLBAR_CLASS = `${ADDON_CLASS}--tag-toolbar`
-const BUTTON_CLASS = `${ADDON_CLASS}--tag-toolbar--button`
-const ACTIVE_CLASS = `${ADDON_CLASS}--tag-toolbar--active`
-const INCLUDE_CLASS = `${ADDON_CLASS}--tag-toolbar--include`
-const EXCLUDE_CLASS = `${ADDON_CLASS}--tag-toolbar--exclude`
 
 /**
  * Blurb tag links we decorate. These are the text-based tags (relationships,
  * characters, additional tags, warnings) shown under each work — NOT the
- * fandom tags in `h5.fandoms`, which are id-based and handled separately.
+ * fandom tags in `h5.fandoms`, which are id-based and handled by FandomToolbar.
  */
 const TAG_LINK_SELECTOR = '.blurb ul.tags a.tag'
 
 /**
- * Every toolbar button on the page, so a change to one tag's state is reflected
- * on every blurb showing that same tag. Rebuilt on each `ready()`.
+ * A decorated tag link: the link itself (a menu trigger), the parsed tag, its
+ * persistent hide/show/highlight behaviour (snapshot from options this run), and
+ * the indicator node currently shown after it (or null when nothing is active).
+ * Rebuilt each `ready()`; the ephemeral include/exclude part is re-synced on
+ * filter change.
  */
-const buttons: { button: HTMLElement, name: string, direction: Direction }[] = []
-
-function setButtonState(button: HTMLElement, direction: Direction, selected: boolean): void {
-  button.classList.toggle(ACTIVE_CLASS, selected)
-  button.setAttribute('aria-pressed', String(selected))
-  const verb = direction === 'include' ? 'included' : 'excluded'
-  const action = direction === 'include' ? 'Include this tag in' : 'Exclude this tag from'
-  const label = selected ? `Remove tag from ${verb} tags` : `${action} the filter`
-  button.title = label
-  button.setAttribute('aria-label', label)
+interface TagEntry {
+  link: HTMLAnchorElement
+  tag: Tag
+  behavior: 'hide' | 'invert' | 'highlight' | null
+  highlightColor: string
+  hasFields: boolean
+  indicator: HTMLElement | null
 }
 
-function refreshAll(): void {
-  for (const { button, name, direction } of buttons)
-    setButtonState(button, direction, isTagSelected(direction, name))
+const entries: TagEntry[] = []
+
+function computeStates(entry: TagEntry): IndicatorState[] {
+  const states: IndicatorState[] = []
+  if (entry.hasFields && isTagSelected('include', entry.tag.name))
+    states.push('include')
+  if (entry.hasFields && isTagSelected('exclude', entry.tag.name))
+    states.push('exclude')
+  if (entry.behavior)
+    states.push(entry.behavior)
+  return states
 }
 
-// Re-sync when any control (this toolbar, or a hidden-work exclude button)
-// mutates the filter. Registered once; refreshAll over an empty registry is a
-// harmless no-op between page runs.
-onFilterChange(refreshAll)
+/** Build the tag's menu fresh at open time (so include/exclude + saved state are current). */
+async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem[]> {
+  const items: MenuItem[] = []
+
+  if (hasTagFilterFields()) {
+    items.push({
+      icon: () => <MdiPlusCircle />,
+      label: 'Include in filter',
+      active: isTagSelected('include', tag.name),
+      onSelect: () => void toggleTagFilter('include', tag.name),
+    })
+    items.push({
+      icon: () => <MdiMinusCircle />,
+      label: 'Exclude from filter',
+      active: isTagSelected('exclude', tag.name),
+      onSelect: () => void toggleTagFilter('exclude', tag.name),
+    })
+  }
+
+  const { filters } = await options.get('hideTags')
+  const behavior = tagBehavior(filters, tag)
+  // The three behaviours are mutually exclusive; the active one is shown disabled
+  // (it's the current state), with a "Clear" row to return to no rule.
+  items.push(
+    {
+      icon: () => <MdiEyeOff />,
+      label: 'Hide',
+      danger: true,
+      active: behavior === 'hide',
+      disabled: behavior === 'hide',
+      separatorBefore: items.length > 0,
+      onSelect: () => toggleTagBehavior(tag, 'hide'),
+    },
+    {
+      icon: () => <MdiEyeCheck />,
+      label: 'Always show',
+      active: behavior === 'invert',
+      disabled: behavior === 'invert',
+      onSelect: () => toggleTagBehavior(tag, 'invert'),
+    },
+    {
+      icon: () => <MdiStar />,
+      label: 'Highlight',
+      active: behavior === 'highlight',
+      disabled: behavior === 'highlight',
+      onSelect: () => toggleTagBehavior(tag, 'highlight'),
+    },
+  )
+  if (behavior) {
+    items.push({
+      icon: () => <MdiCloseCircleOutline />,
+      label: 'Clear',
+      onSelect: () => clearTagBehavior(tag),
+    })
+  }
+
+  items.push(...standardLinkItems(link))
+  return items
+}
+
+/** Insert/replace/remove a tag's indicator to match its current active states. */
+function syncIndicator(entry: TagEntry): void {
+  const states = computeStates(entry)
+  const next = buildIndicators(states, { highlightColor: entry.highlightColor })
+  if (next)
+    attachMenuTrigger(next, () => buildTagMenu(entry.tag, entry.link), { indicator: true })
+
+  if (entry.indicator && next)
+    entry.indicator.replaceWith(next)
+  else if (entry.indicator && !next)
+    entry.indicator.remove()
+  else if (!entry.indicator && next)
+    entry.link.after(next)
+
+  entry.indicator = next
+}
+
+// Re-sync the include/exclude indicators when any control mutates the sidebar
+// filter. Registered once; a no-op over an empty registry between page runs.
+onFilterChange(() => {
+  for (const entry of entries)
+    syncIndicator(entry)
+})
 
 export class TagToolbar extends Unit {
   static override get name() { return 'TagToolbar' }
   override get enabled() { return this.options.tagToolbar }
 
   static override async clean(): Promise<void> {
-    buttons.length = 0
+    entries.length = 0
+    clearMenuTriggers()
     resetFilterSidebarCaches()
   }
 
   override async ready(): Promise<void> {
-    buttons.length = 0
+    entries.length = 0
 
-    if (!hasTagFilterFields()) {
-      this.logger.debug('No filter sidebar on this page; skipping tag toolbars.')
-      return
-    }
+    const hasFields = hasTagFilterFields()
+    const highlightColor = this.options.hideTags.defaultHighlightColor || DEFAULT_HIGHLIGHT_COLOR
+    const { filters } = this.options.hideTags
 
-    const tagLinks = document.querySelectorAll(TAG_LINK_SELECTOR)
-    for (const tagLink of tagLinks) {
-      const name = tagLink.textContent?.trim()
+    for (const link of document.querySelectorAll<HTMLAnchorElement>(TAG_LINK_SELECTOR)) {
+      const name = link.textContent?.trim()
       if (!name)
         continue
-      // clean() already removed previous toolbars, but guard against duplicates.
-      if (tagLink.nextElementSibling?.classList.contains(TOOLBAR_CLASS))
-        continue
 
-      tagLink.after(this.buildToolbar(name))
+      // getTagFromElement reads the (untrimmed) link text; match the trimmed name
+      // used when persistent filters are saved.
+      const tag: Tag = { ...getTagFromElement(link), name }
+      const entry: TagEntry = {
+        link,
+        tag,
+        behavior: tagBehavior(filters, tag),
+        highlightColor,
+        hasFields,
+        indicator: null,
+      }
+      entries.push(entry)
+
+      attachMenuTrigger(link, () => buildTagMenu(tag, link))
+      syncIndicator(entry)
     }
 
-    refreshAll()
-    this.logger.debug(`Added include/exclude toolbars to ${buttons.length / 2} tag links.`)
-  }
-
-  buildToolbar(name: string): HTMLElement {
-    return (
-      <span class={`${ADDON_CLASS} ${TOOLBAR_CLASS}`}>
-        {this.buildButton('exclude', name)}
-        {this.buildButton('include', name)}
-      </span>
-    )
-  }
-
-  buildButton(direction: Direction, name: string): HTMLElement {
-    const Icon = direction === 'include' ? MdiPlusCircle : MdiMinusCircle
-    const directionClass = direction === 'include' ? INCLUDE_CLASS : EXCLUDE_CLASS
-
-    const button: HTMLElement = (
-      <button type="button" class={`${BUTTON_CLASS} ${directionClass}`} aria-pressed="false">
-        <Icon />
-      </button>
-    )
-
-    button.addEventListener('click', (e) => {
-      e.preventDefault()
-      if (!toggleTagFilter(direction, name))
-        this.logger.warn(`No ${direction} checkbox or field for "${name}"; cannot update filter.`)
-    })
-
-    buttons.push({ button, name, direction })
-    return button
+    this.logger.debug(`Added tag menus to ${entries.length} tag links.`)
   }
 }

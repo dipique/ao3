@@ -148,6 +148,58 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   right: 1em;
   bottom: 1em;
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  align-items: flex-end;
+}
+
+/* The stack of pill toggles revealed by the FAB. Collapsed (and click-through)
+   until the toolbar carries the --open class, then it fades/slides into place. */
+.AO3E--filter-toolbar--panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  align-items: flex-end;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(0.5em);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  pointer-events: none;
+}
+
+.AO3E--filter-toolbar--open .AO3E--filter-toolbar--panel {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+}
+
+/* The round, touch-sized launcher: the extension's AO3 logo, white on theme red. */
+.AO3E--filter-toolbar--fab {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 50% !important;
+  background: #970000 !important;
+  color: #fff !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35) !important;
+  cursor: pointer;
+}
+
+.AO3E--filter-toolbar--fab:hover,
+.AO3E--filter-toolbar--fab:focus {
+  background: #b00000 !important;
+}
+
+.AO3E--filter-toolbar--fab > svg {
+  width: 1.7rem !important;
+  height: 1.7rem !important;
+  top: 0 !important;
 }
 
 .AO3E--filter-toolbar--button {
@@ -177,6 +229,14 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: #fff !important;
 }
 
+/* The "disable menus" pill reads as an override when pressed (menus off), so it
+   gets its own amber pressed colour rather than the green of the peek pill. */
+.AO3E--filter-toolbar--menus[aria-pressed="true"] {
+  background: #a8560c !important;
+  border-color: #a8560c !important;
+  color: #fff !important;
+}
+
 .AO3E--filter-toolbar--icon {
   display: inline-flex;
   align-items: center;
@@ -187,250 +247,166 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 }
 
 
-/* Establish a positioning context so the floating toolbar anchors to its tag. */
-.blurb ul.tags li {
-  position: relative;
+/* ===========================================================================
+   Context menus, popovers and indicators.
+
+   The per-item hover toolbars were replaced by an in-page context menu (opened
+   by right-click / long-press / an indicator click) plus small permanent
+   indicators shown next to an item only when a state is active. The menu and
+   popover are overlays with their own light surface (like the floating filter
+   pill) so they stay readable over any AO3 skin.
+   =========================================================================== */
+
+/* Suppress the iOS long-press callout on the elements we attach menus to, and
+   stop a touch long-press from selecting their text. Desktop text selection is
+   left untouched — only coarse (touch) pointers get user-select: none. */
+.AO3E--menu-trigger {
+  -webkit-touch-callout: none;
 }
 
-.AO3E--tag-toolbar {
-  display: none;
-  /* Float just past the end of the tag, out of normal flow, so showing it
-     never shifts the tags around or pushes the icon onto the next line. */
-  position: absolute;
-  left: calc(100% - 0.5em);
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 5;
-  gap: 3px;
-  white-space: nowrap;
-  height: 100%;
+@media (pointer: coarse) {
+  .AO3E--menu-trigger {
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
-.blurb ul.tags li:hover > .AO3E--tag-toolbar,
-.blurb ul.tags a.tag:focus + .AO3E--tag-toolbar,
-.AO3E--tag-toolbar:focus-within {
-  display: flex;
+.AO3E--menu {
+  position: fixed;
+  z-index: 2147483600;
+  min-width: 11em;
+  max-width: min(20em, 90vw);
+  padding: 0.25em 0;
+  margin: 0;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 0.5em;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  font-size: 0.875rem;
+  line-height: 1.3;
 }
 
-.AO3E--tag-toolbar--button {
-  display: inline-flex !important;
+.AO3E--menu--item {
+  display: flex !important;
   align-items: center;
-  padding: 0 !important;
-  margin: 0 !important;
+  gap: 0.55em;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.4em 0.85em !important;
   border: none !important;
+  border-radius: 0 !important;
   background: none !important;
   box-shadow: none !important;
+  color: inherit !important;
+  text-align: left;
   cursor: pointer;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.55;
-}
-
-.AO3E--tag-toolbar--button:hover,
-.AO3E--tag-toolbar--button:focus {
-  opacity: 1;
-}
-
-.AO3E--tag-toolbar--button.AO3E--tag-toolbar--active {
-  opacity: 1;
-}
-
-.AO3E--tag-toolbar--button.AO3E--tag-toolbar--include.AO3E--tag-toolbar--active {
-  color: #0a7a0a;
-}
-
-.AO3E--tag-toolbar--button.AO3E--tag-toolbar--exclude.AO3E--tag-toolbar--active {
-  color: #9a0000;
-}
-
-/* ---------------------------------------------------------------------------
-   Fandom toolbar. Fandom links are inline, comma-separated siblings inside
-   h5.fandoms (not each in their own positioned <li> like tags), so this toolbar
-   flows inline and reveals on hover rather than floating absolutely.
-   --------------------------------------------------------------------------- */
-.AO3E--fandom-toolbar {
-  display: none;
-  gap: 3px;
-  /* Padding (not margin) so the toolbar's own hover area abuts the link with no
-     dead gap to cross. Visibility is toggled from JS via the --visible class. */
-  padding: 0 3px 0 5px;
-  vertical-align: middle;
   white-space: nowrap;
+  font: inherit;
 }
 
-.AO3E--fandom-toolbar.AO3E--fandom-toolbar--visible,
-h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
-.AO3E--fandom-toolbar:focus-within {
-  display: inline-flex;
+.AO3E--menu--item:hover,
+.AO3E--menu--item:focus {
+  background: rgba(0, 0, 0, 0.07) !important;
 }
 
-.AO3E--fandom-toolbar--button {
-  display: inline-flex !important;
-  align-items: center;
-  padding: 0 !important;
-  margin: 0 !important;
-  border: none !important;
-  background: none !important;
-  box-shadow: none !important;
-  cursor: pointer;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.55;
-}
-
-.AO3E--fandom-toolbar--button:hover,
-.AO3E--fandom-toolbar--button:focus {
-  opacity: 1;
-}
-
-.AO3E--fandom-toolbar--button:disabled {
-  opacity: 0.25;
+.AO3E--menu--item:disabled {
+  opacity: 0.5;
   cursor: default;
 }
 
-.AO3E--fandom-toolbar--button.AO3E--fandom-toolbar--active {
+.AO3E--menu--item.AO3E--menu--active {
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 #1b6ec2 !important;
+}
+
+/* The active behaviour is rendered disabled (you can't re-pick the current
+   state), but it's the current selection — keep it at full opacity so it reads
+   as "selected", not "unavailable". Only true placeholders (e.g. "Checking…")
+   stay dimmed. */
+.AO3E--menu--item.AO3E--menu--active:disabled {
   opacity: 1;
 }
 
-.AO3E--fandom-toolbar--button.AO3E--fandom-toolbar--include.AO3E--fandom-toolbar--active {
-  color: #0a7a0a;
-}
-
-.AO3E--fandom-toolbar--button.AO3E--fandom-toolbar--exclude.AO3E--fandom-toolbar--active {
-  color: #9a0000;
-}
-
-/* ---------------------------------------------------------------------------
-   Hide-author button. A single toggle shown after each author byline that adds
-   or removes the author from the persistent hidden-authors list. Always visible
-   (authors are few per work), but faint until hovered, and tinted when active.
-   --------------------------------------------------------------------------- */
-.AO3E--hide-author-toolbar {
-  display: inline-flex !important;
-  align-items: center;
-  padding: 0 !important;
-  margin: 0 0 0 0.25em !important;
-  border: none !important;
-  background: none !important;
-  box-shadow: none !important;
-  cursor: pointer;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.4;
-  vertical-align: middle;
-}
-
-.AO3E--hide-author-toolbar:hover,
-.AO3E--hide-author-toolbar:focus {
-  opacity: 1;
-}
-
-.AO3E--hide-author-toolbar.AO3E--hide-author-toolbar--active {
-  opacity: 1;
-  color: #9a0000;
-}
-
-/* ---------------------------------------------------------------------------
-   Subscribe-author button. A toggle shown after each author byline (next to the
-   hide-author button) that subscribes to / unsubscribes from that user. Faint
-   until hovered; tinted and filled (bell) once you're subscribed.
-   --------------------------------------------------------------------------- */
-.AO3E--subscribe-author-toolbar {
-  display: inline-flex !important;
-  align-items: center;
-  padding: 0 !important;
-  margin: 0 0 0 0.25em !important;
-  border: none !important;
-  background: none !important;
-  box-shadow: none !important;
-  cursor: pointer;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.4;
-  vertical-align: middle;
-}
-
-.AO3E--subscribe-author-toolbar:hover,
-.AO3E--subscribe-author-toolbar:focus {
-  opacity: 1;
-}
-
-.AO3E--subscribe-author-toolbar.AO3E--subscribe-author-toolbar--active {
-  opacity: 1;
+.AO3E--menu--item.AO3E--menu--active .AO3E--menu--icon {
   color: #1b6ec2;
 }
 
-.AO3E--subscribe-author-toolbar:disabled {
-  cursor: default;
+.AO3E--menu--item.AO3E--menu--danger .AO3E--menu--icon {
+  color: #9a0000;
 }
 
-/* ---------------------------------------------------------------------------
-   Mute-author button. A toggle shown after each author byline (next to the
-   subscribe button) that mutes / unmutes that user, hiding all of their works
-   from you. Faint until hovered; tinted amber once you've muted them.
-   --------------------------------------------------------------------------- */
-.AO3E--mute-author-toolbar {
-  display: inline-flex !important;
+.AO3E--menu--item.AO3E--menu--active.AO3E--menu--danger {
+  box-shadow: inset 2px 0 0 #9a0000 !important;
+}
+
+.AO3E--menu--icon {
+  display: inline-flex;
   align-items: center;
-  padding: 0 !important;
-  margin: 0 0 0 0.25em !important;
-  border: none !important;
-  background: none !important;
-  box-shadow: none !important;
-  cursor: pointer;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.4;
-  vertical-align: middle;
+  flex: 0 0 auto;
+  width: 1em;
+  opacity: 0.85;
 }
 
-.AO3E--mute-author-toolbar:hover,
-.AO3E--mute-author-toolbar:focus {
-  opacity: 1;
+.AO3E--menu--label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.AO3E--mute-author-toolbar.AO3E--mute-author-toolbar--active {
-  opacity: 1;
-  color: #a8560c;
+.AO3E--menu--separator {
+  height: 1px;
+  margin: 0.25em 0;
+  background: rgba(0, 0, 0, 0.12);
 }
 
-.AO3E--mute-author-toolbar:disabled {
-  cursor: default;
+.AO3E--popover {
+  position: fixed;
+  z-index: 2147483600;
+  max-width: min(24em, 90vw);
+  padding: 0.6em 0.8em;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 0.5em;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  font-size: 0.875rem;
+  line-height: 1.4;
 }
 
-/* ---------------------------------------------------------------------------
-   Save-for-later button. A toggle shown just after each work title on a listing
-   that adds / removes the work from your Marked for Later list. Faint until
-   hovered; tinted green once the work is saved this session.
-   --------------------------------------------------------------------------- */
-.AO3E--mark-for-later-toolbar {
-  display: inline-flex !important;
+/* Permanent indicators: one small icon per active state, shown after the item
+   it describes. The whole span re-opens that item's menu (it's a trigger). */
+.AO3E--indicators {
+  display: inline-flex;
   align-items: center;
-  padding: 0 !important;
-  margin: 0 0 0 0.35em !important;
-  border: none !important;
-  background: none !important;
-  box-shadow: none !important;
-  cursor: pointer;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.4;
+  gap: 0.1em;
+  margin-left: 0.25em;
   vertical-align: middle;
-  font-size: unset;
+  cursor: pointer;
 }
 
-.AO3E--mark-for-later-toolbar:hover,
-.AO3E--mark-for-later-toolbar:focus {
-  opacity: 1;
+.AO3E--indicator {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
 }
 
-.AO3E--mark-for-later-toolbar.AO3E--mark-for-later-toolbar--active {
-  opacity: 1;
+.AO3E--indicator--include {
+  color: #0a7a0a;
+}
+
+.AO3E--indicator--exclude,
+.AO3E--indicator--hide {
+  color: #9a0000;
+}
+
+.AO3E--indicator--invert,
+.AO3E--indicator--saved {
   color: #2f8f4e;
 }
 
-.AO3E--mark-for-later-toolbar:disabled {
-  cursor: default;
+.AO3E--indicator--highlight {
+  color: var(--ao3e-indicator-color, #d8a200);
 }
 
 /* ---------------------------------------------------------------------------
@@ -482,55 +458,6 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   font-weight: 600;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-}
-
-/* ---------------------------------------------------------------------------
-   Work / series filter toggles. A single button shown after each work title
-   (left of the mark-for-later button) and after each series link that cycles the
-   entity's filter: unset → hide → highlight → always-show → unset. Faint until
-   hovered; tinted per state (red hide, amber-on-star highlight, green show).
-   --------------------------------------------------------------------------- */
-.AO3E--filter-work-toolbar,
-.AO3E--filter-series-toolbar {
-  display: inline-flex !important;
-  align-items: center;
-  padding: 0 !important;
-  margin: 0 0 0 0.35em !important;
-  border: none !important;
-  background: none !important;
-  box-shadow: none !important;
-  cursor: pointer;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.4;
-  vertical-align: middle;
-}
-
-.AO3E--filter-work-toolbar:hover,
-.AO3E--filter-work-toolbar:focus,
-.AO3E--filter-series-toolbar:hover,
-.AO3E--filter-series-toolbar:focus {
-  opacity: 1;
-}
-
-.AO3E--filter-work-toolbar--hide,
-.AO3E--filter-series-toolbar--hide {
-  opacity: 1;
-  color: #9a0000;
-}
-
-.AO3E--filter-work-toolbar--invert,
-.AO3E--filter-series-toolbar--invert {
-  opacity: 1;
-  color: #2f8f4e;
-}
-
-.AO3E--filter-work-toolbar--highlight,
-.AO3E--filter-series-toolbar--highlight {
-  opacity: 1;
-  /* Tint the star with the filter's highlight colour (alpha dropped via the
-     fallback below where the colour carries one). */
-  color: var(--ao3e-toggle-color, #c9b0ff);
 }
 
 .AO3E--tools {

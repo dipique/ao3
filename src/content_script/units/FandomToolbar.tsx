@@ -1,9 +1,22 @@
+import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
+import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
+import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
+import MdiStar from '~icons/mdi/star.jsx'
 
-import { ADDON_CLASS } from '#common'
+import type { Tag } from '#common'
+import type { MenuItem } from '#content_script/contextMenu.js'
+
+import { DEFAULT_HIGHLIGHT_COLOR, options, TagType } from '#common'
 import {
-  type Direction,
+  attachMenuTrigger,
+  buildIndicators,
+  clearMenuTriggers,
+  type IndicatorState,
+  standardLinkItems,
+} from '#content_script/contextTrigger.js'
+import {
   hasFandomFilterFields,
   isFandomSelected,
   loadFandomIdLookup,
@@ -14,192 +27,182 @@ import {
   scrapeSidebar,
   toggleFandomFilter,
 } from '#content_script/filterSidebar.js'
+import { clearTagBehavior, tagBehavior, toggleTagBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
-const TOOLBAR_CLASS = `${ADDON_CLASS}--fandom-toolbar`
-const BUTTON_CLASS = `${ADDON_CLASS}--fandom-toolbar--button`
-const ACTIVE_CLASS = `${ADDON_CLASS}--fandom-toolbar--active`
-const INCLUDE_CLASS = `${ADDON_CLASS}--fandom-toolbar--include`
-const EXCLUDE_CLASS = `${ADDON_CLASS}--fandom-toolbar--exclude`
-const VISIBLE_CLASS = `${ADDON_CLASS}--fandom-toolbar--visible`
-
 /**
- * Grace period before hiding the toolbar after the pointer leaves the fandom
- * link, so the user can cross the small gap onto the toolbar to click it.
- */
-const HIDE_DELAY_MS = 250
-
-/**
- * Blurb fandom links. Unlike the text-based tags handled by TagToolbar, these
- * are id-based: the filter form references fandoms by numeric id, not name, so
- * we must resolve each displayed name to an id before we can filter on it.
+ * Blurb fandom links. Unlike the text-based tags handled by TagToolbar, the
+ * sidebar filters fandoms by numeric id, so include/exclude must resolve each
+ * displayed name to an id first. Hide / always-show / highlight, however, are
+ * persistent filters keyed by name (as a {@link TagType.Fandom} tag), so they
+ * need no id and work on any page.
  */
 const FANDOM_LINK_SELECTOR = 'h5.fandoms a.tag'
 
-// ---------------------------------------------------------------------------
-// Per-fandom state shared across every blurb showing the same fandom.
-// ---------------------------------------------------------------------------
-
 interface FandomEntry {
-  name: string
-  href: string
-  id: number | null
-  resolving: boolean
-  buttons: { button: HTMLButtonElement, direction: Direction }[]
+  link: HTMLAnchorElement
+  tag: Tag
+  behavior: 'hide' | 'invert' | 'highlight' | null
+  highlightColor: string
+  hasFields: boolean
+  indicator: HTMLElement | null
 }
 
-/** lowercased name -> entry. Rebuilt each ready(). */
-const entries = new Map<string, FandomEntry>()
+const entries: FandomEntry[] = []
 
-function setButtonState(button: HTMLButtonElement, direction: Direction, entry: FandomEntry): void {
-  const known = entry.id != null
-  button.disabled = !known
-  const selected = known && isFandomSelected(direction, entry.id!)
-  button.classList.toggle(ACTIVE_CLASS, selected)
-  button.setAttribute('aria-pressed', String(selected))
-
-  let label: string
-  if (!known) {
-    label = entry.resolving ? 'Looking up fandom id…' : 'Fandom id unknown — cannot filter'
+function computeStates(entry: FandomEntry): IndicatorState[] {
+  const states: IndicatorState[] = []
+  if (entry.hasFields) {
+    const id = resolveFandomIdSync(entry.tag.name)
+    if (id != null) {
+      if (isFandomSelected('include', id))
+        states.push('include')
+      if (isFandomSelected('exclude', id))
+        states.push('exclude')
+    }
   }
-  else {
-    const verb = direction === 'include' ? 'included' : 'excluded'
-    const action = direction === 'include' ? 'Include this fandom in' : 'Exclude this fandom from'
-    label = selected ? `Remove fandom from ${verb} fandoms` : `${action} the filter`
+  if (entry.behavior)
+    states.push(entry.behavior)
+  return states
+}
+
+/** Resolve the fandom's id (cached, else fetched) and toggle its sidebar filter. */
+async function toggleFandom(direction: 'include' | 'exclude', tag: Tag, link: HTMLAnchorElement): Promise<void> {
+  let id = resolveFandomIdSync(tag.name)
+  id ??= await resolveFandomIdWithFetch(tag.name, link.href)
+  if (id == null)
+    return
+  toggleFandomFilter(direction, id, tag.name)
+}
+
+async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem[]> {
+  const items: MenuItem[] = []
+
+  if (hasFandomFilterFields()) {
+    const id = resolveFandomIdSync(tag.name)
+    items.push({
+      icon: () => <MdiPlusCircle />,
+      label: 'Include in filter',
+      active: id != null && isFandomSelected('include', id),
+      onSelect: () => toggleFandom('include', tag, link),
+    })
+    items.push({
+      icon: () => <MdiMinusCircle />,
+      label: 'Exclude from filter',
+      active: id != null && isFandomSelected('exclude', id),
+      onSelect: () => toggleFandom('exclude', tag, link),
+    })
   }
-  button.title = label
-  button.setAttribute('aria-label', label)
+
+  const { filters } = await options.get('hideTags')
+  const behavior = tagBehavior(filters, tag)
+  // The active behaviour is shown disabled (current state); "Clear" removes it.
+  items.push(
+    {
+      icon: () => <MdiEyeOff />,
+      label: 'Hide',
+      danger: true,
+      active: behavior === 'hide',
+      disabled: behavior === 'hide',
+      separatorBefore: items.length > 0,
+      onSelect: () => toggleTagBehavior(tag, 'hide'),
+    },
+    {
+      icon: () => <MdiEyeCheck />,
+      label: 'Always show',
+      active: behavior === 'invert',
+      disabled: behavior === 'invert',
+      onSelect: () => toggleTagBehavior(tag, 'invert'),
+    },
+    {
+      icon: () => <MdiStar />,
+      label: 'Highlight',
+      active: behavior === 'highlight',
+      disabled: behavior === 'highlight',
+      onSelect: () => toggleTagBehavior(tag, 'highlight'),
+    },
+  )
+  if (behavior) {
+    items.push({
+      icon: () => <MdiCloseCircleOutline />,
+      label: 'Clear',
+      onSelect: () => clearTagBehavior(tag),
+    })
+  }
+
+  items.push(...standardLinkItems(link))
+  return items
 }
 
-function refreshEntry(entry: FandomEntry): void {
-  for (const { button, direction } of entry.buttons)
-    setButtonState(button, direction, entry)
+function syncIndicator(entry: FandomEntry): void {
+  const states = computeStates(entry)
+  const next = buildIndicators(states, { highlightColor: entry.highlightColor })
+  if (next)
+    attachMenuTrigger(next, () => buildFandomMenu(entry.tag, entry.link), { indicator: true })
+
+  if (entry.indicator && next)
+    entry.indicator.replaceWith(next)
+  else if (entry.indicator && !next)
+    entry.indicator.remove()
+  else if (!entry.indicator && next)
+    entry.link.after(next)
+
+  entry.indicator = next
 }
 
-function refreshAll(): void {
-  for (const entry of entries.values())
-    refreshEntry(entry)
-}
-
-// Re-sync when any control mutates the filter (this toolbar or a hidden-work
-// exclude button). Registered once; a no-op over an empty registry between runs.
-onFilterChange(refreshAll)
+onFilterChange(() => {
+  for (const entry of entries)
+    syncIndicator(entry)
+})
 
 export class FandomToolbar extends Unit {
   static override get name() { return 'FandomToolbar' }
   override get enabled() { return this.options.fandomToolbar }
 
   static override async clean(): Promise<void> {
-    entries.clear()
+    entries.length = 0
+    clearMenuTriggers()
     resetFilterSidebarCaches()
   }
 
   override async ready(): Promise<void> {
-    entries.clear()
+    entries.length = 0
 
-    // Only operate on works-listing pages that have the fandom filter form.
-    const fandomLinks = document.querySelectorAll(FANDOM_LINK_SELECTOR)
-    if (!hasFandomFilterFields() || fandomLinks.length === 0) {
-      this.logger.debug('No fandom filter or fandom links on this page; skipping fandom toolbars.')
+    const fandomLinks = document.querySelectorAll<HTMLAnchorElement>(FANDOM_LINK_SELECTOR)
+    if (fandomLinks.length === 0)
       return
+
+    const hasFields = hasFandomFilterFields()
+    // Include/exclude needs the id lookup; hide/highlight (by name) doesn't.
+    if (hasFields) {
+      await loadFandomIdLookup()
+      scrapeSidebar()
     }
 
-    await loadFandomIdLookup()
-    scrapeSidebar()
+    const highlightColor = this.options.hideTags.defaultHighlightColor || DEFAULT_HIGHLIGHT_COLOR
+    const { filters } = this.options.hideTags
 
     for (const link of fandomLinks) {
-      if (!(link instanceof HTMLAnchorElement))
-        continue
       const name = link.textContent?.trim()
       if (!name)
         continue
-      if (link.nextElementSibling?.classList.contains(TOOLBAR_CLASS))
-        continue
 
-      const key = name.toLowerCase()
-      let entry = entries.get(key)
-      if (!entry) {
-        entry = { name, href: link.href, id: resolveFandomIdSync(name), resolving: false, buttons: [] }
-        entries.set(key, entry)
+      const tag: Tag = { name, type: TagType.Fandom }
+      const entry: FandomEntry = {
+        link,
+        tag,
+        behavior: tagBehavior(filters, tag),
+        highlightColor,
+        hasFields,
+        indicator: null,
       }
-      link.after(this.buildToolbar(entry, link))
+      entries.push(entry)
+
+      attachMenuTrigger(link, () => buildFandomMenu(tag, link))
+      syncIndicator(entry)
     }
 
-    refreshAll()
-    this.logger.debug(`Added include/exclude toolbars to ${entries.size} fandoms.`)
-  }
-
-  buildToolbar(entry: FandomEntry, link: HTMLAnchorElement): HTMLElement {
-    const toolbar = (
-      <span class={`${ADDON_CLASS} ${TOOLBAR_CLASS}`}>
-        {this.buildButton('exclude', entry)}
-        {this.buildButton('include', entry)}
-      </span>
-    )
-
-    // Show/hide is driven from JS (rather than a pure CSS :hover bridge) so a
-    // small grace delay lets the pointer cross the gap from the link onto the
-    // toolbar without it vanishing. Hovering either element keeps it open.
-    let hideTimer: ReturnType<typeof setTimeout> | undefined
-    const show = (): void => {
-      clearTimeout(hideTimer)
-      toolbar.classList.add(VISIBLE_CLASS)
-      // Lazily resolve unknown fandoms on first hover so the click is instant.
-      if (entry.id == null)
-        void this.resolveEntry(entry, link.href)
-    }
-    const scheduleHide = (): void => {
-      clearTimeout(hideTimer)
-      hideTimer = setTimeout(() => toolbar.classList.remove(VISIBLE_CLASS), HIDE_DELAY_MS)
-    }
-    for (const el of [link, toolbar]) {
-      el.addEventListener('pointerenter', show)
-      el.addEventListener('pointerleave', scheduleHide)
-    }
-    return toolbar
-  }
-
-  buildButton(direction: Direction, entry: FandomEntry): HTMLButtonElement {
-    const Icon = direction === 'include' ? MdiPlusCircle : MdiMinusCircle
-    const directionClass = direction === 'include' ? INCLUDE_CLASS : EXCLUDE_CLASS
-
-    const button = (
-      <button type="button" class={`${BUTTON_CLASS} ${directionClass}`} aria-pressed="false">
-        <Icon />
-      </button>
-    ) as HTMLElement as HTMLButtonElement
-
-    button.addEventListener('click', (e) => {
-      e.preventDefault()
-      void this.onButtonClick(direction, entry)
-    })
-
-    entry.buttons.push({ button, direction })
-    return button
-  }
-
-  async resolveEntry(entry: FandomEntry, href: string): Promise<void> {
-    if (entry.id != null || entry.resolving)
-      return
-    entry.resolving = true
-    refreshEntry(entry)
-    const id = await resolveFandomIdWithFetch(entry.name, href)
-    entry.resolving = false
-    if (id != null)
-      entry.id = id
-    refreshEntry(entry)
-  }
-
-  async onButtonClick(direction: Direction, entry: FandomEntry): Promise<void> {
-    if (entry.id == null) {
-      // Last-ditch: resolve on click for users who clicked before hover resolved.
-      await this.resolveEntry(entry, entry.href)
-      if (entry.id == null) {
-        this.logger.warn(`Could not resolve an id for "${entry.name}"; cannot filter.`)
-        return
-      }
-    }
-    toggleFandomFilter(direction, entry.id, entry.name)
+    this.logger.debug(`Added fandom menus to ${entries.length} fandom links.`)
   }
 }

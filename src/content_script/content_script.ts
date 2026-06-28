@@ -2,6 +2,7 @@ import { debounce } from '@antfu/utils'
 
 import { ADDON_CLASS, api, logger, options, toast } from '#common'
 
+import { setMenusEnabled } from './contextTrigger.tsx'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
 
@@ -24,6 +25,8 @@ async function clean() {
 
 async function run() {
   const opts = await options.get()
+  // Seed the context-menu enable flag before any unit decorates the page.
+  setMenusEnabled(opts.contextMenusEnabled)
   const units = UNITS.map(U => new U(opts))
   const enabled = units.filter(u => u.enabled)
 

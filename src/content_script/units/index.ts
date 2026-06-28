@@ -9,13 +9,10 @@ import { HideWorks } from './HideWorks.tsx'
 import { HighlightAuthors } from './HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from './HighlightEntities.ts'
 import { HighlightTags } from './HighlightTags.ts'
-import { MarkForLaterToolbar } from './MarkForLaterToolbar.tsx'
-import { MuteAuthorToolbar } from './MuteAuthorToolbar.tsx'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { SearchMarkedForLater } from './SearchMarkedForLater.tsx'
 import { Stats } from './Stats/Stats.ts'
 import { StyleTweaks } from './StyleTweaks.tsx'
-import { SubscribeAuthorToolbar } from './SubscribeAuthorToolbar.tsx'
 import { TagToolbar } from './TagToolbar.tsx'
 import { TextReplace } from './TextReplace.ts'
 import { Tools } from './Tools.tsx'
@@ -31,13 +28,11 @@ export const UNITS = [
   HighlightWorks,
   HighlightSeries,
   CompressSearchUrls,
+  // The context-menu decorators. Subscribe/mute/mark-for-later were folded into
+  // the author and work menus, so they're no longer separate units.
   TagToolbar,
   FandomToolbar,
   HideAuthorToolbar,
-  SubscribeAuthorToolbar,
-  MuteAuthorToolbar,
-  MarkForLaterToolbar,
-  // After MarkForLaterToolbar so the work toggle inserts left of its button.
   FilterWorkToolbar,
   FilterSeriesToolbar,
   SearchMarkedForLater,

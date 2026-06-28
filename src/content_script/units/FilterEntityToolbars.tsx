@@ -1,71 +1,91 @@
+import MdiClockCheck from '~icons/mdi/clock-check.jsx'
+import MdiClockPlusOutline from '~icons/mdi/clock-plus-outline.jsx'
+import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
-import MdiFilterVariant from '~icons/mdi/filter-variant.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 
-import type { EntityFilter, FilterBehavior } from '#common'
+import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { ADDON_CLASS, DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, options } from '#common'
+import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchToken, getArchiveLink, options, toast } from '#common'
+import {
+  attachMenuTrigger,
+  buildIndicators,
+  clearMenuTriggers,
+  type IndicatorState,
+  standardLinkItems,
+} from '#content_script/contextTrigger.js'
+import { clearEntityBehavior, entityBehavior, type EntityOptionKey, toggleEntityBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
-/**
- * The four states a work/series filter toggle cycles through, in click order.
- * `unset` means no id-based filter exists; the others map onto a
- * {@link FilterBehavior} (with `hide` stored as a missing behavior).
- */
-type ToggleState = 'unset' | 'hide' | 'highlight' | 'invert'
-const STATE_ORDER: ToggleState[] = ['unset', 'hide', 'highlight', 'invert']
-
-function nextState(state: ToggleState): ToggleState {
-  return STATE_ORDER[(STATE_ORDER.indexOf(state) + 1) % STATE_ORDER.length]!
-}
-
-function stateToBehavior(state: ToggleState): FilterBehavior | undefined {
-  return state === 'hide' ? undefined : state === 'unset' ? undefined : state
-}
-
-/** The toggle only manages the id-based (numeric `value`) filter for an entity. */
-function findIdFilter(filters: EntityFilter[], id: string): EntityFilter | undefined {
-  return filters.find(f => f.value.trim() === id)
-}
-
-function stateOf(filters: EntityFilter[], id: string): ToggleState {
-  const filter = findIdFilter(filters, id)
-  if (!filter)
-    return 'unset'
-  return filter.behavior === 'highlight' ? 'highlight' : filter.behavior === 'invert' ? 'invert' : 'hide'
-}
-
-/** A toggle button on the page, keyed by entity id so toggling one syncs the rest. */
-interface ToggleButton {
-  button: HTMLButtonElement
+/** A decorated work/series link and the indicator currently shown after it. */
+interface EntityEntry {
+  link: HTMLAnchorElement
   id: string
+  indicator: HTMLElement | null
 }
+
+// ---------------------------------------------------------------------------
+// Mark for later (works only). Session-scoped per work, shared across every
+// blurb showing the same work, and folded into the work menu. The state can't be
+// read from a blurb, so a work starts un-saved and reflects whatever you last did
+// to it this page load.
+// ---------------------------------------------------------------------------
+
+interface MarkState { saved: boolean, busy: boolean }
+const markState = new Map<string, MarkState>()
+
+/** The page's own CSRF token, present in the head of any AO3 page. */
+function pageToken(): string | null {
+  return document.querySelector('meta[name="csrf-token"]')?.content ?? null
+}
+
+/**
+ * Toggle a work's Marked for Later state with the same request AO3's own
+ * "Mark for Later" / "Mark as Read" buttons make: a PATCH (tunnelled through
+ * POST + `_method`) to `/works/:id/mark_for_later` or `/works/:id/mark_as_read`.
+ */
+async function submitMark(workId: string, save: boolean): Promise<void> {
+  const action = save ? 'mark_for_later' : 'mark_as_read'
+  const token = pageToken() ?? await fetchToken()
+  const res = await fetch(getArchiveLink(`/works/${workId}/${action}`), {
+    method: 'POST',
+    credentials: 'same-origin',
+    // The action finishes by redirecting back to the listing. Keep the redirect
+    // opaque (we don't want that page) and read it as success.
+    redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+    body: new URLSearchParams({ _method: 'patch', authenticity_token: token }).toString(),
+  })
+  if (res.type !== 'opaqueredirect' && !res.ok)
+    throw new Error(`Mark request failed (${res.status})`)
+}
+
+// ---------------------------------------------------------------------------
 
 abstract class FilterEntityToolbar extends Unit {
   /** `'work'` or `'series'` — used in labels. */
   protected abstract get noun(): 'work' | 'series'
   /** The path segment the entity's links use. */
   protected abstract get kind(): 'works' | 'series'
-  /** The option key ({@link Unit.options}) holding this kind's filters. */
-  protected abstract get optionKey(): 'hideWorks' | 'hideSeries'
-  /** Highlight colour shown on the star when a filter highlights without its own colour. */
+  /** The option key holding this kind's persistent filters. */
+  protected abstract get optionKey(): EntityOptionKey
+  /** Highlight colour shown on the star indicator when a highlight has no colour of its own. */
   protected abstract get defaultColor(): string
-  /** CSS class for this kind's toggle buttons. */
-  protected abstract get toolbarClass(): string
-  /** Live registry of this kind's buttons, shared across page runs. */
-  protected abstract get buttons(): ToggleButton[]
+  /** Live registry of this kind's decorated links, shared across page runs. */
+  protected abstract get entries(): EntityEntry[]
+  /** Works fold in mark-for-later; series don't. */
+  protected markEnabled(): boolean { return false }
 
   /**
    * Links to decorate: every `/works/:id` (or `/series/:id`) link, returning the
-   * id and the element the toggle should be inserted after. Works place the
-   * toggle just after the blurb title (left of the mark-for-later button);
-   * series place it after each series link.
+   * id and the link the menu/indicator hang off. Works use the blurb title;
+   * series use each series link.
    */
-  protected links(): { id: string, after: HTMLAnchorElement }[] {
+  protected links(): { id: string, link: HTMLAnchorElement }[] {
     const idRe = new RegExp(`^/${this.kind}/(\\d+)(?:/|$)`)
-    const out: { id: string, after: HTMLAnchorElement }[] = []
+    const out: { id: string, link: HTMLAnchorElement }[] = []
     const selector = this.kind === 'works'
       ? '.blurb .header h4.heading a[href*="/works/"]'
       : 'a[href*="/series/"]'
@@ -78,122 +98,157 @@ abstract class FilterEntityToolbar extends Unit {
         continue
       }
       if (id)
-        out.push({ id, after: el })
+        out.push({ id, link: el })
     }
     return out
   }
 
   override async ready(): Promise<void> {
-    this.buttons.length = 0
+    this.entries.length = 0
 
-    const filters = (this.options[this.optionKey]).filters
-    for (const { id, after } of this.links()) {
-      // clean() already removed previous toolbars, but guard against duplicates
-      // (a work can appear in several links within one blurb).
-      if (after.nextElementSibling?.classList.contains(this.toolbarClass))
-        continue
-      after.after(this.buildButton(id, stateOf(filters, id)))
+    for (const { id, link } of this.links()) {
+      const entry: EntityEntry = { link, id, indicator: null }
+      this.entries.push(entry)
+      attachMenuTrigger(link, () => this.buildMenu(id, link))
+      this.syncIndicator(entry)
     }
 
-    this.logger.debug(`Added ${this.noun} filter toggles to ${this.buttons.length} links.`)
+    this.logger.debug(`Added ${this.noun} menus to ${this.entries.length} links.`)
   }
 
-  buildButton(id: string, state: ToggleState): HTMLButtonElement {
-    const button = (
-      <button type="button" class={`${ADDON_CLASS}  ${this.toolbarClass}`} aria-pressed="false" />
-    ) as HTMLElement as HTMLButtonElement
-
-    this.setButtonState(button, state)
-
-    button.addEventListener('click', (e) => {
-      e.preventDefault()
-      void this.onClick(id)
-    })
-
-    this.buttons.push({ button, id })
-    return button
-  }
-
-  setButtonState(button: HTMLButtonElement, state: ToggleState): void {
-    button.classList.remove(
-      `${this.toolbarClass}--hide`,
-      `${this.toolbarClass}--highlight`,
-      `${this.toolbarClass}--invert`,
-    )
-    button.style.removeProperty('--ao3e-toggle-color')
-
-    let icon: HTMLElement
-    let label: string
-    switch (state) {
-      case 'hide':
-        icon = <MdiEyeOff />
-        label = `${this.noun} hidden — click to highlight instead`
-        button.classList.add(`${this.toolbarClass}--hide`)
-        break
-      case 'highlight':
-        icon = <MdiStar />
-        label = `${this.noun} highlighted — click to always-show instead`
-        button.classList.add(`${this.toolbarClass}--highlight`)
-        button.style.setProperty('--ao3e-toggle-color', this.defaultColor)
-        break
-      case 'invert':
-        icon = <MdiEyeCheck />
-        label = `${this.noun} always shown — click to clear`
-        button.classList.add(`${this.toolbarClass}--invert`)
-        break
-      default:
-        icon = <MdiFilterVariant />
-        label = `Filter this ${this.noun} (hide / highlight / always-show)`
-        break
-    }
-    button.replaceChildren(icon)
-    button.setAttribute('aria-pressed', String(state !== 'unset'))
-    button.title = label
-    button.setAttribute('aria-label', label)
-  }
-
-  async onClick(id: string): Promise<void> {
-    // Read the freshest list so we don't clobber a concurrent change (e.g. the
-    // options page editing it at the same time).
+  async buildMenu(id: string, link: HTMLAnchorElement): Promise<MenuItem[]> {
+    // Read the freshest filters so the checked state is current.
     const { filters } = await options.get(this.optionKey)
+    const behavior = entityBehavior(filters, id)
 
-    const target = nextState(stateOf(filters, id))
+    // The active behaviour is shown disabled (current state); "Clear" removes it.
+    const items: MenuItem[] = [
+      {
+        icon: () => <MdiEyeOff />,
+        label: `Hide ${this.noun}`,
+        danger: true,
+        active: behavior === 'hide',
+        disabled: behavior === 'hide',
+        onSelect: () => toggleEntityBehavior(this.optionKey, id, 'hide'),
+      },
+      {
+        icon: () => <MdiEyeCheck />,
+        label: 'Always show',
+        active: behavior === 'invert',
+        disabled: behavior === 'invert',
+        onSelect: () => toggleEntityBehavior(this.optionKey, id, 'invert'),
+      },
+      {
+        icon: () => <MdiStar />,
+        label: 'Highlight',
+        active: behavior === 'highlight',
+        disabled: behavior === 'highlight',
+        onSelect: () => toggleEntityBehavior(this.optionKey, id, 'highlight'),
+      },
+    ]
+    if (behavior) {
+      items.push({
+        icon: () => <MdiCloseCircleOutline />,
+        label: 'Clear',
+        onSelect: () => clearEntityBehavior(this.optionKey, id),
+      })
+    }
 
-    const index = filters.findIndex(f => f.value.trim() === id)
-    if (index !== -1)
-      filters.splice(index, 1)
-    if (target !== 'unset')
-      filters.push({ value: id, matcher: 'exact', behavior: stateToBehavior(target) })
+    if (this.markEnabled()) {
+      const state = markState.get(id) ?? { saved: false, busy: false }
+      items.push({
+        icon: () => (state.saved ? <MdiClockCheck /> : <MdiClockPlusOutline />),
+        label: state.saved ? 'Mark as read' : 'Mark for later',
+        separatorBefore: true,
+        disabled: state.busy,
+        onSelect: () => this.onMark(id),
+      })
+    }
 
-    await options.set({ [this.optionKey]: { enabled: true, filters } })
+    items.push(...standardLinkItems(link))
+    return items
+  }
 
-    // Reflect the new state immediately on every button for this entity. The
-    // options-change listener re-runs the units shortly after (rebuilding these
-    // buttons), but that's debounced, so this avoids a visible lag.
-    for (const entry of this.buttons) {
-      if (entry.id === id)
-        this.setButtonState(entry.button, target)
+  protected computeStates(id: string): IndicatorState[] {
+    const states: IndicatorState[] = []
+    const behavior = entityBehavior(this.options[this.optionKey].filters, id)
+    if (behavior)
+      states.push(behavior)
+    if (this.markEnabled() && markState.get(id)?.saved)
+      states.push('saved')
+    return states
+  }
+
+  protected syncIndicator(entry: EntityEntry): void {
+    const next = buildIndicators(this.computeStates(entry.id), { highlightColor: this.defaultColor })
+    if (next)
+      attachMenuTrigger(next, () => this.buildMenu(entry.id, entry.link), { indicator: true })
+
+    if (entry.indicator && next)
+      entry.indicator.replaceWith(next)
+    else if (entry.indicator && !next)
+      entry.indicator.remove()
+    else if (!entry.indicator && next)
+      entry.link.after(next)
+
+    entry.indicator = next
+  }
+
+  async onMark(id: string): Promise<void> {
+    const state = markState.get(id) ?? { saved: false, busy: false }
+    if (state.busy)
+      return
+    const save = !state.saved
+    state.busy = true
+    markState.set(id, state)
+    try {
+      await submitMark(id, save)
+      state.saved = save
+      toast(
+        save ? 'Saved for later.' : 'Marked as read — removed from your Marked for Later list.',
+        { type: 'success' },
+      )
+    }
+    catch (err) {
+      this.logger.error(`Failed to update mark-for-later for work ${id}.`, err)
+      toast('Could not update your Marked for Later list.', { type: 'error' })
+    }
+    finally {
+      state.busy = false
+      markState.set(id, state)
+      // Reflect the saved-clock on every blurb showing this work.
+      for (const entry of this.entries) {
+        if (entry.id === id)
+          this.syncIndicator(entry)
+      }
     }
   }
 }
 
-const WORK_TOOLBAR_CLASS = `${ADDON_CLASS}--filter-work-toolbar`
-const SERIES_TOOLBAR_CLASS = `${ADDON_CLASS}--filter-series-toolbar`
-const workButtons: ToggleButton[] = []
-const seriesButtons: ToggleButton[] = []
+const workEntries: EntityEntry[] = []
+const seriesEntries: EntityEntry[] = []
 
 export class FilterWorkToolbar extends FilterEntityToolbar {
   static override get name() { return 'FilterWorkToolbar' }
-  override get enabled() { return this.options.hideWorks.enabled }
+
+  // The work menu appears wherever its actions are useful: when work filters are
+  // on (hide/highlight/always-show), or when mark-for-later is on.
+  override get enabled() { return this.options.hideWorks.enabled || this.options.markForLaterToolbar }
+
   protected override get noun() { return 'work' as const }
   protected override get kind() { return 'works' as const }
   protected override get optionKey() { return 'hideWorks' as const }
   protected override get defaultColor() { return this.options.hideWorks.defaultHighlightColor || DEFAULT_WORK_HIGHLIGHT_COLOR }
-  protected override get toolbarClass() { return WORK_TOOLBAR_CLASS }
-  protected override get buttons() { return workButtons }
+  protected override get entries() { return workEntries }
+
+  protected override markEnabled(): boolean {
+    // Marking needs a logged-in session, and only when the feature is enabled.
+    return this.options.markForLaterToolbar && document.body.classList.contains('logged-in')
+  }
 
   static override async clean(): Promise<void> {
-    workButtons.length = 0
+    workEntries.length = 0
+    clearMenuTriggers()
   }
 }
 
@@ -204,10 +259,10 @@ export class FilterSeriesToolbar extends FilterEntityToolbar {
   protected override get kind() { return 'series' as const }
   protected override get optionKey() { return 'hideSeries' as const }
   protected override get defaultColor() { return this.options.hideSeries.defaultHighlightColor || DEFAULT_SERIES_HIGHLIGHT_COLOR }
-  protected override get toolbarClass() { return SERIES_TOOLBAR_CLASS }
-  protected override get buttons() { return seriesButtons }
+  protected override get entries() { return seriesEntries }
 
   static override async clean(): Promise<void> {
-    seriesButtons.length = 0
+    seriesEntries.length = 0
+    clearMenuTriggers()
   }
 }

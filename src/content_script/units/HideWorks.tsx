@@ -5,6 +5,7 @@ import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import { type EntityFilter, type TagFilter, TagType } from '#common'
 import { ADDON_CLASS, authorFilterMatchesAuthor, entityFilterMatches, tagFilterMatchesTag } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
+import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
   type CheckboxGroup,
   hasCheckboxGroupFields,
@@ -139,6 +140,7 @@ export class HideWorks extends Unit {
 
   static override async clean(): Promise<void> {
     excludeButtons.length = 0
+    clearMenuTriggers()
     resetFilterSidebarCaches()
     const wrappers = document.querySelectorAll(`.${BLURB_WRAPPER_CLASS}`)
     this.logger.debug('Cleaning wrappers', wrappers)
@@ -360,7 +362,11 @@ export class HideWorks extends Unit {
 
         const text = showValues ? item.value : item.rule
         const title = showValues ? item.rule : item.value
-        container.append(<span class={VALUE_CLASS} title={title}>{text}</span>)
+        // The rule stays in `title` for desktop hover; tap/click/long-press (and
+        // right-click) opens it as a popover so it's reachable without a pointer.
+        const valueSpan = <span class={VALUE_CLASS} title={title}>{text}</span>
+        attachPopoverTrigger(valueSpan, () => title)
+        container.append(valueSpan)
 
         const excludeButton = item.exclude ? this.buildExcludeButton(item.exclude) : null
         if (excludeButton) {
