@@ -102,7 +102,7 @@ export class HideAuthorToolbar extends Unit {
 
       const entry: AuthorEntry = { link, author, highlightColor, indicator: null }
       entries.push(entry)
-      attachMenuTrigger(link, () => this.buildMenu(author, link))
+      attachMenuTrigger(link, () => this.buildMenu(author, link), { clickToOpen: this.options.openMenuOnClick })
       this.syncIndicator(entry)
     }
 

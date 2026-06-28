@@ -183,7 +183,7 @@ export class TagToolbar extends Unit {
       }
       entries.push(entry)
 
-      attachMenuTrigger(link, () => buildTagMenu(tag, link))
+      attachMenuTrigger(link, () => buildTagMenu(tag, link), { clickToOpen: this.options.openMenuOnClick })
       syncIndicator(entry)
     }
 

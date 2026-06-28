@@ -4,6 +4,7 @@ import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiLinkVariant from '~icons/mdi/link-variant.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
+import MdiOpenInApp from '~icons/mdi/open-in-app.jsx'
 import MdiOpenInNew from '~icons/mdi/open-in-new.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
@@ -64,6 +65,13 @@ interface Trigger {
    * even when {@link menusEnabled} is false.
    */
   indicator: boolean
+  /**
+   * For page links: open the menu on a plain left-click / short tap (suppressing
+   * navigation) instead of following the link. Unlike {@link indicator} this is
+   * still gated by {@link menusEnabled}, and the menu's "Open" item restores the
+   * navigation. Set from the `openMenuOnClick` option on tag/fandom/author links.
+   */
+  clickToOpen: boolean
 }
 
 const triggers = new Map<HTMLElement, Trigger>()
@@ -76,6 +84,8 @@ export function clearMenuTriggers(): void {
 export interface TriggerOptions {
   /** Treat the element as one of ours: opens on left-click/tap, ignores the global disable. */
   indicator?: boolean
+  /** For a page link: left-click/tap opens the menu (suppressing navigation) while menus are enabled. */
+  clickToOpen?: boolean
 }
 
 /**
@@ -91,6 +101,7 @@ export function attachMenuTrigger(
   el.classList.add(TRIGGER_CLASS)
   triggers.set(el, {
     indicator: !!opts.indicator,
+    clickToOpen: !!opts.clickToOpen,
     open: (x, y) => {
       void Promise.resolve(build()).then((items) => {
         if (items && items.length)
@@ -105,6 +116,7 @@ export function attachPopoverTrigger(el: HTMLElement, getContent: () => Node | s
   el.classList.add(TRIGGER_CLASS)
   triggers.set(el, {
     indicator: true,
+    clickToOpen: false,
     open: (x, y) => openPopover(getContent(), { x, y }),
   })
 }
@@ -211,7 +223,15 @@ function onClick(e: MouseEvent): void {
     return
   }
   const hit = findTrigger(e.target)
-  if (!hit || !hit.trigger.indicator)
+  if (!hit)
+    return
+  // Indicators always open on click (they're ours); links open on click only when
+  // `openMenuOnClick` made them clickToOpen, and only while menus are enabled.
+  // A modifier-click on a link (ctrl/cmd/shift/alt) is left to the browser so the
+  // user can still open it in a new tab/window the usual way.
+  const modified = e.ctrlKey || e.metaKey || e.shiftKey || e.altKey
+  const openOnClick = hit.trigger.indicator || (hit.trigger.clickToOpen && menusEnabled && !modified)
+  if (!openOnClick)
     return
   e.preventDefault()
   e.stopPropagation()
@@ -251,6 +271,15 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
       icon: () => <MdiLinkVariant />,
       label: 'Copy address',
       onSelect: () => void navigator.clipboard?.writeText(link.href),
+    },
+    {
+      // Always offered so following the link is never lost — especially when
+      // `openMenuOnClick` makes a plain click open this menu instead of navigating.
+      icon: () => <MdiOpenInApp />,
+      label: 'Open',
+      onSelect: () => {
+        window.location.assign(link.href)
+      },
     },
     {
       icon: () => <MdiOpenInNew />,

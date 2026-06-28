@@ -31,6 +31,13 @@
     </OptionRow>
     <OptionDivider />
     <OptionRow
+      title="Left-click opens the menu"
+      subtitle="Make a plain left-click or tap on a tag, fandom, or author link open its context menu instead of following the link. The menu's “Open” item (always available) still follows the link, so nothing is lost. Right-click and long-press open the menu either way."
+    >
+      <OptionSwitch option-id="openMenuOnClick" />
+    </OptionRow>
+    <OptionDivider />
+    <OptionRow
       title="Mark for later in the work menu"
       subtitle="Add a “Mark for later” / “Mark as read” action to a work's right-click (or long-press) menu, so you can update your Marked for Later list without opening the work. A saved indicator shows next to works you marked this session."
     >

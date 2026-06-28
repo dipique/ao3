@@ -62,6 +62,12 @@ export interface Options {
    * shows on links again (the on-page indicators still open their menus).
    */
   contextMenusEnabled: boolean
+  /**
+   * When on, a plain left-click / tap on a decorated tag, fandom, or author link
+   * opens its context menu instead of following the link. The menu's "Open" item
+   * (always present) follows the link, so navigation is never lost.
+   */
+  openMenuOnClick: boolean
   /** On your own Marked for Later page, add a button that loads every page into one filterable view. */
   searchMarkedForLater: boolean
 
@@ -113,6 +119,7 @@ export const options = createStorage<Options>({
     subscribeAuthorToolbar: false,
     muteAuthorToolbar: false,
     contextMenusEnabled: true,
+    openMenuOnClick: false,
     searchMarkedForLater: true,
 
     styleWidthEnabled: true,

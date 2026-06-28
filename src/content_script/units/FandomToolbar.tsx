@@ -199,7 +199,7 @@ export class FandomToolbar extends Unit {
       }
       entries.push(entry)
 
-      attachMenuTrigger(link, () => buildFandomMenu(tag, link))
+      attachMenuTrigger(link, () => buildFandomMenu(tag, link), { clickToOpen: this.options.openMenuOnClick })
       syncIndicator(entry)
     }
 
