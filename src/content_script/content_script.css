@@ -182,6 +182,11 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   align-items: center;
 }
 
+.AO3E--filter-toolbar--icon > svg {
+  transform: translateY(-2px);
+}
+
+
 /* Establish a positioning context so the floating toolbar anchors to its tag. */
 .blurb ul.tags li {
   position: relative;
@@ -197,8 +202,8 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   transform: translateY(-50%);
   z-index: 5;
   gap: 3px;
-  padding-left: 3px;
   white-space: nowrap;
+  height: 100%;
 }
 
 .blurb ul.tags li:hover > .AO3E--tag-toolbar,
@@ -411,6 +416,7 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   color: inherit;
   opacity: 0.4;
   vertical-align: middle;
+  font-size: unset;
 }
 
 .AO3E--mark-for-later-toolbar:hover,
@@ -453,6 +459,78 @@ h5.fandoms a.tag:focus + .AO3E--fandom-toolbar,
   font-weight: 600;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+/* Favourite / highlighted works. Applied to native work title links that match a
+   highlight filter; its own default colour (violet) keeps it distinct from tags,
+   authors and series. */
+.AO3E--highlight-work {
+  background-color: var(--ao3e-highlight-color, #c9b0ff9e);
+  border-radius: 0.25em;
+  padding: 0 0.3em;
+  font-weight: 600;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Favourite / highlighted series. Applied to native series links that match a
+   highlight filter; its own default colour (mint) keeps it distinct. */
+.AO3E--highlight-series {
+  background-color: var(--ao3e-highlight-color, #9ee8c79e);
+  border-radius: 0.25em;
+  padding: 0 0.3em;
+  font-weight: 600;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* ---------------------------------------------------------------------------
+   Work / series filter toggles. A single button shown after each work title
+   (left of the mark-for-later button) and after each series link that cycles the
+   entity's filter: unset → hide → highlight → always-show → unset. Faint until
+   hovered; tinted per state (red hide, amber-on-star highlight, green show).
+   --------------------------------------------------------------------------- */
+.AO3E--filter-work-toolbar,
+.AO3E--filter-series-toolbar {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 0 0 0.35em !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.4;
+  vertical-align: middle;
+}
+
+.AO3E--filter-work-toolbar:hover,
+.AO3E--filter-work-toolbar:focus,
+.AO3E--filter-series-toolbar:hover,
+.AO3E--filter-series-toolbar:focus {
+  opacity: 1;
+}
+
+.AO3E--filter-work-toolbar--hide,
+.AO3E--filter-series-toolbar--hide {
+  opacity: 1;
+  color: #9a0000;
+}
+
+.AO3E--filter-work-toolbar--invert,
+.AO3E--filter-series-toolbar--invert {
+  opacity: 1;
+  color: #2f8f4e;
+}
+
+.AO3E--filter-work-toolbar--highlight,
+.AO3E--filter-series-toolbar--highlight {
+  opacity: 1;
+  /* Tint the star with the filter's highlight colour (alpha dropped via the
+     fallback below where the colour carries one). */
+  color: var(--ao3e-toggle-color, #c9b0ff);
 }
 
 .AO3E--tools {

@@ -138,7 +138,7 @@ export async function migrate() {
   // and is idempotent on filters that have none — so re-running after conversion
   // is a no-op. This is also the path that normalises upstream-shaped data on
   // import (the import flow runs these migrations after loading the file).
-  for (const key of ['option.hideTags', 'option.hideAuthors'] as const) {
+  for (const key of ['option.hideTags', 'option.hideAuthors', 'option.hideWorks', 'option.hideSeries'] as const) {
     const stored = (await browser.storage.local.get(key))[key] as
       { enabled: boolean, filters: Array<Record<string, unknown>> } | undefined
     if (stored && Array.isArray(stored.filters) && stored.filters.some(f => 'invert' in f)) {

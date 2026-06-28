@@ -26,7 +26,7 @@ OptionRowHideTagsContext.provide({
     <label flex="~ items-center gap-3 justify-between" mt-3 text="sm">
       <span flex="~ col gap-0.5">
         <span>Default highlight color</span>
-        <span text="xs muted-fg">Used by highlight filters, and force-shown (invert) tags, that don't set their own colour.</span>
+        <span text="xs muted-fg">Used by highlight &amp; force-shown (invert) tag entries without an assigned color.</span>
       </span>
       <ColorInput v-model="defaultColor" />
     </label>

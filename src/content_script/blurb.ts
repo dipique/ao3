@@ -5,11 +5,31 @@ import { getTagFromElement } from '#content_script/utils.js'
 /** A blurb tag, plus the fandom link href (needed to resolve a fandom's id). */
 export type BlurbTag = Tag & { href?: string }
 
+/** A work or series referenced by a blurb: the id parsed from its link, plus its display name. */
+export interface BlurbEntity {
+  id: string
+  name: string
+}
+
 export interface Blurb {
   language?: string | null
   fandoms: string[]
   authors: { userId: string, pseud?: string }[]
   tags: BlurbTag[]
+  /** The work this blurb is for, parsed from its title link (absent on non-work blurbs). */
+  work?: BlurbEntity
+  /** Series the blurb belongs to (the "Part N of …" links), plus any series-listing title. */
+  series: BlurbEntity[]
+}
+
+/** Parse the `:id` from a `/works/:id` or `/series/:id` link, ignoring any trailing path. */
+function parseEntityId(href: string, kind: 'works' | 'series'): string | undefined {
+  try {
+    return new URL(href).pathname.match(new RegExp(`^/${kind}/(\\d+)(?:/|$)`))?.[1]
+  }
+  catch {
+    return undefined
+  }
 }
 
 /**
@@ -55,7 +75,26 @@ export function getBlurb(blurbElement: Element): Blurb {
     }),
   ]
 
-  return { language, fandoms, authors, tags }
+  // The work this blurb is for, from its title link (absent on e.g. series-listing blurbs).
+  const titleLink = blurbElement.querySelector<HTMLAnchorElement>('.header h4.heading a[href*="/works/"]')
+  const workId = titleLink ? parseEntityId(titleLink.href, 'works') : undefined
+  const work: BlurbEntity | undefined = titleLink && workId
+    ? { id: workId, name: titleLink.textContent!.trim() }
+    : undefined
+
+  // Series the blurb references: the "Part N of …" links, and (on series
+  // listings) the blurb's own series title link. Deduped by id.
+  const series: BlurbEntity[] = []
+  const seenSeries = new Set<string>()
+  for (const link of blurbElement.querySelectorAll<HTMLAnchorElement>('a[href*="/series/"]')) {
+    const id = parseEntityId(link.href, 'series')
+    if (!id || seenSeries.has(id))
+      continue
+    seenSeries.add(id)
+    series.push({ id, name: link.textContent!.trim() })
+  }
+
+  return { language, fandoms, authors, tags, work, series }
 }
 
 // ===========================================================================

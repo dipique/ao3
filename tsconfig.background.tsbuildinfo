@@ -1,0 +1,1 @@
+{"root":["./src/background/background.ts","./src/background/menus.ts","./src/background/migrations.ts"],"errors":true,"version":"6.0.3"}

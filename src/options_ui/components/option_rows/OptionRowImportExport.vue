@@ -28,7 +28,7 @@ const EXPORT_VARIANTS = [{
  * than `behavior`. Importing an upstream file is handled the other way round, by
  * the migrations (see {@link filterFromInvert}).
  */
-const FILTER_OPTION_KEYS = ['option.hideTags', 'option.hideAuthors']
+const FILTER_OPTION_KEYS = ['option.hideTags', 'option.hideAuthors', 'option.hideWorks', 'option.hideSeries']
 
 function addInvertFlags(items: Record<string, any>): Record<string, any> {
   const out = { ...items }

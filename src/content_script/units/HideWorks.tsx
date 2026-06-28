@@ -2,8 +2,8 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import { type TagFilter, TagType } from '#common'
-import { ADDON_CLASS, authorFilterMatchesAuthor, tagFilterMatchesTag } from '#common'
+import { type EntityFilter, type TagFilter, TagType } from '#common'
+import { ADDON_CLASS, authorFilterMatchesAuthor, entityFilterMatches, tagFilterMatchesTag } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import {
   type CheckboxGroup,
@@ -64,7 +64,7 @@ type HideReasons = Record<string, ReasonItem[]>
  * blurb (as `data-ao3e-hidden-by`) so the floating filter toolbar can reveal
  * just the works hidden by, say, tag filters.
  */
-type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages'
+type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages' | 'works' | 'series'
 
 function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
   if (!(label in reasons))
@@ -132,6 +132,8 @@ export class HideWorks extends Unit {
       || this.options.hideLanguages.enabled
       || this.options.hideAuthors.enabled
       || this.options.hideTags.enabled
+      || this.options.hideWorks.enabled
+      || this.options.hideSeries.enabled
     )
   }
 
@@ -174,7 +176,7 @@ export class HideWorks extends Unit {
   }
 
   processBlurb(blurb: Blurb): { reasons: HideReasons, kinds: Set<HideKind> } {
-    const { options: { hideLanguages, hideAuthors, hideCrossovers, hideTags } } = this
+    const { options: { hideLanguages, hideAuthors, hideCrossovers, hideTags, hideWorks, hideSeries } } = this
     const reasons: HideReasons = {}
     const kinds = new Set<HideKind>()
 
@@ -216,10 +218,26 @@ export class HideWorks extends Unit {
         })
       : []
 
+    // The work this blurb is for (matched by id or title), and any series it
+    // belongs to. Highlight-only filters are visual (HighlightWorks/Series) and
+    // never hide or force-show, so they're excluded from the hide decision.
+    const workMatches = hideWorks?.enabled && blurb.work
+      ? hideWorks.filters.filter(f => f.behavior !== 'highlight' && entityFilterMatches(f, blurb.work!))
+      : []
+
+    const seriesMatches = hideSeries?.enabled
+      ? blurb.series.flatMap((series) => {
+          const filter = hideSeries.filters.find(f => f.behavior !== 'highlight' && entityFilterMatches(f, series))
+          return filter ? [{ series, filter }] : []
+        })
+      : []
+
     // If any matching filter is a force-show rule, the work is not hidden at all
-    // — return with no reasons. Tags and authors both express this via behavior.
+    // — return with no reasons. All filter kinds express this via behavior.
     const forceShow = tagMatches.some(m => m.filter.behavior === 'invert')
       || authorMatches.some(m => m.filter.behavior === 'invert')
+      || workMatches.some(f => f.behavior === 'invert')
+      || seriesMatches.some(m => m.filter.behavior === 'invert')
     if (forceShow)
       return { reasons, kinds }
 
@@ -241,6 +259,18 @@ export class HideWorks extends Unit {
       const value = author.pseud ? `${author.userId} (${author.pseud})` : author.userId
       const rule = filter.pseud ? `Author ${filter.userId} (${filter.pseud})` : `Author ${filter.userId}`
       addReason(reasons, 'Author', { value, rule })
+    }
+
+    if (workMatches.length > 0 && blurb.work)
+      kinds.add('works')
+    for (const filter of workMatches) {
+      addReason(reasons, 'Work', { value: blurb.work!.name, rule: describeEntityFilter(filter, 'work') })
+    }
+
+    if (seriesMatches.length > 0)
+      kinds.add('series')
+    for (const { series, filter } of seriesMatches) {
+      addReason(reasons, 'Series', { value: series.name, rule: describeEntityFilter(filter, 'series') })
     }
 
     return { reasons, kinds }
@@ -411,6 +441,21 @@ function describeTagFilter(filter: TagFilter): string {
       return `matches /${filter.name}/`
     default:
       return `"${filter.name}"`
+  }
+}
+
+/** Human description of a work/series filter's matching rule, for hover/rule display. */
+function describeEntityFilter(filter: EntityFilter, noun: 'work' | 'series'): string {
+  const value = filter.value.trim()
+  if (/^\d+$/.test(value))
+    return `${noun} id ${value}`
+  switch (filter.matcher) {
+    case 'contains':
+      return `${noun} name contains "${value}"`
+    case 'regex':
+      return `${noun} name matches /${value}/`
+    default:
+      return `${noun} "${value}"`
   }
 }
 

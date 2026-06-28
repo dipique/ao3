@@ -1,6 +1,6 @@
-import type { AuthorFilter, Language, TagFilter, TextReplacement } from './data.ts'
+import type { AuthorFilter, Language, SeriesFilter, TagFilter, TextReplacement, WorkFilter } from './data.ts'
 
-import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR } from './data.ts'
+import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from './data.ts'
 import { createStorage } from './storage.ts'
 
 export interface ThemeOption {
@@ -32,6 +32,18 @@ export interface Options {
     enabled: boolean
     filters: TagFilter[]
     /** Highlight colour used by filters (and force-shown tags) that don't set their own. */
+    defaultHighlightColor?: string
+  }
+  hideWorks: {
+    enabled: boolean
+    filters: WorkFilter[]
+    /** Highlight colour used by filters (and force-shown works) that don't set their own. */
+    defaultHighlightColor?: string
+  }
+  hideSeries: {
+    enabled: boolean
+    filters: SeriesFilter[]
+    /** Highlight colour used by filters (and force-shown series) that don't set their own. */
     defaultHighlightColor?: string
   }
 
@@ -83,6 +95,8 @@ export const options = createStorage<Options>({
     hideLanguages: { enabled: false, show: [] },
     hideAuthors: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_AUTHOR_HIGHLIGHT_COLOR },
     hideTags: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_HIGHLIGHT_COLOR },
+    hideWorks: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_WORK_HIGHLIGHT_COLOR },
+    hideSeries: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_SERIES_HIGHLIGHT_COLOR },
 
     compressSearchUrls: false,
     tagToolbar: false,

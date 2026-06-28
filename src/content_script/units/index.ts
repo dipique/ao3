@@ -2,10 +2,12 @@ import type { Unit } from '#content_script/Unit.js'
 
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { FandomToolbar } from './FandomToolbar.tsx'
+import { FilterSeriesToolbar, FilterWorkToolbar } from './FilterEntityToolbars.tsx'
 import { FilterToolbar } from './FilterToolbar.tsx'
 import { HideAuthorToolbar } from './HideAuthorToolbar.tsx'
 import { HideWorks } from './HideWorks.tsx'
 import { HighlightAuthors } from './HighlightAuthors.ts'
+import { HighlightSeries, HighlightWorks } from './HighlightEntities.ts'
 import { HighlightTags } from './HighlightTags.ts'
 import { MarkForLaterToolbar } from './MarkForLaterToolbar.tsx'
 import { MuteAuthorToolbar } from './MuteAuthorToolbar.tsx'
@@ -26,6 +28,8 @@ export const UNITS = [
   FilterToolbar,
   HighlightTags,
   HighlightAuthors,
+  HighlightWorks,
+  HighlightSeries,
   CompressSearchUrls,
   TagToolbar,
   FandomToolbar,
@@ -33,6 +37,9 @@ export const UNITS = [
   SubscribeAuthorToolbar,
   MuteAuthorToolbar,
   MarkForLaterToolbar,
+  // After MarkForLaterToolbar so the work toggle inserts left of its button.
+  FilterWorkToolbar,
+  FilterSeriesToolbar,
   SearchMarkedForLater,
   Tools,
   Stats,

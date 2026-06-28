@@ -153,6 +153,21 @@ export const DEFAULT_HIGHLIGHT_COLOR = '#ffe0829e'
  */
 export const DEFAULT_AUTHOR_HIGHLIGHT_COLOR = '#82b4ff9e'
 
+/**
+ * Default highlight colour for work filters — a translucent violet at the same
+ * opacity as {@link DEFAULT_HIGHLIGHT_COLOR}. A distinct hue from the tag (amber)
+ * and author (blue) defaults so a highlighted work title stands apart at a
+ * glance. Overridable via `Options.hideWorks.defaultHighlightColor`.
+ */
+export const DEFAULT_WORK_HIGHLIGHT_COLOR = '#c9b0ff9e'
+
+/**
+ * Default highlight colour for series filters — a translucent mint, again a hue
+ * of its own so highlighted series read as distinct from highlighted works,
+ * tags, and authors. Overridable via `Options.hideSeries.defaultHighlightColor`.
+ */
+export const DEFAULT_SERIES_HIGHLIGHT_COLOR = '#9ee8c79e'
+
 export interface TagFilter {
   /** Value of the filter. Will be Tag.name if matcher === exact */
   name: string
@@ -238,6 +253,78 @@ export interface AuthorFilter {
 /** Whether an author filter matches a given author (by userId, then optional pseud). */
 export function authorFilterMatchesAuthor(filter: AuthorFilter, author: { userId: string, pseud?: string }): boolean {
   return filter.userId === author.userId && (filter.pseud === undefined || filter.pseud === author.pseud)
+}
+
+/**
+ * A filter that matches a single work or series — by AO3 id or by name. The two
+ * share one shape (see {@link WorkFilter}, {@link SeriesFilter}); they differ
+ * only in which option list they live in and which default colour they inherit.
+ *
+ * A purely numeric {@link value} is treated as the entity's id and matched
+ * exactly against the id parsed from its link (so e.g. `4232377` hides
+ * `/series/4232377` regardless of its title). Any other value matches the
+ * entity's display name via {@link matcher}. Behaviour and highlight colour
+ * mirror {@link TagFilter}/{@link AuthorFilter} so all four kinds behave alike.
+ */
+export interface EntityFilter {
+  /** A numeric AO3 id (matched against the link's id) or a name to match. */
+  value: string
+  /** How a non-numeric {@link value} matches the name. A numeric value always matches the id exactly. */
+  matcher: 'exact' | 'contains' | 'regex'
+  /** What to do with the matching work/series. Missing is treated as `'hide'`. */
+  behavior?: FilterBehavior
+  /**
+   * Highlight colour (any CSS color) used when the filter highlights its match —
+   * i.e. when `behavior === 'highlight'`, or `behavior === 'invert'` and not
+   * opted out. The literal `'transparent'` on an invert filter means "no
+   * highlight". See {@link filterHighlightColor}.
+   */
+  color?: string
+}
+
+/** A filter matching a single work, by work id or title. See {@link EntityFilter}. */
+export type WorkFilter = EntityFilter
+/** A filter matching a single series, by series id or title. See {@link EntityFilter}. */
+export type SeriesFilter = EntityFilter
+
+/** A work or series, as parsed from its link: a numeric id (if known) and display name. */
+export interface FilterableEntity {
+  /** The id parsed from the entity's `/works/:id` or `/series/:id` link. */
+  id?: string
+  /** The entity's display name (the link text). */
+  name: string
+}
+
+/**
+ * Whether an entity filter matches a given work/series. A numeric `value`
+ * matches the entity's id exactly; otherwise the name is matched using the
+ * filter's `matcher` (mirroring {@link tagFilterMatchesTag}: `exact` is
+ * case-sensitive, `contains`/`regex` are case-insensitive). An empty value or an
+ * invalid regex matches nothing.
+ */
+export function entityFilterMatches(filter: EntityFilter, entity: FilterableEntity): boolean {
+  const value = filter.value.trim()
+  if (value === '')
+    return false
+
+  // A purely numeric value targets the entity's id (parsed from its link).
+  if (/^\d+$/.test(value))
+    return entity.id !== undefined && entity.id === value
+
+  if (filter.matcher === 'contains')
+    return entity.name.toLowerCase().includes(value.toLowerCase())
+
+  if (filter.matcher === 'regex') {
+    try {
+      return new RegExp(value.toLowerCase()).test(entity.name.toLowerCase())
+    }
+    catch {
+      // An invalid regex matches nothing rather than throwing mid-render.
+      return false
+    }
+  }
+
+  return entity.name === value
 }
 
 /**

@@ -31,10 +31,10 @@ export class FilterToolbar extends Unit {
   static override get name() { return 'FilterToolbar' }
 
   override get enabled() {
-    const { filterToolbar, hideTags, hideAuthors, hideCrossovers, hideLanguages } = this.options
+    const { filterToolbar, hideTags, hideAuthors, hideCrossovers, hideLanguages, hideWorks, hideSeries } = this.options
     // Mirror HideWorks' "any hide feature on" check: the toolbar is useful
     // wherever HideWorks might hide a work, not just for tag filters.
-    return filterToolbar && (hideTags.enabled || hideAuthors.enabled || hideCrossovers.enabled || hideLanguages.enabled)
+    return filterToolbar && (hideTags.enabled || hideAuthors.enabled || hideCrossovers.enabled || hideLanguages.enabled || hideWorks.enabled || hideSeries.enabled)
   }
 
   static override async clean(): Promise<void> {

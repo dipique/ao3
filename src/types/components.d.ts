@@ -41,6 +41,7 @@ declare module 'vue' {
     OptionRowHideAuthorsEditDialog: typeof import('./../options_ui/components/option_rows/OptionRowHideAuthorsEditDialog.vue')['default']
     OptionRowHideAuthorsTable: typeof import('./../options_ui/components/option_rows/OptionRowHideAuthorsTable.vue')['default']
     OptionRowHideCrossovers: typeof import('./../options_ui/components/option_rows/OptionRowHideCrossovers.vue')['default']
+    OptionRowHideEntities: typeof import('./../options_ui/components/option_rows/OptionRowHideEntities.vue')['default']
     OptionRowHideLanguages: typeof import('./../options_ui/components/option_rows/OptionRowHideLanguages.vue')['default']
     OptionRowHideTags: typeof import('./../options_ui/components/option_rows/OptionRowHideTags.vue')['default']
     OptionRowHideTagsEditDialog: typeof import('./../options_ui/components/option_rows/OptionRowHideTagsEditDialog.vue')['default']

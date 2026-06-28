@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from '#common'
 </script>
 
 <template>
@@ -48,6 +49,22 @@
     <OptionRowHideAuthors />
     <OptionDivider />
     <OptionRowHideTags />
+    <OptionDivider />
+    <OptionRowHideEntities
+      option-key="hideWorks"
+      title="Works"
+      subtitle="Hide, highlight, or always-show specific works by title or id"
+      noun="work"
+      :default-color="DEFAULT_WORK_HIGHLIGHT_COLOR"
+    />
+    <OptionDivider />
+    <OptionRowHideEntities
+      option-key="hideSeries"
+      title="Series"
+      subtitle="Hide, highlight, or always-show specific series by title or id"
+      noun="series"
+      :default-color="DEFAULT_SERIES_HIGHLIGHT_COLOR"
+    />
     <OptionDivider />
   </OptionCategory>
 </template>

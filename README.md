@@ -58,7 +58,7 @@ npm install -g pnpm
 pnpm install
 $env:BROWSER="chrome"; $env:NODE_ENV="production"; node scripts/builder/build.ts build
 # or
-$env:BROWSER="chrome"; $env:NODE_ENV="development"; node --localstorage-file=.localstorage-build scripts/builder/build.ts build
+$env:BROWSER="chrome"; $env:NODE_ENV="development"; node scripts/builder/build.ts build
 ```
 
 ### Testing
