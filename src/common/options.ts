@@ -51,6 +51,8 @@ export interface Options {
   styleWidth: number
   showStatsColumns: boolean
   forceAlignment: null | 'start' | 'end' | 'justified'
+  /** Hide the "muted author" notices that appear where works are hidden because of a muted author. */
+  hideMutedAuthorNotices: boolean
   textReplacements: { enabled: boolean, rules: TextReplacement[] }
 
   theme: ThemeOption
@@ -96,6 +98,7 @@ export const options = createStorage<Options>({
     styleWidth: 40,
     showStatsColumns: true,
     forceAlignment: null,
+    hideMutedAuthorNotices: false,
     textReplacements: { enabled: false, rules: [] },
 
     theme: { chosen: 'inherit', current: 'light' },

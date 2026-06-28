@@ -3,7 +3,7 @@ import { Unit } from '#content_script/Unit.js'
 
 export class StyleTweaks extends Unit {
   override get name() { return 'StyleTweaks' }
-  override get enabled() { return this.options.styleWidthEnabled || this.options.showStatsColumns }
+  override get enabled() { return this.options.styleWidthEnabled || this.options.showStatsColumns || this.options.hideMutedAuthorNotices }
 
   override async ready(): Promise<void> {
     const styleTag = document.createElement('style')
@@ -45,6 +45,15 @@ export class StyleTweaks extends Unit {
         sheet,
         `.userstuff * {
           text-align: ${this.options.forceAlignment} !important;
+        }`,
+      )
+    }
+
+    if (this.options.hideMutedAuthorNotices) {
+      this.insertRule(
+        sheet,
+        `p.muted.notice {
+          display: none !important;
         }`,
       )
     }

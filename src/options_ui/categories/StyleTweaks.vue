@@ -34,6 +34,13 @@
       <OptionSwitch option-id="showStatsColumns" />
     </OptionRow>
     <OptionDivider />
+    <OptionRow
+      title="Hide muted author notices"
+      subtitle="Removes the notes warning that works may be hidden because of a muted author"
+    >
+      <OptionSwitch option-id="hideMutedAuthorNotices" />
+    </OptionRow>
+    <OptionDivider />
     <OptionRowTextReplacements />
   </OptionCategory>
 </template>
