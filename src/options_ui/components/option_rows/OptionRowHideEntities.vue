@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ComponentInstance, GlobalComponents } from 'vue'
+import type { ComponentInstance, GlobalComponents, Ref } from 'vue'
 
 import type { EntityFilter, FilterBehavior, options } from '#common'
 

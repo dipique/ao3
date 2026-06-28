@@ -6,8 +6,8 @@ const { enabled, defaultHighlightColor } = useOption('hideAuthors')
 // Backed by an optional stored value; fall back to the built-in default for
 // display so the colour control always has a concrete value to show.
 const defaultColor = computed({
-  get: () => defaultHighlightColor.value || DEFAULT_AUTHOR_HIGHLIGHT_COLOR,
-  set: (v: string) => defaultHighlightColor.value = v,
+  get: () => defaultHighlightColor!.value || DEFAULT_AUTHOR_HIGHLIGHT_COLOR,
+  set: (v: string) => defaultHighlightColor!.value = v,
 })
 
 OptionRowHideAuthorsContext.provide({

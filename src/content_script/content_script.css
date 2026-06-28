@@ -197,7 +197,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   /* Float just past the end of the tag, out of normal flow, so showing it
      never shifts the tags around or pushes the icon onto the next line. */
   position: absolute;
-  left: 100%;
+  left: calc(100% - 0.5em);
   top: 50%;
   transform: translateY(-50%);
   z-index: 5;

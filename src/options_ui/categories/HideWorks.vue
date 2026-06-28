@@ -4,8 +4,8 @@ import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from '#c
 
 <template>
   <OptionCategory
-    title="Hide works"
-    subtitle="Hide works based on criteria."
+    title="Hide (or highlight!) works"
+    subtitle="Hide or emphasize works based on criteria."
   >
     <template #icon>
       <Icon i-mdi-eye-off />
