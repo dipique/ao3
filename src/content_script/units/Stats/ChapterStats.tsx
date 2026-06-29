@@ -23,7 +23,7 @@ export class ChapterStats extends Unit {
 
   override async ready(): Promise<void> {
     // Find all chapters (multiple can exist on same page when viewing entire work)
-    const chapters = document.querySelectorAll('#chapters > div.chapter')
+    const chapters = this.root.querySelectorAll('#chapters > div.chapter')
 
     if (chapters.length === 0)
       return

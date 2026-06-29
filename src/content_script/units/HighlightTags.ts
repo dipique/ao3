@@ -42,7 +42,7 @@ export class HighlightTags extends Unit {
       return
 
     let count = 0
-    for (const el of document.querySelectorAll(TAG_SELECTOR)) {
+    for (const el of this.root.querySelectorAll(TAG_SELECTOR)) {
       const tag = getTagFromElement(el)
       const match = highlights.find(h => tagFilterMatchesTag(h.filter, tag))
       if (!match)

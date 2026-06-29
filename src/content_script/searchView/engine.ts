@@ -101,6 +101,14 @@ export function emptyFilterState(): FilterState {
   return { text: '', facets, wordsMin: null, wordsMax: null, sort: 'marked', dir: 'asc' }
 }
 
+/** Deep copy of a filter state (cloning the per-facet Sets), for snapshot/restore. */
+export function cloneFilterState(f: FilterState): FilterState {
+  const facets = {} as Record<FacetKey, FacetSelection>
+  for (const key of FACET_KEYS)
+    facets[key] = { include: new Set(f.facets[key].include), exclude: new Set(f.facets[key].exclude) }
+  return { text: f.text, facets, wordsMin: f.wordsMin, wordsMax: f.wordsMax, sort: f.sort, dir: f.dir }
+}
+
 // A work's searchable text never changes, so build it once and cache it. Keyed
 // by the work object, so it's dropped automatically when works are replaced.
 const haystackCache = new WeakMap<Work, string>()

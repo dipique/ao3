@@ -81,6 +81,20 @@ export function clearMenuTriggers(): void {
   triggers.clear()
 }
 
+/**
+ * Drop triggers whose element has left the DOM. The registry holds its keys
+ * strongly, so blurbs removed when the Marked-for-Later search view tears down
+ * (or re-renders) would otherwise leak. Prunes only disconnected elements, so the
+ * still-connected native page triggers — which {@link clearMenuTriggers} would
+ * also wipe — are left intact.
+ */
+export function pruneDetachedTriggers(): void {
+  for (const el of triggers.keys()) {
+    if (!el.isConnected)
+      triggers.delete(el)
+  }
+}
+
 export interface TriggerOptions {
   /** Treat the element as one of ours: opens on left-click/tap, ignores the global disable. */
   indicator?: boolean

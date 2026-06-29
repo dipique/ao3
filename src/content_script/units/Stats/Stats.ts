@@ -9,11 +9,11 @@ export class Stats extends Unit {
   total: TotalStats
   chapter: ChapterStats
 
-  constructor(options: Options) {
-    super(options)
+  constructor(options: Options, root: ParentNode = document) {
+    super(options, root)
 
-    this.total = new TotalStats(options)
-    this.chapter = new ChapterStats(options)
+    this.total = new TotalStats(options, root)
+    this.chapter = new ChapterStats(options, root)
   }
 
   override get name() { return 'Stats' }
@@ -39,7 +39,7 @@ export class Stats extends Unit {
       await this.chapter.ready()
 
     // Fix thousands separators
-    for (let statValueElement of document.querySelectorAll('dl.stats dd')) {
+    for (let statValueElement of this.root.querySelectorAll<HTMLElement>('dl.stats dd')) {
       if (statValueElement.querySelector('a'))
         statValueElement = statValueElement.querySelector('a')!
 

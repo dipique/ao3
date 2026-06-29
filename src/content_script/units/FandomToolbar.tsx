@@ -169,7 +169,7 @@ export class FandomToolbar extends Unit {
   override async ready(): Promise<void> {
     entries.length = 0
 
-    const fandomLinks = document.querySelectorAll<HTMLAnchorElement>(FANDOM_LINK_SELECTOR)
+    const fandomLinks = this.root.querySelectorAll<HTMLAnchorElement>(FANDOM_LINK_SELECTOR)
     if (fandomLinks.length === 0)
       return
 

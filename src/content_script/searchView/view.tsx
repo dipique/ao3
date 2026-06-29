@@ -12,6 +12,7 @@ import type { FacetCounts, FacetKey, FacetValueCount, FilterState, SortKey } fro
 
 import {
   buildFacets,
+  cloneFilterState,
   computeView,
   emptyFilterState,
   FACET_KEYS,
@@ -32,6 +33,16 @@ export interface SearchViewHandlers {
   onRefresh: () => void
 }
 
+/** A snapshot of what the user has dialled in, so the view can be rebuilt as-is. */
+export interface ViewState {
+  filter: FilterState
+  pageIndex: number
+  /** Per-facet "contains" filter box text, keyed by facet (omitted when empty). */
+  facetQueries: Partial<Record<FacetKey, string>>
+  /** Facet groups the user had collapsed (the rest default open). */
+  collapsedFacets: FacetKey[]
+}
+
 export interface SearchView {
   /** The view root — insert this into the page. */
   el: HTMLElement
@@ -39,11 +50,26 @@ export interface SearchView {
   update: (works: Work[]) => void
   /** Toggle the subtle "updating in the background" indicator. */
   setUpdating: (updating: boolean) => void
+  /** Current filter/sort/page, so a caller can rebuild the view where it left off. */
+  getState: () => ViewState
 }
 
 export interface SearchViewConfig {
   /** Works rendered per page. Paging bounds layout/paint cost on large lists. */
   perPage?: number
+  /**
+   * Decorate one blurb with the per-blurb enhancements (kudos ratio, highlights,
+   * …). Called the first time a blurb appears on a page, so a large list only
+   * pays to decorate what's actually viewed.
+   */
+  decorateBlurb?: (blurb: HTMLElement) => void
+  /**
+   * Wire container-wide enhancements (the right-click / long-press context-menu
+   * toolbars) over the results list. Called once per (re-)mount.
+   */
+  decorateContainer?: (resultsRoot: HTMLElement) => void
+  /** Restore a prior {@link SearchView.getState} snapshot (filters, sort, page). */
+  initialState?: ViewState
 }
 
 const DEFAULT_PER_PAGE = 50
@@ -70,11 +96,19 @@ function parseBound(value: string): number | null {
  */
 export function createSearchView(initialWorks: Work[], handlers: SearchViewHandlers, config: SearchViewConfig = {}): SearchView {
   let works = initialWorks
-  const state: FilterState = emptyFilterState()
+  // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
+  // start blank. cloneFilterState so we never mutate the caller's snapshot.
+  const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
   const perPage = Math.max(1, config.perPage ?? DEFAULT_PER_PAGE)
   // Current page (0-based). Sorted full set is cached; filtering never reorders.
-  let pageIndex = 0
+  let pageIndex = config.initialState?.pageIndex ?? 0
   let sortedWorks: Work[] = works
+  // Blurbs already run through config.decorateBlurb, so each is decorated at most
+  // once (and only when first shown). A WeakSet so replaced works are forgotten.
+  const decorated = new WeakSet<HTMLElement>()
+  // Restore the per-group facet UI (filter text, collapsed groups) once, on the
+  // first build; later rebuilds (a refresh) start the facet UI fresh.
+  let facetUiRestored = false
 
   // Registry of facet rows, rebuilt whenever the facet list changes, so render()
   // can sync toggle state and live drill-down counts against the current filter
@@ -114,6 +148,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   const searchInput = (
     <input type="search" class={cx('input')} placeholder="Title, author, summary, tags…" aria-label="Search works" />
   ) as HTMLElement as HTMLInputElement
+  searchInput.value = state.text
   searchInput.addEventListener('input', debounce(() => {
     state.text = searchInput.value
     filterChanged()
@@ -144,6 +179,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   const minInput = (<input type="number" min="0" inputmode="numeric" class={cx('input')} placeholder="min" aria-label="Minimum words" />) as HTMLElement as HTMLInputElement
   const maxInput = (<input type="number" min="0" inputmode="numeric" class={cx('input')} placeholder="max" aria-label="Maximum words" />) as HTMLElement as HTMLInputElement
+  minInput.value = state.wordsMin != null ? String(state.wordsMin) : ''
+  maxInput.value = state.wordsMax != null ? String(state.wordsMax) : ''
   const onWords = debounce(() => {
     state.wordsMin = parseBound(minInput.value)
     state.wordsMax = parseBound(maxInput.value)
@@ -247,6 +284,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // Row identity/order is fixed from the full set; render() updates the live
     // drill-down counts and hides rows that no longer match the active filter.
     const facets = buildFacets(works)
+    // Restore the saved facet UI only on the first build (a reopen); consume it.
+    const restore = facetUiRestored ? null : config.initialState
+    facetUiRestored = true
     const groups: HTMLElement[] = []
     for (const key of FACET_KEYS) {
       const values = facets[key]
@@ -259,8 +299,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       const filterInput = values.length > FACET_FILTER_THRESHOLD
         ? (<input type="search" class={cx('group-filter')} placeholder={`Filter ${label}…`} aria-label={`Filter ${FACET_LABELS[key]}`} />) as HTMLElement as HTMLInputElement
         : null
+      // Apply any restored filter text / collapsed state for this group.
+      const savedQuery = filterInput ? (restore?.facetQueries[key] ?? '') : ''
+      if (filterInput)
+        filterInput.value = savedQuery
+      const collapsed = restore?.collapsedFacets.includes(key) ?? false
       const group = (
-        <details class={cx('group')} open>
+        <details class={cx('group')} open={!collapsed}>
           <summary class={cx('group-title')}>
             {FACET_LABELS[key]}
             {' '}
@@ -270,7 +315,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
           <div class={cx('group-body')}>{rows.map(r => r.row)}</div>
         </details>
       ) as HTMLElement
-      const groupRef: FacetGroupRef = { key, details: group, countEl: groupCountEl, rows, filter: filterInput, query: '' }
+      const groupRef: FacetGroupRef = { key, details: group, countEl: groupCountEl, rows, filter: filterInput, query: savedQuery }
       filterInput?.addEventListener('input', () => {
         groupRef.query = filterInput.value
         applyGroupVisibility(groupRef)
@@ -431,6 +476,16 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     for (const work of works)
       work.el.classList.toggle(HIDDEN_CLASS, !onPage.has(work))
 
+    // Decorate the page's blurbs the first time they're shown (kudos ratio, etc.).
+    if (config.decorateBlurb) {
+      for (const work of onPage) {
+        if (!decorated.has(work.el)) {
+          decorated.add(work.el)
+          config.decorateBlurb(work.el)
+        }
+      }
+    }
+
     const noun = total === 1 ? 'work' : 'works'
     countEl.textContent = total === 0
       ? `No ${works.length === 1 ? 'work' : 'works'} match`
@@ -442,6 +497,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   function mountResults(): void {
     resultsOl.replaceChildren(...works.map(work => work.el))
     domOrderSig = '' // re-mounted nodes are in array order; force a re-sort.
+    // Wire the context-menu toolbars over the whole (re-)mounted list once.
+    config.decorateContainer?.(resultsOl)
   }
 
   function update(nextWorks: Work[]): void {
@@ -465,6 +522,18 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   function setUpdating(updating: boolean): void {
     updatingEl.classList.toggle(cx('updating-on'), updating)
+  }
+
+  function getState(): ViewState {
+    const facetQueries: Partial<Record<FacetKey, string>> = {}
+    const collapsedFacets: FacetKey[] = []
+    for (const group of facetGroups) {
+      if (group.query)
+        facetQueries[group.key] = group.query
+      if (!(group.details as HTMLDetailsElement).open)
+        collapsedFacets.push(group.key)
+    }
+    return { filter: cloneFilterState(state), pageIndex, facetQueries, collapsedFacets }
   }
 
   // --- Assemble -------------------------------------------------------------
@@ -513,5 +582,5 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     </div>
   ) as HTMLElement
 
-  return { el, update, setUpdating }
+  return { el, update, setUpdating, getState }
 }

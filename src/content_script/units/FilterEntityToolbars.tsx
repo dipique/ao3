@@ -89,7 +89,7 @@ abstract class FilterEntityToolbar extends Unit {
     const selector = this.kind === 'works'
       ? '.blurb .header h4.heading a[href*="/works/"]'
       : 'a[href*="/series/"]'
-    for (const el of document.querySelectorAll<HTMLAnchorElement>(selector)) {
+    for (const el of this.root.querySelectorAll<HTMLAnchorElement>(selector)) {
       let id: string | undefined
       try {
         id = new URL(el.href).pathname.match(idRe)?.[1]

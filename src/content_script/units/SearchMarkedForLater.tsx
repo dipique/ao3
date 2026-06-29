@@ -1,7 +1,9 @@
 import { ADDON_CLASS, getArchiveLink, logger, parseUser, toast } from '#common'
+import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { readSnapshot, writeSnapshot } from '#content_script/searchView/cache.ts'
+import { decorateBlurb, decorateContainer } from '#content_script/searchView/decorate.ts'
 import { detectPageCount, scrapeListing } from '#content_script/searchView/scrape.ts'
-import { createSearchView, type SearchView } from '#content_script/searchView/view.tsx'
+import { createSearchView, type SearchView, type SearchViewConfig, type ViewState } from '#content_script/searchView/view.tsx'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -13,8 +15,15 @@ const NATIVE_HIDDEN_CLASS = cx('native-hidden')
 
 // Module state so the static clean()/teardown can reach the live view + scrape.
 let activeView: SearchView | null = null
+let activeUserId: string | null = null
 let activeController: AbortController | null = null
 let busy = false
+/**
+ * Set when a global re-run (e.g. an options change from a context menu) closed an
+ * open view, carrying the userId + state needed to reopen it where it left off.
+ * Cleared by {@link teardown}, so a user-initiated close (Back) stays closed.
+ */
+let reopen: { userId: string, state: ViewState } | null = null
 
 const log = logger.child('SearchMarkedForLater')
 
@@ -31,11 +40,17 @@ function teardown(): void {
   activeController?.abort()
   activeController = null
   activeView = null
+  activeUserId = null
   busy = false
+  // A teardown means "don't come back" unless the caller re-arms reopen after.
+  reopen = null
   for (const el of document.querySelectorAll(`.${FEATURE}`))
     el.remove()
   for (const el of document.querySelectorAll(`.${NATIVE_HIDDEN_CLASS}`))
     el.classList.remove(NATIVE_HIDDEN_CLASS)
+  // Release the context-menu triggers on the now-removed blurbs (the native
+  // page's still-connected triggers are left intact).
+  pruneDetachedTriggers()
 }
 
 /** Hide the native list + pagination and insert an empty view container after the subnav. */
@@ -129,7 +144,14 @@ export class SearchMarkedForLater extends Unit {
   override get enabled() { return this.options.searchMarkedForLater }
 
   static override async clean(): Promise<void> {
+    // A global re-run (options change, navigation) tears the view down. If it was
+    // open, snapshot it so ready() can reopen it where the user left off — teardown
+    // clears `reopen`, so re-arm it afterwards from the snapshot.
+    const snapshot = activeView && activeUserId
+      ? { userId: activeUserId, state: activeView.getState() }
+      : null
     teardown()
+    reopen = snapshot
   }
 
   override async ready(): Promise<void> {
@@ -156,13 +178,35 @@ export class SearchMarkedForLater extends Unit {
       <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search Marked for Later</button>
     ) as HTMLElement as HTMLButtonElement
     button.addEventListener('click', () => {
-      void this.onClick(pageUser)
+      void this.openView(pageUser)
     })
     host.after(<li class={ADDON_CLASS}>{button}</li>)
     this.logger.debug('Search Marked for Later button added.')
+
+    // If a global re-run closed an open view, reopen it (from cache, no re-scrape)
+    // where the user left off — so e.g. a "Hide tag" context-menu action doesn't
+    // dump them back to the native list.
+    const pending = reopen
+    reopen = null
+    if (pending && pending.userId.toLowerCase() === pageUser.toLowerCase())
+      void this.openView(pageUser, { initialState: pending.state, refresh: false })
   }
 
-  async onClick(userId: string): Promise<void> {
+  /** View options shared by both render paths: page size + blurb decoration. */
+  viewConfig(): SearchViewConfig {
+    return {
+      perPage: this.options.searchPerPage,
+      decorateBlurb: blurb => decorateBlurb(blurb, this.options),
+      decorateContainer: root => decorateContainer(root, this.options),
+    }
+  }
+
+  /**
+   * Open the in-memory view for `userId`. `initialState` restores a prior
+   * snapshot (a reopen after a global re-run); `refresh: false` skips the
+   * background re-scrape when the cache is already known to be fresh.
+   */
+  async openView(userId: string, opts: { initialState?: ViewState, refresh?: boolean } = {}): Promise<void> {
     if (busy || document.querySelector(`.${FEATURE}`))
       return
     busy = true
@@ -170,15 +214,20 @@ export class SearchMarkedForLater extends Unit {
       const key = snapshotKey(userId)
       const container = mountContainer()
       const handlers = makeHandlers(userId)
+      const config: SearchViewConfig = { ...this.viewConfig(), initialState: opts.initialState }
 
       const cached = await readSnapshot(key)
       if (cached && cached.works.length) {
-        // Render instantly from cache, then refresh in the background.
-        const view = createSearchView(cached.works, handlers, { perPage: this.options.searchPerPage })
+        // Render instantly from cache, then refresh in the background (unless the
+        // caller knows the cache is fresh, e.g. a reopen right after a re-run).
+        const view = createSearchView(cached.works, handlers, config)
         activeView = view
+        activeUserId = userId
         container.replaceChildren(view.el)
-        view.setUpdating(true)
-        void refresh(userId, view).finally(() => view.setUpdating(false))
+        if (opts.refresh !== false) {
+          view.setUpdating(true)
+          void refresh(userId, view).finally(() => view.setUpdating(false))
+        }
         return
       }
 
@@ -199,8 +248,9 @@ export class SearchMarkedForLater extends Unit {
           teardown()
           return
         }
-        const view = createSearchView(result.works, handlers, { perPage: this.options.searchPerPage })
+        const view = createSearchView(result.works, handlers, config)
         activeView = view
+        activeUserId = userId
         container.replaceChildren(view.el)
         if (result.loadedPages < result.totalPages)
           toast(`Loaded ${result.loadedPages} of ${result.totalPages} pages — some couldn't be fetched.`, { type: 'error' })

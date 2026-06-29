@@ -23,7 +23,7 @@ export class TotalStats extends Unit {
   }
 
   override async ready(): Promise<void> {
-    const statsElements = document.querySelectorAll('dl.stats')
+    const statsElements = this.root.querySelectorAll('dl.stats')
 
     this.logger.debug('Adding to stats elements: ', statsElements)
 

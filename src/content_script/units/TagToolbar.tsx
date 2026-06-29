@@ -165,7 +165,7 @@ export class TagToolbar extends Unit {
     const highlightColor = this.options.hideTags.defaultHighlightColor || DEFAULT_HIGHLIGHT_COLOR
     const { filters } = this.options.hideTags
 
-    for (const link of document.querySelectorAll<HTMLAnchorElement>(TAG_LINK_SELECTOR)) {
+    for (const link of this.root.querySelectorAll<HTMLAnchorElement>(TAG_LINK_SELECTOR)) {
       const name = link.textContent?.trim()
       if (!name)
         continue

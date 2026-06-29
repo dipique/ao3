@@ -7,6 +7,7 @@ import {
   applyFilters,
   buildFacets,
   buildFilteredFacets,
+  cloneFilterState,
   computeView,
   emptyFilterState,
   matches,
@@ -151,21 +152,49 @@ describe('searchView in-memory engine', () => {
     assert.equal(filtered.freeforms.get('Angst'), undefined)
   })
 
+  // cloneFilterState backs the view-state snapshot used to reopen the view after
+  // a global re-run; the clone must be fully independent of the original.
+  test('cloneFilterState deep-copies, leaving the original untouched', () => {
+    const original = emptyFilterState()
+    original.text = 'naruto'
+    original.facets.fandoms.include.add('Naruto')
+    original.facets.freeforms.exclude.add('Angst')
+    original.wordsMin = 100
+    original.wordsMax = 5000
+    original.sort = 'kudos'
+    original.dir = 'desc'
+
+    const copy = cloneFilterState(original)
+    assert.equal(copy.text, 'naruto')
+    assert.deepEqual([...copy.facets.fandoms.include], ['Naruto'])
+    assert.deepEqual([...copy.facets.freeforms.exclude], ['Angst'])
+    assert.deepEqual([copy.wordsMin, copy.wordsMax, copy.sort, copy.dir], [100, 5000, 'kudos', 'desc'])
+
+    // Mutating the copy must not bleed into the original (independent Sets).
+    copy.text = 'changed'
+    copy.facets.fandoms.include.add('Bleach')
+    assert.equal(original.text, 'naruto')
+    assert.deepEqual([...original.facets.fandoms.include], ['Naruto'])
+  })
+
   // computeView is the optimized hot path; it must stay equivalent to running
   // applyFilters (as a set) and buildFilteredFacets separately.
   test('computeView matches applyFilters + buildFilteredFacets for varied states', () => {
+    const mkState = (mut) => {
+      const s = emptyFilterState()
+      mut?.(s)
+      return s
+    }
     const states = [
       emptyFilterState(),
-      { ...emptyFilterState(), text: 'naruto fluff' },
-      { ...emptyFilterState(), wordsMin: 1000 },
-      (() => { const s = emptyFilterState(); s.facets.fandoms.include.add('Naruto'); return s })(),
-      (() => { const s = emptyFilterState(); s.facets.fandoms.exclude.add('Bleach'); return s })(),
-      (() => {
-        const s = emptyFilterState()
+      mkState((s) => { s.text = 'naruto fluff' }),
+      mkState((s) => { s.wordsMin = 1000 }),
+      mkState(s => s.facets.fandoms.include.add('Naruto')),
+      mkState(s => s.facets.fandoms.exclude.add('Bleach')),
+      mkState((s) => {
         s.facets.fandoms.include.add('Naruto')
         s.facets.freeforms.exclude.add('Angst')
-        return s
-      })(),
+      }),
     ]
     for (const state of states) {
       const { visible, facetCounts } = computeView(works, state)

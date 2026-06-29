@@ -52,7 +52,7 @@ export class HighlightAuthors extends Unit {
       return
 
     let count = 0
-    for (const el of document.querySelectorAll(AUTHOR_LINK_SELECTOR)) {
+    for (const el of this.root.querySelectorAll(AUTHOR_LINK_SELECTOR)) {
       if (!(el instanceof HTMLAnchorElement))
         continue
       const author = parseAuthorLink(el)

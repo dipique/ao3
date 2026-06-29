@@ -38,7 +38,7 @@ abstract class HighlightEntities extends Unit {
 
     const idRe = new RegExp(`^/${this.kind}/(\\d+)(?:/|$)`)
     let count = 0
-    for (const el of document.querySelectorAll<HTMLAnchorElement>(`a[href*="/${this.kind}/"]`)) {
+    for (const el of this.root.querySelectorAll<HTMLAnchorElement>(`a[href*="/${this.kind}/"]`)) {
       let id: string | undefined
       try {
         id = new URL(el.href).pathname.match(idRe)?.[1]

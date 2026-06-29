@@ -90,7 +90,7 @@ export class HideAuthorToolbar extends Unit {
 
     const highlightColor = this.options.hideAuthors.defaultHighlightColor || DEFAULT_AUTHOR_HIGHLIGHT_COLOR
 
-    for (const link of document.querySelectorAll<HTMLAnchorElement>(AUTHOR_LINK_SELECTOR)) {
+    for (const link of this.root.querySelectorAll<HTMLAnchorElement>(AUTHOR_LINK_SELECTOR)) {
       const author = parseAuthorLink(link)
       if (!author)
         continue
