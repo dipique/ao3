@@ -70,8 +70,12 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // without re-creating the DOM (which would reset the open/closed groups).
   interface FacetRowRef {
     value: string
+    /** Lowercased value, precomputed for the per-group "contains" filter. */
+    lower: string
     row: HTMLElement
     countEl: HTMLElement
+    /** Latest drill-down count, updated by syncFacets() and read for visibility. */
+    count: number
     buttons: { dir: 'include' | 'exclude', btn: HTMLButtonElement }[]
   }
   interface FacetGroupRef {
@@ -79,7 +83,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     details: HTMLElement
     countEl: HTMLElement
     rows: FacetRowRef[]
+    /** This group's value-filter box, if it's large enough to have one. */
+    filter: HTMLInputElement | null
+    /** Current text in this group's value filter. */
+    query: string
   }
+  // Large groups (> this many values) get a "contains" filter box for their values.
+  const FACET_FILTER_THRESHOLD = 10
   let facetGroups: FacetGroupRef[] = []
 
   const countEl = (<span class={cx('count')} />) as HTMLElement
@@ -143,6 +153,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     minInput.value = ''
     maxInput.value = ''
     sortSelect.value = state.sort
+    for (const group of facetGroups) {
+      group.query = ''
+      if (group.filter)
+        group.filter.value = ''
+    }
     syncDir()
     render()
   })
@@ -207,8 +222,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
     return {
       value,
+      lower: value.toLowerCase(),
       row,
       countEl,
+      count,
       buttons: [{ dir: 'include', btn: include }, { dir: 'exclude', btn: exclude }],
     }
   }
@@ -225,6 +242,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         continue
       const rows = values.map(value => facetRow(key, value))
       const groupCountEl = (<span class={cx('group-count')}>{String(values.length)}</span>) as HTMLElement
+      // Long value lists (tags, fandoms, characters…) get a "contains" filter.
+      const label = FACET_LABELS[key].toLowerCase()
+      const filterInput = values.length > FACET_FILTER_THRESHOLD
+        ? (<input type="search" class={cx('group-filter')} placeholder={`Filter ${label}…`} aria-label={`Filter ${FACET_LABELS[key]}`} />) as HTMLElement as HTMLInputElement
+        : null
       const group = (
         <details class={cx('group')} open>
           <summary class={cx('group-title')}>
@@ -232,10 +254,16 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
             {' '}
             {groupCountEl}
           </summary>
+          {filterInput}
           <div class={cx('group-body')}>{rows.map(r => r.row)}</div>
         </details>
       ) as HTMLElement
-      facetGroups.push({ key, details: group, countEl: groupCountEl, rows })
+      const groupRef: FacetGroupRef = { key, details: group, countEl: groupCountEl, rows, filter: filterInput, query: '' }
+      filterInput?.addEventListener('input', () => {
+        groupRef.query = filterInput.value
+        applyGroupVisibility(groupRef)
+      })
+      facetGroups.push(groupRef)
       groups.push(group)
     }
     facetsEl.replaceChildren(...groups)
@@ -244,34 +272,53 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // --- Render ---------------------------------------------------------------
 
   /**
+   * Show/hide a group's value rows from its current drill-down counts and value
+   * filter: a row shows when it still has matching works (or is selected, so it
+   * can be toggled off) *and* contains the filter text. The group count tracks
+   * the visible rows; the whole group hides only when no value passes the
+   * drill-down filter — never merely because the text filter excluded them all,
+   * which would also hide the filter box and trap the user.
+   */
+  function applyGroupVisibility(group: FacetGroupRef): void {
+    const sel = state.facets[group.key]
+    const q = group.query.trim().toLowerCase()
+    let relevant = 0
+    let shown = 0
+    for (const row of group.rows) {
+      const selected = sel.include.has(row.value) || sel.exclude.has(row.value)
+      const drillMatch = row.count > 0 || selected
+      if (drillMatch)
+        relevant++
+      const show = drillMatch && (q === '' || row.lower.includes(q))
+      row.row.classList.toggle(HIDDEN_CLASS, !show)
+      if (show)
+        shown++
+    }
+    group.countEl.textContent = String(shown)
+    group.details.classList.toggle(HIDDEN_CLASS, relevant === 0)
+  }
+
+  /**
    * Refresh the facet sidebar against the current filter: each value's count
    * becomes its drill-down count (works passing every other filter that also
-   * carry it), rows that can no longer match are hidden unless selected, and the
-   * group count shows how many values remain. Toggle state is synced too.
+   * carry it) and toggle state is synced, then {@link applyGroupVisibility}
+   * decides what stays visible.
    */
   function syncFacets(): void {
     const counts = buildFilteredFacets(works, state)
     for (const group of facetGroups) {
       const sel = state.facets[group.key]
       const groupCounts = counts[group.key]
-      let shown = 0
       for (const row of group.rows) {
-        const selected = sel.include.has(row.value) || sel.exclude.has(row.value)
-        const count = groupCounts.get(row.value) ?? 0
-        row.countEl.textContent = String(count)
-        // Keep selected values visible at 0 so they can still be toggled off.
-        const show = count > 0 || selected
-        row.row.classList.toggle(HIDDEN_CLASS, !show)
-        if (show)
-          shown++
+        row.count = groupCounts.get(row.value) ?? 0
+        row.countEl.textContent = String(row.count)
         for (const { dir, btn } of row.buttons) {
           const active = sel[dir].has(row.value)
           btn.classList.toggle(ACTIVE_CLASS, active)
           btn.setAttribute('aria-pressed', String(active))
         }
       }
-      group.countEl.textContent = String(shown)
-      group.details.classList.toggle(HIDDEN_CLASS, shown === 0)
+      applyGroupVisibility(group)
     }
   }
 

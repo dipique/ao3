@@ -643,6 +643,13 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   font-weight: normal;
 }
 
+.AO3E--search-view--group-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.3em;
+  font-size: 0.9em;
+}
+
 .AO3E--search-view--group-body {
   margin-top: 0.3em;
   max-height: 16em;
