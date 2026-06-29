@@ -101,21 +101,30 @@ export function emptyFilterState(): FilterState {
   return { text: '', facets, wordsMin: null, wordsMax: null, sort: 'marked', dir: 'asc' }
 }
 
+// A work's searchable text never changes, so build it once and cache it. Keyed
+// by the work object, so it's dropped automatically when works are replaced.
+const haystackCache = new WeakMap<Work, string>()
+
 /** Lowercased text blob a free-text query is matched against. */
 function haystack(work: Work): string {
-  return [
-    work.title,
-    ...work.authors.map(a => a.text),
-    work.summaryText,
-    ...work.fandoms,
-    ...work.relationships,
-    ...work.characters,
-    ...work.freeforms,
-    ...work.warnings,
-    ...work.categories,
-    work.rating ?? '',
-    work.language ?? '',
-  ].join(' \n ').toLowerCase()
+  let hay = haystackCache.get(work)
+  if (hay === undefined) {
+    hay = [
+      work.title,
+      ...work.authors.map(a => a.text),
+      work.summaryText,
+      ...work.fandoms,
+      ...work.relationships,
+      ...work.characters,
+      ...work.freeforms,
+      ...work.warnings,
+      ...work.categories,
+      work.rating ?? '',
+      work.language ?? '',
+    ].join(' \n ').toLowerCase()
+    haystackCache.set(work, hay)
+  }
+  return hay
 }
 
 /**
@@ -188,6 +197,9 @@ export interface FacetValueCount {
   count: number
 }
 
+/** Drill-down counts: per facet, a `value → count` map. */
+export type FacetCounts = Record<FacetKey, Map<string, number>>
+
 function countFacet(works: Work[], key: FacetKey): FacetValueCount[] {
   const counts = new Map<string, number>()
   for (const work of works) {
@@ -213,11 +225,84 @@ export function buildFacets(works: Work[]): Record<FacetKey, FacetValueCount[]> 
  * count reads as "results you'd get if you also picked this". Returns a flat
  * `value → count` map per key for cheap lookup; the view keeps its own row order.
  */
-export function buildFilteredFacets(works: Work[], f: FilterState): Record<FacetKey, Map<string, number>> {
-  const result = {} as Record<FacetKey, Map<string, number>>
+export function buildFilteredFacets(works: Work[], f: FilterState): FacetCounts {
+  const result = {} as FacetCounts
   for (const key of FACET_KEYS) {
     const pool = works.filter(w => matches(w, f, key))
     result[key] = new Map(countFacet(pool, key).map(({ value, count }) => [value, count]))
   }
   return result
+}
+
+export interface ViewComputation {
+  /** Works passing the full filter (unordered — the view sorts separately). */
+  visible: Set<Work>
+  /** Drill-down facet counts (equivalent to {@link buildFilteredFacets}). */
+  facetCounts: FacetCounts
+}
+
+/**
+ * Single-pass filter + drill-down faceting for the live view. Equivalent to
+ * `applyFilters` (as a set) plus `buildFilteredFacets`, but computed together in
+ * one O(works × facets) sweep instead of re-filtering once per facet, with the
+ * text haystack cached — this is the hot path on every keystroke.
+ *
+ * The drill-down trick: a work passing every filter contributes to *all* groups'
+ * counts; a work failing exactly one group contributes only to that group's
+ * counts (it's what you'd gain by relaxing that group); a work failing two or
+ * more contributes nowhere. That reproduces "count over works passing every
+ * other filter" without a separate pass per group.
+ */
+export function computeView(works: Work[], f: FilterState): ViewComputation {
+  const textTerms = f.text.trim() ? f.text.toLowerCase().split(/\s+/).filter(Boolean) : []
+  // Only groups with a selection actually constrain matching.
+  const activeKeys = FACET_KEYS.filter(k => f.facets[k].include.size > 0 || f.facets[k].exclude.size > 0)
+
+  const facetCounts = {} as FacetCounts
+  for (const key of FACET_KEYS)
+    facetCounts[key] = new Map<string, number>()
+  const visible = new Set<Work>()
+
+  const bump = (key: FacetKey, work: Work): void => {
+    const map = facetCounts[key]
+    for (const value of facetValues(work, key))
+      map.set(value, (map.get(value) ?? 0) + 1)
+  }
+
+  for (const work of works) {
+    if (f.wordsMin !== null && work.words < f.wordsMin)
+      continue
+    if (f.wordsMax !== null && work.words > f.wordsMax)
+      continue
+    if (textTerms.length) {
+      const hay = haystack(work)
+      if (!textTerms.every(term => hay.includes(term)))
+        continue
+    }
+
+    let failKey: FacetKey | null = null
+    let failCount = 0
+    for (const key of activeKeys) {
+      const sel = f.facets[key]
+      const values = facetValues(work, key)
+      const excluded = sel.exclude.size > 0 && values.some(v => sel.exclude.has(v))
+      const included = sel.include.size === 0 || values.some(v => sel.include.has(v))
+      if (excluded || !included) {
+        if (++failCount > 1)
+          break
+        failKey = key
+      }
+    }
+
+    if (failCount === 0) {
+      visible.add(work)
+      for (const key of FACET_KEYS)
+        bump(key, work)
+    }
+    else if (failCount === 1 && failKey) {
+      bump(failKey, work)
+    }
+  }
+
+  return { visible, facetCounts }
 }

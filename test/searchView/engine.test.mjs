@@ -7,6 +7,7 @@ import {
   applyFilters,
   buildFacets,
   buildFilteredFacets,
+  computeView,
   emptyFilterState,
   matches,
   sortWorks,
@@ -148,5 +149,31 @@ describe('searchView in-memory engine', () => {
     assert.equal(filtered.fandoms.get('Bleach'), 2) // own group ignores the exclude
     assert.equal(filtered.freeforms.get('Fluff'), 1) // only work 1 remains
     assert.equal(filtered.freeforms.get('Angst'), undefined)
+  })
+
+  // computeView is the optimized hot path; it must stay equivalent to running
+  // applyFilters (as a set) and buildFilteredFacets separately.
+  test('computeView matches applyFilters + buildFilteredFacets for varied states', () => {
+    const states = [
+      emptyFilterState(),
+      { ...emptyFilterState(), text: 'naruto fluff' },
+      { ...emptyFilterState(), wordsMin: 1000 },
+      (() => { const s = emptyFilterState(); s.facets.fandoms.include.add('Naruto'); return s })(),
+      (() => { const s = emptyFilterState(); s.facets.fandoms.exclude.add('Bleach'); return s })(),
+      (() => {
+        const s = emptyFilterState()
+        s.facets.fandoms.include.add('Naruto')
+        s.facets.freeforms.exclude.add('Angst')
+        return s
+      })(),
+    ]
+    for (const state of states) {
+      const { visible, facetCounts } = computeView(works, state)
+      const expectedVisible = new Set(applyFilters(works, state))
+      assert.deepEqual([...visible].map(w => w.workId).sort(), [...expectedVisible].map(w => w.workId).sort())
+      const expectedCounts = buildFilteredFacets(works, state)
+      for (const key of Object.keys(expectedCounts))
+        assert.deepEqual([...facetCounts[key].entries()].sort(), [...expectedCounts[key].entries()].sort())
+    }
   })
 })

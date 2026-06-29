@@ -49,6 +49,7 @@ declare module 'vue' {
     OptionRowImportExport: typeof import('./../options_ui/components/option_rows/OptionRowImportExport.vue')['default']
     OptionRowNumberSlider: typeof import('./../options_ui/components/option_rows/OptionRowNumberSlider.vue')['default']
     OptionRowTextReplacements: typeof import('./../options_ui/components/option_rows/OptionRowTextReplacements.vue')['default']
+    OptionSearchPerPage: typeof import('./../options_ui/components/options/OptionSearchPerPage.vue')['default']
     OptionsUIFooter: typeof import('./../options_ui/components/OptionsUIFooter.vue')['default']
     OptionsUIHeader: typeof import('./../options_ui/components/OptionsUIHeader.vue')['default']
     OptionSwitch: typeof import('./../options_ui/components/options/OptionSwitch.vue')['default']

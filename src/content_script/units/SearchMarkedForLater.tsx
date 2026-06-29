@@ -174,7 +174,7 @@ export class SearchMarkedForLater extends Unit {
       const cached = await readSnapshot(key)
       if (cached && cached.works.length) {
         // Render instantly from cache, then refresh in the background.
-        const view = createSearchView(cached.works, handlers)
+        const view = createSearchView(cached.works, handlers, { perPage: this.options.searchPerPage })
         activeView = view
         container.replaceChildren(view.el)
         view.setUpdating(true)
@@ -199,7 +199,7 @@ export class SearchMarkedForLater extends Unit {
           teardown()
           return
         }
-        const view = createSearchView(result.works, handlers)
+        const view = createSearchView(result.works, handlers, { perPage: this.options.searchPerPage })
         activeView = view
         container.replaceChildren(view.el)
         if (result.loadedPages < result.totalPages)

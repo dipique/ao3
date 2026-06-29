@@ -58,6 +58,13 @@
       <OptionSwitch option-id="searchMarkedForLater" />
     </OptionRow>
     <OptionDivider />
+    <OptionRow
+      title="Results per page"
+      subtitle="How many works to show per page in the Search Marked for Later view. Lower values stay fast even with very large lists; higher values show more at once but take longer to render."
+    >
+      <OptionSearchPerPage />
+    </OptionRow>
+    <OptionDivider />
     <OptionRowFandomExport />
   </OptionCategory>
 </template>

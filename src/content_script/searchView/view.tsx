@@ -8,16 +8,16 @@ import type { Work } from '#content_script/blurb.js'
 import { ADDON_CLASS } from '#common'
 import React from '#dom'
 
-import type { FacetKey, FacetValueCount, FilterState, SortKey } from './engine.ts'
+import type { FacetCounts, FacetKey, FacetValueCount, FilterState, SortKey } from './engine.ts'
 
 import {
-  applyFilters,
   buildFacets,
-  buildFilteredFacets,
+  computeView,
   emptyFilterState,
   FACET_KEYS,
   FACET_LABELS,
   SORT_LABELS,
+  sortWorks,
 } from './engine.ts'
 
 const ROOT = `${ADDON_CLASS}--search-view`
@@ -41,6 +41,13 @@ export interface SearchView {
   setUpdating: (updating: boolean) => void
 }
 
+export interface SearchViewConfig {
+  /** Works rendered per page. Paging bounds layout/paint cost on large lists. */
+  perPage?: number
+}
+
+const DEFAULT_PER_PAGE = 50
+
 function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>
   return (...args: A) => {
@@ -61,9 +68,13 @@ function parseBound(value: string): number | null {
  * any aggregated AO3 listing. The caller mounts {@link SearchView.el} and, for a
  * background refresh, calls {@link SearchView.update} with the new works.
  */
-export function createSearchView(initialWorks: Work[], handlers: SearchViewHandlers): SearchView {
+export function createSearchView(initialWorks: Work[], handlers: SearchViewHandlers, config: SearchViewConfig = {}): SearchView {
   let works = initialWorks
   const state: FilterState = emptyFilterState()
+  const perPage = Math.max(1, config.perPage ?? DEFAULT_PER_PAGE)
+  // Current page (0-based). Sorted full set is cached; filtering never reorders.
+  let pageIndex = 0
+  let sortedWorks: Work[] = works
 
   // Registry of facet rows, rebuilt whenever the facet list changes, so render()
   // can sync toggle state and live drill-down counts against the current filter
@@ -96,6 +107,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   const updatingEl = (<span class={cx('updating')}>Updating…</span>) as HTMLElement
   const resultsOl = (<ol class={`work index group ${cx('results')}`} />) as HTMLElement as HTMLOListElement
   const facetsEl = (<div class={cx('facets')} />) as HTMLElement
+  const pagerEl = (<nav class={cx('pager')} aria-label="Results pages" />) as HTMLElement
 
   // --- Controls -------------------------------------------------------------
 
@@ -104,7 +116,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   ) as HTMLElement as HTMLInputElement
   searchInput.addEventListener('input', debounce(() => {
     state.text = searchInput.value
-    render()
+    filterChanged()
   }, 120))
 
   const sortSelect = (
@@ -135,7 +147,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   const onWords = debounce(() => {
     state.wordsMin = parseBound(minInput.value)
     state.wordsMax = parseBound(maxInput.value)
-    render()
+    filterChanged()
   }, 200)
   minInput.addEventListener('input', onWords)
   maxInput.addEventListener('input', onWords)
@@ -159,7 +171,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         group.filter.value = ''
     }
     syncDir()
-    render()
+    filterChanged()
   })
 
   const backBtn = (
@@ -191,7 +203,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       // Include and exclude are mutually exclusive for one value.
       state.facets[key][dir === 'include' ? 'exclude' : 'include'].delete(value)
     }
-    render()
+    filterChanged()
   }
 
   function facetRow(key: FacetKey, { value, count }: FacetValueCount): FacetRowRef {
@@ -299,44 +311,137 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   /**
-   * Refresh the facet sidebar against the current filter: each value's count
-   * becomes its drill-down count (works passing every other filter that also
-   * carry it) and toggle state is synced, then {@link applyGroupVisibility}
-   * decides what stays visible.
+   * Refresh the facet sidebar from precomputed drill-down counts: each value's
+   * count and toggle state is synced, then {@link applyGroupVisibility} decides
+   * what stays visible. Count writes are guarded so an unchanged row touches no
+   * DOM.
    */
-  function syncFacets(): void {
-    const counts = buildFilteredFacets(works, state)
+  function syncFacets(facetCounts: FacetCounts): void {
     for (const group of facetGroups) {
       const sel = state.facets[group.key]
-      const groupCounts = counts[group.key]
+      const groupCounts = facetCounts[group.key]
       for (const row of group.rows) {
         row.count = groupCounts.get(row.value) ?? 0
-        row.countEl.textContent = String(row.count)
+        const text = String(row.count)
+        if (row.countEl.textContent !== text)
+          row.countEl.textContent = text
         for (const { dir, btn } of row.buttons) {
           const active = sel[dir].has(row.value)
-          btn.classList.toggle(ACTIVE_CLASS, active)
-          btn.setAttribute('aria-pressed', String(active))
+          if ((btn.getAttribute('aria-pressed') === 'true') !== active) {
+            btn.classList.toggle(ACTIVE_CLASS, active)
+            btn.setAttribute('aria-pressed', String(active))
+          }
         }
       }
       applyGroupVisibility(group)
     }
   }
 
+  // The DOM order currently applied to the results list (`sort|dir`); '' forces a
+  // re-sort. Filtering never reorders, so we only touch node order when this
+  // changes — moving 400 heavy blurbs on every keystroke was the filter lag.
+  let domOrderSig = ''
+
+  /** A filter (not sort/page) changed: jump back to the first page, then render. */
+  function filterChanged(): void {
+    pageIndex = 0
+    render()
+  }
+
+  /** Page numbers to show around the current one; `null` marks an elided gap. */
+  function pageWindow(current: number, count: number): (number | null)[] {
+    const keep = new Set<number>()
+    for (let p = 1; p <= count; p++) {
+      if (p === 1 || p === count || Math.abs(p - current) <= 1)
+        keep.add(p)
+    }
+    const out: (number | null)[] = []
+    let prev = 0
+    for (const p of [...keep].sort((a, b) => a - b)) {
+      if (prev && p - prev > 1)
+        out.push(null)
+      out.push(p)
+      prev = p
+    }
+    return out
+  }
+
+  function goToPage(target: number): void {
+    pageIndex = target
+    render()
+  }
+
+  function renderPager(pageCount: number): void {
+    if (pageCount <= 1) {
+      pagerEl.replaceChildren()
+      return
+    }
+    const current = pageIndex + 1
+    const nav = (label: string, target: number, disabled: boolean, title: string): HTMLButtonElement => {
+      const btn = (<button type="button" class={cx('page')} title={title}>{label}</button>) as HTMLElement as HTMLButtonElement
+      btn.disabled = disabled
+      if (!disabled)
+        btn.addEventListener('click', () => goToPage(target))
+      return btn
+    }
+    const nodes: HTMLElement[] = [nav('‹ Prev', pageIndex - 1, current === 1, 'Previous page')]
+    for (const p of pageWindow(current, pageCount)) {
+      if (p === null) {
+        nodes.push((<span class={cx('page-gap')}>…</span>) as HTMLElement)
+        continue
+      }
+      const btn = (<button type="button" class={cx('page')}>{String(p)}</button>) as HTMLElement as HTMLButtonElement
+      if (p === current) {
+        btn.classList.add(ACTIVE_CLASS)
+        btn.setAttribute('aria-current', 'page')
+      }
+      else {
+        btn.addEventListener('click', () => goToPage(p - 1))
+      }
+      nodes.push(btn)
+    }
+    nodes.push(nav('Next ›', pageIndex + 1, current === pageCount, 'Next page'))
+    pagerEl.replaceChildren(...nodes)
+  }
+
   function render(): void {
-    const result = applyFilters(works, state)
-    const visible = new Set(result)
+    const { visible, facetCounts } = computeView(works, state)
+
+    // Re-sort the DOM (and cache the order) only when the sort changed or we
+    // re-mounted — filtering never reorders, so this stays off the hot path.
+    const orderSig = `${state.sort}|${state.dir}`
+    if (orderSig !== domOrderSig) {
+      sortedWorks = sortWorks(works, state.sort, state.dir)
+      for (const work of sortedWorks)
+        resultsOl.append(work.el)
+      domOrderSig = orderSig
+    }
+
+    // Visible works in sort order, then the current page's slice.
+    const ordered = sortedWorks.filter(w => visible.has(w))
+    const total = ordered.length
+    const pageCount = Math.max(1, Math.ceil(total / perPage))
+    pageIndex = Math.min(Math.max(pageIndex, 0), pageCount - 1)
+    const start = pageIndex * perPage
+    const onPage = new Set(ordered.slice(start, start + perPage))
+
+    // Only the current page is shown; everything else is display:none, so the
+    // browser lays out / paints at most `perPage` heavy blurbs no matter how
+    // many match. This is what keeps filtering responsive on large lists.
     for (const work of works)
-      work.el.classList.toggle(HIDDEN_CLASS, !visible.has(work))
-    // append() moves existing nodes, so this reorders without re-creating them.
-    for (const work of result)
-      resultsOl.append(work.el)
-    const noun = works.length === 1 ? 'work' : 'works'
-    countEl.textContent = `Showing ${result.length} of ${works.length} ${noun}`
-    syncFacets()
+      work.el.classList.toggle(HIDDEN_CLASS, !onPage.has(work))
+
+    const noun = total === 1 ? 'work' : 'works'
+    countEl.textContent = total === 0
+      ? `No ${works.length === 1 ? 'work' : 'works'} match`
+      : `Showing ${start + 1}–${start + onPage.size} of ${total} ${noun}`
+    renderPager(pageCount)
+    syncFacets(facetCounts)
   }
 
   function mountResults(): void {
     resultsOl.replaceChildren(...works.map(work => work.el))
+    domOrderSig = '' // re-mounted nodes are in array order; force a re-sort.
   }
 
   function update(nextWorks: Work[]): void {
@@ -352,6 +457,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         }
       }
     }
+    pageIndex = 0 // fresh data — start at the first page
     mountResults()
     renderFacets()
     render()
@@ -399,7 +505,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
           {resetBtn}
           {facetsEl}
         </aside>
-        {resultsOl}
+        <div class={cx('main')}>
+          {resultsOl}
+          {pagerEl}
+        </div>
       </div>
     </div>
   ) as HTMLElement

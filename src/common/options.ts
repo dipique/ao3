@@ -70,6 +70,8 @@ export interface Options {
   openMenuOnClick: boolean
   /** On your own Marked for Later page, add a button that loads every page into one filterable view. */
   searchMarkedForLater: boolean
+  /** How many works to render per page in the Search Marked for Later view (paging keeps large lists fast). */
+  searchPerPage: number
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -121,6 +123,7 @@ export const options = createStorage<Options>({
     contextMenusEnabled: true,
     openMenuOnClick: false,
     searchMarkedForLater: true,
+    searchPerPage: 50,
 
     styleWidthEnabled: true,
     styleWidth: 40,
