@@ -703,7 +703,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: #9a0000;
 }
 
-/* A work filtered out by the in-memory search. */
+/* A work, facet row, or facet group filtered out by the in-memory search. */
 .AO3E--search-view--hidden {
   display: none !important;
 }

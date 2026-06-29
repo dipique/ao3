@@ -6,6 +6,7 @@ import { describe, test } from 'node:test'
 import {
   applyFilters,
   buildFacets,
+  buildFilteredFacets,
   emptyFilterState,
   matches,
   sortWorks,
@@ -110,5 +111,42 @@ describe('searchView in-memory engine', () => {
   test('default sort is marked order', () => {
     const result = applyFilters(works, emptyFilterState())
     assert.deepEqual(result.map(w => w.markedOrder), [0, 1, 2])
+  })
+
+  test('buildFilteredFacets with no filter matches the full-set counts', () => {
+    const filtered = buildFilteredFacets(works, emptyFilterState())
+    assert.equal(filtered.fandoms.get('Naruto'), 2)
+    assert.equal(filtered.fandoms.get('Bleach'), 2)
+    assert.equal(filtered.freeforms.get('Fluff'), 2)
+    assert.equal(filtered.freeforms.get('Angst'), 2)
+  })
+
+  test('drill-down counts shrink to the filtered subset', () => {
+    // wordsMin 1000 keeps works 2 (5000) and 3 (50000).
+    const filtered = buildFilteredFacets(works, { ...emptyFilterState(), wordsMin: 1000 })
+    assert.equal(filtered.fandoms.get('Naruto'), 1) // only work 2
+    assert.equal(filtered.fandoms.get('Bleach'), 2) // works 2 and 3
+  })
+
+  test('a group\'s own selection is ignored when counting that group', () => {
+    const state = emptyFilterState()
+    state.facets.fandoms.include.add('Naruto')
+    const filtered = buildFilteredFacets(works, state)
+    // Selecting Naruto must NOT zero out its sibling values in the same group,
+    // so the user can still see what picking Bleach (OR) would add.
+    assert.equal(filtered.fandoms.get('Naruto'), 2)
+    assert.equal(filtered.fandoms.get('Bleach'), 2)
+    // Other groups DO narrow to the Naruto works (1 and 2).
+    assert.equal(filtered.freeforms.get('Fluff'), 1) // work 1
+    assert.equal(filtered.freeforms.get('Angst'), 1) // work 2
+  })
+
+  test('an exclude narrows other groups but not its own counts', () => {
+    const state = emptyFilterState()
+    state.facets.fandoms.exclude.add('Bleach') // drops works 2 and 3
+    const filtered = buildFilteredFacets(works, state)
+    assert.equal(filtered.fandoms.get('Bleach'), 2) // own group ignores the exclude
+    assert.equal(filtered.freeforms.get('Fluff'), 1) // only work 1 remains
+    assert.equal(filtered.freeforms.get('Angst'), undefined)
   })
 })

@@ -13,6 +13,7 @@ import type { FacetKey, FacetValueCount, FilterState, SortKey } from './engine.t
 import {
   applyFilters,
   buildFacets,
+  buildFilteredFacets,
   emptyFilterState,
   FACET_KEYS,
   FACET_LABELS,
@@ -64,9 +65,22 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   let works = initialWorks
   const state: FilterState = emptyFilterState()
 
-  // Registry of facet toggle buttons, rebuilt whenever the facet list changes,
-  // so render() can sync their active state against the current selection.
-  let facetButtons: { key: FacetKey, value: string, dir: 'include' | 'exclude', btn: HTMLButtonElement }[] = []
+  // Registry of facet rows, rebuilt whenever the facet list changes, so render()
+  // can sync toggle state and live drill-down counts against the current filter
+  // without re-creating the DOM (which would reset the open/closed groups).
+  interface FacetRowRef {
+    value: string
+    row: HTMLElement
+    countEl: HTMLElement
+    buttons: { dir: 'include' | 'exclude', btn: HTMLButtonElement }[]
+  }
+  interface FacetGroupRef {
+    key: FacetKey
+    details: HTMLElement
+    countEl: HTMLElement
+    rows: FacetRowRef[]
+  }
+  let facetGroups: FacetGroupRef[] = []
 
   const countEl = (<span class={cx('count')} />) as HTMLElement
   const updatingEl = (<span class={cx('updating')}>Updating…</span>) as HTMLElement
@@ -165,7 +179,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     render()
   }
 
-  function facetRow(key: FacetKey, { value, count }: FacetValueCount): HTMLElement {
+  function facetRow(key: FacetKey, { value, count }: FacetValueCount): FacetRowRef {
     const include = (
       <button type="button" class={`${cx('toggle')}  ${cx('toggle-include')}`} aria-pressed="false" title={`Only show works tagged "${value}"`}>
         <MdiPlusCircle />
@@ -178,44 +192,88 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     ) as HTMLElement as HTMLButtonElement
     include.addEventListener('click', () => toggleSelection(key, 'include', value))
     exclude.addEventListener('click', () => toggleSelection(key, 'exclude', value))
-    facetButtons.push({ key, value, dir: 'include', btn: include }, { key, value, dir: 'exclude', btn: exclude })
 
-    return (
+    const countEl = (<span class={cx('row-count')}>{String(count)}</span>) as HTMLElement
+    const row = (
       <div class={cx('row')}>
         <span class={cx('row-toggles')}>
           {include}
           {exclude}
         </span>
         <span class={cx('row-name')} title={value}>{value}</span>
-        <span class={cx('row-count')}>{String(count)}</span>
+        {countEl}
       </div>
     ) as HTMLElement
+
+    return {
+      value,
+      row,
+      countEl,
+      buttons: [{ dir: 'include', btn: include }, { dir: 'exclude', btn: exclude }],
+    }
   }
 
   function renderFacets(): void {
-    facetButtons = []
+    facetGroups = []
+    // Row identity/order is fixed from the full set; render() updates the live
+    // drill-down counts and hides rows that no longer match the active filter.
     const facets = buildFacets(works)
     const groups: HTMLElement[] = []
     for (const key of FACET_KEYS) {
       const values = facets[key]
       if (!values.length)
         continue
+      const rows = values.map(value => facetRow(key, value))
+      const groupCountEl = (<span class={cx('group-count')}>{String(values.length)}</span>) as HTMLElement
       const group = (
         <details class={cx('group')} open>
           <summary class={cx('group-title')}>
             {FACET_LABELS[key]}
             {' '}
-            <span class={cx('group-count')}>{String(values.length)}</span>
+            {groupCountEl}
           </summary>
-          <div class={cx('group-body')}>{values.map(value => facetRow(key, value))}</div>
+          <div class={cx('group-body')}>{rows.map(r => r.row)}</div>
         </details>
       ) as HTMLElement
+      facetGroups.push({ key, details: group, countEl: groupCountEl, rows })
       groups.push(group)
     }
     facetsEl.replaceChildren(...groups)
   }
 
   // --- Render ---------------------------------------------------------------
+
+  /**
+   * Refresh the facet sidebar against the current filter: each value's count
+   * becomes its drill-down count (works passing every other filter that also
+   * carry it), rows that can no longer match are hidden unless selected, and the
+   * group count shows how many values remain. Toggle state is synced too.
+   */
+  function syncFacets(): void {
+    const counts = buildFilteredFacets(works, state)
+    for (const group of facetGroups) {
+      const sel = state.facets[group.key]
+      const groupCounts = counts[group.key]
+      let shown = 0
+      for (const row of group.rows) {
+        const selected = sel.include.has(row.value) || sel.exclude.has(row.value)
+        const count = groupCounts.get(row.value) ?? 0
+        row.countEl.textContent = String(count)
+        // Keep selected values visible at 0 so they can still be toggled off.
+        const show = count > 0 || selected
+        row.row.classList.toggle(HIDDEN_CLASS, !show)
+        if (show)
+          shown++
+        for (const { dir, btn } of row.buttons) {
+          const active = sel[dir].has(row.value)
+          btn.classList.toggle(ACTIVE_CLASS, active)
+          btn.setAttribute('aria-pressed', String(active))
+        }
+      }
+      group.countEl.textContent = String(shown)
+      group.details.classList.toggle(HIDDEN_CLASS, shown === 0)
+    }
+  }
 
   function render(): void {
     const result = applyFilters(works, state)
@@ -227,11 +285,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       resultsOl.append(work.el)
     const noun = works.length === 1 ? 'work' : 'works'
     countEl.textContent = `Showing ${result.length} of ${works.length} ${noun}`
-    for (const { key, value, dir, btn } of facetButtons) {
-      const active = state.facets[key][dir].has(value)
-      btn.classList.toggle(ACTIVE_CLASS, active)
-      btn.setAttribute('aria-pressed', String(active))
-    }
+    syncFacets()
   }
 
   function mountResults(): void {
