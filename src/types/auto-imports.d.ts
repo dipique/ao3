@@ -259,6 +259,7 @@ declare global {
   const useStyleTag: typeof import('@vueuse/core').useStyleTag
   const useSupported: typeof import('@vueuse/core').useSupported
   const useSwipe: typeof import('@vueuse/core').useSwipe
+  const useSync: typeof import('../options_ui/composables/useSync').useSync
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTemplateRefsList: typeof import('@vueuse/core').useTemplateRefsList
   const useTextDirection: typeof import('@vueuse/core').useTextDirection

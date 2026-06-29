@@ -115,6 +115,8 @@ declare module 'vue' {
     SelectItem: typeof import('./../options_ui/components/basic/Select/SelectItem.vue')['default']
     Slider: typeof import('./../options_ui/components/basic/Slider.vue')['default']
     Switch: typeof import('./../options_ui/components/basic/Switch.vue')['default']
+    SyncBackupsDialog: typeof import('./../options_ui/components/sync/SyncBackupsDialog.vue')['default']
+    SyncStorageUsage: typeof import('./../options_ui/components/sync/SyncStorageUsage.vue')['default']
     Tooltip: typeof import('./../options_ui/components/basic/Tooltip.vue')['default']
   }
 }

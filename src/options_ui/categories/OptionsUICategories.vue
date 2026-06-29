@@ -8,6 +8,7 @@ import ChapterStats from './ChapterStats.vue'
 import HideWorks from './HideWorks.vue'
 import Search from './Search.vue'
 import StyleTweaks from './StyleTweaks.vue'
+import SyncBackups from './SyncBackups.vue'
 
 const lastRef = ref<ComponentPublicInstance | null>(null)
 const { height: lastHeight } = useElementSize(computed(() => lastRef.value?.$el), undefined, { box: 'border-box' })
@@ -25,6 +26,7 @@ const { height: lastHeight } = useElementSize(computed(() => lastRef.value?.$el)
     <HideWorks />
     <Search />
     <StyleTweaks />
+    <SyncBackups />
     <Advanced ref="lastRef" />
   </div>
 </template>

@@ -73,9 +73,42 @@ function createAPI<const API extends { [k: string]: (...args: any) => Promise<an
   }
 }
 
+/** Lightweight backup descriptor for the options UI (no heavy options blob). */
+export type BackupKind = 'daily' | 'pre-restore' | 'pre-sync'
+export interface BackupSummary {
+  key: string
+  createdAt: number
+  date: string
+  kind: BackupKind
+  label: string
+}
+
+export interface SyncUsage {
+  used: number
+  quota: number
+  overheadBytes: number
+}
+
+export interface SyncStatus {
+  enabled: boolean
+  lastError: string
+  lastSyncAt: number
+  generation: number
+  dirty: boolean
+}
+
 export const api = /* @__PURE__ */ createAPI<{
   getTag: (linkUrl: string) => Promise<Tag>
   toast: (...args: Parameters<typeof toast>) => Promise<void>
   openOptionsPage: () => Promise<void>
   runMigrations: () => Promise<void>
+
+  // Sync + backups (all handled in the background context).
+  // Void-ish actions return `true` so the message channel always sends a response.
+  setSyncEnabled: (enabled: boolean) => Promise<boolean>
+  clearSyncedData: () => Promise<boolean>
+  getSyncUsage: () => Promise<SyncUsage>
+  getSyncStatus: () => Promise<SyncStatus>
+  listBackups: () => Promise<BackupSummary[]>
+  restoreBackup: (key: string) => Promise<boolean>
 }>()

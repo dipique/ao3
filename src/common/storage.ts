@@ -69,11 +69,11 @@ export function createStorage<Shape extends StorageShape>(details: StorageDetail
   async function set<T extends Partial<Shape>>(obj: T): Promise<void> {
     const items = objectMap(obj, (id, value) => [`${prefix}${id}`, value])
     logger.debug('Setting:', items)
-    await browser.storage.local.set(items)
+    await browser.storage[area].set(items)
   }
 
   function listener(changes: { [key: string]: browser.storage.StorageChange }, areaName: string) {
-    if (areaName !== 'local')
+    if (areaName !== area)
       return
 
     const keys = Object.keys(changes).filter(key => key.startsWith(prefix))

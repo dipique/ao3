@@ -1,6 +1,7 @@
 import { createLogger } from './logger.ts'
 
 export { api } from './api.ts'
+export type { BackupKind, BackupSummary, SyncStatus, SyncUsage } from './api.ts'
 
 export { cache } from './cache.ts'
 
@@ -13,6 +14,13 @@ export { type Logger as BaseLogger, createLogger, logger } from './logger.ts'
 
 export { options } from './options.ts'
 export type { Options } from './options.ts'
+
+export * from './syncCodec.ts'
+
+export * from './syncDecide.ts'
+
+export { syncMeta } from './syncMeta.ts'
+export type { SyncMeta } from './syncMeta.ts'
 
 export { toast } from './toast/toast.tsx'
 

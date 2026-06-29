@@ -57,6 +57,7 @@ export default function (): PartialDeep<browser._manifest.WebExtensionManifest> 
       'storage',
       'unlimitedStorage',
       'contextMenus',
+      'alarms',
     ],
     host_permissions: [
       '*://*.archiveofourown.org/*',

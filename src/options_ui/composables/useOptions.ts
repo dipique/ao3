@@ -74,6 +74,24 @@ function externalListener(change: Partial<Options>) {
   setTimeout(() => loading = false, 100)
 }
 
+/**
+ * The options store mutes `theme`/`user` change events ({@link options}'s
+ * `ignoredEvents`) so the content script doesn't re-run every unit when
+ * `OptionsUpdater` writes the detected theme/user. The options page, though, must
+ * still reflect those — e.g. a theme adopted from another device via sync — so we
+ * pick the ignored keys up straight from storage here.
+ */
+function ignoredListener(changes: { [key: string]: browser.storage.StorageChange }, areaName: string) {
+  if (areaName !== options.area || saving || loading)
+    return
+
+  for (const id of options.ignoredEvents ?? []) {
+    const change = changes[`${options.prefix}${id}`]
+    if (change)
+      assign(id, change.newValue)
+  }
+}
+
 function load() {
   loading = true
   logger.log('Loading...')
@@ -88,6 +106,9 @@ function load() {
       logger.log('[external] Attaching listener')
       options.addListener(externalListener)
       onScopeDispose(() => options.removeListener(externalListener))
+
+      browser.storage.onChanged.addListener(ignoredListener)
+      onScopeDispose(() => browser.storage.onChanged.removeListener(ignoredListener))
 
       ready.value = true
       logger.log('Ready!')

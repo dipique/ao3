@@ -5,7 +5,11 @@ const C = globalThis.console
 export class Logger {
   static verbose = true
 
-  constructor(public prefix: string[]) {}
+  prefix: string[]
+
+  constructor(prefix: string[]) {
+    this.prefix = prefix
+  }
 
   get log(): ConsoleFunc { return (Logger.verbose ? C.log.bind(C, ...this.prefix) : () => { /* ignore */ }) }
   get debug(): ConsoleFunc { return (Logger.verbose ? C.debug.bind(C, ...this.prefix) : () => { /* ignore */ }) }
