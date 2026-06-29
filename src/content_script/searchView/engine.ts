@@ -122,8 +122,12 @@ function haystack(work: Work): string {
  * Whether a work passes the filter. Semantics: within a facet group selected
  * values are OR'd; across groups they're AND'd; an excluded value anywhere drops
  * the work (exclude wins). Free text splits into terms that must all appear.
+ *
+ * `ignoreKey` skips one facet group's selections — used to compute drill-down
+ * counts for that group (each value's count over works passing every *other*
+ * filter, i.e. "how many you'd see if you also picked this value").
  */
-export function matches(work: Work, f: FilterState): boolean {
+export function matches(work: Work, f: FilterState, ignoreKey?: FacetKey): boolean {
   if (f.wordsMin !== null && work.words < f.wordsMin)
     return false
   if (f.wordsMax !== null && work.words > f.wordsMax)
@@ -138,6 +142,8 @@ export function matches(work: Work, f: FilterState): boolean {
   }
 
   for (const key of FACET_KEYS) {
+    if (key === ignoreKey)
+      continue
     const sel = f.facets[key]
     if (sel.include.size === 0 && sel.exclude.size === 0)
       continue
@@ -182,18 +188,36 @@ export interface FacetValueCount {
   count: number
 }
 
+function countFacet(works: Work[], key: FacetKey): FacetValueCount[] {
+  const counts = new Map<string, number>()
+  for (const work of works) {
+    for (const value of facetValues(work, key))
+      counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || collator.compare(a.value, b.value))
+}
+
 /** Per-facet value→count list, sorted by count desc then name, over the full set. */
 export function buildFacets(works: Work[]): Record<FacetKey, FacetValueCount[]> {
   const result = {} as Record<FacetKey, FacetValueCount[]>
+  for (const key of FACET_KEYS)
+    result[key] = countFacet(works, key)
+  return result
+}
+
+/**
+ * Per-facet counts reflecting the current filter. Each group is counted over the
+ * works passing every *other* active filter (drill-down faceting), so a value's
+ * count reads as "results you'd get if you also picked this". Returns a flat
+ * `value → count` map per key for cheap lookup; the view keeps its own row order.
+ */
+export function buildFilteredFacets(works: Work[], f: FilterState): Record<FacetKey, Map<string, number>> {
+  const result = {} as Record<FacetKey, Map<string, number>>
   for (const key of FACET_KEYS) {
-    const counts = new Map<string, number>()
-    for (const work of works) {
-      for (const value of facetValues(work, key))
-        counts.set(value, (counts.get(value) ?? 0) + 1)
-    }
-    result[key] = [...counts.entries()]
-      .map(([value, count]) => ({ value, count }))
-      .sort((a, b) => b.count - a.count || collator.compare(a.value, b.value))
+    const pool = works.filter(w => matches(w, f, key))
+    result[key] = new Map(countFacet(pool, key).map(({ value, count }) => [value, count]))
   }
   return result
 }
