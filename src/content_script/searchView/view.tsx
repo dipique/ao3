@@ -1,4 +1,5 @@
 import MdiArrowLeft from '~icons/mdi/arrow-left.jsx'
+import MdiCheckCircle from '~icons/mdi/check-circle.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiRefresh from '~icons/mdi/refresh.jsx'
@@ -8,7 +9,7 @@ import type { Work } from '#content_script/blurb.js'
 import { ADDON_CLASS } from '#common'
 import React from '#dom'
 
-import type { FacetCounts, FacetKey, FacetValueCount, FilterState, SortKey } from './engine.ts'
+import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FilterState, SortKey } from './engine.ts'
 
 import {
   buildFacets,
@@ -54,6 +55,19 @@ export interface SearchView {
   getState: () => ViewState
 }
 
+/**
+ * An optional per-blurb action button (e.g. "Mark as Read"). `run` performs the
+ * side effect for one work; if it resolves, the view drops that work from the
+ * list (and reports the new set via {@link SearchViewConfig.onWorksChanged}). A
+ * rejection leaves the work in place — the action is assumed to have surfaced its
+ * own error. The button is disabled while `run` is pending.
+ */
+export interface BlurbAction {
+  label: string
+  title?: string
+  run: (work: Work) => Promise<void>
+}
+
 export interface SearchViewConfig {
   /** Works rendered per page. Paging bounds layout/paint cost on large lists. */
   perPage?: number
@@ -68,6 +82,10 @@ export interface SearchViewConfig {
    * toolbars) over the results list. Called once per (re-)mount.
    */
   decorateContainer?: (resultsRoot: HTMLElement) => void
+  /** A per-work action button added to every blurb (see {@link BlurbAction}). */
+  blurbAction?: BlurbAction
+  /** Called after a {@link BlurbAction} removes a work, so the host can persist. */
+  onWorksChanged?: (works: Work[]) => void
   /** Restore a prior {@link SearchView.getState} snapshot (filters, sort, page). */
   initialState?: ViewState
 }
@@ -118,10 +136,15 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     /** Lowercased value, precomputed for the per-group "contains" filter. */
     lower: string
     row: HTMLElement
+    /** Drill-down count: results you'd get if you also *included* this value. */
     countEl: HTMLElement
+    /** Result count: results remaining if you additionally *required* this value. */
+    resultCountEl: HTMLElement
     /** Latest drill-down count, updated by syncFacets() and read for visibility. */
     count: number
-    buttons: { dir: 'include' | 'exclude', btn: HTMLButtonElement }[]
+    /** The require button, toggled disabled when requiring would empty results. */
+    requireBtn: HTMLButtonElement
+    buttons: { dir: FacetDir, btn: HTMLButtonElement }[]
   }
   interface FacetGroupRef {
     key: FacetKey
@@ -230,22 +253,32 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   // --- Facets ---------------------------------------------------------------
 
-  function toggleSelection(key: FacetKey, dir: 'include' | 'exclude', value: string): void {
+  const FACET_DIRS: FacetDir[] = ['require', 'include', 'exclude']
+
+  function toggleSelection(key: FacetKey, dir: FacetDir, value: string): void {
     const sel = state.facets[key][dir]
     if (sel.has(value)) {
       sel.delete(value)
     }
     else {
       sel.add(value)
-      // Include and exclude are mutually exclusive for one value.
-      state.facets[key][dir === 'include' ? 'exclude' : 'include'].delete(value)
+      // The three directions are mutually exclusive for one value.
+      for (const other of FACET_DIRS) {
+        if (other !== dir)
+          state.facets[key][other].delete(value)
+      }
     }
     filterChanged()
   }
 
   function facetRow(key: FacetKey, { value, count }: FacetValueCount): FacetRowRef {
+    const require = (
+      <button type="button" class={`${cx('toggle')}  ${cx('toggle-require')}`} aria-pressed="false" title={`Require "${value}" — every shown work must have this tag`}>
+        <MdiCheckCircle />
+      </button>
+    ) as HTMLElement as HTMLButtonElement
     const include = (
-      <button type="button" class={`${cx('toggle')}  ${cx('toggle-include')}`} aria-pressed="false" title={`Only show works tagged "${value}"`}>
+      <button type="button" class={`${cx('toggle')}  ${cx('toggle-include')}`} aria-pressed="false" title={`Include "${value}" — show works with this tag (any of the included)`}>
         <MdiPlusCircle />
       </button>
     ) as HTMLElement as HTMLButtonElement
@@ -254,18 +287,25 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         <MdiMinusCircle />
       </button>
     ) as HTMLElement as HTMLButtonElement
+    require.addEventListener('click', () => toggleSelection(key, 'require', value))
     include.addEventListener('click', () => toggleSelection(key, 'include', value))
     exclude.addEventListener('click', () => toggleSelection(key, 'exclude', value))
 
-    const countEl = (<span class={cx('row-count')}>{String(count)}</span>) as HTMLElement
+    // Two counts: the drill-down count (what including this would surface) and,
+    // in parentheses, how many of the *current* results have this value (what
+    // requiring it would leave).
+    const countEl = (<span class={cx('row-count')} title="Results if you include this value">{String(count)}</span>) as HTMLElement
+    const resultCountEl = (<span class={cx('row-result-count')} title="Results remaining if you require this value">{`(${count})`}</span>) as HTMLElement
     const row = (
       <div class={cx('row')}>
         <span class={cx('row-toggles')}>
+          {require}
           {include}
           {exclude}
         </span>
         <span class={cx('row-name')} title={value}>{value}</span>
         {countEl}
+        {resultCountEl}
       </div>
     ) as HTMLElement
 
@@ -274,8 +314,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       lower: value.toLowerCase(),
       row,
       countEl,
+      resultCountEl,
       count,
-      buttons: [{ dir: 'include', btn: include }, { dir: 'exclude', btn: exclude }],
+      requireBtn: require,
+      buttons: [{ dir: 'require', btn: require }, { dir: 'include', btn: include }, { dir: 'exclude', btn: exclude }],
     }
   }
 
@@ -342,7 +384,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     let relevant = 0
     let shown = 0
     for (const row of group.rows) {
-      const selected = sel.include.has(row.value) || sel.exclude.has(row.value)
+      const selected = sel.include.has(row.value) || sel.exclude.has(row.value) || sel.require.has(row.value)
       const drillMatch = row.count > 0 || selected
       if (drillMatch)
         relevant++
@@ -361,15 +403,28 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
    * what stays visible. Count writes are guarded so an unchanged row touches no
    * DOM.
    */
-  function syncFacets(facetCounts: FacetCounts): void {
+  function syncFacets(facetCounts: FacetCounts, resultCounts: FacetCounts): void {
     for (const group of facetGroups) {
       const sel = state.facets[group.key]
       const groupCounts = facetCounts[group.key]
+      const groupResultCounts = resultCounts[group.key]
       for (const row of group.rows) {
         row.count = groupCounts.get(row.value) ?? 0
         const text = String(row.count)
         if (row.countEl.textContent !== text)
           row.countEl.textContent = text
+        const resultCount = groupResultCounts.get(row.value) ?? 0
+        const resultText = `(${resultCount})`
+        if (row.resultCountEl.textContent !== resultText)
+          row.resultCountEl.textContent = resultText
+        // Requiring a value narrows to the visible works that have it; if that's
+        // zero (and it isn't already the required value), requiring it would wipe
+        // the results — so disable the button to mark it a dead end.
+        const wouldEmpty = resultCount === 0 && !sel.require.has(row.value)
+        if (row.requireBtn.disabled !== wouldEmpty) {
+          row.requireBtn.disabled = wouldEmpty
+          row.requireBtn.classList.toggle(cx('toggle-empty'), wouldEmpty)
+        }
         for (const { dir, btn } of row.buttons) {
           const active = sel[dir].has(row.value)
           if ((btn.getAttribute('aria-pressed') === 'true') !== active) {
@@ -386,6 +441,55 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // re-sort. Filtering never reorders, so we only touch node order when this
   // changes — moving 400 heavy blurbs on every keystroke was the filter lag.
   let domOrderSig = ''
+
+  /**
+   * Add the per-blurb action button to one blurb. On click it disables itself,
+   * runs the action, and — only if that resolves — removes the work from the
+   * view. A rejection re-enables the button (the action surfaced its own error).
+   * The button goes into the blurb's native `ul.actions` list when present, so it
+   * sits with AO3's own per-work controls; otherwise it's appended to the blurb.
+   */
+  function injectBlurbAction(work: Work, action: BlurbAction): void {
+    const btn = (
+      <button type="button" class={cx('blurb-action')} title={action.title ?? action.label}>{action.label}</button>
+    ) as HTMLElement as HTMLButtonElement
+    btn.addEventListener('click', () => {
+      if (btn.disabled)
+        return
+      btn.disabled = true
+      btn.classList.add(cx('blurb-action-busy'))
+      void action.run(work)
+        .then(() => removeWork(work))
+        .catch(() => {
+          btn.disabled = false
+          btn.classList.remove(cx('blurb-action-busy'))
+        })
+    })
+    const actions = work.el.querySelector('ul.actions')
+    if (actions)
+      actions.prepend((<li class={ADDON_CLASS}>{btn}</li>) as HTMLElement)
+    else
+      work.el.append((<div class={`${ADDON_CLASS}  ${cx('blurb-actions')}`}>{btn}</div>) as HTMLElement)
+  }
+
+  /**
+   * Drop a work from the view (a blurbAction removed it), detach its node, and
+   * re-render over the reduced set. Facet rows aren't rebuilt — a value that hit
+   * zero just hides via the normal drill-down visibility — so the user's facet UI
+   * state (filter boxes, collapsed groups) is preserved. Reports the new set so
+   * the host can persist it.
+   */
+  function removeWork(work: Work): void {
+    const next = works.filter(w => w !== work)
+    if (next.length === works.length)
+      return
+    works = next
+    work.el.remove()
+    decorated.delete(work.el)
+    domOrderSig = '' // force a re-sort/re-append over the reduced set
+    render()
+    config.onWorksChanged?.(works)
+  }
 
   /** A filter (not sort/page) changed: jump back to the first page, then render. */
   function filterChanged(): void {
@@ -450,7 +554,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   function render(): void {
-    const { visible, facetCounts } = computeView(works, state)
+    const { visible, facetCounts, resultCounts } = computeView(works, state)
 
     // Re-sort the DOM (and cache the order) only when the sort changed or we
     // re-mounted — filtering never reorders, so this stays off the hot path.
@@ -476,14 +580,15 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     for (const work of works)
       work.el.classList.toggle(HIDDEN_CLASS, !onPage.has(work))
 
-    // Decorate the page's blurbs the first time they're shown (kudos ratio, etc.).
-    if (config.decorateBlurb) {
-      for (const work of onPage) {
-        if (!decorated.has(work.el)) {
-          decorated.add(work.el)
-          config.decorateBlurb(work.el)
-        }
-      }
+    // Decorate the page's blurbs the first time they're shown (kudos ratio, etc.)
+    // and attach the optional per-blurb action.
+    for (const work of onPage) {
+      if (decorated.has(work.el))
+        continue
+      decorated.add(work.el)
+      config.decorateBlurb?.(work.el)
+      if (config.blurbAction)
+        injectBlurbAction(work, config.blurbAction)
     }
 
     const noun = total === 1 ? 'work' : 'works'
@@ -491,7 +596,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       ? `No ${works.length === 1 ? 'work' : 'works'} match`
       : `Showing ${start + 1}–${start + onPage.size} of ${total} ${noun}`
     renderPager(pageCount)
-    syncFacets(facetCounts)
+    syncFacets(facetCounts, resultCounts)
   }
 
   function mountResults(): void {
@@ -507,7 +612,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     const present = buildFacets(works)
     for (const key of FACET_KEYS) {
       const valid = new Set(present[key].map(v => v.value))
-      for (const dir of ['include', 'exclude'] as const) {
+      for (const dir of ['include', 'exclude', 'require'] as const) {
         for (const value of [...state.facets[key][dir]]) {
           if (!valid.has(value))
             state.facets[key][dir].delete(value)

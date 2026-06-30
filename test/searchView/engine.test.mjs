@@ -73,6 +73,36 @@ describe('searchView in-memory engine', () => {
     assert.deepEqual(result.map(w => w.workId).sort(), ['2', '3'])
   })
 
+  test('require is AND within a group', () => {
+    // work 3 has both Fluff and Angst; work 1 only Fluff; work 2 only Angst.
+    const state = emptyFilterState()
+    state.facets.freeforms.require.add('Fluff')
+    state.facets.freeforms.require.add('Angst')
+    const result = applyFilters(works, state)
+    assert.deepEqual(result.map(w => w.workId), ['3'])
+  })
+
+  test('require composes with exclude (exclude still wins)', () => {
+    const state = emptyFilterState()
+    state.facets.freeforms.require.add('Fluff') // works 1 and 3
+    state.facets.fandoms.exclude.add('Bleach') // drops work 3
+    assert.deepEqual(applyFilters(works, state).map(w => w.workId), ['1'])
+  })
+
+  test('computeView resultCounts count the visible set (require preview)', () => {
+    const state = emptyFilterState()
+    state.facets.fandoms.include.add('Naruto') // visible: works 1 and 2
+    const { visible, resultCounts } = computeView(works, state)
+    assert.deepEqual([...visible].map(w => w.workId).sort(), ['1', '2'])
+    // Among the two visible works, Fluff is on work 1 and Angst on work 2.
+    assert.equal(resultCounts.freeforms.get('Fluff'), 1)
+    assert.equal(resultCounts.freeforms.get('Angst'), 1)
+    // Requiring Naruto leaves both visible works (its drill-down stays 2).
+    assert.equal(resultCounts.fandoms.get('Naruto'), 2)
+    // Bleach is on only one of the visible works (work 2).
+    assert.equal(resultCounts.fandoms.get('Bleach'), 1)
+  })
+
   test('across groups facets are AND', () => {
     const state = emptyFilterState()
     state.facets.fandoms.include.add('Naruto')

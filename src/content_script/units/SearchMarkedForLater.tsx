@@ -5,6 +5,7 @@ import { decorateBlurb, decorateContainer } from '#content_script/searchView/dec
 import { detectPageCount, scrapeListing } from '#content_script/searchView/scrape.ts'
 import { createSearchView, type SearchView, type SearchViewConfig, type ViewState } from '#content_script/searchView/view.tsx'
 import { Unit } from '#content_script/Unit.js'
+import { submitMark } from '#content_script/units/FilterEntityToolbars.tsx'
 import React from '#dom'
 
 const FEATURE = `${ADDON_CLASS}--search-marked-for-later`
@@ -214,7 +215,31 @@ export class SearchMarkedForLater extends Unit {
       const key = snapshotKey(userId)
       const container = mountContainer()
       const handlers = makeHandlers(userId)
-      const config: SearchViewConfig = { ...this.viewConfig(), initialState: opts.initialState }
+      const config: SearchViewConfig = {
+        ...this.viewConfig(),
+        initialState: opts.initialState,
+        // Each blurb gets a "Mark as Read" button; on success the view drops the
+        // work and reports the reduced set, which we persist so the snapshot (and
+        // a reopen from cache) stays in sync with the server.
+        blurbAction: {
+          label: 'Mark as Read',
+          title: 'Mark as read — remove this work from your Marked for Later list',
+          run: async (work) => {
+            try {
+              // save: false ⇒ POST /works/:id/mark_as_read (leaves reading history).
+              await submitMark(work.workId, false)
+            }
+            catch (err) {
+              log.error('Mark as read failed', err)
+              toast('Could not mark this work as read.', { type: 'error' })
+              throw err
+            }
+          },
+        },
+        onWorksChanged: (works) => {
+          void writeSnapshot(key, works).catch(err => log.error('Failed to persist after mark-as-read', err))
+        },
+      }
 
       const cached = await readSnapshot(key)
       if (cached && cached.works.length) {

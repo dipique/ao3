@@ -81,9 +81,16 @@ export function facetValues(work: Work, key: FacetKey): string[] {
 }
 
 export interface FacetSelection {
+  /** OR within the group: a work matches if it has any included value. */
   include: Set<string>
+  /** Drops a work that has any excluded value (exclude wins). */
   exclude: Set<string>
+  /** AND within the group: a work matches only if it has every required value. */
+  require: Set<string>
 }
+
+/** The three ways a value can be selected in a facet group. */
+export type FacetDir = 'include' | 'exclude' | 'require'
 
 export interface FilterState {
   text: string
@@ -97,15 +104,20 @@ export interface FilterState {
 export function emptyFilterState(): FilterState {
   const facets = {} as Record<FacetKey, FacetSelection>
   for (const key of FACET_KEYS)
-    facets[key] = { include: new Set(), exclude: new Set() }
+    facets[key] = { include: new Set(), exclude: new Set(), require: new Set() }
   return { text: '', facets, wordsMin: null, wordsMax: null, sort: 'marked', dir: 'asc' }
 }
 
 /** Deep copy of a filter state (cloning the per-facet Sets), for snapshot/restore. */
 export function cloneFilterState(f: FilterState): FilterState {
   const facets = {} as Record<FacetKey, FacetSelection>
-  for (const key of FACET_KEYS)
-    facets[key] = { include: new Set(f.facets[key].include), exclude: new Set(f.facets[key].exclude) }
+  for (const key of FACET_KEYS) {
+    facets[key] = {
+      include: new Set(f.facets[key].include),
+      exclude: new Set(f.facets[key].exclude),
+      require: new Set(f.facets[key].require),
+    }
+  }
   return { text: f.text, facets, wordsMin: f.wordsMin, wordsMax: f.wordsMax, sort: f.sort, dir: f.dir }
 }
 
@@ -136,9 +148,10 @@ function haystack(work: Work): string {
 }
 
 /**
- * Whether a work passes the filter. Semantics: within a facet group selected
- * values are OR'd; across groups they're AND'd; an excluded value anywhere drops
- * the work (exclude wins). Free text splits into terms that must all appear.
+ * Whether a work passes the filter. Semantics: within a facet group *included*
+ * values are OR'd while *required* values are AND'd (the work must carry every
+ * one); across groups they're AND'd; an excluded value anywhere drops the work
+ * (exclude wins). Free text splits into terms that must all appear.
  *
  * `ignoreKey` skips one facet group's selections — used to compute drill-down
  * counts for that group (each value's count over works passing every *other*
@@ -162,12 +175,14 @@ export function matches(work: Work, f: FilterState, ignoreKey?: FacetKey): boole
     if (key === ignoreKey)
       continue
     const sel = f.facets[key]
-    if (sel.include.size === 0 && sel.exclude.size === 0)
+    if (sel.include.size === 0 && sel.exclude.size === 0 && sel.require.size === 0)
       continue
     const values = facetValues(work, key)
     if (sel.exclude.size && values.some(v => sel.exclude.has(v)))
       return false
     if (sel.include.size && !values.some(v => sel.include.has(v)))
+      return false
+    if (sel.require.size && ![...sel.require].every(v => values.includes(v)))
       return false
   }
 
@@ -247,6 +262,12 @@ export interface ViewComputation {
   visible: Set<Work>
   /** Drill-down facet counts (equivalent to {@link buildFilteredFacets}). */
   facetCounts: FacetCounts
+  /**
+   * Per-facet `value → count` over the *currently visible* works only — i.e. how
+   * many results would remain if you additionally required that value. Unlike
+   * {@link facetCounts} this respects the value's own group selection.
+   */
+  resultCounts: FacetCounts
 }
 
 /**
@@ -264,15 +285,20 @@ export interface ViewComputation {
 export function computeView(works: Work[], f: FilterState): ViewComputation {
   const textTerms = f.text.trim() ? f.text.toLowerCase().split(/\s+/).filter(Boolean) : []
   // Only groups with a selection actually constrain matching.
-  const activeKeys = FACET_KEYS.filter(k => f.facets[k].include.size > 0 || f.facets[k].exclude.size > 0)
+  const activeKeys = FACET_KEYS.filter(k =>
+    f.facets[k].include.size > 0 || f.facets[k].exclude.size > 0 || f.facets[k].require.size > 0,
+  )
 
   const facetCounts = {} as FacetCounts
-  for (const key of FACET_KEYS)
+  const resultCounts = {} as FacetCounts
+  for (const key of FACET_KEYS) {
     facetCounts[key] = new Map<string, number>()
+    resultCounts[key] = new Map<string, number>()
+  }
   const visible = new Set<Work>()
 
-  const bump = (key: FacetKey, work: Work): void => {
-    const map = facetCounts[key]
+  const bump = (counts: FacetCounts, key: FacetKey, work: Work): void => {
+    const map = counts[key]
     for (const value of facetValues(work, key))
       map.set(value, (map.get(value) ?? 0) + 1)
   }
@@ -295,7 +321,8 @@ export function computeView(works: Work[], f: FilterState): ViewComputation {
       const values = facetValues(work, key)
       const excluded = sel.exclude.size > 0 && values.some(v => sel.exclude.has(v))
       const included = sel.include.size === 0 || values.some(v => sel.include.has(v))
-      if (excluded || !included) {
+      const required = sel.require.size === 0 || [...sel.require].every(v => values.includes(v))
+      if (excluded || !included || !required) {
         if (++failCount > 1)
           break
         failKey = key
@@ -304,13 +331,17 @@ export function computeView(works: Work[], f: FilterState): ViewComputation {
 
     if (failCount === 0) {
       visible.add(work)
-      for (const key of FACET_KEYS)
-        bump(key, work)
+      for (const key of FACET_KEYS) {
+        // Drill-down counts (every group) and result counts both gain a fully
+        // matching work; result counts track only the visible set.
+        bump(facetCounts, key, work)
+        bump(resultCounts, key, work)
+      }
     }
     else if (failCount === 1 && failKey) {
-      bump(failKey, work)
+      bump(facetCounts, failKey, work)
     }
   }
 
-  return { visible, facetCounts }
+  return { visible, facetCounts, resultCounts }
 }

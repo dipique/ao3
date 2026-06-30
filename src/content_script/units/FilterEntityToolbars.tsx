@@ -46,7 +46,7 @@ function pageToken(): string | null {
  * "Mark for Later" / "Mark as Read" buttons make: a PATCH (tunnelled through
  * POST + `_method`) to `/works/:id/mark_for_later` or `/works/:id/mark_as_read`.
  */
-async function submitMark(workId: string, save: boolean): Promise<void> {
+export async function submitMark(workId: string, save: boolean): Promise<void> {
   const action = save ? 'mark_for_later' : 'mark_as_read'
   const token = pageToken() ?? await fetchToken()
   const res = await fetch(getArchiveLink(`/works/${workId}/${action}`), {

@@ -712,6 +712,15 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   font-variant-numeric: tabular-nums;
 }
 
+/* Second count: results remaining if you require this value. */
+.AO3E--search-view--row-result-count {
+  opacity: 0.45;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+  min-width: 2.5em;
+  text-align: right;
+}
+
 .AO3E--search-view--row-toggles {
   display: inline-flex;
   gap: 0.1em;
@@ -736,6 +745,19 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   opacity: 1;
 }
 
+/* Requiring this value would leave 0 results — a dead end, so disabled. */
+.AO3E--search-view--toggle:disabled,
+.AO3E--search-view--toggle-empty {
+  opacity: 0.15 !important;
+  cursor: not-allowed;
+  color: inherit !important;
+}
+
+.AO3E--search-view--toggle-require.AO3E--search-view--active {
+  opacity: 1;
+  color: #0a5ad6;
+}
+
 .AO3E--search-view--toggle-include.AO3E--search-view--active {
   opacity: 1;
   color: #0a7a0a;
@@ -744,6 +766,16 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--search-view--toggle-exclude.AO3E--search-view--active {
   opacity: 1;
   color: #9a0000;
+}
+
+/* Per-blurb action button (e.g. "Mark as Read"), added to the blurb's actions. */
+.AO3E--search-view--blurb-action {
+  cursor: pointer;
+}
+
+.AO3E--search-view--blurb-action-busy {
+  opacity: 0.5;
+  cursor: progress;
 }
 
 /* A work, facet row, or facet group filtered out by the in-memory search. */
