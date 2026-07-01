@@ -10,6 +10,7 @@ import { HighlightAuthors } from './HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from './HighlightEntities.ts'
 import { HighlightTags } from './HighlightTags.ts'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
+import { RequiredTagsToolbar } from './RequiredTagsToolbar.tsx'
 import { SearchMarkedForLater } from './SearchMarkedForLater.tsx'
 import { Stats } from './Stats/Stats.ts'
 import { StyleTweaks } from './StyleTweaks.tsx'
@@ -31,6 +32,7 @@ export const UNITS = [
   // The context-menu decorators. Subscribe/mute/mark-for-later were folded into
   // the author and work menus, so they're no longer separate units.
   TagToolbar,
+  RequiredTagsToolbar,
   FandomToolbar,
   HideAuthorToolbar,
   FilterWorkToolbar,

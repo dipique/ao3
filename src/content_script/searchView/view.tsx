@@ -1,5 +1,7 @@
 import MdiArrowLeft from '~icons/mdi/arrow-left.jsx'
 import MdiCheckCircle from '~icons/mdi/check-circle.jsx'
+import MdiChevronDown from '~icons/mdi/chevron-down.jsx'
+import MdiChevronUp from '~icons/mdi/chevron-up.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiRefresh from '~icons/mdi/refresh.jsx'
@@ -10,6 +12,7 @@ import { ADDON_CLASS } from '#common'
 import React from '#dom'
 
 import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FilterState, SortKey } from './engine.ts'
+import type { SearchViewPrefs } from './prefs.ts'
 
 import {
   buildFacets,
@@ -21,6 +24,7 @@ import {
   SORT_LABELS,
   sortWorks,
 } from './engine.ts'
+import { registerFacetBridge } from './facetBridge.ts'
 
 const ROOT = `${ADDON_CLASS}--search-view`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
@@ -88,6 +92,15 @@ export interface SearchViewConfig {
   onWorksChanged?: (works: Work[]) => void
   /** Restore a prior {@link SearchView.getState} snapshot (filters, sort, page). */
   initialState?: ViewState
+  /**
+   * Local (never-synced) layout prefs restored on open: collapsed facet groups,
+   * custom facet order, and last sort. Seeded from {@link onPrefsChange}'s prior
+   * output. `initialState` (an in-memory reopen) wins over these for the fields
+   * they share, since it reflects exactly what the user last had on screen.
+   */
+  prefs?: Partial<SearchViewPrefs>
+  /** Called whenever a persisted layout pref changes (collapse, sort, reorder). */
+  onPrefsChange?: (prefs: SearchViewPrefs) => void
 }
 
 const DEFAULT_PER_PAGE = 50
@@ -107,6 +120,30 @@ function parseBound(value: string): number | null {
 }
 
 /**
+ * The facet keys in the user's saved order, with any keys missing from it
+ * appended in their default position — so a saved order stays valid even as facet
+ * keys are added or removed across versions.
+ */
+function orderFacetKeys(saved: readonly string[] | undefined): FacetKey[] {
+  if (!saved || saved.length === 0)
+    return [...FACET_KEYS]
+  const known = new Set<string>(FACET_KEYS)
+  const seen = new Set<FacetKey>()
+  const ordered: FacetKey[] = []
+  for (const key of saved) {
+    if (known.has(key) && !seen.has(key as FacetKey)) {
+      ordered.push(key as FacetKey)
+      seen.add(key as FacetKey)
+    }
+  }
+  for (const key of FACET_KEYS) {
+    if (!seen.has(key))
+      ordered.push(key)
+  }
+  return ordered
+}
+
+/**
  * Build a self-contained, filterable/sortable view over a list of works. Pure
  * UI: it knows nothing about where the works came from, so it is reusable for
  * any aggregated AO3 listing. The caller mounts {@link SearchView.el} and, for a
@@ -117,6 +154,17 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
   // start blank. cloneFilterState so we never mutate the caller's snapshot.
   const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
+  // Seed the sort from saved prefs on a fresh open. An in-memory reopen
+  // (initialState) already carries the user's live sort, so it wins.
+  if (!config.initialState && config.prefs) {
+    if (config.prefs.sort)
+      state.sort = config.prefs.sort
+    if (config.prefs.dir)
+      state.dir = config.prefs.dir
+  }
+  // The user's custom facet-group order (persisted locally), applied on every
+  // (re)build and mutated by the per-group reorder arrows.
+  let facetOrder: FacetKey[] = orderFacetKeys(config.prefs?.order)
   const perPage = Math.max(1, config.perPage ?? DEFAULT_PER_PAGE)
   // Current page (0-based). Sorted full set is cached; filtering never reorders.
   let pageIndex = config.initialState?.pageIndex ?? 0
@@ -155,10 +203,23 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     filter: HTMLInputElement | null
     /** Current text in this group's value filter. */
     query: string
+    /** The reorder arrows, disabled at the ends of the list. */
+    upBtn: HTMLButtonElement
+    downBtn: HTMLButtonElement
   }
   // Large groups (> this many values) get a "contains" filter box for their values.
   const FACET_FILTER_THRESHOLD = 10
   let facetGroups: FacetGroupRef[] = []
+
+  /** Snapshot the persistable layout prefs (collapse/order/sort) to the host. */
+  function persist(): void {
+    if (!config.onPrefsChange)
+      return
+    const collapsed = facetGroups
+      .filter(g => !(g.details as HTMLDetailsElement).open)
+      .map(g => g.key)
+    config.onPrefsChange({ collapsed, order: [...facetOrder], sort: state.sort, dir: state.dir })
+  }
 
   const countEl = (<span class={cx('count')} />) as HTMLElement
   const updatingEl = (<span class={cx('updating')}>Updating…</span>) as HTMLElement
@@ -186,6 +247,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   sortSelect.addEventListener('change', () => {
     state.sort = sortSelect.value as SortKey
     render()
+    persist()
   })
 
   const dirBtn = (<button type="button" class={cx('dir')} />) as HTMLElement as HTMLButtonElement
@@ -197,6 +259,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     state.dir = state.dir === 'asc' ? 'desc' : 'asc'
     syncDir()
     render()
+    persist()
   })
   syncDir()
 
@@ -232,6 +295,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     }
     syncDir()
     filterChanged()
+    // Sort reset to default is a visible change; keep the stored pref in step.
+    persist()
   })
 
   const backBtn = (
@@ -326,11 +391,14 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // Row identity/order is fixed from the full set; render() updates the live
     // drill-down counts and hides rows that no longer match the active filter.
     const facets = buildFacets(works)
-    // Restore the saved facet UI only on the first build (a reopen); consume it.
-    const restore = facetUiRestored ? null : config.initialState
+    // Restore the saved facet UI only on the first build; consume it. An in-memory
+    // reopen (initialState) wins; otherwise the persisted local prefs seed the
+    // collapsed groups on a fresh open.
+    const firstBuild = !facetUiRestored
+    const restore = firstBuild ? config.initialState : null
+    const prefCollapsed = firstBuild && !restore ? new Set(config.prefs?.collapsed ?? []) : null
     facetUiRestored = true
-    const groups: HTMLElement[] = []
-    for (const key of FACET_KEYS) {
+    for (const key of facetOrder) {
       const values = facets[key]
       if (!values.length)
         continue
@@ -345,27 +413,86 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       const savedQuery = filterInput ? (restore?.facetQueries[key] ?? '') : ''
       if (filterInput)
         filterInput.value = savedQuery
-      const collapsed = restore?.collapsedFacets.includes(key) ?? false
+      const collapsed = restore
+        ? restore.collapsedFacets.includes(key)
+        : (prefCollapsed?.has(key) ?? false)
+      const upBtn = (
+        <button type="button" class={`${cx('group-move')}  ${cx('group-move-up')}`} title={`Move ${FACET_LABELS[key]} up`} aria-label={`Move ${FACET_LABELS[key]} up`}>
+          <MdiChevronUp />
+        </button>
+      ) as HTMLElement as HTMLButtonElement
+      const downBtn = (
+        <button type="button" class={`${cx('group-move')}  ${cx('group-move-down')}`} title={`Move ${FACET_LABELS[key]} down`} aria-label={`Move ${FACET_LABELS[key]} down`}>
+          <MdiChevronDown />
+        </button>
+      ) as HTMLElement as HTMLButtonElement
+      // Reorder on click; stop the summary's default toggle so the arrows don't
+      // also collapse/expand the group.
+      const onMove = (delta: -1 | 1) => (e: Event): void => {
+        e.preventDefault()
+        e.stopPropagation()
+        moveGroup(key, delta)
+      }
+      upBtn.addEventListener('click', onMove(-1))
+      downBtn.addEventListener('click', onMove(1))
       const group = (
         <details class={cx('group')} open={!collapsed}>
           <summary class={cx('group-title')}>
-            {FACET_LABELS[key]}
-            {' '}
-            {groupCountEl}
+            <span class={cx('group-label')}>
+              {FACET_LABELS[key]}
+              {' '}
+              {groupCountEl}
+            </span>
+            <span class={cx('group-moves')}>
+              {upBtn}
+              {downBtn}
+            </span>
           </summary>
           {filterInput}
           <div class={cx('group-body')}>{rows.map(r => r.row)}</div>
         </details>
       ) as HTMLElement
-      const groupRef: FacetGroupRef = { key, details: group, countEl: groupCountEl, rows, filter: filterInput, query: savedQuery }
+      const groupRef: FacetGroupRef = { key, details: group, countEl: groupCountEl, rows, filter: filterInput, query: savedQuery, upBtn, downBtn }
       filterInput?.addEventListener('input', () => {
         groupRef.query = filterInput.value
         applyGroupVisibility(groupRef)
       })
+      // Persist collapse/expand as the user toggles the group open or shut.
+      group.addEventListener('toggle', () => persist())
       facetGroups.push(groupRef)
-      groups.push(group)
     }
-    facetsEl.replaceChildren(...groups)
+    facetsEl.replaceChildren(...facetGroups.map(g => g.details))
+    syncReorderButtons()
+  }
+
+  /** Grey out the up arrow on the first group and the down arrow on the last. */
+  function syncReorderButtons(): void {
+    facetGroups.forEach((group, i) => {
+      group.upBtn.disabled = i === 0
+      group.downBtn.disabled = i === facetGroups.length - 1
+    })
+  }
+
+  /**
+   * Move a facet group one slot up (-1) or down (1). Reorders the live group
+   * nodes in place (preserving their open/filter state), updates the saved order,
+   * and persists — no facet rebuild needed.
+   */
+  function moveGroup(key: FacetKey, delta: -1 | 1): void {
+    const from = facetGroups.findIndex(g => g.key === key)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= facetGroups.length)
+      return
+    const [moved] = facetGroups.splice(from, 1)
+    facetGroups.splice(to, 0, moved!)
+    facetsEl.replaceChildren(...facetGroups.map(g => g.details))
+    // Rebuild the saved order: visible groups in their new order, then any facet
+    // keys without a group on this page, kept in their prior relative position.
+    const visibleOrder = facetGroups.map(g => g.key)
+    const visibleSet = new Set(visibleOrder)
+    facetOrder = [...visibleOrder, ...facetOrder.filter(k => !visibleSet.has(k))]
+    syncReorderButtons()
+    persist()
   }
 
   // --- Render ---------------------------------------------------------------
@@ -642,6 +769,14 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   // --- Assemble -------------------------------------------------------------
+
+  // Let shared blurb decorators (e.g. the required-tags menu) drive this view's
+  // in-memory facets when they act on a blurb inside it, instead of the page's
+  // native filter sidebar. Registered before the first decorateContainer run.
+  registerFacetBridge(resultsOl, {
+    isSelected: (key, dir, value) => state.facets[key][dir].has(value),
+    toggle: (key, dir, value) => toggleSelection(key, dir, value),
+  })
 
   mountResults()
   renderFacets()

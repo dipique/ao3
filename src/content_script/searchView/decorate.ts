@@ -8,6 +8,7 @@ import { HideAuthorToolbar } from '#content_script/units/HideAuthorToolbar.tsx'
 import { HighlightAuthors } from '#content_script/units/HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from '#content_script/units/HighlightEntities.ts'
 import { HighlightTags } from '#content_script/units/HighlightTags.ts'
+import { RequiredTagsToolbar } from '#content_script/units/RequiredTagsToolbar.tsx'
 import { Stats } from '#content_script/units/Stats/Stats.ts'
 import { TagToolbar } from '#content_script/units/TagToolbar.tsx'
 
@@ -25,7 +26,7 @@ const BLURB_UNITS = [Stats, HighlightTags, HighlightAuthors, HighlightWorks, Hig
  * run once over the whole results container, not per blurb. Their menus open on
  * right-click / long-press (and the indicators they add open on click).
  */
-const CONTAINER_UNITS = [TagToolbar, FandomToolbar, HideAuthorToolbar, FilterWorkToolbar, FilterSeriesToolbar] as typeof Unit[]
+const CONTAINER_UNITS = [TagToolbar, RequiredTagsToolbar, FandomToolbar, HideAuthorToolbar, FilterWorkToolbar, FilterSeriesToolbar] as typeof Unit[]
 
 function runUnit(U: typeof Unit, options: Options, root: ParentNode): void {
   const unit = new U(options, root)

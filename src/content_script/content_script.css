@@ -374,6 +374,23 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   line-height: 1.4;
 }
 
+/* The "Show Symbol Key" popover holds a whole help fragment, so it's wider and
+   scrolls rather than clipping. */
+.AO3E--popover:has(.AO3E--symbols-key) {
+  max-width: min(42em, 92vw);
+}
+
+.AO3E--symbols-key {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.AO3E--symbols-key ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 /* Permanent indicators: one small icon per active state, shown after the item
    it describes. The whole span re-opens that item's menu (it's a trigger). */
 .AO3E--indicators {
@@ -672,11 +689,54 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--search-view--group-title {
   cursor: pointer;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+
+.AO3E--search-view--group-label {
+  flex: 1;
+  min-width: 0;
 }
 
 .AO3E--search-view--group-count {
   opacity: 0.6;
   font-weight: normal;
+}
+
+/* Per-group reorder arrows, shown to the right of the category title. */
+.AO3E--search-view--group-moves {
+  display: inline-flex;
+  gap: 0.1em;
+  opacity: 0.5;
+}
+
+.AO3E--search-view--group-title:hover .AO3E--search-view--group-moves,
+.AO3E--search-view--group-moves:focus-within {
+  opacity: 1;
+}
+
+.AO3E--search-view--group-move {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.AO3E--search-view--group-move:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.AO3E--search-view--group-move:disabled {
+  opacity: 0.15;
+  cursor: default;
 }
 
 .AO3E--search-view--group-filter {

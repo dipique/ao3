@@ -2,6 +2,7 @@ import { ADDON_CLASS, getArchiveLink, logger, parseUser, toast } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { readSnapshot, writeSnapshot } from '#content_script/searchView/cache.ts'
 import { decorateBlurb, decorateContainer } from '#content_script/searchView/decorate.ts'
+import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.ts'
 import { detectPageCount, scrapeListing } from '#content_script/searchView/scrape.ts'
 import { createSearchView, type SearchView, type SearchViewConfig, type ViewState } from '#content_script/searchView/view.tsx'
 import { Unit } from '#content_script/Unit.js'
@@ -27,6 +28,13 @@ let busy = false
 let reopen: { userId: string, state: ViewState } | null = null
 
 const log = logger.child('SearchMarkedForLater')
+
+/**
+ * Identifies this use of the search view for local layout prefs (collapsed
+ * groups, facet order, sort). One id for the whole feature — not per-user — so a
+ * user's layout follows them across accounts on the same device.
+ */
+const PREFS_APP_ID = 'marked-for-later'
 
 function pageUrl(userId: string, page: number): string {
   return getArchiveLink(`/users/${userId}/readings?show=to-read&page=${page}`)
@@ -215,9 +223,15 @@ export class SearchMarkedForLater extends Unit {
       const key = snapshotKey(userId)
       const container = mountContainer()
       const handlers = makeHandlers(userId)
+      // Local (never-synced) layout prefs for this application of the view.
+      const prefs = await loadPrefs(PREFS_APP_ID)
       const config: SearchViewConfig = {
         ...this.viewConfig(),
         initialState: opts.initialState,
+        prefs,
+        onPrefsChange: (next) => {
+          void savePrefs(PREFS_APP_ID, next).catch(err => log.error('Failed to save search-view prefs', err))
+        },
         // Each blurb gets a "Mark as Read" button; on success the view drops the
         // work and reports the reduced set, which we persist so the snapshot (and
         // a reopen from cache) stays in sync with the server.
