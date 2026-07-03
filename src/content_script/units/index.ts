@@ -10,6 +10,7 @@ import { HighlightAuthors } from './HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from './HighlightEntities.ts'
 import { HighlightTags } from './HighlightTags.ts'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
+import { ReaderMode } from './ReaderMode.ts'
 import { RequiredTagsToolbar } from './RequiredTagsToolbar.tsx'
 import { SearchMarkedForLater } from './SearchMarkedForLater.tsx'
 import { Stats } from './Stats/Stats.ts'
@@ -20,6 +21,9 @@ import { Tools } from './Tools.tsx'
 
 export const UNITS = [
   StyleTweaks,
+  // After StyleTweaks so it takes over #workskin's width (its inline width wins
+  // over StyleTweaks' stylesheet rule) and measures the resulting column width.
+  ReaderMode,
   TextReplace,
   HideWorks,
   // Runs after HideWorks so it can count the works HideWorks marked as hidden.

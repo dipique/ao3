@@ -21,6 +21,13 @@
     />
     <OptionDivider />
     <OptionRow
+      title="Reader mode on works"
+      subtitle="Zoom (Ctrl+scroll or pinch) over the work text resizes its font; drag the handles on its edges to set the reading width. Saved on this device only."
+    >
+      <OptionSwitch option-id="readerMode" />
+    </OptionRow>
+    <OptionDivider />
+    <OptionRow
       title="Force alignment of work text"
       subtitle="Can sometimes help with readability"
     >

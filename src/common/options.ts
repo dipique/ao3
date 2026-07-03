@@ -75,6 +75,15 @@ export interface Options {
 
   styleWidthEnabled: boolean
   styleWidth: number
+  /**
+   * On work pages, take over sizing of the work text (`#workskin`): a zoom
+   * gesture (Ctrl+scroll / trackpad pinch) over the text changes its font size
+   * and reflows it instead of zooming the page, and drag-handles on the text's
+   * left/right edges set how wide the reading column is. The actual font scale
+   * and width are per-device state kept in the page's `localStorage` (see
+   * `ReaderMode`), so they never sync — this flag is only the on/off switch.
+   */
+  readerMode: boolean
   showStatsColumns: boolean
   forceAlignment: null | 'start' | 'end' | 'justified'
   /** Hide the "muted author" notices that appear where works are hidden because of a muted author. */
@@ -127,6 +136,7 @@ export const options = createStorage<Options>({
 
     styleWidthEnabled: true,
     styleWidth: 40,
+    readerMode: false,
     showStatsColumns: true,
     forceAlignment: null,
     hideMutedAuthorNotices: false,

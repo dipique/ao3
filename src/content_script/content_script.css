@@ -3,6 +3,77 @@
   max-width: 100%;
 }
 
+/* ---------------------------------------------------------------------------
+   Reader mode. A small grab handle rides each left/right edge of the work text
+   so the reading column can be dragged wider/narrower. Each handle is placed in
+   JS (its `left` tracks a column edge) and pinned to the vertical centre of the
+   viewport, so it stays reachable as you scroll. The visible affordance is a
+   single grip dot; currentColor lets it read on any AO3 skin.
+   --------------------------------------------------------------------------- */
+.AO3E--reader-handle {
+  position: fixed;
+  top: 50%;
+  height: 80px;
+  width: 18px;
+  z-index: 30;
+  /* Centre the grab area on the column edge (x, via `left`) and the viewport (y). */
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+/* The visible affordance: a grip dot in the centre, with two smaller dots above
+   and below it so the cluster reads as a draggable grip. */
+.AO3E--reader-handle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: currentColor;
+  /* A soft neutral halo keeps the dot visible over text of any colour. */
+  box-shadow: 0 0 0 4px rgba(128, 128, 128, 0.15);
+  opacity: 0.35;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* The two smaller dots — drawn as box-shadow copies of a transparent centre box
+   offset above and below the main dot. */
+.AO3E--reader-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: 0 -14px 0 currentColor, 0 14px 0 currentColor;
+  opacity: 0.35;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.AO3E--reader-handle:hover::before,
+.AO3E--reader-resizing .AO3E--reader-handle::before,
+.AO3E--reader-handle:hover::after,
+.AO3E--reader-resizing .AO3E--reader-handle::after {
+  opacity: 0.7;
+  transform: translate(-50%, -50%) scale(1.3);
+}
+
+/* While a handle is being dragged, suppress text selection everywhere and keep
+   the resize cursor even as the pointer leaves the thin handle. */
+.AO3E--reader-resizing {
+  cursor: ew-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 *[data-ao3e-hidden] {
   display: none !important;
 }
