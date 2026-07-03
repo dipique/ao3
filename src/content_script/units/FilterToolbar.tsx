@@ -1,4 +1,5 @@
 import Icon from '~icons/ao3e/icon.jsx'
+import MdiBookOpenVariant from '~icons/mdi/book-open-variant.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiGestureTapHold from '~icons/mdi/gesture-tap-hold.jsx'
@@ -49,11 +50,18 @@ function detachOutsideHandler(): void {
  * - **Disable menus** — the escape hatch for the in-page context menus: flips
  *   `contextMenusEnabled`, restoring the browser's native menu on links. Shown
  *   whenever any menu decorator is active on the page, so it's always reachable.
+ * - **Reader mode** — on a work page, toggles the `readerMode` option (font-zoom
+ *   + drag-to-width on the work text) without a trip to the options page.
  *
  * Runs after HideWorks so the hidden markers the peek counts are already in place.
  */
 export class FilterToolbar extends Unit {
   static override get name() { return 'FilterToolbar' }
+
+  /** A single work / chapter page — the only place the reader-mode pill applies. */
+  private get onWorkPage(): boolean {
+    return /^\/works\/\d+/.test(location.pathname)
+  }
 
   /** Whether any feature that adds a context menu is active on the page. */
   private get menuFeaturesActive(): boolean {
@@ -75,7 +83,9 @@ export class FilterToolbar extends Unit {
   }
 
   override get enabled() {
-    return this.peekAvailable || this.menuFeaturesActive
+    // `onWorkPage` only reads the URL (available at document_start); the precise
+    // `#workskin` check that actually gates the reader pill happens in `ready()`.
+    return this.peekAvailable || this.menuFeaturesActive || this.onWorkPage
   }
 
   static override async clean(): Promise<void> {
@@ -87,18 +97,22 @@ export class FilterToolbar extends Unit {
     const count = this.peekAvailable ? document.querySelectorAll(HIDDEN_SELECTOR).length : 0
     const showPeek = count > 0
     const showMenus = this.menuFeaturesActive
+    // The reader pill needs the actual work text present, not just a work URL.
+    const showReader = this.onWorkPage && document.querySelector('#workskin') !== null
 
-    if (!showPeek && !showMenus) {
+    if (!showPeek && !showMenus && !showReader) {
       this.logger.debug('Nothing to show in the filter toolbar.')
       return
     }
 
-    document.body.append(this.buildToolbar(count, showPeek, showMenus))
-    this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}).`)
+    document.body.append(this.buildToolbar(count, showPeek, showMenus, showReader))
+    this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}, reader: ${showReader}).`)
   }
 
-  buildToolbar(count: number, showPeek: boolean, showMenus: boolean): HTMLElement {
+  buildToolbar(count: number, showPeek: boolean, showMenus: boolean, showReader: boolean): HTMLElement {
     const panel = <div class={PANEL_CLASS} role="group" />
+    if (showReader)
+      panel.append(this.buildReaderButton())
     if (showPeek)
       panel.append(this.buildPeekButton(count))
     if (showMenus)
@@ -204,6 +218,40 @@ export class FilterToolbar extends Unit {
       const next = !getMenusEnabled()
       setMenusEnabled(next)
       void options.set({ contextMenusEnabled: next })
+      sync()
+    })
+    sync()
+
+    return button
+  }
+
+  buildReaderButton(): HTMLElement {
+    // Optimistic local state so the pill flips instantly; the options change also
+    // triggers a re-run that rebuilds the toolbar (and (de)activates ReaderMode).
+    let on = this.options.readerMode
+    const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiBookOpenVariant /></span>
+    const text: HTMLElement = <span />
+    const button: HTMLButtonElement = (
+      <button type="button" class={BUTTON_CLASS} aria-pressed="false">
+        {icon}
+        {text}
+      </button>
+    ) as HTMLElement as HTMLButtonElement
+
+    const sync = () => {
+      // aria-pressed reads as the feature's on/off state (green when on).
+      button.setAttribute('aria-pressed', String(on))
+      text.textContent = on ? 'Disable reader mode' : 'Enable reader mode'
+      const label = on
+        ? 'Turn off reader mode (zoom + adjustable width) for this work'
+        : 'Turn on reader mode (zoom + adjustable width) for this work'
+      button.title = label
+      button.setAttribute('aria-label', label)
+    }
+
+    button.addEventListener('click', () => {
+      on = !on
+      void options.set({ readerMode: on })
       sync()
     })
     sync()
