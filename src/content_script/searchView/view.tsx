@@ -30,6 +30,8 @@ const ROOT = `${ADDON_CLASS}--search-view`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
 const HIDDEN_CLASS = cx('hidden')
 const ACTIVE_CLASS = cx('active')
+// Name tiebreaker for facet-row ordering; mirrors engine's value sort.
+const rowCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
 export interface SearchViewHandlers {
   /** Restore the native page (remove the aggregated view). */
@@ -190,6 +192,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     resultCountEl: HTMLElement
     /** Latest drill-down count, updated by syncFacets() and read for visibility. */
     count: number
+    /** Latest result count (works remaining if required), for row sorting. */
+    resultCount: number
     /** The require button, toggled disabled when requiring would empty results. */
     requireBtn: HTMLButtonElement
     buttons: { dir: FacetDir, btn: HTMLButtonElement }[]
@@ -198,11 +202,19 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     key: FacetKey
     details: HTMLElement
     countEl: HTMLElement
+    /** The container the value rows live in, re-ordered as counts/selection change. */
+    body: HTMLElement
     rows: FacetRowRef[]
     /** This group's value-filter box, if it's large enough to have one. */
     filter: HTMLInputElement | null
     /** Current text in this group's value filter. */
     query: string
+    /** Which count the rows are sorted by (secondary to selection-first). */
+    valueSort: 'count' | 'result'
+    /** Direction of the value-count sort. */
+    valueSortDir: 'asc' | 'desc'
+    /** Last row order applied to the DOM, to skip churn when it's unchanged. */
+    rowOrder: FacetRowRef[]
     /** The reorder arrows, disabled at the ends of the list. */
     upBtn: HTMLButtonElement
     downBtn: HTMLButtonElement
@@ -359,8 +371,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // Two counts: the drill-down count (what including this would surface) and,
     // in parentheses, how many of the *current* results have this value (what
     // requiring it would leave).
-    const countEl = (<span class={cx('row-count')} title="Results if you include this value">{String(count)}</span>) as HTMLElement
-    const resultCountEl = (<span class={cx('row-result-count')} title="Results remaining if you require this value">{`(${count})`}</span>) as HTMLElement
+    const countEl = (<span class={cx('row-count')} role="button" title="Results if you include this value — click to sort by this count">{String(count)}</span>) as HTMLElement
+    const resultCountEl = (<span class={cx('row-result-count')} role="button" title="Results remaining if you require this value — click to sort by this count">{`(${count})`}</span>) as HTMLElement
     const row = (
       <div class={cx('row')}>
         <span class={cx('row-toggles')}>
@@ -381,6 +393,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       countEl,
       resultCountEl,
       count,
+      resultCount: count,
       requireBtn: require,
       buttons: [{ dir: 'require', btn: require }, { dir: 'include', btn: include }, { dir: 'exclude', btn: exclude }],
     }
@@ -435,6 +448,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       }
       upBtn.addEventListener('click', onMove(-1))
       downBtn.addEventListener('click', onMove(1))
+      const bodyEl = (<div class={cx('group-body')}>{rows.map(r => r.row)}</div>) as HTMLElement
       const group = (
         <details class={cx('group')} open={!collapsed}>
           <summary class={cx('group-title')}>
@@ -449,10 +463,29 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
             </span>
           </summary>
           {filterInput}
-          <div class={cx('group-body')}>{rows.map(r => r.row)}</div>
+          {bodyEl}
         </details>
       ) as HTMLElement
-      const groupRef: FacetGroupRef = { key, details: group, countEl: groupCountEl, rows, filter: filterInput, query: savedQuery, upBtn, downBtn }
+      const groupRef: FacetGroupRef = {
+        key,
+        details: group,
+        countEl: groupCountEl,
+        body: bodyEl,
+        rows,
+        filter: filterInput,
+        query: savedQuery,
+        valueSort: 'count',
+        valueSortDir: 'desc',
+        rowOrder: rows,
+        upBtn,
+        downBtn,
+      }
+      // Clicking either count sorts the group's rows by that number (selection
+      // still floats to the top); clicking the active one flips direction.
+      for (const r of rows) {
+        r.countEl.addEventListener('click', () => setValueSort(groupRef, 'count'))
+        r.resultCountEl.addEventListener('click', () => setValueSort(groupRef, 'result'))
+      }
       filterInput?.addEventListener('input', () => {
         groupRef.query = filterInput.value
         applyGroupVisibility(groupRef)
@@ -525,6 +558,58 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   /**
+   * The group's rows in display order: values with any selection
+   * (require/include/exclude) float to the top, then the rest sort by the group's
+   * chosen count (drill-down or result) in its current direction, tie-broken by
+   * name. Selection-first is the primary key so the active tags stay reachable.
+   */
+  function orderedRows(group: FacetGroupRef): FacetRowRef[] {
+    const sel = state.facets[group.key]
+    const sign = group.valueSortDir === 'asc' ? 1 : -1
+    const isSelected = (r: FacetRowRef): boolean =>
+      sel.include.has(r.value) || sel.exclude.has(r.value) || sel.require.has(r.value)
+    const num = (r: FacetRowRef): number => group.valueSort === 'result' ? r.resultCount : r.count
+    return [...group.rows].sort((a, b) => {
+      const selDelta = (isSelected(a) ? 0 : 1) - (isSelected(b) ? 0 : 1)
+      if (selDelta !== 0)
+        return selDelta
+      return sign * (num(a) - num(b)) || rowCollator.compare(a.value, b.value)
+    })
+  }
+
+  /**
+   * Re-sort a group's value rows in the DOM (selection-first, then by the chosen
+   * count) and mark which count column is active. The row nodes are only moved
+   * when the order actually changed, so a render that doesn't disturb the order
+   * touches no DOM.
+   */
+  function applyRowOrder(group: FacetGroupRef): void {
+    group.body.classList.toggle(cx('sort-by-result'), group.valueSort === 'result')
+    group.body.classList.toggle(cx('sort-by-count'), group.valueSort === 'count')
+    const ordered = orderedRows(group)
+    const unchanged = ordered.length === group.rowOrder.length
+      && ordered.every((r, i) => group.rowOrder[i] === r)
+    if (unchanged)
+      return
+    group.rowOrder = ordered
+    group.body.replaceChildren(...ordered.map(r => r.row))
+  }
+
+  /**
+   * Switch a group's rows to sort by the clicked count; clicking the count that's
+   * already active flips its direction. Selection-first ordering is unaffected.
+   */
+  function setValueSort(group: FacetGroupRef, which: 'count' | 'result'): void {
+    if (group.valueSort === which)
+      group.valueSortDir = group.valueSortDir === 'desc' ? 'asc' : 'desc'
+    else {
+      group.valueSort = which
+      group.valueSortDir = 'desc'
+    }
+    applyRowOrder(group)
+  }
+
+  /**
    * Refresh the facet sidebar from precomputed drill-down counts: each value's
    * count and toggle state is synced, then {@link applyGroupVisibility} decides
    * what stays visible. Count writes are guarded so an unchanged row touches no
@@ -541,6 +626,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         if (row.countEl.textContent !== text)
           row.countEl.textContent = text
         const resultCount = groupResultCounts.get(row.value) ?? 0
+        row.resultCount = resultCount
         const resultText = `(${resultCount})`
         if (row.resultCountEl.textContent !== resultText)
           row.resultCountEl.textContent = resultText
@@ -560,6 +646,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
           }
         }
       }
+      applyRowOrder(group)
       applyGroupVisibility(group)
     }
   }
