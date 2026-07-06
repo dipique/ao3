@@ -844,6 +844,11 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.AO3E--search-view--row-name:hover {
+  text-decoration: underline;
 }
 
 .AO3E--search-view--row-count {
@@ -872,6 +877,11 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--search-view--sort-by-count .AO3E--search-view--row-count,
 .AO3E--search-view--sort-by-result .AO3E--search-view--row-result-count {
   opacity: 0.9;
+  font-weight: 600;
+}
+
+/* Bold the name when the group is sorted alphabetically (name is full-opacity). */
+.AO3E--search-view--sort-by-name .AO3E--search-view--row-name {
   font-weight: 600;
 }
 

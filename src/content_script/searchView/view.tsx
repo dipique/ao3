@@ -187,6 +187,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     /** Lowercased value, precomputed for the per-group "contains" filter. */
     lower: string
     row: HTMLElement
+    /** The value's name label — click to sort the group's rows alphabetically. */
+    nameEl: HTMLElement
     /** Drill-down count: results you'd get if you also *included* this value. */
     countEl: HTMLElement
     /** Result count: results remaining if you additionally *required* this value. */
@@ -210,9 +212,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     filter: HTMLInputElement | null
     /** Current text in this group's value filter. */
     query: string
-    /** Which count the rows are sorted by (secondary to selection-first). */
-    valueSort: 'count' | 'result'
-    /** Direction of the value-count sort. */
+    /** What the rows are sorted by (secondary to selection-first): a count or the name. */
+    valueSort: 'count' | 'result' | 'name'
+    /** Direction of the value sort. */
     valueSortDir: 'asc' | 'desc'
     /** Last row order applied to the DOM, to skip churn when it's unchanged. */
     rowOrder: FacetRowRef[]
@@ -374,6 +376,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // requiring it would leave).
     const countEl = (<span class={cx('row-count')} role="button" title="Results if you include this value — click to sort by this count">{String(count)}</span>) as HTMLElement
     const resultCountEl = (<span class={cx('row-result-count')} role="button" title="Results remaining if you require this value — click to sort by this count">{`(${count})`}</span>) as HTMLElement
+    // The full value is the tooltip (names truncate); it also acts as a button to
+    // sort the group's rows alphabetically, mirroring the click-to-sort counts.
+    const nameEl = (<span class={cx('row-name')} role="button" title={`${value} — click to sort by name`}>{value}</span>) as HTMLElement
     const row = (
       <div class={cx('row')}>
         <span class={cx('row-toggles')}>
@@ -381,7 +386,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
           {include}
           {exclude}
         </span>
-        <span class={cx('row-name')} title={value}>{value}</span>
+        {nameEl}
         {countEl}
         {resultCountEl}
       </div>
@@ -391,6 +396,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       value,
       lower: value.toLowerCase(),
       row,
+      nameEl,
       countEl,
       resultCountEl,
       count,
@@ -495,9 +501,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         upBtn,
         downBtn,
       }
-      // Clicking either count sorts the group's rows by that number (selection
-      // still floats to the top); clicking the active one flips direction.
+      // Clicking either count sorts the group's rows by that number, and clicking
+      // a name sorts them alphabetically (selection still floats to the top);
+      // clicking the active one flips direction.
       for (const r of rows) {
+        r.nameEl.addEventListener('click', () => setValueSort(groupRef, 'name'))
         r.countEl.addEventListener('click', () => setValueSort(groupRef, 'count'))
         r.resultCountEl.addEventListener('click', () => setValueSort(groupRef, 'result'))
       }
@@ -575,8 +583,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   /**
    * The group's rows in display order: values with any selection
    * (require/include/exclude) float to the top, then the rest sort by the group's
-   * chosen count (drill-down or result) in its current direction, tie-broken by
-   * name. Selection-first is the primary key so the active tags stay reachable.
+   * chosen key — a count (drill-down or result), tie-broken by name, or the name
+   * itself — in its current direction. Selection-first is the primary key so the
+   * active tags stay reachable.
    */
   function orderedRows(group: FacetGroupRef): FacetRowRef[] {
     const sel = state.facets[group.key]
@@ -588,6 +597,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       const selDelta = (isSelected(a) ? 0 : 1) - (isSelected(b) ? 0 : 1)
       if (selDelta !== 0)
         return selDelta
+      if (group.valueSort === 'name')
+        return sign * rowCollator.compare(a.value, b.value)
       return sign * (num(a) - num(b)) || rowCollator.compare(a.value, b.value)
     })
   }
@@ -601,6 +612,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   function applyRowOrder(group: FacetGroupRef): void {
     group.body.classList.toggle(cx('sort-by-result'), group.valueSort === 'result')
     group.body.classList.toggle(cx('sort-by-count'), group.valueSort === 'count')
+    group.body.classList.toggle(cx('sort-by-name'), group.valueSort === 'name')
     const ordered = orderedRows(group)
     const unchanged = ordered.length === group.rowOrder.length
       && ordered.every((r, i) => group.rowOrder[i] === r)
@@ -611,15 +623,18 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   /**
-   * Switch a group's rows to sort by the clicked count; clicking the count that's
-   * already active flips its direction. Selection-first ordering is unaffected.
+   * Switch a group's rows to sort by the clicked column (a count or the name);
+   * clicking the one that's already active flips its direction. A fresh switch
+   * starts descending for counts (highest first) but ascending for the name
+   * (A→Z). Selection-first ordering is unaffected.
    */
-  function setValueSort(group: FacetGroupRef, which: 'count' | 'result'): void {
-    if (group.valueSort === which)
+  function setValueSort(group: FacetGroupRef, which: 'count' | 'result' | 'name'): void {
+    if (group.valueSort === which) {
       group.valueSortDir = group.valueSortDir === 'desc' ? 'asc' : 'desc'
+    }
     else {
       group.valueSort = which
-      group.valueSortDir = 'desc'
+      group.valueSortDir = which === 'name' ? 'asc' : 'desc'
     }
     applyRowOrder(group)
   }

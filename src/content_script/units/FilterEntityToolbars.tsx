@@ -7,7 +7,7 @@ import MdiStar from '~icons/mdi/star.jsx'
 
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchToken, getArchiveLink, options, toast } from '#common'
+import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchAndParseDocument, fetchToken, getArchiveLink, options, toast } from '#common'
 import {
   attachMenuTrigger,
   buildIndicators,
@@ -33,7 +33,13 @@ interface EntityEntry {
 // to it this page load.
 // ---------------------------------------------------------------------------
 
-interface MarkState { saved: boolean, busy: boolean }
+/**
+ * Per-work Marked-for-Later state. `known` marks a state we actually trust — set
+ * once a work has been seeded (a listing that knows its works are saved), acted
+ * on this session, or checked via {@link fetchWorkMarkState}. Until then the menu
+ * treats the state as unknown and checks it on open rather than assuming un-saved.
+ */
+interface MarkState { saved: boolean, busy: boolean, known: boolean }
 const markState = new Map<string, MarkState>()
 
 /**
@@ -48,8 +54,31 @@ export function seedMarkedForLater(workIds: Iterable<string>): void {
   for (const id of workIds) {
     if (markState.get(id)?.busy)
       continue
-    markState.set(id, { saved: true, busy: false })
+    markState.set(id, { saved: true, busy: false, known: true })
   }
+}
+
+/**
+ * Read a work's Marked-for-Later state from its fetched page. The work header
+ * renders one mark button whose form action is `/works/:id/mark_as_read` when the
+ * work is already marked for later, or `/works/:id/mark_for_later` when it isn't.
+ * Returns null when neither is present (e.g. logged out or the markup changed).
+ */
+export function parseMarkedForLater(doc: Document): boolean | null {
+  const form = doc.querySelector('form.button_to[action*="/mark_as_read"], form.button_to[action*="/mark_for_later"]')
+  const action = form?.getAttribute('action') ?? ''
+  if (action.includes('/mark_as_read'))
+    return true
+  if (action.includes('/mark_for_later'))
+    return false
+  return null
+}
+
+/** Fetch a work page and read its current Marked-for-Later state. */
+async function fetchWorkMarkState(workId: string): Promise<boolean | null> {
+  // view_adult skips the adult-content interstitial, which omits the mark button.
+  const doc = await fetchAndParseDocument(getArchiveLink(`/works/${workId}?view_adult=true`))
+  return parseMarkedForLater(doc)
 }
 
 /** The page's own CSRF token, present in the head of any AO3 page. */
@@ -170,19 +199,79 @@ abstract class FilterEntityToolbar extends Unit {
       })
     }
 
-    if (this.markEnabled()) {
-      const state = markState.get(id) ?? { saved: false, busy: false }
-      items.push({
-        icon: () => (state.saved ? <MdiClockCheck /> : <MdiClockPlusOutline />),
-        label: state.saved ? 'Mark as read' : 'Mark for later',
-        separatorBefore: true,
-        disabled: state.busy,
-        onSelect: () => this.onMark(id),
-      })
-    }
+    if (this.markEnabled())
+      items.push(this.markItem(id))
 
     items.push(...standardLinkItems(link))
     return items
+  }
+
+  /**
+   * The Mark for Later / Mark as Read row. When the work's saved state is already
+   * known (acted on this session, or seeded by a listing that knows its works are
+   * saved — the Search Marked for Later view), it renders directly. Otherwise it
+   * renders a disabled "Checking…" placeholder that opens *with* the menu and
+   * patches itself once a background fetch of the work page reveals the real
+   * state — so opening the menu never waits on the network.
+   */
+  private markItem(id: string): MenuItem {
+    const known = markState.get(id)
+    if (known?.known)
+      return this.markAction(id, known.saved, known.busy)
+    return {
+      icon: () => <MdiClockPlusOutline />,
+      label: 'Checking Marked for Later…',
+      separatorBefore: true,
+      disabled: true,
+      resolve: async () => {
+        const saved = await this.checkMarked(id)
+        if (saved === null)
+          return { icon: () => <MdiClockPlusOutline />, label: 'Mark for later (unavailable)', disabled: true }
+        return this.markAction(id, saved, markState.get(id)?.busy ?? false)
+      },
+    }
+  }
+
+  /** The resolved, actionable Mark for Later / Mark as Read row. */
+  private markAction(id: string, saved: boolean, busy: boolean): MenuItem {
+    return {
+      icon: () => (saved ? <MdiClockCheck /> : <MdiClockPlusOutline />),
+      label: saved ? 'Mark as read' : 'Mark for later',
+      separatorBefore: true,
+      disabled: busy,
+      onSelect: () => this.onMark(id),
+    }
+  }
+
+  /**
+   * Fetch the work page to read its current Marked-for-Later state, record it in
+   * the shared session state (unless a toggle is mid-flight), and refresh the
+   * saved-clock indicator on every blurb showing this work. Returns the saved
+   * state, or null if it couldn't be determined.
+   */
+  private async checkMarked(id: string): Promise<boolean | null> {
+    let saved: boolean | null
+    try {
+      saved = await fetchWorkMarkState(id)
+    }
+    catch (err) {
+      this.logger.warn(`Could not load Marked for Later state for work ${id}.`, err)
+      return null
+    }
+    if (saved === null)
+      return null
+    const state = markState.get(id) ?? { saved: false, busy: false, known: false }
+    // A toggle in flight is the freshest intent — don't overwrite it.
+    if (state.busy)
+      return state.saved
+    state.saved = saved
+    state.known = true
+    markState.set(id, state)
+    for (const entry of this.entries) {
+      if (entry.id === id)
+        this.syncIndicator(entry)
+    }
+    return saved
   }
 
   protected computeStates(id: string): IndicatorState[] {
@@ -211,7 +300,7 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   async onMark(id: string): Promise<void> {
-    const state = markState.get(id) ?? { saved: false, busy: false }
+    const state = markState.get(id) ?? { saved: false, busy: false, known: false }
     if (state.busy)
       return
     const save = !state.saved
@@ -220,6 +309,8 @@ abstract class FilterEntityToolbar extends Unit {
     try {
       await submitMark(id, save)
       state.saved = save
+      // We now know this work's state first-hand, so future opens skip the check.
+      state.known = true
       toast(
         save ? 'Saved for later.' : 'Marked as read — removed from your Marked for Later list.',
         { type: 'success' },
