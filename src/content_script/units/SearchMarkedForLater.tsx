@@ -6,7 +6,7 @@ import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.ts'
 import { detectPageCount, scrapeListing } from '#content_script/searchView/scrape.ts'
 import { createSearchView, type SearchView, type SearchViewConfig, type ViewState } from '#content_script/searchView/view.tsx'
 import { Unit } from '#content_script/Unit.js'
-import { submitMark } from '#content_script/units/FilterEntityToolbars.tsx'
+import { seedMarkedForLater, submitMark } from '#content_script/units/FilterEntityToolbars.tsx'
 import React from '#dom'
 
 const FEATURE = `${ADDON_CLASS}--search-marked-for-later`
@@ -113,6 +113,9 @@ async function refresh(userId: string, view: SearchView): Promise<void> {
     if (controller.signal.aborted)
       return
     await writeSnapshot(snapshotKey(userId), result.works)
+    // Every work here is marked for later — keep the work menu's saved state in
+    // step with the refreshed set before it re-decorates the blurbs.
+    seedMarkedForLater(result.works.map(w => w.workId))
     view.update(result.works)
     if (result.loadedPages < result.totalPages)
       toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
@@ -257,6 +260,10 @@ export class SearchMarkedForLater extends Unit {
 
       const cached = await readSnapshot(key)
       if (cached && cached.works.length) {
+        // Every work in this list is by definition marked for later; seed the
+        // shared session state before the view decorates the blurbs so the work
+        // menu offers "Mark as read" and shows the saved indicator.
+        seedMarkedForLater(cached.works.map(w => w.workId))
         // Render instantly from cache, then refresh in the background (unless the
         // caller knows the cache is fresh, e.g. a reopen right after a re-run).
         const view = createSearchView(cached.works, handlers, config)
@@ -287,6 +294,7 @@ export class SearchMarkedForLater extends Unit {
           teardown()
           return
         }
+        seedMarkedForLater(result.works.map(w => w.workId))
         const view = createSearchView(result.works, handlers, config)
         activeView = view
         activeUserId = userId

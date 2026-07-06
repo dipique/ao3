@@ -65,6 +65,8 @@
       <OptionSearchPerPage />
     </OptionRow>
     <OptionDivider />
+    <OptionRowSearchLanguage />
+    <OptionDivider />
     <OptionRowFandomExport />
   </OptionCategory>
 </template>

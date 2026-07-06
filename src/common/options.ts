@@ -72,6 +72,13 @@ export interface Options {
   searchMarkedForLater: boolean
   /** How many works to render per page in the Search Marked for Later view (paging keeps large lists fast). */
   searchPerPage: number
+  /**
+   * Auto-select a default language in AO3's Sort & Filter Language dropdown
+   * (works/bookmark listings and the advanced search page). Only applied when no
+   * language is already chosen, so a language already in the URL is respected.
+   * `language` null = none set.
+   */
+  searchLanguage: { enabled: boolean, language: Language | null }
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -133,6 +140,7 @@ export const options = createStorage<Options>({
     openMenuOnClick: false,
     searchMarkedForLater: true,
     searchPerPage: 50,
+    searchLanguage: { enabled: false, language: null },
 
     styleWidthEnabled: true,
     styleWidth: 40,

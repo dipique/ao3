@@ -1,6 +1,7 @@
 import type { Unit } from '#content_script/Unit.js'
 
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
+import { DefaultSearchLanguage } from './DefaultSearchLanguage.ts'
 import { FandomToolbar } from './FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from './FilterEntityToolbars.tsx'
 import { FilterToolbar } from './FilterToolbar.tsx'
@@ -33,6 +34,7 @@ export const UNITS = [
   HighlightWorks,
   HighlightSeries,
   CompressSearchUrls,
+  DefaultSearchLanguage,
   // The context-menu decorators. Subscribe/mute/mark-for-later were folded into
   // the author and work menus, so they're no longer separate units.
   TagToolbar,

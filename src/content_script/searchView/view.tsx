@@ -174,8 +174,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // Blurbs already run through config.decorateBlurb, so each is decorated at most
   // once (and only when first shown). A WeakSet so replaced works are forgotten.
   const decorated = new WeakSet<HTMLElement>()
-  // Restore the per-group facet UI (filter text, collapsed groups) once, on the
-  // first build; later rebuilds (a refresh) start the facet UI fresh.
+  // The per-group facet UI (filter text, collapsed groups) is restored from the
+  // saved snapshot/prefs only once, on the first build. Later rebuilds (a
+  // refresh) instead carry over the live on-screen state (see renderFacets).
   let facetUiRestored = false
 
   // Registry of facet rows, rebuilt whenever the facet list changes, so render()
@@ -400,13 +401,24 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   function renderFacets(): void {
+    // Before discarding the current groups, snapshot their live collapse/filter
+    // state so a rebuild (a background refresh) preserves what the user has on
+    // screen instead of resetting every group to open with empty filters.
+    const liveCollapsed = new Set<FacetKey>()
+    const liveQueries = new Map<FacetKey, string>()
+    for (const group of facetGroups) {
+      if (!(group.details as HTMLDetailsElement).open)
+        liveCollapsed.add(group.key)
+      if (group.query)
+        liveQueries.set(group.key, group.query)
+    }
     facetGroups = []
     // Row identity/order is fixed from the full set; render() updates the live
     // drill-down counts and hides rows that no longer match the active filter.
     const facets = buildFacets(works)
-    // Restore the saved facet UI only on the first build; consume it. An in-memory
-    // reopen (initialState) wins; otherwise the persisted local prefs seed the
-    // collapsed groups on a fresh open.
+    // Seed the facet UI: the first build restores from the saved snapshot (an
+    // in-memory reopen via initialState wins, else the persisted local prefs);
+    // later rebuilds (a refresh) carry over the live on-screen state captured above.
     const firstBuild = !facetUiRestored
     const restore = firstBuild ? config.initialState : null
     const prefCollapsed = firstBuild && !restore ? new Set(config.prefs?.collapsed ?? []) : null
@@ -422,13 +434,16 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       const filterInput = values.length > FACET_FILTER_THRESHOLD
         ? (<input type="search" class={cx('group-filter')} placeholder={`Filter ${label}…`} aria-label={`Filter ${FACET_LABELS[key]}`} />) as HTMLElement as HTMLInputElement
         : null
-      // Apply any restored filter text / collapsed state for this group.
-      const savedQuery = filterInput ? (restore?.facetQueries[key] ?? '') : ''
+      // Apply the filter text / collapsed state for this group: on the first
+      // build from the saved snapshot/prefs, on a rebuild from the live state.
+      const savedQuery = filterInput
+        ? (firstBuild ? (restore?.facetQueries[key] ?? '') : (liveQueries.get(key) ?? ''))
+        : ''
       if (filterInput)
         filterInput.value = savedQuery
-      const collapsed = restore
-        ? restore.collapsedFacets.includes(key)
-        : (prefCollapsed?.has(key) ?? false)
+      const collapsed = firstBuild
+        ? (restore ? restore.collapsedFacets.includes(key) : (prefCollapsed?.has(key) ?? false))
+        : liveCollapsed.has(key)
       const upBtn = (
         <button type="button" class={`${cx('group-move')}  ${cx('group-move-up')}`} title={`Move ${FACET_LABELS[key]} up`} aria-label={`Move ${FACET_LABELS[key]} up`}>
           <MdiChevronUp />

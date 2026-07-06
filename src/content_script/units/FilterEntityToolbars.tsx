@@ -36,6 +36,22 @@ interface EntityEntry {
 interface MarkState { saved: boolean, busy: boolean }
 const markState = new Map<string, MarkState>()
 
+/**
+ * Seed the shared session mark-for-later state for works already known to be
+ * saved. The state normally starts empty (it can't be read from a blurb), but
+ * some listings know every work on them is marked for later — the Search Marked
+ * for Later view above all — so seeding lets the work menu offer "Mark as read"
+ * (not "Mark for later") and show the saved-clock indicator from the first
+ * render. A work mid-request (busy) is left untouched.
+ */
+export function seedMarkedForLater(workIds: Iterable<string>): void {
+  for (const id of workIds) {
+    if (markState.get(id)?.busy)
+      continue
+    markState.set(id, { saved: true, busy: false })
+  }
+}
+
 /** The page's own CSRF token, present in the head of any AO3 page. */
 function pageToken(): string | null {
   return document.querySelector('meta[name="csrf-token"]')?.content ?? null
