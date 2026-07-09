@@ -50,6 +50,7 @@ export type SortKey
     | 'updated'
     | 'words'
     | 'kudos'
+    | 'kudosPct'
     | 'hits'
     | 'comments'
     | 'bookmarks'
@@ -61,6 +62,7 @@ export const SORT_LABELS: Record<SortKey, string> = {
   updated: 'Date updated',
   words: 'Word count',
   kudos: 'Kudos',
+  kudosPct: 'Kudos %',
   hits: 'Hits',
   comments: 'Comments',
   bookmarks: 'Bookmarks',
@@ -191,6 +193,11 @@ export function matches(work: Work, f: FilterState, ignoreKey?: FacetKey): boole
 
 const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
+/** Kudos-to-hits ratio; 0 when a work has no hits (mirrors the blurb's Stats display). */
+function kudosRatio(w: Work): number {
+  return w.hits > 0 ? w.kudos / w.hits : 0
+}
+
 function compareKey(a: Work, b: Work, sort: SortKey): number {
   switch (sort) {
     case 'marked': return a.markedOrder - b.markedOrder
@@ -199,6 +206,8 @@ function compareKey(a: Work, b: Work, sort: SortKey): number {
     case 'updated': return a.dateUpdated - b.dateUpdated
     case 'words': return a.words - b.words
     case 'kudos': return a.kudos - b.kudos
+    // Kudos as a share of hits (kudos/hits); no hits ⇒ 0, so unread works sort last.
+    case 'kudosPct': return kudosRatio(a) - kudosRatio(b)
     case 'hits': return a.hits - b.hits
     case 'comments': return a.comments - b.comments
     case 'bookmarks': return a.bookmarks - b.bookmarks
