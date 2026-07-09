@@ -19,9 +19,13 @@ import { clearEntityBehavior, entityBehavior, type EntityOptionKey, toggleEntity
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
-/** A decorated work/series link and the indicator currently shown after it. */
+/**
+ * A decorated work/series entity and the indicator currently shown after it.
+ * `link` is usually the blurb/series link, but on an individual work page it's the
+ * bare `<h2>` title (not a link) — see {@link workPageTitle}.
+ */
 interface EntityEntry {
-  link: HTMLAnchorElement
+  link: HTMLElement
   id: string
   indicator: HTMLElement | null
 }
@@ -128,9 +132,9 @@ abstract class FilterEntityToolbar extends Unit {
    * id and the link the menu/indicator hang off. Works use the blurb title;
    * series use each series link.
    */
-  protected links(): { id: string, link: HTMLAnchorElement }[] {
+  protected links(): { id: string, link: HTMLElement }[] {
     const idRe = new RegExp(`^/${this.kind}/(\\d+)(?:/|$)`)
-    const out: { id: string, link: HTMLAnchorElement }[] = []
+    const out: { id: string, link: HTMLElement }[] = []
     const selector = this.kind === 'works'
       ? '.blurb .header h4.heading a[href*="/works/"]'
       : 'a[href*="/series/"]'
@@ -161,7 +165,7 @@ abstract class FilterEntityToolbar extends Unit {
     this.logger.debug(`Added ${this.noun} menus to ${this.entries.length} links.`)
   }
 
-  async buildMenu(id: string, link: HTMLAnchorElement): Promise<MenuItem[]> {
+  async buildMenu(id: string, link: HTMLElement): Promise<MenuItem[]> {
     // Read the freshest filters so the checked state is current.
     const { filters } = await options.get(this.optionKey)
     const behavior = entityBehavior(filters, id)
@@ -202,7 +206,9 @@ abstract class FilterEntityToolbar extends Unit {
     if (this.markEnabled())
       items.push(this.markItem(id))
 
-    items.push(...standardLinkItems(link))
+    // The work-page title isn't a link, so the copy/open-link rows don't apply.
+    if (link instanceof HTMLAnchorElement)
+      items.push(...standardLinkItems(link))
     return items
   }
 
@@ -294,9 +300,22 @@ abstract class FilterEntityToolbar extends Unit {
     else if (entry.indicator && !next)
       entry.indicator.remove()
     else if (!entry.indicator && next)
-      entry.link.after(next)
+      this.insertIndicator(entry, next)
 
     entry.indicator = next
+  }
+
+  /**
+   * Place a freshly built indicator relative to its anchor. Blurb/series titles are
+   * links, so the indicator sits right after them, inline in the heading. The work
+   * page's own title is a bare `<h2>` block — append inside it so the indicator
+   * stays on the title's line instead of dropping to the next.
+   */
+  protected insertIndicator(entry: EntityEntry, indicator: HTMLElement): void {
+    if (entry.link instanceof HTMLAnchorElement)
+      entry.link.after(indicator)
+    else
+      entry.link.append(indicator)
   }
 
   async onMark(id: string): Promise<void> {
@@ -335,6 +354,19 @@ abstract class FilterEntityToolbar extends Unit {
 const workEntries: EntityEntry[] = []
 const seriesEntries: EntityEntry[] = []
 
+/** The work id from a `/works/:id` URL, or null when we're not on a work page. */
+function workPageId(): string | null {
+  return location.pathname.match(/^\/works\/(\d+)(?:\/|$)/)?.[1] ?? null
+}
+
+/**
+ * The individual work page's own title heading — a bare `<h2>`, not a link, so the
+ * blurb-link selector misses it. Null on any other page.
+ */
+function workPageTitle(root: ParentNode): HTMLElement | null {
+  return root.querySelector<HTMLElement>('#workskin > .preface.group > h2.title.heading')
+}
+
 export class FilterWorkToolbar extends FilterEntityToolbar {
   static override get name() { return 'FilterWorkToolbar' }
 
@@ -351,6 +383,42 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   protected override markEnabled(): boolean {
     // Marking needs a logged-in session, and only when the feature is enabled.
     return this.options.markForLaterToolbar && document.body.classList.contains('logged-in')
+  }
+
+  override async ready(): Promise<void> {
+    this.seedWorkPageMark()
+    await super.ready()
+  }
+
+  /**
+   * On the blurb-less work page the title link doesn't exist, so decorate the
+   * page's own `<h2>` title with the same work menu (and indicator).
+   */
+  protected override links(): { id: string, link: HTMLElement }[] {
+    const found = super.links()
+    const title = workPageTitle(this.root)
+    const id = workPageId()
+    if (title && id)
+      found.push({ id, link: title })
+    return found
+  }
+
+  /**
+   * The work page carries its own Mark for Later / Mark as Read button, so read the
+   * saved state straight from it — no background page-fetch the way a blurb needs.
+   * Seeded before {@link ready} builds the menu so the title's action label and
+   * saved indicator are right from the first render.
+   */
+  private seedWorkPageMark(): void {
+    if (!this.markEnabled())
+      return
+    const id = workPageId()
+    // Don't clobber a toggle already in flight for this work this session.
+    if (!id || markState.get(id)?.busy)
+      return
+    const saved = parseMarkedForLater(document)
+    if (saved !== null)
+      markState.set(id, { saved, busy: false, known: true })
   }
 
   static override async clean(): Promise<void> {
