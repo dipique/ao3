@@ -257,7 +257,9 @@ async function pull(): Promise<void> {
   // Back up the pre-pull state, then apply only the keys that actually change.
   await maybeDailyBackup()
   const current = await options.get()
-  const desired = buildLocalUpdate(result.options, options.defaults, current)
+  // `remote.k` tells us which options the writing device knew about, so a device
+  // on an older build can't silently reset (and wipe) ones it has never heard of.
+  const desired = buildLocalUpdate(result.options, options.defaults, current, remote?.k)
   const update = diffOptions(current, desired)
   if (Object.keys(update).length)
     await options.set(update)

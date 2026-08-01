@@ -1,6 +1,6 @@
 import type { Unit } from '#content_script/Unit.js'
 
-import { CaptureMarkAsRead } from './CaptureMarkAsRead.ts'
+import { CaptureMarkButtons } from './CaptureMarkButtons.ts'
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { DefaultSearchLanguage } from './DefaultSearchLanguage.ts'
 import { FandomToolbar } from './FandomToolbar.tsx'
@@ -36,7 +36,7 @@ export const UNITS = [
   HighlightSeries,
   CompressSearchUrls,
   DefaultSearchLanguage,
-  CaptureMarkAsRead,
+  CaptureMarkButtons,
   // The context-menu decorators. Subscribe/mute/mark-for-later were folded into
   // the author and work menus, so they're no longer separate units.
   TagToolbar,

@@ -162,6 +162,17 @@ dd.finish-at {
   font-weight: 600;
 }
 
+/* Icon before a reason group's label (currently just "Read"). Matches the
+   indicator colour that sits next to an un-hidden work's title, so the same
+   state reads the same either side of being collapsed. */
+.AO3E--hide-works--reason-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.25em;
+  color: #6b7280;
+  vertical-align: middle;
+}
+
 /* Each matched value carries the rule on hover (native title tooltip). */
 .AO3E--hide-works--reason-value {
   cursor: help;
@@ -496,11 +507,6 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   gap: 0.15em;
   margin-left: 0.05em;
 
-  /* These are status affordances, not text. Sizing them in `rem` decouples them
-     from whatever font-size they were dropped into — inheriting `em` made them
-     balloon inside a work page's <h2> title (and on skins with large headings),
-     where they ended up as tall as the title itself. */
-  font-size: 1rem;
   line-height: 1;
 
   /* Centres the row on the text's midline rather than sitting it on the
@@ -515,10 +521,23 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   line-height: 1;
 }
 
-/* AO3's skin sizes and offsets bare `svg`s in places, so pin ours explicitly. */
+/* The `em` half tracks the surrounding text, so reader mode still scales these:
+   it sets a font-size on `#workskin`, and the work title lives inside it, so a
+   plain `rem` size froze the icons while the work grew around them. The factor
+   keeps them near the text's cap height rather than the full em box — matching
+   the title's size outright is what made them as tall as the title itself.
+
+   The `rem` floor stops them shrinking in the smaller headings on listings,
+   where 0.75em would only be ~12px. Net effect: ~16px in a blurb, ~18px on a
+   work title, and growing from there as reader mode zooms.
+
+   Tuning note: raise/lower the 0.75 to taste — it is the size relative to
+   whatever heading the indicator sits in.
+
+   `!important` because AO3's skin sizes and offsets bare `svg`s. */
 .AO3E--indicator > svg {
-  width: 1.15em !important;
-  height: 1.15em !important;
+  width: max(0.75em, 1rem) !important;
+  height: max(0.75em, 1rem) !important;
   top: 0 !important;
   vertical-align: middle;
 }

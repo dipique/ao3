@@ -46,6 +46,14 @@ export interface Manifest {
   h: string
   /** writer token for compare-after-write conflict detection */
   w: string
+  /**
+   * The option keys the writing device knew about. Lets a reader tell "absent
+   * because it equals the default" from "absent because that device has never
+   * heard of it" — see {@link buildLocalUpdate}. Optional: payloads written
+   * before this field existed don't carry it, and older readers ignore it (which
+   * is why adding it doesn't need a schema-version bump).
+   */
+  k?: string[]
 }
 
 export type DecodeResult
@@ -74,17 +82,49 @@ export function pruneToSynced(options: Options, defaults: Options): Partial<Opti
 }
 
 /**
- * Rebuild the full local options from a pruned synced payload: defaults overlaid
- * with synced values (so keys absent from the payload are reset to default),
- * while preserving device-local fields (`theme.current`, `user`, `verbose`) from
- * what's already on this device.
+ * Rebuild the full local options from a pruned synced payload: synced values
+ * applied over what's on this device, with keys absent from the payload reset to
+ * their default — and device-local fields (`theme.current`, `user`, `verbose`)
+ * always kept from this device.
+ *
+ * `writerKeys` is the manifest's {@link Manifest.k}. "Absent from the payload"
+ * only means "equals the default" for keys the writing device actually knew
+ * about: a device on an older build prunes against its own, smaller set of
+ * defaults, so an option it has never heard of is missing for an entirely
+ * different reason. Resetting those wiped real data — a whole read-marks list,
+ * and the switch that turns the feature on — every time the older device synced.
+ *
+ * With no key list (a payload written before `k` existed) the two cases are
+ * indistinguishable, so absent keys are left alone. A stale setting is
+ * recoverable; a deleted list of everything you've read is not. The cost is that
+ * a reset-to-default made on such a device stops propagating until it updates.
  */
-export function buildLocalUpdate(pruned: Partial<Options>, defaults: Options, existing: Options): Options {
-  const out = { ...defaults, ...pruned } as Options
+export function buildLocalUpdate(
+  pruned: Partial<Options>,
+  defaults: Options,
+  existing: Options,
+  writerKeys?: string[],
+): Options {
+  const known = writerKeys ? new Set(writerKeys) : null
+  const out = { ...existing } as Options
+  for (const key of Object.keys(defaults) as (keyof Options)[]) {
+    // theme is rebuilt below; the local-only keys always come from this device.
+    if (LOCAL_ONLY.has(key) || key === 'theme')
+      continue
+    if (key in pruned)
+      (out as Record<string, unknown>)[key] = pruned[key]
+    else if (known?.has(key))
+      (out as Record<string, unknown>)[key] = defaults[key]
+  }
   out.theme = { ...defaults.theme, ...(pruned.theme ?? {}), current: existing.theme.current }
   for (const key of LOCAL_ONLY)
     (out as Record<string, unknown>)[key] = existing[key]
   return out
+}
+
+/** The option keys a device writes into {@link Manifest.k} — everything it syncs. */
+export function syncedKeys(defaults: Options): string[] {
+  return (Object.keys(defaults) as (keyof Options)[]).filter(k => !LOCAL_ONLY.has(k)).sort()
 }
 
 /** Recursively key-sorted JSON — order-independent so identical data hashes identically across devices. */
@@ -174,7 +214,7 @@ export async function encode(
   for (let i = 0; i < n; i++)
     chunks[`${CHUNK_PREFIX}${i}`] = b64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
 
-  return { chunks, manifest: { v: SYNC_SCHEMA_VERSION, n, g: generation, h, w: token } }
+  return { chunks, manifest: { v: SYNC_SCHEMA_VERSION, n, g: generation, h, w: token, k: syncedKeys(defaults) } }
 }
 
 /**

@@ -27,6 +27,10 @@ function installMock() {
     clear: () => { stores[name] = {}; return Promise.resolve() },
   })
   const browser = {
+    // Present in every live extension context. storage.ts reads it to tell a
+    // working context from an orphaned one (a content script whose extension was
+    // reloaded), and goes inert without it — so the mock has to carry it.
+    runtime: { id: 'test' },
     storage: {
       local: area('local'),
       sync: area('sync'),
@@ -81,5 +85,76 @@ describe('createStorage honors the configured area', () => {
     assert.deepEqual(seen, [{ a: 200 }], 'sync change must notify a sync-area store')
 
     store.removeListener(() => {})
+  })
+})
+
+describe('createStorage survives an orphaned extension context', () => {
+  let createStorage, mock
+
+  before(async () => {
+    mock = installMock()
+    ;({ createStorage } = await import('../../src/common/storage.ts'))
+  })
+
+  /** Reproduce a reloaded extension: runtime.id goes, every call rejects. */
+  function orphan() {
+    const restore = { id: globalThis.browser.runtime.id, local: globalThis.browser.storage.local }
+    globalThis.browser.runtime.id = undefined
+    const dead = () => Promise.reject(new Error('Extension context invalidated.'))
+    globalThis.browser.storage.local = { get: dead, set: dead, remove: dead, clear: dead }
+    return () => {
+      globalThis.browser.runtime.id = restore.id
+      globalThis.browser.storage.local = restore.local
+    }
+  }
+
+  test('get() falls back to defaults instead of rejecting', async () => {
+    const store = createStorage({ area: 'local', name: 'T', prefix: 'o.', defaults: { a: 1, b: 'x' } })
+    const restore = orphan()
+    try {
+      assert.deepEqual(await store.get(), { a: 1, b: 'x' })
+      assert.equal(await store.get('a'), 1)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('set() is dropped instead of rejecting', async () => {
+    const store = createStorage({ area: 'local', name: 'T', prefix: 'o.', defaults: { a: 1 } })
+    const restore = orphan()
+    try {
+      await store.set({ a: 99 })
+    }
+    finally {
+      restore()
+    }
+    assert.equal('o.a' in mock.stores.local, false, 'nothing should have been written')
+  })
+
+  test('subscribing does not throw', async () => {
+    const store = createStorage({ area: 'local', name: 'T', prefix: 'o.', defaults: { a: 1 } })
+    const restore = orphan()
+    try {
+      store.addListener(() => {})
+      store.removeListener(() => {})
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('a real storage failure still surfaces', async () => {
+    // Only the invalidated-context error is swallowed — a genuine bug must not
+    // be quietly turned into "here are your defaults".
+    const store = createStorage({ area: 'local', name: 'T', prefix: 'o.', defaults: { a: 1 } })
+    const real = globalThis.browser.storage.local
+    globalThis.browser.storage.local = { ...real, get: () => Promise.reject(new Error('QUOTA_BYTES exceeded')) }
+    try {
+      await assert.rejects(() => store.get(), /QUOTA_BYTES/)
+    }
+    finally {
+      globalThis.browser.storage.local = real
+    }
   })
 })

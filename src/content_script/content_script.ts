@@ -1,6 +1,6 @@
 import { debounce } from '@antfu/utils'
 
-import { ADDON_CLASS, api, logger, options, toast } from '#common'
+import { ADDON_CLASS, api, isExtensionContextValid, logger, options, toast } from '#common'
 
 import { setMenusEnabled } from './contextTrigger.tsx'
 import { UNITS } from './units/index.ts'
@@ -24,6 +24,17 @@ async function clean() {
 }
 
 async function run() {
+  // Bail before touching the page if the extension was reloaded, updated, or
+  // disabled under this tab. Storage answers from defaults once that happens
+  // (see `#common/extensionContext`), so re-running here would re-render every
+  // unit with default settings — silently undoing the reader's filters on a page
+  // that looked fine a moment ago. Leaving the page as-is is the honest option;
+  // a reload reconnects it.
+  if (!isExtensionContextValid()) {
+    logger.warn('Extension context is gone (reloaded or updated) — leaving this page as it is. Reload to reconnect.')
+    return
+  }
+
   const opts = await options.get()
   // Seed the context-menu enable flag before any unit decorates the page.
   setMenusEnabled(opts.contextMenusEnabled)

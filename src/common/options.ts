@@ -22,7 +22,18 @@ export interface Options {
   hideShowReason: boolean
   hideShowMatchedValues: boolean
   hideCrossovers: { enabled: boolean, maxFandoms: number }
-  hideLanguages: { enabled: boolean, show: Language[] }
+  hideLanguages: {
+    enabled: boolean
+    show: Language[]
+    /**
+     * Also pre-select this language in AO3's own Sort & Filter dropdown, so the
+     * archive filters server-side instead of us hiding the results after they
+     * arrive. Only meaningful when exactly one language is listed — with several
+     * there's no single value the dropdown could take. An explicit
+     * {@link Options.searchLanguage} still wins.
+     */
+    applyToSearch?: boolean
+  }
   hideAuthors: {
     enabled: boolean
     filters: AuthorFilter[]
@@ -129,7 +140,7 @@ export const options = createStorage<Options>({
     hideShowReason: true,
     hideShowMatchedValues: true,
     hideCrossovers: { enabled: true, maxFandoms: 7 },
-    hideLanguages: { enabled: false, show: [] },
+    hideLanguages: { enabled: false, show: [], applyToSearch: false },
     hideAuthors: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_AUTHOR_HIGHLIGHT_COLOR },
     hideTags: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_HIGHLIGHT_COLOR },
     hideWorks: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_WORK_HIGHLIGHT_COLOR },

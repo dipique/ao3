@@ -1,3 +1,4 @@
+import MdiBookCheck from '~icons/mdi/book-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
@@ -29,6 +30,7 @@ import React from '#dom'
 const BLURB_WRAPPER_CLASS = `${ADDON_CLASS}--hide-works--wrapper`
 const REASONS_CLASS = `${ADDON_CLASS}--hide-works--reasons`
 const LABEL_CLASS = `${ADDON_CLASS}--hide-works--reason-label`
+const REASON_ICON_CLASS = `${ADDON_CLASS}--hide-works--reason-icon`
 const VALUE_CLASS = `${ADDON_CLASS}--hide-works--reason-value`
 const EXCLUDE_CLASS = `${ADDON_CLASS}--hide-works--exclude`
 const EXCLUDE_ACTIVE_CLASS = `${ADDON_CLASS}--hide-works--exclude-active`
@@ -59,6 +61,18 @@ interface ReasonItem {
 
 /** Reason items grouped by display label, e.g. `Relationship` -> [items]. */
 type HideReasons = Record<string, ReasonItem[]>
+
+/**
+ * Icons shown before a reason group's label. A collapsed work hides its own
+ * title (and so the indicator that normally rides next to it), so the reason
+ * line is the only place left to say *why* at a glance — and "you've read this"
+ * is the one worth spotting without reading the text.
+ *
+ * Keyed by the same labels {@link addReason} groups under.
+ */
+const REASON_ICONS: Record<string, () => Node> = {
+  Read: () => <MdiBookCheck />,
+}
 
 /**
  * Which categories of filter contributed to hiding a work. Recorded on the
@@ -376,6 +390,9 @@ export class HideWorks extends Unit {
     Object.entries(reasons).forEach(([label, items], groupIndex) => {
       if (groupIndex > 0)
         container.append(document.createTextNode(' | '))
+      const icon = REASON_ICONS[label]
+      if (icon)
+        container.append(<span class={REASON_ICON_CLASS}>{icon()}</span>)
       container.append(<span class={LABEL_CLASS}>{`${label}: `}</span>)
 
       items.forEach((item, i) => {

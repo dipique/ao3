@@ -14,6 +14,7 @@ import {
   MANIFEST_KEY,
   pruneToSynced,
   SYNC_SCHEMA_VERSION,
+  syncedKeys,
 } from '../../src/common/syncCodec.ts'
 
 const defaults = {
@@ -77,12 +78,48 @@ describe('buildLocalUpdate', () => {
   })
 
   test('resets keys absent from the payload back to default', () => {
-    const rebuilt = buildLocalUpdate({}, defaults, options)
+    // The writer knew every key, so "absent" really does mean "equals default".
+    const rebuilt = buildLocalUpdate({}, defaults, options, syncedKeys(defaults))
     assert.equal(rebuilt.wordsPerMinute, 200, 'absent synced key -> default')
     assert.deepEqual(rebuilt.hideTags, defaults.hideTags)
     assert.deepEqual(rebuilt.theme, { chosen: 'inherit', current: 'dark' }, 'chosen reset, current kept')
     assert.deepEqual(rebuilt.user, { userId: 'me' }, 'user preserved from existing')
     assert.equal(rebuilt.verbose, true, 'verbose preserved from existing')
+  })
+
+  test('keeps options the writing device never heard of', () => {
+    // A device on an older build: it prunes against defaults that lack the newer
+    // keys, so they're missing from its payload for a reason that has nothing to
+    // do with their value. Resetting them here wiped real data.
+    const older = syncedKeys(defaults).filter(k => k !== 'hideTags' && k !== 'textReplacements')
+    const rebuilt = buildLocalUpdate({ wordsPerMinute: 300 }, defaults, options, older)
+    assert.deepEqual(rebuilt.hideTags, options.hideTags, 'unknown-to-writer key kept as-is')
+    assert.equal(rebuilt.showTotalTime, true, 'known key absent from payload -> default')
+  })
+
+  test('without a key list, absent keys are left alone', () => {
+    // Payloads written before the manifest carried `k`: the two cases are
+    // indistinguishable, so prefer a stale setting over destroying data.
+    const rebuilt = buildLocalUpdate({}, defaults, options)
+    assert.deepEqual(rebuilt.hideTags, options.hideTags)
+    assert.equal(rebuilt.wordsPerMinute, 300)
+    assert.deepEqual(rebuilt.user, { userId: 'me' }, 'local-only still from this device')
+    assert.deepEqual(rebuilt.theme, { chosen: 'inherit', current: 'dark' })
+  })
+
+  test('an older build syncing cannot wipe a newer build\'s data', () => {
+    // End-to-end reproduction of the reported bug: a feature holding real data
+    // (a list, plus the switch that enables it) survives the older device's push.
+    const withData = { ...options, marks: { enabled: true, read: 'a,b,c' } }
+    const newDefaults = { ...defaults, marks: { enabled: false, read: '' } }
+    const oldDefaults = { ...defaults }
+    const oldState = { ...oldDefaults, wordsPerMinute: 300 }
+
+    const pushed = pruneToSynced(oldState, oldDefaults)
+    assert.equal('marks' in pushed, false, 'the old build cannot push a key it lacks')
+
+    const rebuilt = buildLocalUpdate(pushed, newDefaults, withData, syncedKeys(oldDefaults))
+    assert.deepEqual(rebuilt.marks, withData.marks, 'data survives the pull')
   })
 })
 

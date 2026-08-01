@@ -7,7 +7,7 @@ import { detectPageCount, scrapeListing } from '#content_script/searchView/scrap
 import { createSearchView, type SearchView, type SearchViewConfig, type ViewState } from '#content_script/searchView/view.tsx'
 import { Unit } from '#content_script/Unit.js'
 import { seedMarkedForLater, submitMark } from '#content_script/units/FilterEntityToolbars.tsx'
-import { setWorkMark } from '#content_script/workMarks.js'
+import { applyReadMark } from '#content_script/workMarks.js'
 import React from '#dom'
 
 const FEATURE = `${ADDON_CLASS}--search-marked-for-later`
@@ -254,11 +254,10 @@ export class SearchMarkedForLater extends Unit {
             }
             // Record it locally too, so a work triaged from here stops resurfacing
             // in listings. Only after the server call succeeded — a failed unsave
-            // would otherwise leave the work read *and* still on the list.
-            if (this.options.workMarks.enabled) {
-              await setWorkMark('read', work.workId, true)
-                .catch(err => log.error('Could not record the read mark', err))
-            }
+            // would otherwise leave the work read *and* still on the list. Same
+            // call our work menu and AO3's own button make, so all three agree.
+            if (this.options.workMarks.enabled)
+              applyReadMark(this.options.workMarks, work.workId, true)
           },
         },
         onWorksChanged: (works) => {

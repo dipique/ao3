@@ -21,7 +21,7 @@ import {
 } from '#content_script/contextTrigger.js'
 import { clearEntityBehavior, entityBehavior, type EntityOptionKey, toggleEntityBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
-import { setWorkMark } from '#content_script/workMarks.js'
+import { applyReadMark, setFavoriteMark } from '#content_script/workMarks.js'
 import React from '#dom'
 
 /**
@@ -280,7 +280,7 @@ abstract class FilterEntityToolbar extends Unit {
     return [
       {
         icon: () => (read ? <MdiBookOutline /> : <MdiBookCheck />),
-        label: read ? 'Unmark as unread' : 'Mark as read',
+        label: read ? 'Unmark as read' : 'Mark as read',
         separatorBefore: true,
         onSelect: () => this.onToggleRead(id, !read),
       },
@@ -300,15 +300,7 @@ abstract class FilterEntityToolbar extends Unit {
    * unknown state is left alone rather than paying for a page fetch here.
    */
   private async onToggleRead(id: string, read: boolean): Promise<void> {
-    // Optimistic, so the indicator flips before the options round-trip (whose
-    // change event also re-runs every unit and rebuilds this from storage).
-    if (read)
-      readIds.add(id)
-    else
-      readIds.delete(id)
-    this.syncEntriesFor(id)
-
-    await setWorkMark('read', id, read)
+    this.setReadLocally(id, read)
 
     const state = markState.get(id)
     if (read && this.markEnabled() && state?.saved && !state.busy) {
@@ -319,6 +311,23 @@ abstract class FilterEntityToolbar extends Unit {
     toast(read ? 'Marked as read.' : 'Marked as unread.', { type: 'success' })
   }
 
+  /**
+   * Apply a read mark and show it immediately. Goes through
+   * {@link applyReadMark} — the one writer of read marks — so this behaves
+   * identically to pressing AO3's own button, which lands in the same place.
+   *
+   * The indicator is updated optimistically rather than waiting for the options
+   * round-trip (whose change event re-runs every unit and rebuilds it anyway).
+   */
+  protected setReadLocally(id: string, read: boolean): void {
+    if (read)
+      readIds.add(id)
+    else
+      readIds.delete(id)
+    applyReadMark(this.options.workMarks, id, read)
+    this.syncEntriesFor(id)
+  }
+
   private async onToggleFavorite(id: string, favorite: boolean): Promise<void> {
     if (favorite)
       favoriteIds.add(id)
@@ -326,7 +335,7 @@ abstract class FilterEntityToolbar extends Unit {
       favoriteIds.delete(id)
     this.syncEntriesFor(id)
 
-    await setWorkMark('favorite', id, favorite)
+    await setFavoriteMark(id, favorite)
     toast(favorite ? 'Added to favorites.' : 'Removed from favorites.', { type: 'success' })
   }
 
@@ -477,6 +486,12 @@ abstract class FilterEntityToolbar extends Unit {
       state.known = true
       // ...and must not be overwritten by a re-seed from the now-stale page.
       state.acted = true
+      // Read and Marked for Later are opposite ends of one decision, so keep the
+      // read mark in step: saving a work for later clears it, taking it off the
+      // list records it. On the native-button path CaptureMarkButtons does this
+      // same step — this branch is the fetch fallback, where no button exists.
+      if (this.marksEnabled())
+        this.setReadLocally(id, !save)
       toast(
         save ? 'Saved for later.' : 'Marked as read — removed from your Marked for Later list.',
         { type: 'success' },

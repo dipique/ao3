@@ -1,6 +1,8 @@
 import type { Tag } from './data.ts'
 import type { toast } from './toast/toast.tsx'
 
+import { isContextInvalidatedError, isExtensionContextValid } from './extensionContext.ts'
+
 type Callback<Fn extends (...args: any) => Promise<any>> = (...args: Parameters<Fn>) => Promise<Awaited<ReturnType<Fn>> | void>
 
 class APIMethod<Name extends string, Fn extends (...args: any) => Promise<any>> {
@@ -12,7 +14,19 @@ class APIMethod<Name extends string, Fn extends (...args: any) => Promise<any>> 
   }
 
   async sendToBackground(...args: Parameters<Fn>): Promise<Awaited<ReturnType<Fn>>> {
-    return await browser.runtime.sendMessage({ [this.name]: args })
+    // An orphaned content script has nothing to send to — see
+    // {@link file://./extensionContext.ts}. Resolving undefined keeps a stale
+    // tab quiet; every caller already copes with a message going unanswered.
+    if (!isExtensionContextValid())
+      return undefined as Awaited<ReturnType<Fn>>
+    try {
+      return await browser.runtime.sendMessage({ [this.name]: args })
+    }
+    catch (error) {
+      if (!isContextInvalidatedError(error))
+        throw error
+      return undefined as Awaited<ReturnType<Fn>>
+    }
   }
 
   async sendToTab(frame: { tabId: number, frameId: number }, ...args: Parameters<Fn>): Promise<Awaited<ReturnType<Fn>>>

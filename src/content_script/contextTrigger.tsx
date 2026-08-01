@@ -11,7 +11,7 @@ import MdiOpenInNew from '~icons/mdi/open-in-new.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 
-import { ADDON_CLASS } from '#common'
+import { ADDON_CLASS, isExtensionContextValid, toast } from '#common'
 import React from '#dom'
 
 import type { MenuItem } from './contextMenu.tsx'
@@ -154,8 +154,24 @@ function findTrigger(target: EventTarget | null): { el: HTMLElement, trigger: Tr
   return null
 }
 
+/** Told the reader once that this page's copy of the extension is stale. */
+let staleNotified = false
+
 let lastOpen = 0
 function fire(trigger: Trigger, x: number, y: number): void {
+  // The extension was reloaded, updated, or disabled under this page. Our menus
+  // read settings to build themselves and write them on select, so none of it
+  // would work — retire the triggers (which also hands links back to the
+  // browser's own context menu) and say why, once.
+  if (!isExtensionContextValid()) {
+    clearMenuTriggers()
+    if (!staleNotified) {
+      staleNotified = true
+      toast('AO3 Enhancements was updated or reloaded. Refresh this page to use its menus again.', { type: 'error' })
+    }
+    return
+  }
+
   const now = Date.now()
   if (now - lastOpen < REOPEN_GUARD_MS)
     return
@@ -328,6 +344,18 @@ const INDICATOR_ICONS: Record<IndicatorState, () => Node> = {
 
 const INDICATOR_ORDER: IndicatorState[] = ['include', 'exclude', 'hide', 'invert', 'highlight', 'saved', 'read', 'favorite']
 
+/** Hover text, so an icon's meaning doesn't depend on recognising it. */
+const INDICATOR_LABELS: Record<IndicatorState, string> = {
+  include: 'Included in the filter',
+  exclude: 'Excluded from the filter',
+  hide: 'Hidden',
+  invert: 'Always shown',
+  highlight: 'Highlighted',
+  saved: 'Marked for later',
+  read: 'Read',
+  favorite: 'Favorite',
+}
+
 export interface IndicatorOptions {
   /** Colour for the highlight star (defaults to the CSS fallback). */
   highlightColor?: string
@@ -347,7 +375,12 @@ export function buildIndicators(states: Iterable<IndicatorState>, opts: Indicato
   const span = (<span class={`${ADDON_CLASS}  ${INDICATORS_CLASS}`} aria-hidden="true" />) as HTMLElement
   for (const state of ordered) {
     const icon = (
-      <span class={`${INDICATOR_CLASS}  ${INDICATOR_CLASS}--${state}`}>{INDICATOR_ICONS[state]()}</span>
+      <span
+        class={`${INDICATOR_CLASS}  ${INDICATOR_CLASS}--${state}`}
+        title={INDICATOR_LABELS[state]}
+      >
+        {INDICATOR_ICONS[state]()}
+      </span>
     ) as HTMLElement
     if (state === 'highlight' && opts.highlightColor)
       icon.style.setProperty('--ao3e-indicator-color', opts.highlightColor)
