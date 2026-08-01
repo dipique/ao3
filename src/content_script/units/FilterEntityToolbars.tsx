@@ -1,13 +1,17 @@
+import MdiBookCheck from '~icons/mdi/book-check.jsx'
+import MdiBookOutline from '~icons/mdi/book-outline.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiClockPlusOutline from '~icons/mdi/clock-plus-outline.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
+import MdiHeartOutline from '~icons/mdi/heart-outline.jsx'
+import MdiHeart from '~icons/mdi/heart.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchAndParseDocument, fetchToken, getArchiveLink, options, toast } from '#common'
+import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchAndParseDocument, fetchToken, getArchiveLink, options, toast, unpackIds } from '#common'
 import {
   attachMenuTrigger,
   buildIndicators,
@@ -17,6 +21,7 @@ import {
 } from '#content_script/contextTrigger.js'
 import { clearEntityBehavior, entityBehavior, type EntityOptionKey, toggleEntityBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
+import { setWorkMark } from '#content_script/workMarks.js'
 import React from '#dom'
 
 /**
@@ -43,7 +48,18 @@ interface EntityEntry {
  * on this session, or checked via {@link fetchWorkMarkState}. Until then the menu
  * treats the state as unknown and checks it on open rather than assuming un-saved.
  */
-interface MarkState { saved: boolean, busy: boolean, known: boolean }
+interface MarkState {
+  saved: boolean
+  busy: boolean
+  known: boolean
+  /**
+   * We changed this state ourselves this session. Seeding reads the *page*, which
+   * still shows the pre-toggle markup after a background {@link submitMark} — so
+   * a re-run (every options change triggers one) would otherwise re-seed the old
+   * value and bring the saved-clock back on a work just marked read.
+   */
+  acted: boolean
+}
 const markState = new Map<string, MarkState>()
 
 /**
@@ -56,9 +72,11 @@ const markState = new Map<string, MarkState>()
  */
 export function seedMarkedForLater(workIds: Iterable<string>): void {
   for (const id of workIds) {
-    if (markState.get(id)?.busy)
+    const state = markState.get(id)
+    // A toggle in flight, or one we already made, is fresher than the listing.
+    if (state?.busy || state?.acted)
       continue
-    markState.set(id, { saved: true, busy: false, known: true })
+    markState.set(id, { saved: true, busy: false, known: true, acted: false })
   }
 }
 
@@ -91,6 +109,26 @@ function pageToken(): string | null {
 }
 
 /**
+ * AO3's own mark button for a work — the `li.mark` form in a work page's header.
+ * It renders exactly one of `mark_for_later` / `mark_as_read`, so asking for the
+ * action we want also tells us whether it's the right one to press.
+ *
+ * Pressing it beats posting the request ourselves ({@link submitMark}): AO3
+ * handles its own redirect, so the button flips to the opposite action and the
+ * "added to your Marked for Later list" notice matches reality. A background POST
+ * leaves both stale until the reader reloads by hand — and leaves a "Mark as
+ * Read" button sitting there on a work that's already been marked read.
+ *
+ * Returns null on listings (no such form), where {@link submitMark} is the only
+ * option — and is fine there, because nothing on the page claims otherwise.
+ */
+function nativeMarkButton(workId: string, save: boolean): HTMLButtonElement | null {
+  const action = save ? 'mark_for_later' : 'mark_as_read'
+  const form = document.querySelector<HTMLFormElement>(`form.button_to[action*="/works/${workId}/${action}"]`)
+  return form?.querySelector<HTMLButtonElement>('button') ?? null
+}
+
+/**
  * Toggle a work's Marked for Later state with the same request AO3's own
  * "Mark for Later" / "Mark as Read" buttons make: a PATCH (tunnelled through
  * POST + `_method`) to `/works/:id/mark_for_later` or `/works/:id/mark_as_read`.
@@ -112,6 +150,21 @@ export async function submitMark(workId: string, save: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Read / favourite marks (works only). Unlike mark-for-later these are ours, so
+// the state is always known: it's unpacked once per run from the `workMarks`
+// option into these sets, and the menu/indicators read them synchronously.
+// ---------------------------------------------------------------------------
+
+let readIds = new Set<string>()
+let favoriteIds = new Set<string>()
+
+/** Re-read the packed mark sets from options at the start of a run. */
+function loadMarkSets(marks: { read: string, favorite: string }): void {
+  readIds = unpackIds(marks.read)
+  favoriteIds = unpackIds(marks.favorite)
+}
+
+// ---------------------------------------------------------------------------
 
 abstract class FilterEntityToolbar extends Unit {
   /** `'work'` or `'series'` — used in labels. */
@@ -126,6 +179,8 @@ abstract class FilterEntityToolbar extends Unit {
   protected abstract get entries(): EntityEntry[]
   /** Works fold in mark-for-later; series don't. */
   protected markEnabled(): boolean { return false }
+  /** Works fold in read/favourite marks; series don't. */
+  protected marksEnabled(): boolean { return false }
 
   /**
    * Links to decorate: every `/works/:id` (or `/series/:id`) link, returning the
@@ -203,6 +258,9 @@ abstract class FilterEntityToolbar extends Unit {
       })
     }
 
+    if (this.marksEnabled())
+      items.push(...this.markSetItems(id))
+
     if (this.markEnabled())
       items.push(this.markItem(id))
 
@@ -210,6 +268,66 @@ abstract class FilterEntityToolbar extends Unit {
     if (link instanceof HTMLAnchorElement)
       items.push(...standardLinkItems(link))
     return items
+  }
+
+  /**
+   * The read / favourite rows. Both are local state we already hold, so unlike
+   * the mark-for-later row they render their real label immediately.
+   */
+  private markSetItems(id: string): MenuItem[] {
+    const read = readIds.has(id)
+    const favorite = favoriteIds.has(id)
+    return [
+      {
+        icon: () => (read ? <MdiBookOutline /> : <MdiBookCheck />),
+        label: read ? 'Unmark as unread' : 'Mark as read',
+        separatorBefore: true,
+        onSelect: () => this.onToggleRead(id, !read),
+      },
+      {
+        icon: () => (favorite ? <MdiHeart /> : <MdiHeartOutline />),
+        label: favorite ? 'Remove from favorites' : 'Add to favorites',
+        onSelect: () => this.onToggleFavorite(id, !favorite),
+      },
+    ]
+  }
+
+  /**
+   * Toggle the local read mark. Marking a work read means "I'm done with this",
+   * so when we already know it's on the Marked for Later list it comes off it
+   * too — that's the loop this feature exists to break. The list is only touched
+   * when its state is known first-hand (seeded or acted on this session); an
+   * unknown state is left alone rather than paying for a page fetch here.
+   */
+  private async onToggleRead(id: string, read: boolean): Promise<void> {
+    // Optimistic, so the indicator flips before the options round-trip (whose
+    // change event also re-runs every unit and rebuilds this from storage).
+    if (read)
+      readIds.add(id)
+    else
+      readIds.delete(id)
+    this.syncEntriesFor(id)
+
+    await setWorkMark('read', id, read)
+
+    const state = markState.get(id)
+    if (read && this.markEnabled() && state?.saved && !state.busy) {
+      // onMark toasts the "removed from your Marked for Later list" message.
+      await this.onMark(id)
+      return
+    }
+    toast(read ? 'Marked as read.' : 'Marked as unread.', { type: 'success' })
+  }
+
+  private async onToggleFavorite(id: string, favorite: boolean): Promise<void> {
+    if (favorite)
+      favoriteIds.add(id)
+    else
+      favoriteIds.delete(id)
+    this.syncEntriesFor(id)
+
+    await setWorkMark('favorite', id, favorite)
+    toast(favorite ? 'Added to favorites.' : 'Removed from favorites.', { type: 'success' })
   }
 
   /**
@@ -238,11 +356,17 @@ abstract class FilterEntityToolbar extends Unit {
     }
   }
 
-  /** The resolved, actionable Mark for Later / Mark as Read row. */
+  /**
+   * The resolved, actionable Mark for Later / Mark as Read row. When read marks
+   * are on there's already a "Mark as read" row above (which also unsaves), so
+   * this one is relabelled to what it uniquely does — otherwise the menu would
+   * carry two identically-labelled actions.
+   */
   private markAction(id: string, saved: boolean, busy: boolean): MenuItem {
+    const savedLabel = this.marksEnabled() ? 'Remove from Marked for Later' : 'Mark as read'
     return {
       icon: () => (saved ? <MdiClockCheck /> : <MdiClockPlusOutline />),
-      label: saved ? 'Mark as read' : 'Mark for later',
+      label: saved ? savedLabel : 'Mark for later',
       separatorBefore: true,
       disabled: busy,
       onSelect: () => this.onMark(id),
@@ -266,18 +390,23 @@ abstract class FilterEntityToolbar extends Unit {
     }
     if (saved === null)
       return null
-    const state = markState.get(id) ?? { saved: false, busy: false, known: false }
-    // A toggle in flight is the freshest intent — don't overwrite it.
-    if (state.busy)
+    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false }
+    // A toggle in flight, or one we already made, is the freshest intent.
+    if (state.busy || state.acted)
       return state.saved
     state.saved = saved
     state.known = true
     markState.set(id, state)
+    this.syncEntriesFor(id)
+    return saved
+  }
+
+  /** Refresh the indicator on every decorated link showing this entity. */
+  protected syncEntriesFor(id: string): void {
     for (const entry of this.entries) {
       if (entry.id === id)
         this.syncIndicator(entry)
     }
-    return saved
   }
 
   protected computeStates(id: string): IndicatorState[] {
@@ -287,6 +416,12 @@ abstract class FilterEntityToolbar extends Unit {
       states.push(behavior)
     if (this.markEnabled() && markState.get(id)?.saved)
       states.push('saved')
+    if (this.marksEnabled()) {
+      if (readIds.has(id))
+        states.push('read')
+      if (favoriteIds.has(id))
+        states.push('favorite')
+    }
     return states
   }
 
@@ -319,10 +454,20 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   async onMark(id: string): Promise<void> {
-    const state = markState.get(id) ?? { saved: false, busy: false, known: false }
+    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false }
     if (state.busy)
       return
     const save = !state.saved
+
+    // On a work page, let AO3's own button do it — it reloads the page, so its
+    // mark button and notice end up telling the truth. This navigates away, so
+    // nothing below runs.
+    const native = nativeMarkButton(id, save)
+    if (native) {
+      native.click()
+      return
+    }
+
     state.busy = true
     markState.set(id, state)
     try {
@@ -330,6 +475,8 @@ abstract class FilterEntityToolbar extends Unit {
       state.saved = save
       // We now know this work's state first-hand, so future opens skip the check.
       state.known = true
+      // ...and must not be overwritten by a re-seed from the now-stale page.
+      state.acted = true
       toast(
         save ? 'Saved for later.' : 'Marked as read — removed from your Marked for Later list.',
         { type: 'success' },
@@ -343,10 +490,7 @@ abstract class FilterEntityToolbar extends Unit {
       state.busy = false
       markState.set(id, state)
       // Reflect the saved-clock on every blurb showing this work.
-      for (const entry of this.entries) {
-        if (entry.id === id)
-          this.syncIndicator(entry)
-      }
+      this.syncEntriesFor(id)
     }
   }
 }
@@ -371,8 +515,11 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   static override get name() { return 'FilterWorkToolbar' }
 
   // The work menu appears wherever its actions are useful: when work filters are
-  // on (hide/highlight/always-show), or when mark-for-later is on.
-  override get enabled() { return this.options.hideWorks.enabled || this.options.markForLaterToolbar }
+  // on (hide/highlight/always-show), mark-for-later is on, or read/favourite
+  // marks are on.
+  override get enabled() {
+    return this.options.hideWorks.enabled || this.options.markForLaterToolbar || this.options.workMarks.enabled
+  }
 
   protected override get noun() { return 'work' as const }
   protected override get kind() { return 'works' as const }
@@ -385,9 +532,35 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     return this.options.markForLaterToolbar && document.body.classList.contains('logged-in')
   }
 
+  // Read/favourite marks are ours alone — no AO3 session needed.
+  protected override marksEnabled(): boolean { return this.options.workMarks.enabled }
+
   override async ready(): Promise<void> {
+    loadMarkSets(this.options.workMarks)
+    this.seedMarkedForLaterPage()
     this.seedWorkPageMark()
     await super.ready()
+  }
+
+  /**
+   * Seed the shared mark-for-later state from the reading-history page, where
+   * each blurb states it: AO3 appends "(Marked for Later.)" to the `h4.viewed`
+   * heading of every saved work (on both the full history and the `?show=to-read`
+   * view). Without this the work menu on the very page you triage from would
+   * treat each saved state as unknown — and "Mark as read" would then leave the
+   * work sitting on the list.
+   */
+  private seedMarkedForLaterPage(): void {
+    if (!this.markEnabled() || !/^\/users\/[^/]+\/readings\/?$/.test(location.pathname))
+      return
+
+    const saved: string[] = []
+    for (const blurb of this.root.querySelectorAll<HTMLElement>('li.blurb[id^="work_"]')) {
+      const id = blurb.id.slice('work_'.length)
+      if (id && blurb.querySelector('h4.viewed')?.textContent?.includes('Marked for Later'))
+        saved.push(id)
+    }
+    seedMarkedForLater(saved)
   }
 
   /**
@@ -413,12 +586,14 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     if (!this.markEnabled())
       return
     const id = workPageId()
-    // Don't clobber a toggle already in flight for this work this session.
-    if (!id || markState.get(id)?.busy)
+    // Don't clobber a toggle in flight, or one we already made — after a
+    // background toggle this page's own mark button still shows the old state.
+    const state = id ? markState.get(id) : undefined
+    if (!id || state?.busy || state?.acted)
       return
     const saved = parseMarkedForLater(document)
     if (saved !== null)
-      markState.set(id, { saved, busy: false, known: true })
+      markState.set(id, { saved, busy: false, known: true, acted: false })
   }
 
   static override async clean(): Promise<void> {

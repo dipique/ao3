@@ -3,7 +3,7 @@ import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
 import { type EntityFilter, type TagFilter, TagType } from '#common'
-import { ADDON_CLASS, authorFilterMatchesAuthor, entityFilterMatches, tagFilterMatchesTag } from '#common'
+import { ADDON_CLASS, authorFilterMatchesAuthor, entityFilterMatches, tagFilterMatchesTag, unpackIds } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -65,7 +65,7 @@ type HideReasons = Record<string, ReasonItem[]>
  * blurb (as `data-ao3e-hidden-by`) so the floating filter toolbar can reveal
  * just the works hidden by, say, tag filters.
  */
-type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages' | 'works' | 'series'
+type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages' | 'works' | 'series' | 'read'
 
 function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
   if (!(label in reasons))
@@ -127,6 +127,13 @@ onFilterChange(refreshExcludeButtons)
 
 export class HideWorks extends Unit {
   static override get name() { return 'HideWorks' }
+
+  /**
+   * Work ids marked read, unpacked once per run. Empty unless read-hiding is
+   * actually on, so {@link processBlurb} can test it without re-checking options.
+   */
+  private readIds = new Set<string>()
+
   override get enabled() {
     return (
       this.options.hideCrossovers.enabled
@@ -135,7 +142,13 @@ export class HideWorks extends Unit {
       || this.options.hideTags.enabled
       || this.options.hideWorks.enabled
       || this.options.hideSeries.enabled
+      || this.hideReadEnabled
     )
+  }
+
+  /** Whether works marked read should be collapsed on this run. */
+  private get hideReadEnabled(): boolean {
+    return this.options.workMarks.enabled && this.options.workMarks.hideRead
   }
 
   static override async clean(): Promise<void> {
@@ -156,6 +169,7 @@ export class HideWorks extends Unit {
   override async ready(): Promise<void> {
     this.logger.debug('Hiding works...')
     excludeButtons.length = 0
+    this.readIds = this.hideReadEnabled ? unpackIds(this.options.workMarks.read) : new Set()
 
     const blurbElements = document.querySelectorAll('.blurb')
 
@@ -242,6 +256,14 @@ export class HideWorks extends Unit {
       || seriesMatches.some(m => m.filter.behavior === 'invert')
     if (forceShow)
       return { reasons, kinds }
+
+    // Works you've marked read. Listed first because it's the reason you're most
+    // likely to want to act on — and, like every other rule here, an "always
+    // show" filter above already force-showed the work before we got here.
+    if (blurb.work && this.readIds.has(blurb.work.id)) {
+      addReason(reasons, 'Read', { value: blurb.work.name, rule: 'You marked this work as read' })
+      kinds.add('read')
+    }
 
     if (tagMatches.length > 0)
       kinds.add('tags')

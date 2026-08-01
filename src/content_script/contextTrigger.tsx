@@ -1,7 +1,9 @@
+import MdiBookCheck from '~icons/mdi/book-check.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiContentCopy from '~icons/mdi/content-copy.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
+import MdiHeart from '~icons/mdi/heart.jsx'
 import MdiLinkVariant from '~icons/mdi/link-variant.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiOpenInApp from '~icons/mdi/open-in-app.jsx'
@@ -311,7 +313,7 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
 // ---------------------------------------------------------------------------
 
 /** A state an indicator can show, in display order. */
-export type IndicatorState = 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'saved'
+export type IndicatorState = 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'saved' | 'read' | 'favorite'
 
 const INDICATOR_ICONS: Record<IndicatorState, () => Node> = {
   include: () => <MdiPlusCircle />,
@@ -320,9 +322,11 @@ const INDICATOR_ICONS: Record<IndicatorState, () => Node> = {
   invert: () => <MdiEyeCheck />,
   highlight: () => <MdiStar />,
   saved: () => <MdiClockCheck />,
+  read: () => <MdiBookCheck />,
+  favorite: () => <MdiHeart />,
 }
 
-const INDICATOR_ORDER: IndicatorState[] = ['include', 'exclude', 'hide', 'invert', 'highlight', 'saved']
+const INDICATOR_ORDER: IndicatorState[] = ['include', 'exclude', 'hide', 'invert', 'highlight', 'saved', 'read', 'favorite']
 
 export interface IndicatorOptions {
   /** Colour for the highlight star (defaults to the CSS fallback). */

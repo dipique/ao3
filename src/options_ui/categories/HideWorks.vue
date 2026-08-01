@@ -50,6 +50,8 @@ import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from '#c
     <OptionDivider />
     <OptionRowHideTags />
     <OptionDivider />
+    <OptionRowWorkMarks />
+    <OptionDivider />
     <OptionRowHideEntities
       option-key="hideWorks"
       title="Works"

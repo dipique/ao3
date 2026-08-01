@@ -105,9 +105,17 @@ export function installMock(seed) {
   const storage = { local: area('local'), sync: area('sync'), session: area('session'), managed: area('managed'), onChanged }
   const noop = () => {}
   const deep = () => new Proxy(noop, { get: (_t, p) => (p === 'then' ? undefined : deep()), apply: () => undefined })
+  // `api.ts` guards every (de)registration with hasListener, so the event shape
+  // has to be complete or the content script throws on its first addListener.
+  const msgListeners = new Set()
+  const onMessage = {
+    addListener: l => msgListeners.add(l),
+    removeListener: l => msgListeners.delete(l),
+    hasListener: l => msgListeners.has(l),
+  }
   const base = {
     storage,
-    runtime: { id: 'mock', getURL: p => p, sendMessage: () => Promise.resolve(), connect: () => ({ onMessage: { addListener: noop }, postMessage: noop, onDisconnect: { addListener: noop } }), onMessage: { addListener: noop, removeListener: noop }, getManifest: () => ({ version: '0.0.0' }) },
+    runtime: { id: 'mock', getURL: p => p, sendMessage: () => Promise.resolve(), connect: () => ({ onMessage: { addListener: noop }, postMessage: noop, onDisconnect: { addListener: noop } }), onMessage, getManifest: () => ({ version: '0.0.0', short_name: 'AO3E' }) },
     i18n: { getMessage: () => '' },
   }
   const chrome = new Proxy(base, { get: (t, p) => (p in t ? t[p] : deep()) })

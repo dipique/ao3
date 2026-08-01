@@ -231,6 +231,15 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   flex-direction: column;
   gap: 0.6em;
   align-items: flex-end;
+
+  /* The collapsed panel still reserves its layout box (it's hidden with
+     `visibility`, which keeps the space so the open/close transition has
+     somewhere to animate). That makes this container far larger than the visible
+     circle — and a transparent container still hit-tests, so it swallowed every
+     click in that corner, most visibly on AO3's filter sidebar. Nothing here is
+     interactive in its own right, so the container opts out of pointer events
+     entirely and each actual control opts back in below. */
+  pointer-events: none;
 }
 
 /* The stack of pill toggles revealed by the FAB. Collapsed (and click-through)
@@ -247,11 +256,14 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   pointer-events: none;
 }
 
+/* Stays click-through even when open: the pills are right-aligned and sized to
+   their own text, so the panel box has dead space beside the narrower ones. The
+   pills themselves opt in. (Collapsed, `visibility: hidden` already takes the
+   whole subtree out of hit-testing.) */
 .AO3E--filter-toolbar--open .AO3E--filter-toolbar--panel {
   opacity: 1;
   visibility: visible;
   transform: none;
-  pointer-events: auto;
 }
 
 /* The round, touch-sized launcher: the extension's AO3 logo, white on theme red. */
@@ -268,6 +280,9 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: #fff !important;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35) !important;
   cursor: pointer;
+
+  /* Opts back in — the container above is click-through. */
+  pointer-events: auto;
 }
 
 .AO3E--filter-toolbar--fab:hover,
@@ -295,6 +310,9 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   font-size: 0.875rem;
   line-height: 1;
   white-space: nowrap;
+
+  /* Opts back in — both the container and the panel are click-through. */
+  pointer-events: auto;
 }
 
 .AO3E--filter-toolbar--button:hover,
@@ -475,8 +493,18 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--indicators {
   display: inline-flex;
   align-items: center;
-  gap: 0.1em;
-  margin-left: 0.25em;
+  gap: 0.15em;
+  margin-left: 0.05em;
+
+  /* These are status affordances, not text. Sizing them in `rem` decouples them
+     from whatever font-size they were dropped into — inheriting `em` made them
+     balloon inside a work page's <h2> title (and on skins with large headings),
+     where they ended up as tall as the title itself. */
+  font-size: 1rem;
+  line-height: 1;
+
+  /* Centres the row on the text's midline rather than sitting it on the
+     baseline, which left the icons riding high next to a large title. */
   vertical-align: middle;
   cursor: pointer;
 }
@@ -485,6 +513,14 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   display: inline-flex;
   align-items: center;
   line-height: 1;
+}
+
+/* AO3's skin sizes and offsets bare `svg`s in places, so pin ours explicitly. */
+.AO3E--indicator > svg {
+  width: 1.15em !important;
+  height: 1.15em !important;
+  top: 0 !important;
+  vertical-align: middle;
 }
 
 .AO3E--indicator--include {
@@ -503,6 +539,15 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--indicator--highlight {
   color: var(--ao3e-indicator-color, #d8a200);
+}
+
+/* Read: deliberately muted — it marks a work as done with, not as noteworthy. */
+.AO3E--indicator--read {
+  color: #6b7280;
+}
+
+.AO3E--indicator--favorite {
+  color: #c2185b;
 }
 
 /* ---------------------------------------------------------------------------

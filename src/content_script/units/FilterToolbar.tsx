@@ -74,12 +74,16 @@ export class FilterToolbar extends Unit {
       || o.muteAuthorToolbar
       || o.hideWorks.enabled
       || o.hideSeries.enabled
+      || o.workMarks.enabled
   }
 
   /** Whether the peek pill could apply here (the `filterToolbar` option + a hide feature). */
   private get peekAvailable(): boolean {
-    const { filterToolbar, hideTags, hideAuthors, hideCrossovers, hideLanguages, hideWorks, hideSeries } = this.options
-    return filterToolbar && (hideTags.enabled || hideAuthors.enabled || hideCrossovers.enabled || hideLanguages.enabled || hideWorks.enabled || hideSeries.enabled)
+    const { filterToolbar, hideTags, hideAuthors, hideCrossovers, hideLanguages, hideWorks, hideSeries, workMarks } = this.options
+    return filterToolbar && (
+      hideTags.enabled || hideAuthors.enabled || hideCrossovers.enabled || hideLanguages.enabled
+      || hideWorks.enabled || hideSeries.enabled || (workMarks.enabled && workMarks.hideRead)
+    )
   }
 
   override get enabled() {

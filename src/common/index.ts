@@ -26,5 +26,7 @@ export { toast } from './toast/toast.tsx'
 
 export * from './utils.ts'
 
+export * from './workMarks.ts'
+
 const manifest = browser.runtime.getManifest()
 createLogger(`${manifest.short_name} v${manifest.version}`, 'display: inline-block; background-color: #e0005a; color: #ffffff; font-weight: bold; padding: 1px 3px; border-radius: 3px;').info()

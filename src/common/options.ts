@@ -1,4 +1,5 @@
 import type { AuthorFilter, Language, SeriesFilter, TagFilter, TextReplacement, WorkFilter } from './data.ts'
+import type { WorkMarks } from './workMarks.ts'
 
 import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from './data.ts'
 import { createStorage } from './storage.ts'
@@ -46,6 +47,12 @@ export interface Options {
     /** Highlight colour used by filters (and force-shown series) that don't set their own. */
     defaultHighlightColor?: string
   }
+  /**
+   * Per-work read/favourite marks, plus the switch that hides read works. Unlike
+   * the filter lists these grow one entry per work you finish, so the id sets are
+   * stored delta-packed — see {@link file://./workMarks.ts}.
+   */
+  workMarks: WorkMarks
 
   compressSearchUrls: boolean
   tagToolbar: boolean
@@ -127,6 +134,7 @@ export const options = createStorage<Options>({
     hideTags: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_HIGHLIGHT_COLOR },
     hideWorks: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_WORK_HIGHLIGHT_COLOR },
     hideSeries: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_SERIES_HIGHLIGHT_COLOR },
+    workMarks: { enabled: false, hideRead: false, read: '', favorite: '' },
 
     compressSearchUrls: false,
     tagToolbar: false,
