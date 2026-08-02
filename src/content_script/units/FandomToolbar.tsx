@@ -4,8 +4,9 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
+import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
-import type { Tag } from '#common'
+import type { FilterBehavior, Tag } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
 import { DEFAULT_HIGHLIGHT_COLOR, options, TagType } from '#common'
@@ -43,7 +44,7 @@ const FANDOM_LINK_SELECTOR = 'h5.fandoms a.tag'
 interface FandomEntry {
   link: HTMLAnchorElement
   tag: Tag
-  behavior: 'hide' | 'invert' | 'highlight' | null
+  behavior: FilterBehavior | null
   highlightColor: string
   hasFields: boolean
   indicator: HTMLElement | null
@@ -121,6 +122,15 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
       active: behavior === 'highlight',
       disabled: behavior === 'highlight',
       onSelect: () => toggleTagBehavior(tag, 'highlight'),
+    },
+    {
+      // Hides the fandom tag itself wherever it's listed, leaving the work
+      // alone. Undoing it is a settings job — the tag is gone from the page.
+      icon: () => <MdiTagOff />,
+      label: 'Hide this filter',
+      active: behavior === 'hideFilter',
+      disabled: behavior === 'hideFilter',
+      onSelect: () => toggleTagBehavior(tag, 'hideFilter'),
     },
   )
   if (behavior) {

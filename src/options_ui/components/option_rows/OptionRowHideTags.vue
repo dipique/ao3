@@ -19,7 +19,7 @@ OptionRowHideTagsContext.provide({
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Tags"
-    subtitle="Hide tags based on the tags of the work"
+    subtitle="Hide or highlight works based on its tags"
   >
     <OptionRowHideTagsTable />
 
@@ -55,6 +55,10 @@ OptionRowHideTagsContext.provide({
             then explicitly unhiding marked as <Icon i-tabler-eye-exclamation op100 label="Show" title="Show" />.
             Tags marked as <Icon i-mdi-star op100 label="Highlight" title="Highlight" /> are instead highlighted on results in a colour of your choice, without changing what is hidden.
             Force-shown (<Icon i-tabler-eye-exclamation op100 label="Show" title="Show" />) tags are highlighted too by default so they stand out; you can turn that off per filter or change the default colour below.
+          </p>
+          <p>
+            Tags marked as <Icon i-mdi-tag-off op100 label="Hide tag" title="Hide tag" /> are hidden themselves — taken out of each work's tag list and out of the filter sidebar — without hiding any works.
+            Use it for noise tags that only cost you reading time. You can set it from a tag's context menu ("Hide this filter"), but removing it again has to be done here.
           </p>
           <h2 mt-6 py-1>
             Limitations

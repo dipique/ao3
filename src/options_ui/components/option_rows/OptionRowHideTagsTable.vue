@@ -56,11 +56,13 @@ const context = OptionRowHideTagsContext.inject()
                     label="Highlight"
                   />
                   <Icon v-else-if="cell.value === 'invert'" i-tabler-eye-exclamation op100 label="Show" />
+                  <Icon v-else-if="cell.value === 'hideFilter'" i-mdi-tag-off op100 label="Hide tag" />
                   <Icon v-else i-tabler-eye-off op40 label="Hide" />
                 </div>
                 <template #content>
                   <span v-if="cell.value === 'highlight'">Highlight matching tags on results (does not hide).</span>
                   <span v-else-if="cell.value === 'invert'">Always show works with matching tags - even if matched by other filters.</span>
+                  <span v-else-if="cell.value === 'hideFilter'">Hide the matching tags themselves, on works and in the filter sidebar (does not hide works).</span>
                   <span v-else>Hide works with matching tags.</span>
                 </template>
               </Tooltip>

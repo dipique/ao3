@@ -132,10 +132,24 @@ export interface User {
  *   out); opt out by setting `color` to `'transparent'`.
  * - `'highlight'`: visually highlight the match, without affecting whether the
  *   work is hidden.
+ * - `'hideFilter'`: hide the matched *tag* itself — from a work's tag list, from
+ *   the filter sidebar, and from the search view's facets — without affecting
+ *   whether the work is shown. For noise tags ("Story", "X is a jerk") that only
+ *   cost you reading time. Tag filters only; see {@link filterAffectsWorks}.
  *
  * Shared by {@link TagFilter} and {@link AuthorFilter} so the two behave alike.
  */
-export type FilterBehavior = 'hide' | 'invert' | 'highlight'
+export type FilterBehavior = 'hide' | 'invert' | 'highlight' | 'hideFilter'
+
+/**
+ * Whether a filter takes part in deciding if a work is shown — i.e. it hides the
+ * work (`hide`) or force-shows it (`invert`). The purely presentational
+ * behaviours (`highlight`, `hideFilter`) only change how the *match* is drawn, so
+ * they're skipped when HideWorks collects its reasons.
+ */
+export function filterAffectsWorks(filter: { behavior?: FilterBehavior }): boolean {
+  return filter.behavior !== 'highlight' && filter.behavior !== 'hideFilter'
+}
 
 /**
  * A pleasant, visible-but-not-loud default highlight colour for tag filters: a

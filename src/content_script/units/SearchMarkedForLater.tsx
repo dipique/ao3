@@ -1,7 +1,7 @@
 import { ADDON_CLASS, getArchiveLink, logger, parseUser, toast } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { readSnapshot, writeSnapshot } from '#content_script/searchView/cache.ts'
-import { decorateBlurb, decorateContainer } from '#content_script/searchView/decorate.ts'
+import { decorateBlurb, decorateContainer, makeFacetHider } from '#content_script/searchView/decorate.ts'
 import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.ts'
 import { detectPageCount, scrapeListing } from '#content_script/searchView/scrape.ts'
 import { createSearchView, type SearchView, type SearchViewConfig, type ViewState } from '#content_script/searchView/view.tsx'
@@ -211,6 +211,7 @@ export class SearchMarkedForLater extends Unit {
       perPage: this.options.searchPerPage,
       decorateBlurb: blurb => decorateBlurb(blurb, this.options),
       decorateContainer: root => decorateContainer(root, this.options),
+      hideFacetValue: makeFacetHider(this.options),
     }
   }
 

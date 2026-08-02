@@ -12,6 +12,21 @@ export function getTag(linkUrl: string): Tag | undefined {
   return getTagFromElement(a)
 }
 
+/**
+ * A work page types its tag lists on the wrapping `dd` (e.g. `dd.freeform.tags`)
+ * instead of the `li`, and in the singular — so the plural classes
+ * {@link TagType.toCSSClass} looks for never match there.
+ */
+const WORK_META_TAG_CLASSES: Record<string, TagType> = {
+  rating: TagType.Rating,
+  warning: TagType.ArchiveWarning,
+  category: TagType.Category,
+  fandom: TagType.Fandom,
+  relationship: TagType.Relationship,
+  character: TagType.Character,
+  freeform: TagType.Freeform,
+}
+
 export function getTagFromElement(tagElement: Element): Tag {
   const parent = tagElement?.closest('.fandoms,li')
 
@@ -21,6 +36,18 @@ export function getTagFromElement(tagElement: Element): Tag {
     if (parent?.classList.contains(cssClass)) {
       tagType = type
       break
+    }
+  }
+
+  // Blurb tags carry their type on the `li`; work-page tags don't, so fall back
+  // to the `dd` their list lives in.
+  if (tagType === undefined) {
+    const dd = tagElement?.closest('dd.tags')
+    for (const [cssClass, type] of Object.entries(WORK_META_TAG_CLASSES)) {
+      if (dd?.classList.contains(cssClass)) {
+        tagType = type
+        break
+      }
     }
   }
 

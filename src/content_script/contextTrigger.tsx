@@ -10,6 +10,7 @@ import MdiOpenInApp from '~icons/mdi/open-in-app.jsx'
 import MdiOpenInNew from '~icons/mdi/open-in-new.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
+import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import { ADDON_CLASS, isExtensionContextValid, toast } from '#common'
 import React from '#dom'
@@ -329,7 +330,7 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
 // ---------------------------------------------------------------------------
 
 /** A state an indicator can show, in display order. */
-export type IndicatorState = 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'saved' | 'read' | 'favorite'
+export type IndicatorState = 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'hideFilter' | 'saved' | 'read' | 'favorite'
 
 const INDICATOR_ICONS: Record<IndicatorState, () => Node> = {
   include: () => <MdiPlusCircle />,
@@ -337,12 +338,13 @@ const INDICATOR_ICONS: Record<IndicatorState, () => Node> = {
   hide: () => <MdiEyeOff />,
   invert: () => <MdiEyeCheck />,
   highlight: () => <MdiStar />,
+  hideFilter: () => <MdiTagOff />,
   saved: () => <MdiClockCheck />,
   read: () => <MdiBookCheck />,
   favorite: () => <MdiHeart />,
 }
 
-const INDICATOR_ORDER: IndicatorState[] = ['include', 'exclude', 'hide', 'invert', 'highlight', 'saved', 'read', 'favorite']
+const INDICATOR_ORDER: IndicatorState[] = ['include', 'exclude', 'hide', 'invert', 'highlight', 'hideFilter', 'saved', 'read', 'favorite']
 
 /** Hover text, so an icon's meaning doesn't depend on recognising it. */
 const INDICATOR_LABELS: Record<IndicatorState, string> = {
@@ -351,6 +353,9 @@ const INDICATOR_LABELS: Record<IndicatorState, string> = {
   hide: 'Hidden',
   invert: 'Always shown',
   highlight: 'Highlighted',
+  // Normally unseen — the tag it sits on is hidden — but it shows up wherever
+  // HideFilters doesn't reach (e.g. while that unit is mid-run).
+  hideFilter: 'Tag hidden',
   saved: 'Marked for later',
   read: 'Read',
   favorite: 'Favorite',

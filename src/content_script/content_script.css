@@ -584,6 +584,23 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   -webkit-box-decoration-break: clone;
 }
 
+/* ---------------------------------------------------------------------------
+   Muted tags — the "hide filter" behaviour (see units/HideFilters.ts). The tag
+   is taken out of the page wherever it's listed: a work's tag list, and the
+   filter sidebar's include/exclude rows. `!important` because AO3 sets
+   `display: inline` on `.commas li`.
+   --------------------------------------------------------------------------- */
+.AO3E--hidden-filter {
+  display: none !important;
+}
+
+/* AO3 draws a comma after every `.commas li` except the last child — which may
+   now be hidden. This marks the last one still showing, so the list doesn't end
+   on a dangling comma. */
+.AO3E--hidden-filter-last::after {
+  content: none !important;
+}
+
 /* Favourite / highlighted authors. The author analogue of --highlight-tag,
    applied to native byline links (a[rel=author]) that match a highlight filter.
    Its own default colour is bluer than the tag default so highlighted authors

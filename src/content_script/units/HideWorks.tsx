@@ -4,7 +4,7 @@ import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
 import { type EntityFilter, type TagFilter, TagType } from '#common'
-import { ADDON_CLASS, authorFilterMatchesAuthor, entityFilterMatches, tagFilterMatchesTag, unpackIds } from '#common'
+import { ADDON_CLASS, authorFilterMatchesAuthor, entityFilterMatches, filterAffectsWorks, tagFilterMatchesTag, unpackIds } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -230,11 +230,12 @@ export class HideWorks extends Unit {
       kinds.add('crossovers')
     }
 
-    // Highlight filters are purely visual (handled by HighlightTags) and never
-    // hide or force-show, so they're excluded from the hide decision here.
+    // Presentational filters are handled elsewhere (HighlightTags colours the
+    // tag, HideFilters hides it) and never hide or force-show a work, so they're
+    // excluded from the hide decision here.
     const tagMatches = hideTags?.enabled
       ? blurb.tags.flatMap((tag) => {
-          const filter = hideTags.filters.find(f => f.behavior !== 'highlight' && tagFilterMatchesTag(f, tag))
+          const filter = hideTags.filters.find(f => filterAffectsWorks(f) && tagFilterMatchesTag(f, tag))
           return filter ? [{ tag, filter }] : []
         })
       : []
@@ -243,7 +244,7 @@ export class HideWorks extends Unit {
     // handles them), so they're excluded from the hide decision here too.
     const authorMatches = hideAuthors?.enabled
       ? blurb.authors.flatMap((author) => {
-          const filter = hideAuthors.filters.find(f => f.behavior !== 'highlight' && authorFilterMatchesAuthor(f, author))
+          const filter = hideAuthors.filters.find(f => filterAffectsWorks(f) && authorFilterMatchesAuthor(f, author))
           return filter ? [{ author, filter }] : []
         })
       : []
@@ -252,12 +253,12 @@ export class HideWorks extends Unit {
     // belongs to. Highlight-only filters are visual (HighlightWorks/Series) and
     // never hide or force-show, so they're excluded from the hide decision.
     const workMatches = hideWorks?.enabled && blurb.work
-      ? hideWorks.filters.filter(f => f.behavior !== 'highlight' && entityFilterMatches(f, blurb.work!))
+      ? hideWorks.filters.filter(f => filterAffectsWorks(f) && entityFilterMatches(f, blurb.work!))
       : []
 
     const seriesMatches = hideSeries?.enabled
       ? blurb.series.flatMap((series) => {
-          const filter = hideSeries.filters.find(f => f.behavior !== 'highlight' && entityFilterMatches(f, series))
+          const filter = hideSeries.filters.find(f => filterAffectsWorks(f) && entityFilterMatches(f, series))
           return filter ? [{ series, filter }] : []
         })
       : []

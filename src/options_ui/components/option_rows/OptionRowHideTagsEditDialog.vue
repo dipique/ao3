@@ -100,7 +100,7 @@ const typeModel = computed({
         {{ creating ? 'Create' : 'Edit' }} tag filter
       </DialogTitle>
       <DialogDescription class="sr-only">
-        Configure a tag filter: the text to match, how it matches, the tag type to restrict to, and whether matching works are hidden, force-shown, or have the tag highlighted.
+        Configure a tag filter: the text to match, how it matches, the tag type to restrict to, and whether matching works are hidden, force-shown, or have the tag highlighted or hidden.
       </DialogDescription>
       <div flex="~ col gap-4" pt-4>
         <label flex="~ col gap-1">
@@ -167,6 +167,9 @@ const typeModel = computed({
             </SelectItem>
             <SelectItem value="highlight">
               Highlight the tag (does not hide)
+            </SelectItem>
+            <SelectItem value="hideFilter">
+              Hide the tag itself (does not hide works)
             </SelectItem>
           </Select>
         </label>

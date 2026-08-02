@@ -53,7 +53,11 @@ const TAG_DIRECTIONS: Record<Direction, { fieldId: string, checkboxPrefix: strin
 // Preferred over free-text entry: if a tag already has a checkbox we just
 // (un)check it, matching how a user would use the sidebar.
 
-function checkboxTagName(input: HTMLInputElement): string {
+/**
+ * The tag name a sidebar filter checkbox stands for, with AO3's trailing work
+ * count stripped. Exported for HideFilters, which matches these rows by name.
+ */
+export function checkboxTagName(input: HTMLInputElement): string {
   const label = input.closest('label')
   // The label holds: <input> <span.indicator> <span>NAME (count)</span>
   const nameSpan = label?.querySelector('span:not(.indicator)')

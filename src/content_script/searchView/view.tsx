@@ -90,6 +90,13 @@ export interface SearchViewConfig {
   decorateContainer?: (resultsRoot: HTMLElement) => void
   /** A per-work action button added to every blurb (see {@link BlurbAction}). */
   blurbAction?: BlurbAction
+  /**
+   * Whether a facet value should be left out of the sidebar entirely — the
+   * in-memory counterpart of the native filter rows HideFilters hides. A hidden
+   * value keeps counting towards the works it's on; it just can't be seen or
+   * filtered by, and any selection on it is dropped.
+   */
+  hideFacetValue?: (key: FacetKey, value: string) => boolean
   /** Called after a {@link BlurbAction} removes a work, so the host can persist. */
   onWorksChanged?: (works: Work[]) => void
   /** Restore a prior {@link SearchView.getState} snapshot (filters, sort, page). */
@@ -430,7 +437,17 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     const prefCollapsed = firstBuild && !restore ? new Set(config.prefs?.collapsed ?? []) : null
     facetUiRestored = true
     for (const key of facetOrder) {
-      const values = facets[key]
+      // Drop the values the user has muted ("hide filter"), and with them any
+      // selection they carried — an unreachable row must not keep filtering.
+      const values = config.hideFacetValue
+        ? facets[key].filter(({ value }) => {
+            if (!config.hideFacetValue!(key, value))
+              return true
+            for (const dir of FACET_DIRS)
+              state.facets[key][dir].delete(value)
+            return false
+          })
+        : facets[key]
       if (!values.length)
         continue
       const rows = values.map(value => facetRow(key, value))

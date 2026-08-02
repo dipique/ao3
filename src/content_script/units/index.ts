@@ -7,6 +7,7 @@ import { FandomToolbar } from './FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from './FilterEntityToolbars.tsx'
 import { FilterToolbar } from './FilterToolbar.tsx'
 import { HideAuthorToolbar } from './HideAuthorToolbar.tsx'
+import { HideFilters } from './HideFilters.ts'
 import { HideWorks } from './HideWorks.tsx'
 import { HighlightAuthors } from './HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from './HighlightEntities.ts'
@@ -31,6 +32,9 @@ export const UNITS = [
   // Runs after HideWorks so it can count the works HideWorks marked as hidden.
   FilterToolbar,
   HighlightTags,
+  // After HighlightTags: a tag can't be both highlighted and hidden, but if a
+  // page ever matched both rules, hiding should be what the reader sees.
+  HideFilters,
   HighlightAuthors,
   HighlightWorks,
   HighlightSeries,

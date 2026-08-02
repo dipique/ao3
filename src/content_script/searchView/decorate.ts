@@ -1,10 +1,12 @@
 import type { Options } from '#common'
 import type { Unit } from '#content_script/Unit.js'
 
+import { tagFilterMatchesTag, TagType } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { FandomToolbar } from '#content_script/units/FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from '#content_script/units/FilterEntityToolbars.tsx'
 import { HideAuthorToolbar } from '#content_script/units/HideAuthorToolbar.tsx'
+import { HideFilters } from '#content_script/units/HideFilters.ts'
 import { HighlightAuthors } from '#content_script/units/HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from '#content_script/units/HighlightEntities.ts'
 import { HighlightTags } from '#content_script/units/HighlightTags.ts'
@@ -12,13 +14,16 @@ import { RequiredTagsToolbar } from '#content_script/units/RequiredTagsToolbar.t
 import { Stats } from '#content_script/units/Stats/Stats.ts'
 import { TagToolbar } from '#content_script/units/TagToolbar.tsx'
 
+import type { FacetKey } from './engine.ts'
+
 /**
  * Per-blurb enhancements — units that act on one blurb independently, with no
  * cross-blurb state. Safe to run lazily, one blurb at a time, as pages are shown.
  * Stats adds the kudos/hits ratio, reading time and thousands separators; the
- * highlight units colour favourite tags/authors/works/series.
+ * highlight units colour favourite tags/authors/works/series, and HideFilters
+ * takes the muted ones out of each blurb's tag list.
  */
-const BLURB_UNITS = [Stats, HighlightTags, HighlightAuthors, HighlightWorks, HighlightSeries] as typeof Unit[]
+const BLURB_UNITS = [Stats, HighlightTags, HideFilters, HighlightAuthors, HighlightWorks, HighlightSeries] as typeof Unit[]
 
 /**
  * Context-menu toolbars — units that keep a shared registry of every decorated
@@ -52,4 +57,35 @@ export function decorateContainer(root: HTMLElement, options: Options): void {
   pruneDetachedTriggers()
   for (const U of CONTAINER_UNITS)
     runUnit(U, options, root)
+}
+
+/**
+ * The tag type each facet group's values are. Language and completion status are
+ * not tags at all, so no tag filter can speak about them.
+ */
+const FACET_TAG_TYPES: Partial<Record<FacetKey, TagType>> = {
+  rating: TagType.Rating,
+  warnings: TagType.ArchiveWarning,
+  categories: TagType.Category,
+  fandoms: TagType.Fandom,
+  relationships: TagType.Relationship,
+  characters: TagType.Character,
+  freeforms: TagType.Freeform,
+}
+
+/**
+ * Build the view's `hideFacetValue` predicate from the user's `'hideFilter'` tag
+ * rules — the search view's answer to the native sidebar rows HideFilters hides.
+ * Returns undefined when no such rule applies, so the view skips the check
+ * entirely.
+ */
+export function makeFacetHider(options: Options): ((key: FacetKey, value: string) => boolean) | undefined {
+  const { enabled, filters } = options.hideTags
+  const hidden = enabled ? filters.filter(f => f.behavior === 'hideFilter') : []
+  if (hidden.length === 0)
+    return undefined
+  return (key, value) => {
+    const type = FACET_TAG_TYPES[key]
+    return type !== undefined && hidden.some(f => tagFilterMatchesTag(f, { name: value, type }))
+  }
 }
