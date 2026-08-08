@@ -18,10 +18,36 @@ const LABEL_CLASS = `${ADDON_CLASS}--menu--label`
 const ACTIVE_CLASS = `${ADDON_CLASS}--menu--active`
 const DANGER_CLASS = `${ADDON_CLASS}--menu--danger`
 const SEPARATOR_CLASS = `${ADDON_CLASS}--menu--separator`
+const GROUP_CLASS = `${ADDON_CLASS}--menu--group`
+const HEADING_CLASS = `${ADDON_CLASS}--menu--heading`
 const POPOVER_CLASS = `${ADDON_CLASS}--popover`
 
 /** Gap kept between the floating element and the viewport edge when clamping. */
 const VIEWPORT_MARGIN = 6
+
+/**
+ * What a row reaches. A menu opened on a search page mixes rows that rewrite a
+ * saved setting (every listing, from now on) with rows that only re-run the
+ * search in front of you — identical-looking actions with very different
+ * consequences, which is why each scope gets its own labelled group.
+ *
+ * - `search` — the search you're looking at, gone with the next one.
+ * - `settings` — our settings, stored by the extension.
+ * - `account` — settings that live on AO3 (your marks, subscriptions, mutes).
+ * - `builtin` — what the browser's own menu would have offered: copy, open.
+ *
+ * A row with no scope (e.g. the symbols key) sits outside every group and keeps
+ * its own {@link MenuItem.separatorBefore}.
+ */
+export type MenuScope = 'search' | 'settings' | 'account' | 'builtin'
+
+/** The heading drawn above each scope's group, in the order the rows appear. */
+const SCOPE_HEADINGS: Record<MenuScope, string> = {
+  search: 'Search',
+  settings: 'Settings (Extension)',
+  account: 'Settings (AO3)',
+  builtin: 'Built-in',
+}
 
 /** A single row in a {@link openMenu} menu. */
 export interface MenuItem {
@@ -29,6 +55,11 @@ export interface MenuItem {
   icon?: Node | (() => Node) | null
   /** The row's text. */
   label: string
+  /**
+   * How long this row's effect lasts. Consecutive rows sharing a scope are
+   * grouped under one heading; see {@link MenuScope}.
+   */
+  scope?: MenuScope
   /** Show a check/accent indicating this action is the current state. */
   active?: boolean
   /** Render in a "destructive" accent (e.g. hide). */
@@ -106,13 +137,37 @@ export function openMenu(items: MenuItem[], at: { x: number, y: number }): void 
     <div class={`${ADDON_CLASS}  ${MENU_CLASS}`} role="menu" />
   ) as HTMLElement
 
+  // Each run of same-scope rows becomes a labelled group — an ARIA one, so the
+  // heading is announced rather than just seen. Unscoped rows (copy, open) go
+  // straight into the menu.
+  let scope: MenuScope | undefined
+  let container: HTMLElement = menu
   for (const item of items) {
-    if (item.separatorBefore && menu.childElementCount > 0)
-      menu.append(<div class={SEPARATOR_CLASS} />)
+    const opensGroup = item.scope !== scope
+    if (opensGroup) {
+      scope = item.scope
+      container = menu
+      if (scope) {
+        const label = SCOPE_HEADINGS[scope]
+        const group = (<div class={GROUP_CLASS} role="group" aria-label={label} />) as HTMLElement
+        // Visual only: the group's own aria-label already says this to a reader.
+        group.append(<div class={HEADING_CLASS} aria-hidden="true">{label}</div>)
+        menu.append(group)
+        container = group
+      }
+    }
+
+    // A group heading is its own divider; anywhere else, honour the row's ask.
+    if ((!opensGroup || !scope) && item.separatorBefore && container.childElementCount > 0)
+      container.append(<div class={SEPARATOR_CLASS} />)
 
     const { el, set } = makeRow()
     set(item)
-    menu.append(el)
+    // On the row itself rather than in `set`, so a `resolve`d replacement (which
+    // carries no scope of its own) stays in the group it was rendered under.
+    if (item.scope)
+      el.classList.add(`${ITEM_CLASS}--${item.scope}`)
+    container.append(el)
 
     if (item.resolve) {
       void item.resolve()

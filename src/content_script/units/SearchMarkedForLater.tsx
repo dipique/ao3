@@ -1,5 +1,8 @@
+import type { Work } from '#content_script/blurb.js'
+
 import { ADDON_CLASS, getArchiveLink, logger, parseUser, toast } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
+import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { readSnapshot, writeSnapshot } from '#content_script/searchView/cache.ts'
 import { decorateBlurb, decorateContainer, makeFacetHider } from '#content_script/searchView/decorate.ts'
 import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.ts'
@@ -43,6 +46,18 @@ function pageUrl(userId: string, page: number): string {
 
 function snapshotKey(userId: string): string {
   return `marked-for-later:${userId}`
+}
+
+/**
+ * Record the list: the blurb snapshot this view re-renders from, plus the id
+ * index every *other* listing reads to show its saved indicators
+ * ({@link file://./../markedForLaterIndex.ts}). This page is the only place that
+ * sees the whole list, so the two are always written together — an index that
+ * lags the snapshot would show the clock on works already triaged away.
+ */
+async function persist(userId: string, works: Work[]): Promise<void> {
+  await writeSnapshot(snapshotKey(userId), works)
+  await saveMarkedForLaterIndex(userId, works.map(work => work.workId))
 }
 
 /** Restore the native page: abort any scrape, remove our view, un-hide the list. */
@@ -113,7 +128,7 @@ async function refresh(userId: string, view: SearchView): Promise<void> {
     })
     if (controller.signal.aborted)
       return
-    await writeSnapshot(snapshotKey(userId), result.works)
+    await persist(userId, result.works)
     // Every work here is marked for later — keep the work menu's saved state in
     // step with the refreshed set before it re-decorates the blurbs.
     seedMarkedForLater(result.works.map(w => w.workId))
@@ -262,7 +277,7 @@ export class SearchMarkedForLater extends Unit {
           },
         },
         onWorksChanged: (works) => {
-          void writeSnapshot(key, works).catch(err => log.error('Failed to persist after mark-as-read', err))
+          void persist(userId, works).catch(err => log.error('Failed to persist after mark-as-read', err))
         },
       }
 
@@ -272,6 +287,11 @@ export class SearchMarkedForLater extends Unit {
         // shared session state before the view decorates the blurbs so the work
         // menu offers "Mark as read" and shows the saved indicator.
         seedMarkedForLater(cached.works.map(w => w.workId))
+        // Record the same ids as the index other listings read. The refresh below
+        // normally overwrites this within seconds — it's here so a snapshot taken
+        // before the index existed (or a refresh that fails) still counts.
+        void saveMarkedForLaterIndex(userId, cached.works.map(w => w.workId))
+          .catch(err => log.error('Failed to seed the Marked for Later index', err))
         // Render instantly from cache, then refresh in the background (unless the
         // caller knows the cache is fresh, e.g. a reopen right after a re-run).
         const view = createSearchView(cached.works, handlers, config)
@@ -296,7 +316,7 @@ export class SearchMarkedForLater extends Unit {
           onProgress: progress.update,
           signal: controller.signal,
         })
-        await writeSnapshot(key, result.works)
+        await persist(userId, result.works)
         if (!result.works.length) {
           toast('No works found in your Marked for Later list.', { type: 'error' })
           teardown()

@@ -297,12 +297,13 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
     {
       icon: () => <MdiContentCopy />,
       label: 'Copy text',
-      separatorBefore: true,
+      scope: 'builtin',
       onSelect: () => void navigator.clipboard?.writeText(link.textContent?.trim() ?? ''),
     },
     {
       icon: () => <MdiLinkVariant />,
       label: 'Copy address',
+      scope: 'builtin',
       onSelect: () => void navigator.clipboard?.writeText(link.href),
     },
     {
@@ -310,6 +311,7 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
       // `openMenuOnClick` makes a plain click open this menu instead of navigating.
       icon: () => <MdiOpenInApp />,
       label: 'Open',
+      scope: 'builtin',
       onSelect: () => {
         window.location.assign(link.href)
       },
@@ -317,6 +319,7 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
     {
       icon: () => <MdiOpenInNew />,
       label: 'Open in new tab',
+      scope: 'builtin',
       onSelect: () => {
         window.open(link.href, '_blank', 'noopener')
       },

@@ -85,12 +85,14 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
     items.push({
       icon: () => <MdiPlusCircle />,
       label: 'Include in filter',
+      scope: 'search',
       active: id != null && isFandomSelected('include', id),
       onSelect: () => toggleFandom('include', tag, link),
     })
     items.push({
       icon: () => <MdiMinusCircle />,
       label: 'Exclude from filter',
+      scope: 'search',
       active: id != null && isFandomSelected('exclude', id),
       onSelect: () => toggleFandom('exclude', tag, link),
     })
@@ -103,15 +105,16 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
     {
       icon: () => <MdiEyeOff />,
       label: 'Hide',
+      scope: 'settings',
       danger: true,
       active: behavior === 'hide',
       disabled: behavior === 'hide',
-      separatorBefore: items.length > 0,
       onSelect: () => toggleTagBehavior(tag, 'hide'),
     },
     {
       icon: () => <MdiEyeCheck />,
       label: 'Always show',
+      scope: 'settings',
       active: behavior === 'invert',
       disabled: behavior === 'invert',
       onSelect: () => toggleTagBehavior(tag, 'invert'),
@@ -119,6 +122,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
     {
       icon: () => <MdiStar />,
       label: 'Highlight',
+      scope: 'settings',
       active: behavior === 'highlight',
       disabled: behavior === 'highlight',
       onSelect: () => toggleTagBehavior(tag, 'highlight'),
@@ -128,6 +132,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
       // alone. Undoing it is a settings job — the tag is gone from the page.
       icon: () => <MdiTagOff />,
       label: 'Hide this filter',
+      scope: 'settings',
       active: behavior === 'hideFilter',
       disabled: behavior === 'hideFilter',
       onSelect: () => toggleTagBehavior(tag, 'hideFilter'),
@@ -137,6 +142,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
     items.push({
       icon: () => <MdiCloseCircleOutline />,
       label: 'Clear',
+      scope: 'settings',
       onSelect: () => clearTagBehavior(tag),
     })
   }

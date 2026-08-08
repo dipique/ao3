@@ -11,7 +11,7 @@ import MdiStar from '~icons/mdi/star.jsx'
 
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchAndParseDocument, fetchToken, getArchiveLink, options, toast, unpackIds } from '#common'
+import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchAndParseDocument, fetchToken, getArchiveLink, options, parseUser, toast, unpackIds } from '#common'
 import {
   attachMenuTrigger,
   buildIndicators,
@@ -19,6 +19,7 @@ import {
   type IndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
+import { loadMarkedForLaterIndex, noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
 import { clearEntityBehavior, entityBehavior, type EntityOptionKey, toggleEntityBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import { applyReadMark, setFavoriteMark } from '#content_script/workMarks.js'
@@ -59,8 +60,21 @@ interface MarkState {
    * value and bring the saved-clock back on a work just marked read.
    */
   acted: boolean
+  /**
+   * The state came from the cached Marked for Later index rather than from this
+   * page or a fetch — good enough to draw the indicator, but possibly out of date
+   * by however long ago the list was last scraped. Opening the work's menu
+   * re-checks a cached state against the archive before acting on it.
+   */
+  cached: boolean
 }
 const markState = new Map<string, MarkState>()
+
+/** Options for {@link seedMarkedForLater}. */
+interface SeedOptions {
+  /** The ids come from the cached index — see {@link MarkState.cached}. */
+  cached?: boolean
+}
 
 /**
  * Seed the shared session mark-for-later state for works already known to be
@@ -69,14 +83,22 @@ const markState = new Map<string, MarkState>()
  * for Later view above all — so seeding lets the work menu offer "Mark as read"
  * (not "Mark for later") and show the saved-clock indicator from the first
  * render. A work mid-request (busy) is left untouched.
+ *
+ * The other seed is {@link file://../markedForLaterIndex.ts}, the cached id list
+ * from the last bulk scrape, which is what puts the indicator on ordinary
+ * listings. Those ids come in with `cached: true` and never overwrite a state
+ * read first-hand.
  */
-export function seedMarkedForLater(workIds: Iterable<string>): void {
+export function seedMarkedForLater(workIds: Iterable<string>, opts: SeedOptions = {}): void {
   for (const id of workIds) {
     const state = markState.get(id)
     // A toggle in flight, or one we already made, is fresher than the listing.
     if (state?.busy || state?.acted)
       continue
-    markState.set(id, { saved: true, busy: false, known: true, acted: false })
+    // Anything read off this page (or fetched) beats a possibly-stale cache.
+    if (opts.cached && state?.known && !state.cached)
+      continue
+    markState.set(id, { saved: true, busy: false, known: true, acted: false, cached: !!opts.cached })
   }
 }
 
@@ -230,6 +252,7 @@ abstract class FilterEntityToolbar extends Unit {
       {
         icon: () => <MdiEyeOff />,
         label: `Hide ${this.noun}`,
+        scope: 'settings',
         danger: true,
         active: behavior === 'hide',
         disabled: behavior === 'hide',
@@ -238,6 +261,7 @@ abstract class FilterEntityToolbar extends Unit {
       {
         icon: () => <MdiEyeCheck />,
         label: 'Always show',
+        scope: 'settings',
         active: behavior === 'invert',
         disabled: behavior === 'invert',
         onSelect: () => toggleEntityBehavior(this.optionKey, id, 'invert'),
@@ -245,6 +269,7 @@ abstract class FilterEntityToolbar extends Unit {
       {
         icon: () => <MdiStar />,
         label: 'Highlight',
+        scope: 'settings',
         active: behavior === 'highlight',
         disabled: behavior === 'highlight',
         onSelect: () => toggleEntityBehavior(this.optionKey, id, 'highlight'),
@@ -254,6 +279,7 @@ abstract class FilterEntityToolbar extends Unit {
       items.push({
         icon: () => <MdiCloseCircleOutline />,
         label: 'Clear',
+        scope: 'settings',
         onSelect: () => clearEntityBehavior(this.optionKey, id),
       })
     }
@@ -281,12 +307,14 @@ abstract class FilterEntityToolbar extends Unit {
       {
         icon: () => (read ? <MdiBookOutline /> : <MdiBookCheck />),
         label: read ? 'Unmark as read' : 'Mark as read',
+        scope: 'settings',
         separatorBefore: true,
         onSelect: () => this.onToggleRead(id, !read),
       },
       {
         icon: () => (favorite ? <MdiHeart /> : <MdiHeartOutline />),
         label: favorite ? 'Remove from favorites' : 'Add to favorites',
+        scope: 'settings',
         onSelect: () => this.onToggleFavorite(id, !favorite),
       },
     ]
@@ -340,28 +368,47 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   /**
-   * The Mark for Later / Mark as Read row. When the work's saved state is already
-   * known (acted on this session, or seeded by a listing that knows its works are
-   * saved — the Search Marked for Later view), it renders directly. Otherwise it
-   * renders a disabled "Checking…" placeholder that opens *with* the menu and
-   * patches itself once a background fetch of the work page reveals the real
-   * state — so opening the menu never waits on the network.
+   * The Mark for Later / Mark as Read row. When the work's saved state is known
+   * first-hand (acted on this session, read off this page, or seeded by a listing
+   * that knows its works are saved — the Search Marked for Later view), it renders
+   * directly and stands.
+   *
+   * Otherwise the row opens *with* the menu and patches itself once a background
+   * fetch of the work page reveals the real state, so opening never waits on the
+   * network. What it shows meanwhile depends on how much we know:
+   *
+   * - a cached state (from the Marked for Later index) renders as the real,
+   *   usable action straight away — the check only corrects it if the list has
+   *   moved on since the last scrape;
+   * - knowing nothing at all, a disabled "Checking…" placeholder.
    */
   private markItem(id: string): MenuItem {
-    const known = markState.get(id)
-    if (known?.known)
-      return this.markAction(id, known.saved, known.busy)
+    const state = markState.get(id)
+    if (state?.known && !state.cached)
+      return this.markAction(id, state.saved, state.busy)
+
+    const resolve = async (): Promise<MenuItem> => {
+      const saved = await this.checkMarked(id)
+      const busy = markState.get(id)?.busy ?? false
+      if (saved === null) {
+        // Couldn't reach the archive. A cached state is still the best answer we
+        // have, so leave that row usable rather than replacing it with nothing.
+        return state?.known
+          ? this.markAction(id, state.saved, busy)
+          : { icon: () => <MdiClockPlusOutline />, label: 'Mark for later (unavailable)', disabled: true }
+      }
+      return this.markAction(id, saved, busy)
+    }
+
+    if (state?.known)
+      return { ...this.markAction(id, state.saved, state.busy), resolve }
+
     return {
       icon: () => <MdiClockPlusOutline />,
       label: 'Checking Marked for Later…',
-      separatorBefore: true,
+      scope: 'account',
       disabled: true,
-      resolve: async () => {
-        const saved = await this.checkMarked(id)
-        if (saved === null)
-          return { icon: () => <MdiClockPlusOutline />, label: 'Mark for later (unavailable)', disabled: true }
-        return this.markAction(id, saved, markState.get(id)?.busy ?? false)
-      },
+      resolve,
     }
   }
 
@@ -376,7 +423,7 @@ abstract class FilterEntityToolbar extends Unit {
     return {
       icon: () => (saved ? <MdiClockCheck /> : <MdiClockPlusOutline />),
       label: saved ? savedLabel : 'Mark for later',
-      separatorBefore: true,
+      scope: 'account',
       disabled: busy,
       onSelect: () => this.onMark(id),
     }
@@ -399,12 +446,16 @@ abstract class FilterEntityToolbar extends Unit {
     }
     if (saved === null)
       return null
-    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false }
+    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
     // A toggle in flight, or one we already made, is the freshest intent.
     if (state.busy || state.acted)
       return state.saved
     state.saved = saved
     state.known = true
+    // Straight from the archive, so it supersedes anything the index said — and
+    // the index itself, which may have been what we just disagreed with.
+    state.cached = false
+    noteMarkedForLater(id, saved)
     markState.set(id, state)
     this.syncEntriesFor(id)
     return saved
@@ -463,7 +514,7 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   async onMark(id: string): Promise<void> {
-    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false }
+    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
     if (state.busy)
       return
     const save = !state.saved
@@ -484,8 +535,12 @@ abstract class FilterEntityToolbar extends Unit {
       state.saved = save
       // We now know this work's state first-hand, so future opens skip the check.
       state.known = true
+      state.cached = false
       // ...and must not be overwritten by a re-seed from the now-stale page.
       state.acted = true
+      // Keep the cached index in step, so every other listing agrees with what
+      // just happened rather than waiting for the next bulk scrape.
+      noteMarkedForLater(id, save)
       // Read and Marked for Later are opposite ends of one decision, so keep the
       // read mark in step: saving a work for later clears it, taking it off the
       // list records it. On the native-button path CaptureMarkButtons does this
@@ -552,9 +607,32 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
 
   override async ready(): Promise<void> {
     loadMarkSets(this.options.workMarks)
+    // Weakest source first: each of the three may overwrite the one before it.
+    await this.seedFromIndex()
     this.seedMarkedForLaterPage()
     this.seedWorkPageMark()
     await super.ready()
+  }
+
+  /**
+   * Seed the saved state from the cached Marked for Later index, which is what
+   * puts the saved indicator on an ordinary listing: the states are known from
+   * the last bulk scrape rather than from a request per work, which is the cost
+   * that kept the indicator off listings entirely.
+   *
+   * Seeded before the menus are built so the indicators are right on first paint.
+   * They're flagged `cached`, so opening a work's menu still re-checks that one
+   * work before offering to act on it.
+   */
+  private async seedFromIndex(): Promise<void> {
+    if (!this.markEnabled())
+      return
+    const userId = parseUser(document)?.userId
+    if (!userId)
+      return
+    const ids = await loadMarkedForLaterIndex(userId)
+    if (ids.size)
+      seedMarkedForLater(ids, { cached: true })
   }
 
   /**
@@ -607,8 +685,11 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     if (!id || state?.busy || state?.acted)
       return
     const saved = parseMarkedForLater(document)
-    if (saved !== null)
-      markState.set(id, { saved, busy: false, known: true, acted: false })
+    if (saved !== null) {
+      markState.set(id, { saved, busy: false, known: true, acted: false, cached: false })
+      // The page states it, so the index can be corrected for free.
+      noteMarkedForLater(id, saved)
+    }
   }
 
   static override async clean(): Promise<void> {

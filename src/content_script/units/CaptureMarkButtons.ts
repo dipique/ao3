@@ -1,9 +1,12 @@
+import { noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
 import { Unit } from '#content_script/Unit.js'
 import { applyReadMark } from '#content_script/workMarks.js'
 
 /**
- * Keeps the read mark in step with **AO3's own** mark buttons — the `li.mark`
- * form in a work's header, and anywhere else the archive renders one.
+ * Keeps our own record in step with **AO3's own** mark buttons — the `li.mark`
+ * form in a work's header, and anywhere else the archive renders one. Two things
+ * ride on one of those being pressed: the local read mark, and the cached
+ * Marked for Later index that puts the saved indicator on listings.
  *
  * Pressing one of those does exactly what the matching item in our work menu
  * does, because both end up in {@link applyReadMark}. Without this the two drift
@@ -13,14 +16,16 @@ import { applyReadMark } from '#content_script/workMarks.js'
  * Both directions are handled, because Read and Marked for Later are opposite
  * ends of one decision:
  *
- * - **Mark as Read** — you're done with it, so record the read mark.
- * - **Mark for Later** — it's back on the to-read pile, so clear the read mark.
- *   Otherwise "hide read works" would go on hiding the very work you just chose
- *   to come back to.
+ * - **Mark as Read** — you're done with it, so record the read mark. It also
+ *   comes off the Marked for Later list, which the index has to hear about or
+ *   every listing goes on showing the saved indicator on a work you just cleared.
+ * - **Mark for Later** — it's back on the to-read pile, so clear the read mark
+ *   and add it to the index. Otherwise "hide read works" would go on hiding the
+ *   very work you just chose to come back to.
  *
  * AO3 renders these as `button_to` forms that POST and redirect, so pressing one
  * navigates away. The handler therefore never awaits and never calls
- * `preventDefault` — it dispatches the storage write and lets the form submit
+ * `preventDefault` — it dispatches the storage writes and lets the form submit
  * exactly as it always has.
  */
 
@@ -55,7 +60,9 @@ function parseMarkForm(form: HTMLFormElement): { id: string, read: boolean } | n
 export class CaptureMarkButtons extends Unit {
   static override get name() { return 'CaptureMarkButtons' }
 
-  override get enabled() { return this.options.workMarks.enabled }
+  // Either record rides on these buttons, so one being on is enough (each side
+  // effect below is gated on its own feature).
+  override get enabled() { return this.options.workMarks.enabled || this.options.markForLaterToolbar }
 
   static override async clean(): Promise<void> {
     detachHandler()
@@ -73,8 +80,11 @@ export class CaptureMarkButtons extends Unit {
       if (!mark)
         return
       // A no-op when our own menu already applied it before pressing this button.
-      if (applyReadMark(this.options.workMarks, mark.id, mark.read))
+      if (this.options.workMarks.enabled && applyReadMark(this.options.workMarks, mark.id, mark.read))
         this.logger.debug(`Work ${mark.id} marked ${mark.read ? 'read' : 'unread'} from AO3's own button.`)
+      // Mark as Read takes the work off the list; Mark for Later puts it on.
+      // (A no-op unless FilterWorkToolbar has loaded the index for this page.)
+      noteMarkedForLater(mark.id, !mark.read)
     }
     document.addEventListener('submit', submitHandler, true)
   }

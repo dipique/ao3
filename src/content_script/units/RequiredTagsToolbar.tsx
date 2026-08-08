@@ -141,6 +141,7 @@ function buildSymbolMenu(anchor: HTMLAnchorElement, span: Element): MenuItem[] {
       items.push({
         icon: () => <MdiPlusCircle />,
         label: `Include${suffix} in filter`,
+        scope: 'search',
         active: target.isSelected('include', value),
         separatorBefore: i > 0,
         onSelect: () => target.toggle('include', value),
@@ -148,6 +149,7 @@ function buildSymbolMenu(anchor: HTMLAnchorElement, span: Element): MenuItem[] {
       items.push({
         icon: () => <MdiMinusCircle />,
         label: `Exclude${suffix} from filter`,
+        scope: 'search',
         active: target.isSelected('exclude', value),
         onSelect: () => target.toggle('exclude', value),
       })

@@ -121,6 +121,7 @@ export class HideAuthorToolbar extends Unit {
         {
           icon: () => <MdiAccountOff />,
           label: 'Hide author',
+          scope: 'settings',
           danger: true,
           active: behavior === 'hide',
           disabled: behavior === 'hide',
@@ -129,6 +130,7 @@ export class HideAuthorToolbar extends Unit {
         {
           icon: () => <MdiEyeCheck />,
           label: 'Always show',
+          scope: 'settings',
           active: behavior === 'invert',
           disabled: behavior === 'invert',
           onSelect: () => toggleAuthorBehavior(author.userId, 'invert'),
@@ -136,6 +138,7 @@ export class HideAuthorToolbar extends Unit {
         {
           icon: () => <MdiStar />,
           label: 'Highlight',
+          scope: 'settings',
           active: behavior === 'highlight',
           disabled: behavior === 'highlight',
           onSelect: () => toggleAuthorBehavior(author.userId, 'highlight'),
@@ -145,6 +148,7 @@ export class HideAuthorToolbar extends Unit {
         items.push({
           icon: () => <MdiCloseCircleOutline />,
           label: 'Clear',
+          scope: 'settings',
           onSelect: () => clearAuthorBehavior(author.userId),
         })
       }
@@ -152,6 +156,7 @@ export class HideAuthorToolbar extends Unit {
         items.push({
           icon: () => <MdiAccountMinus />,
           label: 'Hide this pseud',
+          scope: 'settings',
           danger: true,
           active: authorBehavior(filters, author.userId, author.pseud) === 'hide',
           onSelect: () => toggleAuthorBehavior(author.userId, 'hide', author.pseud),
@@ -160,22 +165,22 @@ export class HideAuthorToolbar extends Unit {
     }
 
     if (caps.subscribe)
-      items.push(this.subscribeItem(author, items.length > 0))
+      items.push(this.subscribeItem(author))
     if (caps.mute)
-      items.push(this.muteItem(author, items.length > 0))
+      items.push(this.muteItem(author))
 
-    // standardLinkItems already adds its own separator before "Copy text".
+    // standardLinkItems carries its own scope, so it opens its own group.
     items.push(...standardLinkItems(link))
     return items
   }
 
   /** The Subscribe/Unsubscribe row — a placeholder that resolves via a page fetch. */
-  private subscribeItem(author: AuthorLink, separator: boolean): MenuItem {
+  private subscribeItem(author: AuthorLink): MenuItem {
     return {
       icon: () => <MdiBellOutline />,
       label: 'Checking subscription…',
+      scope: 'account',
       disabled: true,
-      separatorBefore: separator,
       resolve: async () => {
         try {
           const sub = parseSubscription(await getAuthorPage(author.href))
@@ -197,12 +202,12 @@ export class HideAuthorToolbar extends Unit {
   }
 
   /** The Mute/Unmute row — a placeholder that resolves via a page fetch. */
-  private muteItem(author: AuthorLink, separator: boolean): MenuItem {
+  private muteItem(author: AuthorLink): MenuItem {
     return {
       icon: () => <MdiAccountCancelOutline />,
       label: 'Checking mute…',
+      scope: 'account',
       disabled: true,
-      separatorBefore: separator,
       resolve: async () => {
         try {
           const state = parseMuteState(await getAuthorPage(author.href))

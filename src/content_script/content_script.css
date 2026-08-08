@@ -468,6 +468,34 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   background: rgba(0, 0, 0, 0.12);
 }
 
+/* Scope groups. A menu on a search page offers rows that rewrite a saved setting
+   next to rows that only re-run the search in front of you — they look alike and
+   last very differently, so each group says which it is. The heading doubles as
+   the group's divider, so no separator is drawn between groups. */
+.AO3E--menu--group:not(:first-child) {
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  margin-top: 0.25em !important;
+  padding-top: 0.25em !important;
+}
+
+.AO3E--menu--heading {
+  padding: 0.35em 0.85em 0.2em !important;
+  margin: 0 !important;
+  color: inherit !important;
+  opacity: 0.6;
+  font-size: 0.72em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* A second cue for the transient group, for anyone skimming past the heading:
+   these rows are gone with the next search, so their labels are italic. */
+.AO3E--menu--item--search .AO3E--menu--label {
+  font-style: italic;
+}
+
 .AO3E--popover {
   position: fixed;
   z-index: 2147483600;

@@ -26,6 +26,21 @@ export interface SearchViewPrefs {
   dir?: 'asc' | 'desc'
 }
 
+/**
+ * The work ids on one user's Marked for Later list as of the last bulk scrape.
+ * Lets listings show the saved indicator without a request per work; see
+ * {@link file://./../content_script/markedForLaterIndex.ts} for what it can and
+ * can't be trusted to say.
+ */
+export interface MarkedForLaterIndex {
+  /** The (lower-cased) AO3 user the ids belong to; '' when there's no index yet. */
+  userId: string
+  /** Epoch ms the list was last scraped, for staleness. */
+  updatedAt: number
+  /** The saved work ids, delta-packed like the read/favourite marks. */
+  ids: string
+}
+
 export interface Cache {
   chapterDates: { [workId: string]: string[] }
   /**
@@ -36,6 +51,8 @@ export interface Cache {
   searchSnapshots: { [key: string]: SearchSnapshot }
   /** Per-application local UI prefs for the search view (see {@link SearchViewPrefs}). */
   searchViewPrefs: { [appId: string]: SearchViewPrefs }
+  /** Which works are on your Marked for Later list (see {@link MarkedForLaterIndex}). */
+  markedForLater: MarkedForLaterIndex
 }
 
 export const cache = createStorage<Cache>({
@@ -46,6 +63,7 @@ export const cache = createStorage<Cache>({
     chapterDates: {},
     searchSnapshots: {},
     searchViewPrefs: {},
+    markedForLater: { userId: '', updatedAt: 0, ids: '' },
   },
 })
 
