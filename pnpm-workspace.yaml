@@ -1,3 +1,8 @@
+# esbuild (Go) cannot detect directory symlinks on a ReFS Dev Drive, which makes
+# pnpm's default symlinked node_modules unresolvable at bundle time. A hoisted,
+# npm-style node_modules has no symlinks to follow.
+nodeLinker: hoisted
+
 allowBuilds:
   esbuild: true
   spawn-sync: true
