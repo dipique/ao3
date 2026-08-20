@@ -53,8 +53,14 @@ export class TotalStats extends Unit {
     const fragment = document.createDocumentFragment()
 
     for (const [dt, dd] of dts.map((e, i) => [e, dds[i]] as const)) {
+      // The wrapper stands for the stat itself, so it takes AO3's own classes
+      // only. Another unit may already have decorated the `dt` (the word-count
+      // menu marks it, and `clean()` drops the wrapper rather than unmarking
+      // it) — copying that across would leave the decoration on a node nothing
+      // owns.
+      const klass = Array.from(dt.classList).filter(name => !name.startsWith(ADDON_CLASS)).join(' ')
       const wrapper = (
-        <div class={dt.className}>
+        <div class={klass}>
           {dt}
           {dd}
         </div>

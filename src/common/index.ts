@@ -27,6 +27,8 @@ export { toast } from './toast/toast.tsx'
 
 export * from './utils.ts'
 
+export * from './wordCount.ts'
+
 export * from './workMarks.ts'
 
 const manifest = browser.runtime.getManifest()

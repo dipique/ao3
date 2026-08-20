@@ -3,6 +3,7 @@ import type { Unit } from '#content_script/Unit.js'
 import { CaptureMarkButtons } from './CaptureMarkButtons.ts'
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { DefaultSearchLanguage } from './DefaultSearchLanguage.ts'
+import { DefaultSearchWordCount } from './DefaultSearchWordCount.ts'
 import { FandomToolbar } from './FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from './FilterEntityToolbars.tsx'
 import { FilterToolbar } from './FilterToolbar.tsx'
@@ -21,6 +22,7 @@ import { StyleTweaks } from './StyleTweaks.tsx'
 import { TagToolbar } from './TagToolbar.tsx'
 import { TextReplace } from './TextReplace.ts'
 import { Tools } from './Tools.tsx'
+import { WordCountToolbar } from './WordCountToolbar.tsx'
 
 export const UNITS = [
   StyleTweaks,
@@ -40,6 +42,7 @@ export const UNITS = [
   HighlightSeries,
   CompressSearchUrls,
   DefaultSearchLanguage,
+  DefaultSearchWordCount,
   CaptureMarkButtons,
   // The context-menu decorators. Subscribe/mute/mark-for-later were folded into
   // the author and work menus, so they're no longer separate units.
@@ -49,6 +52,7 @@ export const UNITS = [
   HideAuthorToolbar,
   FilterWorkToolbar,
   FilterSeriesToolbar,
+  WordCountToolbar,
   SearchMarkedForLater,
   Tools,
   Stats,

@@ -1,3 +1,5 @@
+import type { WordCountRange } from '#common'
+
 import type { FacetKey } from './engine.ts'
 
 /**
@@ -14,6 +16,10 @@ import type { FacetKey } from './engine.ts'
 export interface FacetBridge {
   isSelected: (key: FacetKey, dir: 'include' | 'exclude', value: string) => boolean
   toggle: (key: FacetKey, dir: 'include' | 'exclude', value: string) => void
+  /** The view's current word-count bounds, or null when it isn't filtering by length. */
+  getWordCount: () => WordCountRange | null
+  /** Replace those bounds (null clears them) and re-run the filter. */
+  setWordCount: (range: WordCountRange | null) => void
 }
 
 /** Results container → its bridge. At most a handful of entries (one per open view). */

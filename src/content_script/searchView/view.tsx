@@ -910,6 +910,18 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   registerFacetBridge(resultsOl, {
     isSelected: (key, dir, value) => state.facets[key][dir].has(value),
     toggle: (key, dir, value) => toggleSelection(key, dir, value),
+    getWordCount: () => state.wordsMin === null && state.wordsMax === null
+      ? null
+      : { from: state.wordsMin, to: state.wordsMax },
+    setWordCount: (range) => {
+      state.wordsMin = range?.from ?? null
+      state.wordsMax = range?.to ?? null
+      // The sidebar inputs are the same filter shown a second time — keep them
+      // in step, since the range was picked from a blurb rather than typed here.
+      minInput.value = state.wordsMin != null ? String(state.wordsMin) : ''
+      maxInput.value = state.wordsMax != null ? String(state.wordsMax) : ''
+      filterChanged()
+    },
   })
 
   mountResults()

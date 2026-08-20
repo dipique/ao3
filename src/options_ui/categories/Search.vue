@@ -67,6 +67,10 @@
     <OptionDivider />
     <OptionRowSearchLanguage />
     <OptionDivider />
+    <OptionRowWordCountRanges />
+    <OptionDivider />
+    <OptionRowSearchWordCount />
+    <OptionDivider />
     <OptionRowFandomExport />
   </OptionCategory>
 </template>

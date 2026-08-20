@@ -1,7 +1,9 @@
 import type { Language, Rule, RuleColors, TextReplacement } from './data.ts'
+import type { WordCountRange } from './wordCount.ts'
 import type { WorkMarks } from './workMarks.ts'
 
 import { createStorage } from './storage.ts'
+import { DEFAULT_WORD_COUNT_RANGES } from './wordCount.ts'
 import { createDefaultMarks } from './workMarks.ts'
 
 export interface ThemeOption {
@@ -91,6 +93,28 @@ export interface Options {
    * `language` null = none set.
    */
   searchLanguage: { enabled: boolean, language: Language | null }
+  /**
+   * Click a work's word count on a listing for a menu of quick word-count
+   * ranges (and a row clearing the current one). Drives AO3's own Word Count
+   * filter on native listings, and the in-memory filter inside our search views.
+   */
+  wordCountToolbar: {
+    enabled: boolean
+    /**
+     * The ranges that menu offers, in the order they're listed. Data, not code —
+     * editing the list in the options is the whole feature. Overlaps are
+     * allowed; duplicates and invalid bounds are rejected by the editor (see
+     * {@link file://./wordCount.ts}).
+     */
+    ranges: WordCountRange[]
+  }
+  /**
+   * Pre-fill AO3's Word Count filter with this range, at the same point (and
+   * under the same "only when nothing is set yet" rule) as
+   * {@link Options.searchLanguage}. Either bound may be null for a one-sided
+   * range.
+   */
+  searchWordCount: { enabled: boolean, from: number | null, to: number | null }
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -151,6 +175,8 @@ export const options = createStorage<Options>({
     searchMarkedForLater: true,
     searchPerPage: 50,
     searchLanguage: { enabled: false, language: null },
+    wordCountToolbar: { enabled: false, ranges: DEFAULT_WORD_COUNT_RANGES.map(range => ({ ...range })) },
+    searchWordCount: { enabled: false, from: null, to: null },
 
     styleWidthEnabled: true,
     styleWidth: 40,
