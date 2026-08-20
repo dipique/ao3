@@ -160,6 +160,37 @@ describe('word-count range menu', { skip }, () => {
     assert.deepEqual(await bounds(), { from: '', to: '', submits: 2 })
   })
 
+  test('Ctrl+Shift+right-click hands the gesture back to the browser', async () => {
+    // No preventDefault means the browser's own menu opens instead of ours — all
+    // we can observe here is that ours stayed shut and the event was left alone.
+    const defaultPrevented = await page.evaluate(() => new Promise((resolve) => {
+      const target = document.getElementById('words')
+      document.addEventListener('contextmenu', e => resolve(e.defaultPrevented), { once: true })
+      target.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        shiftKey: true,
+      }))
+    }))
+    await sleep(150)
+    assert.equal(defaultPrevented, false, 'the native menu must not be suppressed')
+    assert.equal(await page.$('.AO3E--menu'), null, 'our menu must stay shut')
+  })
+
+  test('a plain right-click still opens our menu', async () => {
+    const defaultPrevented = await page.evaluate(() => new Promise((resolve) => {
+      const target = document.getElementById('words')
+      document.addEventListener('contextmenu', e => resolve(e.defaultPrevented), { once: true })
+      target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    }))
+    await sleep(200)
+    assert.equal(defaultPrevented, true)
+    assert.notEqual(await page.$('.AO3E--menu'), null)
+    await page.keyboard.press('Escape')
+    await sleep(150)
+  })
+
   test('an open-ended range leaves the other bound empty', async () => {
     await openMenu()
     await page.evaluate(() => {

@@ -156,7 +156,7 @@ function syncIndicator(entry: FandomEntry): void {
   const states = computeStates(entry)
   const next = buildIndicators(states, { highlightColor: entry.highlightColor })
   if (next)
-    attachMenuTrigger(next, () => buildFandomMenu(entry.tag, entry.link), { indicator: true })
+    attachMenuTrigger(next, () => buildFandomMenu(entry.tag, entry.link), { indicator: true, link: entry.link })
 
   if (entry.indicator && next)
     entry.indicator.replaceWith(next)

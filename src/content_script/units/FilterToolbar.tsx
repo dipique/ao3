@@ -50,6 +50,8 @@ function detachOutsideHandler(): void {
  * - **Disable menus** — the escape hatch for the in-page context menus: flips
  *   `contextMenusEnabled`, restoring the browser's native menu on links. Shown
  *   whenever any menu decorator is active on the page, so it's always reachable.
+ *   (The per-gesture version is holding Shift; see
+ *   {@link file://../contextTrigger.tsx}.)
  * - **Reader mode** — on a work page, toggles the `readerMode` option (font-zoom
  *   + drag-to-width on the work text) without a trip to the options page.
  *
@@ -211,7 +213,7 @@ export class FilterToolbar extends Unit {
       button.setAttribute('aria-pressed', String(!enabled))
       text.textContent = enabled ? 'Disable right-click menus' : 'Enable right-click menus'
       const label = enabled
-        ? 'Turn off the extension\'s right-click / long-press menus (restores the browser\'s native menu)'
+        ? 'Turn off the extension\'s right-click / long-press menus (restores the browser\'s native menu). To stand it down for one gesture instead, hold Shift while clicking.'
         : 'Turn the extension\'s right-click / long-press menus back on'
       button.title = label
       button.setAttribute('aria-label', label)

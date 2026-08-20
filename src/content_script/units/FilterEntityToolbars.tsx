@@ -509,7 +509,7 @@ abstract class FilterEntityToolbar extends Unit {
       marks: this.options.workMarks.marks,
     })
     if (next)
-      attachMenuTrigger(next, () => this.buildMenu(entry.id, entry.link), { indicator: true })
+      attachMenuTrigger(next, () => this.buildMenu(entry.id, entry.link), { indicator: true, link: entry.link })
 
     if (entry.indicator && next)
       entry.indicator.replaceWith(next)

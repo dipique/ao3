@@ -32,7 +32,7 @@
     <OptionDivider />
     <OptionRow
       title="Left-click opens the menu"
-      subtitle="Make a plain left-click or tap on a tag, fandom, or author link open its context menu instead of following the link. The menu's “Open” item (always available) still follows the link, so nothing is lost. Right-click and long-press open the menu either way."
+      subtitle="Make a plain left-click or tap on a tag, fandom, or author link open its context menu instead of following the link. The menu's “Open” item (always available) still follows the link, so nothing is lost. Right-click and long-press open the menu either way. Holding Shift stands the extension down for one gesture: Shift+right-click gives you the browser's own menu, and Shift+click follows the link — so Ctrl+Shift+click still opens it in a new tab."
     >
       <OptionSwitch option-id="openMenuOnClick" />
     </OptionRow>

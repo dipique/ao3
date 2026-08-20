@@ -146,7 +146,7 @@ function syncIndicator(entry: TagEntry): void {
   const states = computeStates(entry)
   const next = buildIndicators(states, { highlightColor: entry.highlightColor })
   if (next)
-    attachMenuTrigger(next, () => buildTagMenu(entry.tag, entry.link), { indicator: true })
+    attachMenuTrigger(next, () => buildTagMenu(entry.tag, entry.link), { indicator: true, link: entry.link })
 
   if (entry.indicator && next)
     entry.indicator.replaceWith(next)

@@ -21,7 +21,9 @@ import { openMenu, openPopover } from './contextMenu.tsx'
 
 /**
  * Attaches the right-click / long-press / indicator triggers that open the
- * floating menus, and the small per-state indicator icons.
+ * floating menus, and the small per-state indicator icons. Shift is reserved as a
+ * per-gesture escape hatch: held down, the extension stands aside and the element
+ * behaves the way the browser would have it (see {@link wantsNativeBehavior}).
  *
  * Events are handled by a single set of document-level listeners (installed once)
  * that look up the element under the pointer in a per-page {@link triggers}
@@ -39,6 +41,32 @@ const LONG_PRESS_MS = 450
 const MOVE_CANCEL_PX = 10
 /** Collapse a right-click + long-press for one physical gesture into one open. */
 const REOPEN_GUARD_MS = 250
+
+/**
+ * Shift means "stand back": for one gesture, the extension gets out of the way
+ * and the element behaves as the browser would have it. A per-gesture escape
+ * hatch that needs no setting and no round trip through the toolbar's "Disable
+ * right-click menus" toggle.
+ *
+ * - **Right-click** — our menu stays shut and the native one opens, so "Copy
+ *   image", "Inspect" or "Search with…" are reachable on anything we decorate.
+ *   Firefox already treats Shift+right-click this way on pages that override the
+ *   context menu, so there the chord is the one users reach for anyway.
+ * - **Left-click** — we don't intercept, so the browser reads the click exactly
+ *   as it normally would. On an element with no native click behaviour of its
+ *   own — our indicator icons — {@link followLinkFor} stands in.
+ *
+ * Shift alone, not Ctrl+Shift, so that **any further modifier is still the
+ * browser's to read**: Ctrl+Shift+click keeps meaning "open in a new foreground
+ * tab", and merely also tells us to keep out of it. What that costs is Shift's
+ * own native meaning on a link — "open in a new window" — which the menu's link
+ * rows cover anyway.
+ *
+ * Mouse only; a long-press has no modifier to hold.
+ */
+function wantsNativeBehavior(e: MouseEvent): boolean {
+  return e.shiftKey
+}
 
 // ---------------------------------------------------------------------------
 // Global enable flag. Seeded from the `contextMenusEnabled` option each run (see
@@ -75,6 +103,15 @@ interface Trigger {
    * navigation. Set from the `openMenuOnClick` option on tag/fandom/author links.
    */
   clickToOpen: boolean
+  /**
+   * The page link this trigger speaks for, when the trigger element isn't the
+   * link itself — an indicator icon sits *beside* the tag/fandom/author/work link
+   * it belongs to. It's what Shift+click opens (see
+   * {@link wantsNativeBehavior}), matching the menu's own "Open" row. Null when
+   * there's nothing to open: a word count, a hidden-work reason, a work-page
+   * title that isn't a link.
+   */
+  link: HTMLElement | null
 }
 
 const triggers = new Map<HTMLElement, Trigger>()
@@ -103,6 +140,11 @@ export interface TriggerOptions {
   indicator?: boolean
   /** For a page link: left-click/tap opens the menu (suppressing navigation) while menus are enabled. */
   clickToOpen?: boolean
+  /**
+   * The link this trigger stands next to, for an element that isn't itself a
+   * link (an indicator). Shift+click follows it — see {@link Trigger.link}.
+   */
+  link?: HTMLElement | null
 }
 
 /**
@@ -119,6 +161,7 @@ export function attachMenuTrigger(
   triggers.set(el, {
     indicator: !!opts.indicator,
     clickToOpen: !!opts.clickToOpen,
+    link: opts.link ?? null,
     open: (x, y) => {
       void Promise.resolve(build()).then((items) => {
         if (items && items.length)
@@ -134,6 +177,7 @@ export function attachPopoverTrigger(el: HTMLElement, getContent: () => Node | s
   triggers.set(el, {
     indicator: true,
     clickToOpen: false,
+    link: null,
     open: (x, y) => openPopover(getContent(), { x, y }),
   })
 }
@@ -200,6 +244,10 @@ function cancelLongPress(): void {
 }
 
 function onContextMenu(e: MouseEvent): void {
+  // Checked before anything else, so the escape hatch also covers our indicators
+  // — which otherwise open their menu regardless of the global disable.
+  if (wantsNativeBehavior(e))
+    return
   const hit = findTrigger(e.target)
   if (!hit)
     return
@@ -246,6 +294,35 @@ function onPointerEnd(): void {
   cancelLongPress()
 }
 
+/**
+ * The left-click half of {@link wantsNativeBehavior}.
+ *
+ * When the thing clicked is (or sits inside) a real link, the browser's own
+ * handling *is* the native behaviour asked for — Shift+click opens a window,
+ * Ctrl+Shift+click a new foreground tab — so we do nothing and let the event run
+ * its course.
+ *
+ * Our indicator icons have no such default: they're spans we put *beside* the
+ * link they describe, so a click there does nothing at all unless we act. There
+ * we follow the link ourselves, reading the same modifier the browser would have
+ * — Ctrl/Cmd for a new tab, otherwise here — through the same two calls the
+ * menu's "Open" and "Open in new tab" rows make. Shift is what got us here, so it
+ * can't also mean something on this side.
+ */
+function followLinkFor(hit: { el: HTMLElement, trigger: Trigger }, e: MouseEvent): void {
+  if (hit.el.closest('a[href]'))
+    return // a real link: the browser already does the right thing
+  const { link } = hit.trigger
+  if (!(link instanceof HTMLAnchorElement) || !link.href)
+    return // nothing to open (a word count, a hidden-work reason)
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.ctrlKey || e.metaKey)
+    window.open(link.href, '_blank', 'noopener')
+  else
+    window.location.assign(link.href)
+}
+
 function onClick(e: MouseEvent): void {
   // Suppress the click that a long-press leaves behind (so links don't navigate
   // and text isn't actioned).
@@ -258,6 +335,12 @@ function onClick(e: MouseEvent): void {
   const hit = findTrigger(e.target)
   if (!hit)
     return
+  // Shift stands the extension down for this click — including on an indicator,
+  // which would otherwise open its menu regardless of anything else.
+  if (wantsNativeBehavior(e)) {
+    followLinkFor(hit, e)
+    return
+  }
   // Indicators always open on click (they're ours); links open on click only when
   // `openMenuOnClick` made them clickToOpen, and only while menus are enabled.
   // A modifier-click on a link (ctrl/cmd/shift/alt) is left to the browser so the

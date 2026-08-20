@@ -275,7 +275,7 @@ export class HideAuthorToolbar extends Unit {
 
     const next = buildIndicators(states, { highlightColor: entry.highlightColor })
     if (next)
-      attachMenuTrigger(next, () => this.buildMenu(entry.author, entry.link), { indicator: true })
+      attachMenuTrigger(next, () => this.buildMenu(entry.author, entry.link), { indicator: true, link: entry.link })
 
     if (entry.indicator && next)
       entry.indicator.replaceWith(next)
