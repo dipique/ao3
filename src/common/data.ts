@@ -125,9 +125,9 @@ export interface User {
 }
 
 /**
- * What a tag or author filter does with the works (and tags/authors) it matches:
+ * What a rule does with the works (and tags/authors/titles) it matches:
  * - `'hide'` (or missing): hide the work. The default.
- * - `'invert'`: force-show the work even if another filter would hide it. Also
+ * - `'invert'`: force-show the work even when another rule would hide it. Also
  *   highlights the match by default (a force-shown work usually wants to stand
  *   out); opt out by setting `color` to `'transparent'`.
  * - `'highlight'`: visually highlight the match, without affecting whether the
@@ -135,101 +135,204 @@ export interface User {
  * - `'hideFilter'`: hide the matched *tag* itself — from a work's tag list, from
  *   the filter sidebar, and from the search view's facets — without affecting
  *   whether the work is shown. For noise tags ("Story", "X is a jerk") that only
- *   cost you reading time. Tag filters only; see {@link filterAffectsWorks}.
- *
- * Shared by {@link TagFilter} and {@link AuthorFilter} so the two behave alike.
+ *   cost you reading time. Tag rules only; see {@link ruleAffectsWorks}.
  */
 export type FilterBehavior = 'hide' | 'invert' | 'highlight' | 'hideFilter'
 
 /**
- * Whether a filter takes part in deciding if a work is shown — i.e. it hides the
+ * Whether a rule takes part in deciding if a work is shown — i.e. it hides the
  * work (`hide`) or force-shows it (`invert`). The purely presentational
  * behaviours (`highlight`, `hideFilter`) only change how the *match* is drawn, so
  * they're skipped when HideWorks collects its reasons.
  */
-export function filterAffectsWorks(filter: { behavior?: FilterBehavior }): boolean {
-  return filter.behavior !== 'highlight' && filter.behavior !== 'hideFilter'
+export function ruleAffectsWorks(rule: { behavior?: FilterBehavior }): boolean {
+  return rule.behavior !== 'highlight' && rule.behavior !== 'hideFilter'
+}
+
+// ---------------------------------------------------------------------------
+// Rule priority. Every rule carries a 0-9 strength; the highest-priority rule
+// matching a work decides whether it's hidden, so a force-show no longer wins
+// unconditionally over everything else.
+// ---------------------------------------------------------------------------
+
+/** Lowest (and default) rule priority. */
+export const MIN_PRIORITY = 0
+/** Highest rule priority. */
+export const MAX_PRIORITY = 9
+
+/**
+ * The priority a rule gets when it doesn't carry one of its own — set from the
+ * behaviour chosen when the rule was created. Everything is `0` except
+ * `'invert'`, which sits at `4`: high enough to beat every other rule by default
+ * (which is what "Always show" has always meant), with room above it for a hide
+ * rule that should win anyway, and room below for a force-show that shouldn't.
+ */
+export const DEFAULT_BEHAVIOR_PRIORITY: Record<FilterBehavior, number> = {
+  hide: 0,
+  invert: 4,
+  highlight: 0,
+  hideFilter: 0,
 }
 
 /**
- * A pleasant, visible-but-not-loud default highlight colour for tag filters: a
- * translucent amber (`#rrggbbaa`, ~62% opacity) so it reads as a gentle wash
- * rather than a loud block. Users can override the default in options (see
- * `Options.hideTags.defaultHighlightColor`), and any filter can set its own.
+ * A rule's effective priority: its own `priority` when set (clamped to
+ * 0-{@link MAX_PRIORITY}), else the default for its behaviour. Rules only store a
+ * `priority` when it differs from that default, so a rule written before
+ * priorities existed still behaves exactly as it used to.
  */
-export const DEFAULT_HIGHLIGHT_COLOR = '#ffe0829e'
+export function rulePriority(rule: { behavior?: FilterBehavior, priority?: number }): number {
+  const own = rule.priority
+  if (typeof own === 'number' && Number.isFinite(own))
+    return Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.trunc(own)))
+  return DEFAULT_BEHAVIOR_PRIORITY[rule.behavior ?? 'hide']
+}
+
+// ---------------------------------------------------------------------------
+// Rules — one list, one shape, for tags, fandoms, authors, works and series.
+// ---------------------------------------------------------------------------
 
 /**
- * Default highlight colour for author filters — a translucent sky-blue at the
- * same opacity as {@link DEFAULT_HIGHLIGHT_COLOR}. Deliberately a different hue
- * from the tag default so a highlighted author byline reads as distinct from a
- * highlighted tag at a glance. Overridable via `Options.hideAuthors.defaultHighlightColor`.
+ * What a rule matches. `'tag'` means any tag regardless of type; a {@link TagType}
+ * restricts to that one type; the remaining three target the work's author, the
+ * work itself, or a series it belongs to.
+ *
+ * This single field is also what the default highlight colours are keyed on (see
+ * {@link DEFAULT_RULE_COLORS}), so a rule's colour follows from what it targets
+ * rather than from which list it used to live in.
  */
-export const DEFAULT_AUTHOR_HIGHLIGHT_COLOR = '#82b4ff9e'
+export type RuleTarget = 'tag' | TagType | 'author' | 'work' | 'series'
+
+/** Every rule target, in the order the options UI offers them. */
+export const RULE_TARGETS: RuleTarget[] = ['tag', ...TagType.values(), 'author', 'work', 'series']
+
+/** Whether a target names a tag (any type, or one specific type). */
+export function isTagTarget(target: RuleTarget): target is 'tag' | TagType {
+  return target !== 'author' && target !== 'work' && target !== 'series'
+}
+
+/** Human name for a rule target, as shown in the options table and menus. */
+export function ruleTargetLabel(target: RuleTarget): string {
+  switch (target) {
+    case 'tag': return 'Any tag'
+    case 'author': return 'Author'
+    case 'work': return 'Work'
+    case 'series': return 'Series'
+    default: return TagType.toDisplayString(target)
+  }
+}
 
 /**
- * Default highlight colour for work filters — a translucent violet at the same
- * opacity as {@link DEFAULT_HIGHLIGHT_COLOR}. A distinct hue from the tag (amber)
- * and author (blue) defaults so a highlighted work title stands apart at a
- * glance. Overridable via `Options.hideWorks.defaultHighlightColor`.
+ * One entry in the Rules list — the single shape that used to be four separate
+ * lists (`hideTags`, `hideAuthors`, `hideWorks`, `hideSeries`). What it matches
+ * is decided by {@link Rule.target}; everything else (how it matches, what it
+ * does, how strongly, what colour it highlights in) is shared by every target.
  */
-export const DEFAULT_WORK_HIGHLIGHT_COLOR = '#c9b0ff9e'
-
-/**
- * Default highlight colour for series filters — a translucent mint, again a hue
- * of its own so highlighted series read as distinct from highlighted works,
- * tags, and authors. Overridable via `Options.hideSeries.defaultHighlightColor`.
- */
-export const DEFAULT_SERIES_HIGHLIGHT_COLOR = '#9ee8c79e'
-
-export interface TagFilter {
-  /** Value of the filter. Will be Tag.name if matcher === exact */
-  name: string
-  /** Type of the tag. If not provided, the filter will match all types. */
-  type?: TagType
-  /** How to match */
+export interface Rule {
+  /** What this rule matches: any tag, one tag type, an author, a work, or a series. */
+  target: RuleTarget
+  /**
+   * The value matched: a tag name, an author's user id, or a work/series title.
+   * For `'work'`/`'series'` a purely numeric value matches the entity's id
+   * instead of its title (so `4232377` hides `/series/4232377` whatever it's called).
+   */
+  value: string
+  /** Author rules only: restrict the rule to one of that author's pseuds. */
+  pseud?: string
+  /** How {@link Rule.value} matches. `exact` is case-sensitive; `contains`/`regex` are not. */
   matcher: 'exact' | 'contains' | 'regex'
-  /** What to do with matching works/tags. Missing is treated as `'hide'`. */
+  /** What to do with the match. Missing is treated as `'hide'`. */
   behavior?: FilterBehavior
   /**
-   * Highlight colour (any CSS color) used when the filter highlights its
-   * matching tag — i.e. when `behavior === 'highlight'`, or `behavior ===
-   * 'invert'` and not opted out. The literal `'transparent'` on an invert
-   * filter means "no highlight". See {@link filterHighlightColor}.
+   * How strongly this rule asserts itself, 0-9. Only stored when it differs from
+   * the behaviour's default ({@link DEFAULT_BEHAVIOR_PRIORITY}); read it through
+   * {@link rulePriority}.
+   */
+  priority?: number
+  /**
+   * Highlight colour (any CSS color) used when the rule highlights its match —
+   * i.e. when `behavior === 'highlight'`, or `behavior === 'invert'` and not
+   * opted out. The literal `'transparent'` on an invert rule means "no
+   * highlight". Missing falls back to the target's default colour. See
+   * {@link ruleHighlightColor}.
    */
   color?: string
 }
 
 /**
- * The colour a filter (tag or author) should highlight its match with, or `null`
- * if it does not highlight. Highlight filters always highlight; invert filters
- * highlight too (so force-shown works stand out) unless their colour is the
- * sentinel `'transparent'` ("No highlight"). A filter with no explicit colour
- * falls back to `defaultColor` (the user-configurable default highlight colour),
- * which itself defaults to {@link DEFAULT_HIGHLIGHT_COLOR}.
+ * A pleasant, visible-but-not-loud default highlight colour for tag rules: a
+ * translucent amber (`#rrggbbaa`, ~62% opacity) so it reads as a gentle wash
+ * rather than a loud block.
  */
-export function filterHighlightColor(filter: { behavior?: FilterBehavior, color?: string }, defaultColor: string = DEFAULT_HIGHLIGHT_COLOR): string | null {
-  switch (filter.behavior) {
+export const DEFAULT_HIGHLIGHT_COLOR = '#ffe0829e'
+
+/**
+ * Default highlight colour for author rules — a translucent sky-blue at the same
+ * opacity as {@link DEFAULT_HIGHLIGHT_COLOR}. Deliberately a different hue so a
+ * highlighted byline reads as distinct from a highlighted tag.
+ */
+export const DEFAULT_AUTHOR_HIGHLIGHT_COLOR = '#82b4ff9e'
+
+/** Default highlight colour for work rules — a translucent violet, again its own hue. */
+export const DEFAULT_WORK_HIGHLIGHT_COLOR = '#c9b0ff9e'
+
+/** Default highlight colour for series rules — a translucent mint. */
+export const DEFAULT_SERIES_HIGHLIGHT_COLOR = '#9ee8c79e'
+
+/**
+ * The built-in highlight colour for every rule target. Tags (of any type) share
+ * the amber default; authors, works and series each keep the hue they had when
+ * they were separate lists. User overrides live in `options.rules.colors`, keyed
+ * by the same targets — which is what makes the defaults data rather than four
+ * ad-hoc settings.
+ */
+export const DEFAULT_RULE_COLORS: Record<RuleTarget, string> = {
+  tag: DEFAULT_HIGHLIGHT_COLOR,
+  [TagType.Rating]: DEFAULT_HIGHLIGHT_COLOR,
+  [TagType.ArchiveWarning]: DEFAULT_HIGHLIGHT_COLOR,
+  [TagType.Category]: DEFAULT_HIGHLIGHT_COLOR,
+  [TagType.Fandom]: DEFAULT_HIGHLIGHT_COLOR,
+  [TagType.Relationship]: DEFAULT_HIGHLIGHT_COLOR,
+  [TagType.Character]: DEFAULT_HIGHLIGHT_COLOR,
+  [TagType.Freeform]: DEFAULT_HIGHLIGHT_COLOR,
+  author: DEFAULT_AUTHOR_HIGHLIGHT_COLOR,
+  work: DEFAULT_WORK_HIGHLIGHT_COLOR,
+  series: DEFAULT_SERIES_HIGHLIGHT_COLOR,
+}
+
+/** Per-target highlight colour overrides, as stored in `options.rules.colors`. */
+export type RuleColors = Partial<Record<RuleTarget, string>>
+
+/** The default highlight colour for a target: the user's override, else the built-in. */
+export function ruleTargetColor(target: RuleTarget, colors?: RuleColors): string {
+  return colors?.[target] || DEFAULT_RULE_COLORS[target] || DEFAULT_HIGHLIGHT_COLOR
+}
+
+/**
+ * The colour a rule should highlight its match with, or `null` if it does not
+ * highlight. Highlight rules always highlight; invert rules highlight too (so
+ * force-shown works stand out) unless their colour is the sentinel
+ * `'transparent'` ("No highlight"). A rule with no colour of its own falls back
+ * to its target's default (see {@link ruleTargetColor}).
+ */
+export function ruleHighlightColor(rule: Rule, colors?: RuleColors): string | null {
+  switch (rule.behavior) {
     case 'highlight':
-      return filter.color || defaultColor
+      return rule.color || ruleTargetColor(rule.target, colors)
     case 'invert':
-      return filter.color === 'transparent' ? null : filter.color || defaultColor
+      return rule.color === 'transparent' ? null : rule.color || ruleTargetColor(rule.target, colors)
     default:
       return null
   }
 }
 
-/** Whether a tag filter matches a given tag (by type, then name/contains/regex). */
-export function tagFilterMatchesTag(filter: TagFilter, tag: Tag): boolean {
-  if (filter.type !== undefined && filter.type !== tag.type)
-    return false
+/** Apply a rule's matcher to one subject string. */
+function matchesValue(rule: Rule, subject: string): boolean {
+  if (rule.matcher === 'contains')
+    return subject.toLowerCase().includes(rule.value.toLowerCase())
 
-  if (filter.matcher === 'contains')
-    return tag.name.toLowerCase().includes(filter.name.toLowerCase())
-
-  if (filter.matcher === 'regex') {
+  if (rule.matcher === 'regex') {
     try {
-      return new RegExp(filter.name.toLowerCase()).test(tag.name.toLowerCase())
+      return new RegExp(rule.value.toLowerCase()).test(subject.toLowerCase())
     }
     catch {
       // An invalid regex matches nothing rather than throwing mid-render.
@@ -237,69 +340,26 @@ export function tagFilterMatchesTag(filter: TagFilter, tag: Tag): boolean {
     }
   }
 
-  return filter.name === tag.name
+  return rule.value === subject
 }
 
-export interface AuthorFilter {
-  /** Value of the filter. */
-  userId: string
-  /** Value of the filter. */
-  pseud?: string
-  /**
-   * What to do with works by the matching author. Missing is treated as
-   * `'hide'`. Mirrors {@link TagFilter.behavior} so authors and tags align.
-   *
-   * Cross-extension note: upstream AO3 Enhancements expresses force-show with a
-   * boolean `invert` flag instead. We don't store `invert` — imports map it onto
-   * `behavior` (see {@link filterFromInvert}) and exports re-emit it (see
-   * {@link filterWithInvert}) so settings stay usable in both extensions.
-   */
-  behavior?: FilterBehavior
-  /**
-   * Highlight colour (any CSS color) used when the filter highlights the
-   * author's byline — i.e. when `behavior === 'highlight'`, or `behavior ===
-   * 'invert'` and not opted out. The literal `'transparent'` on an invert filter
-   * means "no highlight". See {@link filterHighlightColor}.
-   */
-  color?: string
+/** Whether a tag-targeted rule matches a given tag (by type, then name). */
+export function ruleMatchesTag(rule: Rule, tag: Tag): boolean {
+  if (!isTagTarget(rule.target))
+    return false
+  if (rule.target !== 'tag' && rule.target !== tag.type)
+    return false
+  return matchesValue(rule, tag.name)
 }
 
-/** Whether an author filter matches a given author (by userId, then optional pseud). */
-export function authorFilterMatchesAuthor(filter: AuthorFilter, author: { userId: string, pseud?: string }): boolean {
-  return filter.userId === author.userId && (filter.pseud === undefined || filter.pseud === author.pseud)
+/** Whether an author-targeted rule matches a given author (by user id, then optional pseud). */
+export function ruleMatchesAuthor(rule: Rule, author: { userId: string, pseud?: string }): boolean {
+  if (rule.target !== 'author')
+    return false
+  if (rule.pseud !== undefined && rule.pseud !== author.pseud)
+    return false
+  return matchesValue(rule, author.userId)
 }
-
-/**
- * A filter that matches a single work or series — by AO3 id or by name. The two
- * share one shape (see {@link WorkFilter}, {@link SeriesFilter}); they differ
- * only in which option list they live in and which default colour they inherit.
- *
- * A purely numeric {@link value} is treated as the entity's id and matched
- * exactly against the id parsed from its link (so e.g. `4232377` hides
- * `/series/4232377` regardless of its title). Any other value matches the
- * entity's display name via {@link matcher}. Behaviour and highlight colour
- * mirror {@link TagFilter}/{@link AuthorFilter} so all four kinds behave alike.
- */
-export interface EntityFilter {
-  /** A numeric AO3 id (matched against the link's id) or a name to match. */
-  value: string
-  /** How a non-numeric {@link value} matches the name. A numeric value always matches the id exactly. */
-  matcher: 'exact' | 'contains' | 'regex'
-  /** What to do with the matching work/series. Missing is treated as `'hide'`. */
-  behavior?: FilterBehavior
-  /**
-   * Highlight colour (any CSS color) used when the filter highlights its match —
-   * i.e. when `behavior === 'highlight'`, or `behavior === 'invert'` and not
-   * opted out. The literal `'transparent'` on an invert filter means "no
-   * highlight". See {@link filterHighlightColor}.
-   */
-  color?: string
-}
-
-/** A filter matching a single work, by work id or title. See {@link EntityFilter}. */
-export type WorkFilter = EntityFilter
-/** A filter matching a single series, by series id or title. See {@link EntityFilter}. */
-export type SeriesFilter = EntityFilter
 
 /** A work or series, as parsed from its link: a numeric id (if known) and display name. */
 export interface FilterableEntity {
@@ -310,14 +370,14 @@ export interface FilterableEntity {
 }
 
 /**
- * Whether an entity filter matches a given work/series. A numeric `value`
- * matches the entity's id exactly; otherwise the name is matched using the
- * filter's `matcher` (mirroring {@link tagFilterMatchesTag}: `exact` is
- * case-sensitive, `contains`/`regex` are case-insensitive). An empty value or an
- * invalid regex matches nothing.
+ * Whether a work/series-targeted rule matches a given entity. A purely numeric
+ * `value` matches the entity's id exactly; otherwise the name is matched with
+ * the rule's matcher. An empty value matches nothing.
  */
-export function entityFilterMatches(filter: EntityFilter, entity: FilterableEntity): boolean {
-  const value = filter.value.trim()
+export function ruleMatchesEntity(rule: Rule, kind: 'work' | 'series', entity: FilterableEntity): boolean {
+  if (rule.target !== kind)
+    return false
+  const value = rule.value.trim()
   if (value === '')
     return false
 
@@ -325,20 +385,7 @@ export function entityFilterMatches(filter: EntityFilter, entity: FilterableEnti
   if (/^\d+$/.test(value))
     return entity.id !== undefined && entity.id === value
 
-  if (filter.matcher === 'contains')
-    return entity.name.toLowerCase().includes(value.toLowerCase())
-
-  if (filter.matcher === 'regex') {
-    try {
-      return new RegExp(value.toLowerCase()).test(entity.name.toLowerCase())
-    }
-    catch {
-      // An invalid regex matches nothing rather than throwing mid-render.
-      return false
-    }
-  }
-
-  return entity.name === value
+  return matchesValue({ ...rule, value }, entity.name)
 }
 
 /**

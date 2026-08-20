@@ -1,8 +1,8 @@
-import type { AuthorFilter, Language, SeriesFilter, TagFilter, TextReplacement, WorkFilter } from './data.ts'
+import type { Language, Rule, RuleColors, TextReplacement } from './data.ts'
 import type { WorkMarks } from './workMarks.ts'
 
-import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR } from './data.ts'
 import { createStorage } from './storage.ts'
+import { createDefaultMarks } from './workMarks.ts'
 
 export interface ThemeOption {
   chosen: 'inherit' | 'dark' | 'light'
@@ -34,34 +34,28 @@ export interface Options {
      */
     applyToSearch?: boolean
   }
-  hideAuthors: {
+  /**
+   * The Rules list — one list covering tags, fandoms, authors, works and series
+   * (it replaces the four separate `hideTags`/`hideAuthors`/`hideWorks`/
+   * `hideSeries` lists; see the migration in `background/migrations.ts`). What
+   * each rule matches is its `target`; see {@link Rule}.
+   */
+  rules: {
     enabled: boolean
-    filters: AuthorFilter[]
-    /** Highlight colour used by author filters (and force-shown authors) that don't set their own. */
-    defaultHighlightColor?: string
-  }
-  hideTags: {
-    enabled: boolean
-    filters: TagFilter[]
-    /** Highlight colour used by filters (and force-shown tags) that don't set their own. */
-    defaultHighlightColor?: string
-  }
-  hideWorks: {
-    enabled: boolean
-    filters: WorkFilter[]
-    /** Highlight colour used by filters (and force-shown works) that don't set their own. */
-    defaultHighlightColor?: string
-  }
-  hideSeries: {
-    enabled: boolean
-    filters: SeriesFilter[]
-    /** Highlight colour used by filters (and force-shown series) that don't set their own. */
-    defaultHighlightColor?: string
+    /** The rules themselves, in no particular order (the options table sorts for display). */
+    filters: Rule[]
+    /**
+     * Default highlight colour per rule target, overriding
+     * {@link DEFAULT_RULE_COLORS}. Keyed by target so the defaults are data —
+     * a fandom rule and a character rule can differ without either being a
+     * separate setting.
+     */
+    colors: RuleColors
   }
   /**
-   * Per-work read/favourite marks, plus the switch that hides read works. Unlike
-   * the filter lists these grow one entry per work you finish, so the id sets are
-   * stored delta-packed — see {@link file://./workMarks.ts}.
+   * Per-work marks (read, favorite, and the finer dispositions), plus how each
+   * one behaves. Unlike the rules these grow one entry per work you finish, so
+   * the id sets are stored delta-packed — see {@link file://./workMarks.ts}.
    */
   workMarks: WorkMarks
 
@@ -141,11 +135,8 @@ export const options = createStorage<Options>({
     hideShowMatchedValues: true,
     hideCrossovers: { enabled: true, maxFandoms: 7 },
     hideLanguages: { enabled: false, show: [], applyToSearch: false },
-    hideAuthors: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_AUTHOR_HIGHLIGHT_COLOR },
-    hideTags: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_HIGHLIGHT_COLOR },
-    hideWorks: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_WORK_HIGHLIGHT_COLOR },
-    hideSeries: { enabled: false, filters: [], defaultHighlightColor: DEFAULT_SERIES_HIGHLIGHT_COLOR },
-    workMarks: { enabled: false, hideRead: false, read: '', favorite: '' },
+    rules: { enabled: false, filters: [], colors: {} },
+    workMarks: { enabled: false, marks: createDefaultMarks() },
 
     compressSearchUrls: false,
     tagToolbar: false,

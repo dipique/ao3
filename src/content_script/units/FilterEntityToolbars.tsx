@@ -1,28 +1,27 @@
-import MdiBookCheck from '~icons/mdi/book-check.jsx'
-import MdiBookOutline from '~icons/mdi/book-outline.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiClockPlusOutline from '~icons/mdi/clock-plus-outline.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
-import MdiHeartOutline from '~icons/mdi/heart-outline.jsx'
-import MdiHeart from '~icons/mdi/heart.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 
+import type { MarkId, WorkMarks } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, fetchAndParseDocument, fetchToken, getArchiveLink, options, parseUser, toast, unpackIds } from '#common'
+import { fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markGroup, markItems, markRoot, options, parseUser, READ_MARK, ruleTargetColor, SAVED_MARK, toast } from '#common'
 import {
   attachMenuTrigger,
   buildIndicators,
   clearMenuTriggers,
   type IndicatorState,
+  markIndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
 import { loadMarkedForLaterIndex, noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
-import { clearEntityBehavior, entityBehavior, type EntityOptionKey, toggleEntityBehavior } from '#content_script/persistentFilters.js'
+import { markIcon } from '#content_script/markIcons.js'
+import { clearRule, entityKey, ruleBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
-import { applyReadMark, setFavoriteMark } from '#content_script/workMarks.js'
+import { applyMark, applyMarkGroup } from '#content_script/workMarks.js'
 import React from '#dom'
 
 /**
@@ -68,7 +67,7 @@ interface MarkState {
    */
   cached: boolean
 }
-const markState = new Map<string, MarkState>()
+const savedState = new Map<string, MarkState>()
 
 /** Options for {@link seedMarkedForLater}. */
 interface SeedOptions {
@@ -91,14 +90,14 @@ interface SeedOptions {
  */
 export function seedMarkedForLater(workIds: Iterable<string>, opts: SeedOptions = {}): void {
   for (const id of workIds) {
-    const state = markState.get(id)
+    const state = savedState.get(id)
     // A toggle in flight, or one we already made, is fresher than the listing.
     if (state?.busy || state?.acted)
       continue
     // Anything read off this page (or fetched) beats a possibly-stale cache.
     if (opts.cached && state?.known && !state.cached)
       continue
-    markState.set(id, { saved: true, busy: false, known: true, acted: false, cached: !!opts.cached })
+    savedState.set(id, { saved: true, busy: false, known: true, acted: false, cached: !!opts.cached })
   }
 }
 
@@ -172,37 +171,49 @@ export async function submitMark(workId: string, save: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Read / favourite marks (works only). Unlike mark-for-later these are ours, so
-// the state is always known: it's unpacked once per run from the `workMarks`
-// option into these sets, and the menu/indicators read them synchronously.
+// Per-work marks (works only). Unlike mark-for-later these are ours, so the
+// state is always known: each mark's packed id set is unpacked once per run into
+// this cache, and the menu/indicators read it synchronously.
 // ---------------------------------------------------------------------------
 
-let readIds = new Set<string>()
-let favoriteIds = new Set<string>()
+let markSets = new Map<MarkId, Set<string>>()
 
-/** Re-read the packed mark sets from options at the start of a run. */
-function loadMarkSets(marks: { read: string, favorite: string }): void {
-  readIds = unpackIds(marks.read)
-  favoriteIds = unpackIds(marks.favorite)
+/** Re-read every local mark's id set from options at the start of a run. */
+function loadMarkSets(marks: WorkMarks): void {
+  markSets = new Map(localMarkIds(marks.marks).map(id => [id, markItems(marks.marks, id)]))
+}
+
+/**
+ * Mirror one mark write in the cached sets, so indicators can update without
+ * waiting for the options round-trip. Follows the same rule the stored table
+ * does: a work carries at most one mark per trigger group.
+ */
+function noteMark(marks: WorkMarks, workId: string, markId: MarkId, on: boolean): void {
+  if (!on) {
+    markSets.get(markId)?.delete(workId)
+    return
+  }
+  for (const other of markGroup(marks.marks, markId))
+    markSets.get(other)?.delete(workId)
+  markSets.get(markId)?.add(workId)
 }
 
 // ---------------------------------------------------------------------------
 
 abstract class FilterEntityToolbar extends Unit {
-  /** `'work'` or `'series'` — used in labels. */
+  /** `'work'` or `'series'` — used in labels, and the rule target for this kind. */
   protected abstract get noun(): 'work' | 'series'
   /** The path segment the entity's links use. */
   protected abstract get kind(): 'works' | 'series'
-  /** The option key holding this kind's persistent filters. */
-  protected abstract get optionKey(): EntityOptionKey
-  /** Highlight colour shown on the star indicator when a highlight has no colour of its own. */
-  protected abstract get defaultColor(): string
   /** Live registry of this kind's decorated links, shared across page runs. */
   protected abstract get entries(): EntityEntry[]
   /** Works fold in mark-for-later; series don't. */
   protected markEnabled(): boolean { return false }
-  /** Works fold in read/favourite marks; series don't. */
+  /** Works fold in the per-work marks; series don't. */
   protected marksEnabled(): boolean { return false }
+
+  /** Highlight colour shown on the star indicator when a highlight has no colour of its own. */
+  protected get defaultColor(): string { return ruleTargetColor(this.noun, this.options.rules.colors) }
 
   /**
    * Links to decorate: every `/works/:id` (or `/series/:id`) link, returning the
@@ -243,9 +254,10 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   async buildMenu(id: string, link: HTMLElement): Promise<MenuItem[]> {
-    // Read the freshest filters so the checked state is current.
-    const { filters } = await options.get(this.optionKey)
-    const behavior = entityBehavior(filters, id)
+    // Read the freshest rules so the checked state is current.
+    const { filters } = await options.get('rules')
+    const key = entityKey(this.noun, id)
+    const behavior = ruleBehavior(filters, key)
 
     // The active behaviour is shown disabled (current state); "Clear" removes it.
     const items: MenuItem[] = [
@@ -256,7 +268,7 @@ abstract class FilterEntityToolbar extends Unit {
         danger: true,
         active: behavior === 'hide',
         disabled: behavior === 'hide',
-        onSelect: () => toggleEntityBehavior(this.optionKey, id, 'hide'),
+        onSelect: () => toggleRuleBehavior(key, 'hide'),
       },
       {
         icon: () => <MdiEyeCheck />,
@@ -264,7 +276,7 @@ abstract class FilterEntityToolbar extends Unit {
         scope: 'settings',
         active: behavior === 'invert',
         disabled: behavior === 'invert',
-        onSelect: () => toggleEntityBehavior(this.optionKey, id, 'invert'),
+        onSelect: () => toggleRuleBehavior(key, 'invert'),
       },
       {
         icon: () => <MdiStar />,
@@ -272,7 +284,7 @@ abstract class FilterEntityToolbar extends Unit {
         scope: 'settings',
         active: behavior === 'highlight',
         disabled: behavior === 'highlight',
-        onSelect: () => toggleEntityBehavior(this.optionKey, id, 'highlight'),
+        onSelect: () => toggleRuleBehavior(key, 'highlight'),
       },
     ]
     if (behavior) {
@@ -280,7 +292,7 @@ abstract class FilterEntityToolbar extends Unit {
         icon: () => <MdiCloseCircleOutline />,
         label: 'Clear',
         scope: 'settings',
-        onSelect: () => clearEntityBehavior(this.optionKey, id),
+        onSelect: () => clearRule(key),
       })
     }
 
@@ -297,74 +309,80 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   /**
-   * The read / favourite rows. Both are local state we already hold, so unlike
-   * the mark-for-later row they render their real label immediately.
+   * One row per mark that holds its own ids — read, favorite, and whatever finer
+   * dispositions the mark table lists. All of it is local state we already hold,
+   * so unlike the mark-for-later row these render their real label immediately.
    */
   private markSetItems(id: string): MenuItem[] {
-    const read = readIds.has(id)
-    const favorite = favoriteIds.has(id)
-    return [
-      {
-        icon: () => (read ? <MdiBookOutline /> : <MdiBookCheck />),
-        label: read ? 'Unmark as read' : 'Mark as read',
+    const { marks } = this.options.workMarks
+    return localMarkIds(marks).map((markId, index) => {
+      const config = marks[markId]!
+      const has = markSets.get(markId)?.has(id) ?? false
+      const noun = (config.label || markId).toLowerCase()
+      return {
+        icon: markIcon(config.icon),
+        label: has ? `Unmark as ${noun}` : `Mark as ${noun}`,
         scope: 'settings',
-        separatorBefore: true,
-        onSelect: () => this.onToggleRead(id, !read),
-      },
-      {
-        icon: () => (favorite ? <MdiHeart /> : <MdiHeartOutline />),
-        label: favorite ? 'Remove from favorites' : 'Add to favorites',
-        scope: 'settings',
-        onSelect: () => this.onToggleFavorite(id, !favorite),
-      },
-    ]
+        separatorBefore: index === 0,
+        active: has,
+        onSelect: () => this.onToggleMark(id, markId, !has),
+      } satisfies MenuItem
+    })
   }
 
   /**
-   * Toggle the local read mark. Marking a work read means "I'm done with this",
-   * so when we already know it's on the Marked for Later list it comes off it
-   * too — that's the loop this feature exists to break. The list is only touched
-   * when its state is known first-hand (seeded or acted on this session); an
-   * unknown state is left alone rather than paying for a page fetch here.
+   * Toggle one mark on a work. Every mark in the read group means "I'm done with
+   * this", so when we already know the work is on the Marked for Later list it
+   * comes off it too — that's the loop this feature exists to break. The list is
+   * only touched when its state is known first-hand (seeded or acted on this
+   * session); an unknown state is left alone rather than paying for a page fetch.
    */
-  private async onToggleRead(id: string, read: boolean): Promise<void> {
-    this.setReadLocally(id, read)
+  private async onToggleMark(id: string, markId: MarkId, on: boolean): Promise<void> {
+    const noun = (this.options.workMarks.marks[markId]?.label || markId).toLowerCase()
+    this.setMarkLocally(id, markId, on)
 
-    const state = markState.get(id)
-    if (read && this.markEnabled() && state?.saved && !state.busy) {
+    const state = savedState.get(id)
+    const done = on && markRoot(this.options.workMarks.marks, markId) === READ_MARK
+    if (done && this.markEnabled() && state?.saved && !state.busy) {
       // onMark toasts the "removed from your Marked for Later list" message.
       await this.onMark(id)
       return
     }
-    toast(read ? 'Marked as read.' : 'Marked as unread.', { type: 'success' })
+    toast(on ? `Marked as ${noun}.` : `Unmarked as ${noun}.`, { type: 'success' })
   }
 
   /**
-   * Apply a read mark and show it immediately. Goes through
-   * {@link applyReadMark} — the one writer of read marks — so this behaves
-   * identically to pressing AO3's own button, which lands in the same place.
+   * Apply one specific mark and show it immediately. Goes through
+   * {@link applyMark} — one of the two writers of marks — so an explicit choice
+   * behaves the same wherever it's made.
    *
    * The indicator is updated optimistically rather than waiting for the options
    * round-trip (whose change event re-runs every unit and rebuilds it anyway).
    */
-  protected setReadLocally(id: string, read: boolean): void {
-    if (read)
-      readIds.add(id)
-    else
-      readIds.delete(id)
-    applyReadMark(this.options.workMarks, id, read)
+  protected setMarkLocally(id: string, markId: MarkId, on: boolean): void {
+    noteMark(this.options.workMarks, id, markId, on)
+    applyMark(this.options.workMarks, id, markId, on)
     this.syncEntriesFor(id)
   }
 
-  private async onToggleFavorite(id: string, favorite: boolean): Promise<void> {
-    if (favorite)
-      favoriteIds.add(id)
-    else
-      favoriteIds.delete(id)
+  /**
+   * Apply the read *disposition* rather than one specific mark — what AO3's own
+   * buttons mean. A work already marked with something finer keeps that mark
+   * (see {@link applyMarkGroup}).
+   */
+  protected setReadLocally(id: string, read: boolean): void {
+    const marks = this.options.workMarks
+    const carried = markGroup(marks.marks, READ_MARK).filter(markId => markSets.get(markId)?.has(id))
+    if (read) {
+      if (carried.length === 0)
+        noteMark(marks, id, READ_MARK, true)
+    }
+    else {
+      for (const markId of carried)
+        noteMark(marks, id, markId, false)
+    }
+    applyMarkGroup(marks, id, read)
     this.syncEntriesFor(id)
-
-    await setFavoriteMark(id, favorite)
-    toast(favorite ? 'Added to favorites.' : 'Removed from favorites.', { type: 'success' })
   }
 
   /**
@@ -383,13 +401,13 @@ abstract class FilterEntityToolbar extends Unit {
    * - knowing nothing at all, a disabled "Checking…" placeholder.
    */
   private markItem(id: string): MenuItem {
-    const state = markState.get(id)
+    const state = savedState.get(id)
     if (state?.known && !state.cached)
       return this.markAction(id, state.saved, state.busy)
 
     const resolve = async (): Promise<MenuItem> => {
       const saved = await this.checkMarked(id)
-      const busy = markState.get(id)?.busy ?? false
+      const busy = savedState.get(id)?.busy ?? false
       if (saved === null) {
         // Couldn't reach the archive. A cached state is still the best answer we
         // have, so leave that row usable rather than replacing it with nothing.
@@ -446,7 +464,7 @@ abstract class FilterEntityToolbar extends Unit {
     }
     if (saved === null)
       return null
-    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
+    const state = savedState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
     // A toggle in flight, or one we already made, is the freshest intent.
     if (state.busy || state.acted)
       return state.saved
@@ -456,7 +474,7 @@ abstract class FilterEntityToolbar extends Unit {
     // the index itself, which may have been what we just disagreed with.
     state.cached = false
     noteMarkedForLater(id, saved)
-    markState.set(id, state)
+    savedState.set(id, state)
     this.syncEntriesFor(id)
     return saved
   }
@@ -471,22 +489,25 @@ abstract class FilterEntityToolbar extends Unit {
 
   protected computeStates(id: string): IndicatorState[] {
     const states: IndicatorState[] = []
-    const behavior = entityBehavior(this.options[this.optionKey].filters, id)
+    const behavior = ruleBehavior(this.options.rules.filters, entityKey(this.noun, id))
     if (behavior)
       states.push(behavior)
-    if (this.markEnabled() && markState.get(id)?.saved)
-      states.push('saved')
+    if (this.markEnabled() && savedState.get(id)?.saved)
+      states.push(markIndicatorState(SAVED_MARK))
     if (this.marksEnabled()) {
-      if (readIds.has(id))
-        states.push('read')
-      if (favoriteIds.has(id))
-        states.push('favorite')
+      for (const [markId, ids] of markSets) {
+        if (ids.has(id))
+          states.push(markIndicatorState(markId))
+      }
     }
     return states
   }
 
   protected syncIndicator(entry: EntityEntry): void {
-    const next = buildIndicators(this.computeStates(entry.id), { highlightColor: this.defaultColor })
+    const next = buildIndicators(this.computeStates(entry.id), {
+      highlightColor: this.defaultColor,
+      marks: this.options.workMarks.marks,
+    })
     if (next)
       attachMenuTrigger(next, () => this.buildMenu(entry.id, entry.link), { indicator: true })
 
@@ -514,7 +535,7 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   async onMark(id: string): Promise<void> {
-    const state = markState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
+    const state = savedState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
     if (state.busy)
       return
     const save = !state.saved
@@ -529,7 +550,7 @@ abstract class FilterEntityToolbar extends Unit {
     }
 
     state.busy = true
-    markState.set(id, state)
+    savedState.set(id, state)
     try {
       await submitMark(id, save)
       state.saved = save
@@ -558,7 +579,7 @@ abstract class FilterEntityToolbar extends Unit {
     }
     finally {
       state.busy = false
-      markState.set(id, state)
+      savedState.set(id, state)
       // Reflect the saved-clock on every blurb showing this work.
       this.syncEntriesFor(id)
     }
@@ -584,17 +605,14 @@ function workPageTitle(root: ParentNode): HTMLElement | null {
 export class FilterWorkToolbar extends FilterEntityToolbar {
   static override get name() { return 'FilterWorkToolbar' }
 
-  // The work menu appears wherever its actions are useful: when work filters are
-  // on (hide/highlight/always-show), mark-for-later is on, or read/favourite
-  // marks are on.
+  // The work menu appears wherever its actions are useful: when rules are on
+  // (hide/highlight/always-show), mark-for-later is on, or per-work marks are on.
   override get enabled() {
-    return this.options.hideWorks.enabled || this.options.markForLaterToolbar || this.options.workMarks.enabled
+    return this.options.rules.enabled || this.options.markForLaterToolbar || this.options.workMarks.enabled
   }
 
   protected override get noun() { return 'work' as const }
   protected override get kind() { return 'works' as const }
-  protected override get optionKey() { return 'hideWorks' as const }
-  protected override get defaultColor() { return this.options.hideWorks.defaultHighlightColor || DEFAULT_WORK_HIGHLIGHT_COLOR }
   protected override get entries() { return workEntries }
 
   protected override markEnabled(): boolean {
@@ -602,7 +620,7 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     return this.options.markForLaterToolbar && document.body.classList.contains('logged-in')
   }
 
-  // Read/favourite marks are ours alone — no AO3 session needed.
+  // The per-work marks are ours alone — no AO3 session needed.
   protected override marksEnabled(): boolean { return this.options.workMarks.enabled }
 
   override async ready(): Promise<void> {
@@ -681,12 +699,12 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     const id = workPageId()
     // Don't clobber a toggle in flight, or one we already made — after a
     // background toggle this page's own mark button still shows the old state.
-    const state = id ? markState.get(id) : undefined
+    const state = id ? savedState.get(id) : undefined
     if (!id || state?.busy || state?.acted)
       return
     const saved = parseMarkedForLater(document)
     if (saved !== null) {
-      markState.set(id, { saved, busy: false, known: true, acted: false, cached: false })
+      savedState.set(id, { saved, busy: false, known: true, acted: false, cached: false })
       // The page states it, so the index can be corrected for free.
       noteMarkedForLater(id, saved)
     }
@@ -700,11 +718,9 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
 
 export class FilterSeriesToolbar extends FilterEntityToolbar {
   static override get name() { return 'FilterSeriesToolbar' }
-  override get enabled() { return this.options.hideSeries.enabled }
+  override get enabled() { return this.options.rules.enabled }
   protected override get noun() { return 'series' as const }
   protected override get kind() { return 'series' as const }
-  protected override get optionKey() { return 'hideSeries' as const }
-  protected override get defaultColor() { return this.options.hideSeries.defaultHighlightColor || DEFAULT_SERIES_HIGHLIGHT_COLOR }
   protected override get entries() { return seriesEntries }
 
   static override async clean(): Promise<void> {

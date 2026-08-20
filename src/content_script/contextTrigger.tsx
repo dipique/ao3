@@ -1,9 +1,6 @@
-import MdiBookCheck from '~icons/mdi/book-check.jsx'
-import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiContentCopy from '~icons/mdi/content-copy.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
-import MdiHeart from '~icons/mdi/heart.jsx'
 import MdiLinkVariant from '~icons/mdi/link-variant.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiOpenInApp from '~icons/mdi/open-in-app.jsx'
@@ -12,7 +9,10 @@ import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
+import type { MarkConfig, MarkId } from '#common'
+
 import { ADDON_CLASS, isExtensionContextValid, toast } from '#common'
+import { markIcon } from '#content_script/markIcons.js'
 import React from '#dom'
 
 import type { MenuItem } from './contextMenu.tsx'
@@ -332,25 +332,28 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
 // only when something is active. The returned span is itself a menu trigger.
 // ---------------------------------------------------------------------------
 
-/** A state an indicator can show, in display order. */
-export type IndicatorState = 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'hideFilter' | 'saved' | 'read' | 'favorite'
+/**
+ * A state an indicator can show. The fixed six describe a rule or the sidebar
+ * filter; `mark:<id>` covers the per-work marks, which are data (see
+ * {@link file://../common/workMarks.ts}) and so can't be enumerated here.
+ */
+export type IndicatorState = 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'hideFilter' | `mark:${MarkId}`
 
-const INDICATOR_ICONS: Record<IndicatorState, () => Node> = {
+/** The non-mark states, in display order. Marks follow them, in mark-table order. */
+const FILTER_STATES = ['include', 'exclude', 'hide', 'invert', 'highlight', 'hideFilter'] as const
+type FilterState = typeof FILTER_STATES[number]
+
+const FILTER_ICONS: Record<FilterState, () => Node> = {
   include: () => <MdiPlusCircle />,
   exclude: () => <MdiMinusCircle />,
   hide: () => <MdiEyeOff />,
   invert: () => <MdiEyeCheck />,
   highlight: () => <MdiStar />,
   hideFilter: () => <MdiTagOff />,
-  saved: () => <MdiClockCheck />,
-  read: () => <MdiBookCheck />,
-  favorite: () => <MdiHeart />,
 }
 
-const INDICATOR_ORDER: IndicatorState[] = ['include', 'exclude', 'hide', 'invert', 'highlight', 'hideFilter', 'saved', 'read', 'favorite']
-
 /** Hover text, so an icon's meaning doesn't depend on recognising it. */
-const INDICATOR_LABELS: Record<IndicatorState, string> = {
+const FILTER_LABELS: Record<FilterState, string> = {
   include: 'Included in the filter',
   exclude: 'Excluded from the filter',
   hide: 'Hidden',
@@ -359,14 +362,57 @@ const INDICATOR_LABELS: Record<IndicatorState, string> = {
   // Normally unseen — the tag it sits on is hidden — but it shows up wherever
   // HideFilters doesn't reach (e.g. while that unit is mid-run).
   hideFilter: 'Tag hidden',
-  saved: 'Marked for later',
-  read: 'Read',
-  favorite: 'Favorite',
+}
+
+/** The indicator state for a mark id. */
+export function markIndicatorState(id: MarkId): IndicatorState {
+  return `mark:${id}`
 }
 
 export interface IndicatorOptions {
   /** Colour for the highlight star (defaults to the CSS fallback). */
   highlightColor?: string
+  /** The mark table, so `mark:*` states can resolve their icon, label and colour. */
+  marks?: Record<MarkId, MarkConfig>
+}
+
+/** One indicator's rendered parts, whatever kind of state it came from. */
+interface Indicator {
+  suffix: string
+  label: string
+  icon: () => Node
+  color?: string
+}
+
+/** Resolve the active states into indicators, in display order (filters, then marks). */
+function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] {
+  const out: Indicator[] = []
+  for (const state of FILTER_STATES) {
+    if (set.has(state)) {
+      out.push({
+        suffix: state,
+        label: FILTER_LABELS[state],
+        icon: FILTER_ICONS[state],
+        color: state === 'highlight' ? opts.highlightColor : undefined,
+      })
+    }
+  }
+
+  // Marks render in the order the mark table lists them, so a work's indicators
+  // read the same way everywhere regardless of what order the caller collected.
+  const ids = opts.marks ? Object.keys(opts.marks) : []
+  for (const id of ids) {
+    if (!set.has(markIndicatorState(id)))
+      continue
+    const config = opts.marks![id]!
+    out.push({
+      suffix: `mark  ${INDICATOR_CLASS}--mark-${id}`,
+      label: config.label || id,
+      icon: markIcon(config.icon),
+      color: config.color,
+    })
+  }
+  return out
 }
 
 /**
@@ -375,24 +421,23 @@ export interface IndicatorOptions {
  * trigger class but is wired to a menu by the caller via {@link attachMenuTrigger}.
  */
 export function buildIndicators(states: Iterable<IndicatorState>, opts: IndicatorOptions = {}): HTMLElement | null {
-  const set = new Set(states)
-  const ordered = INDICATOR_ORDER.filter(s => set.has(s))
-  if (ordered.length === 0)
+  const indicators = resolve(new Set(states), opts)
+  if (indicators.length === 0)
     return null
 
   const span = (<span class={`${ADDON_CLASS}  ${INDICATORS_CLASS}`} aria-hidden="true" />) as HTMLElement
-  for (const state of ordered) {
-    const icon = (
+  for (const { suffix, label, icon, color } of indicators) {
+    const el = (
       <span
-        class={`${INDICATOR_CLASS}  ${INDICATOR_CLASS}--${state}`}
-        title={INDICATOR_LABELS[state]}
+        class={`${INDICATOR_CLASS}  ${INDICATOR_CLASS}--${suffix}`}
+        title={label}
       >
-        {INDICATOR_ICONS[state]()}
+        {icon()}
       </span>
     ) as HTMLElement
-    if (state === 'highlight' && opts.highlightColor)
-      icon.style.setProperty('--ao3e-indicator-color', opts.highlightColor)
-    span.append(icon)
+    if (color)
+      el.style.setProperty('--ao3e-indicator-color', color)
+    span.append(el)
   }
   return span
 }

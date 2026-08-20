@@ -1,117 +1,88 @@
-import type { AuthorFilter, EntityFilter, FilterBehavior, TagType } from '#common'
+import type { FilterBehavior, Rule, RuleTarget, Tag, TagType } from '#common'
 
 import { options } from '#common'
 
 /**
- * Toggle and read the *persistent* extension filters — the saved `hideTags`,
- * `hideAuthors`, `hideWorks` and `hideSeries` lists (as opposed to the ephemeral
- * AO3 sidebar filters handled by `filterSidebar.tsx`).
+ * Toggle and read the *persistent* extension rules — the saved `rules` list (as
+ * opposed to the ephemeral AO3 sidebar filters handled by `filterSidebar.tsx`).
  *
  * Every menu that sets a hide/always-show/highlight state goes through here so
  * the read-freshest → find-exact → toggle → `options.set` pattern (previously
- * duplicated across the toolbars and background menus) lives in one place. All
- * four kinds share menu-toggle semantics: choosing the behaviour an item already
- * has clears it, and choosing a different behaviour replaces it.
+ * duplicated across the toolbars and background menus) lives in one place.
+ * Choosing the behaviour an item already has clears it; choosing a different one
+ * replaces it.
  *
  * The behaviours map onto {@link FilterBehavior}: `hide` hides the item,
- * `invert` force-shows it ("always show"), `highlight` only highlights it.
+ * `invert` force-shows it ("always show"), `highlight` only highlights it, and
+ * `hideFilter` hides the tag itself. Priority is left off entirely — a rule with
+ * no `priority` takes its behaviour's default (see `rulePriority`), which is
+ * what these menus mean.
  */
 
-/** The single exact-match tag the menus target (name + optional type). */
-export interface TagTarget {
-  name: string
-  type?: TagType
+/**
+ * The single exact-match rule a menu targets: what it points at, plus the value
+ * (and, for authors, the optional pseud). Everything a menu can act on reduces
+ * to one of these.
+ */
+export interface RuleTargetKey {
+  target: RuleTarget
+  value: string
+  /** Author rules only — a rule for one pseud is distinct from one for the account. */
+  pseud?: string
 }
 
-function sameType(a: TagType | undefined, b: TagType | undefined): boolean {
-  return (a ?? undefined) === (b ?? undefined)
+/** The key for a tag/fandom link: its type when known, else "any tag". */
+export function tagKey(tag: Tag): RuleTargetKey {
+  return { target: (tag.type ?? 'tag') as TagType | 'tag', value: tag.name }
 }
 
-// --- Tags / fandoms (stored together in `hideTags` as exact TagFilters). -----
-
-/** The behaviour currently applied to this exact tag, or `null` if none. */
-export function tagBehavior(filters: { name: string, type?: TagType, matcher: string, behavior?: FilterBehavior }[], tag: TagTarget): FilterBehavior | null {
-  const filter = filters.find(f => f.matcher === 'exact' && f.name === tag.name && sameType(f.type, tag.type))
-  return filter ? (filter.behavior ?? 'hide') : null
+/** The key for an author byline (optionally narrowed to one pseud). */
+export function authorKey(userId: string, pseud?: string): RuleTargetKey {
+  return { target: 'author', value: userId, pseud }
 }
 
-/** Toggle `behavior` for an exact tag/fandom in `hideTags` (re-selecting clears it). */
-export async function toggleTagBehavior(tag: TagTarget, behavior: FilterBehavior): Promise<void> {
-  const hideTags = await options.get('hideTags')
-  const filters = hideTags.filters
-  const index = filters.findIndex(f => f.matcher === 'exact' && f.name === tag.name && sameType(f.type, tag.type))
+/** The key for a work or series, by its numeric AO3 id. */
+export function entityKey(kind: 'work' | 'series', id: string): RuleTargetKey {
+  return { target: kind, value: id }
+}
+
+function matches(rule: Rule, key: RuleTargetKey): boolean {
+  return rule.matcher === 'exact'
+    && rule.target === key.target
+    && rule.value === key.value
+    && (rule.pseud ?? undefined) === (key.pseud ?? undefined)
+}
+
+/** The behaviour currently applied to this exact key, or `null` if no rule matches it. */
+export function ruleBehavior(rules: Rule[], key: RuleTargetKey): FilterBehavior | null {
+  const rule = rules.find(r => matches(r, key))
+  return rule ? (rule.behavior ?? 'hide') : null
+}
+
+/** Toggle `behavior` for an exact key in the rules list (re-selecting clears it). */
+export async function toggleRuleBehavior(key: RuleTargetKey, behavior: FilterBehavior): Promise<void> {
+  const rules = await options.get('rules')
+  const filters = rules.filters
+  const index = filters.findIndex(r => matches(r, key))
   const current = index !== -1 ? (filters[index]!.behavior ?? 'hide') : null
   if (index !== -1)
     filters.splice(index, 1)
-  if (current !== behavior)
-    filters.push({ name: tag.name, ...(tag.type !== undefined ? { type: tag.type } : {}), matcher: 'exact', behavior })
+  if (current !== behavior) {
+    filters.push({
+      target: key.target,
+      value: key.value,
+      ...(key.pseud !== undefined ? { pseud: key.pseud } : {}),
+      matcher: 'exact',
+      behavior,
+    })
+  }
 
-  await options.set({ hideTags: { ...hideTags, enabled: true, filters } })
+  await options.set({ rules: { ...rules, enabled: true, filters } })
 }
 
-/** Remove any exact hide/always-show/highlight on a tag/fandom (back to no rule). */
-export async function clearTagBehavior(tag: TagTarget): Promise<void> {
-  const hideTags = await options.get('hideTags')
-  const filters = hideTags.filters.filter(f => !(f.matcher === 'exact' && f.name === tag.name && sameType(f.type, tag.type)))
-  await options.set({ hideTags: { ...hideTags, filters } })
-}
-
-// --- Authors (stored in `hideAuthors`, keyed by userId + optional pseud). -----
-
-/** The behaviour currently applied to this author (or specific pseud), or `null`. */
-export function authorBehavior(filters: AuthorFilter[], userId: string, pseud?: string): FilterBehavior | null {
-  const filter = filters.find(f => f.userId === userId && f.pseud === pseud)
-  return filter ? (filter.behavior ?? 'hide') : null
-}
-
-/** Toggle `behavior` for an author (or a specific pseud) in `hideAuthors`. */
-export async function toggleAuthorBehavior(userId: string, behavior: FilterBehavior, pseud?: string): Promise<void> {
-  const hideAuthors = await options.get('hideAuthors')
-  const filters = hideAuthors.filters
-  const index = filters.findIndex(f => f.userId === userId && f.pseud === pseud)
-  const current = index !== -1 ? (filters[index]!.behavior ?? 'hide') : null
-  if (index !== -1)
-    filters.splice(index, 1)
-  if (current !== behavior)
-    filters.push({ userId, ...(pseud !== undefined ? { pseud } : {}), behavior })
-
-  await options.set({ hideAuthors: { ...hideAuthors, enabled: true, filters } })
-}
-
-/** Remove any hide/always-show/highlight on an author (or a specific pseud). */
-export async function clearAuthorBehavior(userId: string, pseud?: string): Promise<void> {
-  const hideAuthors = await options.get('hideAuthors')
-  const filters = hideAuthors.filters.filter(f => !(f.userId === userId && f.pseud === pseud))
-  await options.set({ hideAuthors: { ...hideAuthors, filters } })
-}
-
-// --- Works / series (stored in `hideWorks` / `hideSeries` by numeric id). -----
-
-export type EntityOptionKey = 'hideWorks' | 'hideSeries'
-
-/** The behaviour currently applied to this work/series id, or `null` if none. */
-export function entityBehavior(filters: EntityFilter[], value: string): FilterBehavior | null {
-  const filter = filters.find(f => f.value.trim() === value)
-  return filter ? (filter.behavior ?? 'hide') : null
-}
-
-/** Toggle `behavior` for a work/series id in the given option (re-selecting clears it). */
-export async function toggleEntityBehavior(optionKey: EntityOptionKey, value: string, behavior: FilterBehavior): Promise<void> {
-  const option = await options.get(optionKey)
-  const filters = option.filters
-  const index = filters.findIndex(f => f.value.trim() === value)
-  const current = index !== -1 ? (filters[index]!.behavior ?? 'hide') : null
-  if (index !== -1)
-    filters.splice(index, 1)
-  if (current !== behavior)
-    filters.push({ value, matcher: 'exact', behavior })
-
-  await options.set({ [optionKey]: { ...option, enabled: true, filters } })
-}
-
-/** Remove any hide/always-show/highlight on a work/series id (back to no rule). */
-export async function clearEntityBehavior(optionKey: EntityOptionKey, value: string): Promise<void> {
-  const option = await options.get(optionKey)
-  const filters = option.filters.filter(f => f.value.trim() !== value)
-  await options.set({ [optionKey]: { ...option, filters } })
+/** Remove any exact rule on this key (back to no rule at all). */
+export async function clearRule(key: RuleTargetKey): Promise<void> {
+  const rules = await options.get('rules')
+  const filters = rules.filters.filter(r => !matches(r, key))
+  await options.set({ rules: { ...rules, filters } })
 }

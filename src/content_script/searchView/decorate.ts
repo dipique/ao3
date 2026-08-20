@@ -1,7 +1,7 @@
 import type { Options } from '#common'
 import type { Unit } from '#content_script/Unit.js'
 
-import { tagFilterMatchesTag, TagType } from '#common'
+import { ruleMatchesTag, TagType } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { FandomToolbar } from '#content_script/units/FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from '#content_script/units/FilterEntityToolbars.tsx'
@@ -80,12 +80,12 @@ const FACET_TAG_TYPES: Partial<Record<FacetKey, TagType>> = {
  * entirely.
  */
 export function makeFacetHider(options: Options): ((key: FacetKey, value: string) => boolean) | undefined {
-  const { enabled, filters } = options.hideTags
+  const { enabled, filters } = options.rules
   const hidden = enabled ? filters.filter(f => f.behavior === 'hideFilter') : []
   if (hidden.length === 0)
     return undefined
   return (key, value) => {
     const type = FACET_TAG_TYPES[key]
-    return type !== undefined && hidden.some(f => tagFilterMatchesTag(f, { name: value, type }))
+    return type !== undefined && hidden.some(f => ruleMatchesTag(f, { name: value, type }))
   }
 }

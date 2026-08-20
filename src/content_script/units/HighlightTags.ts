@@ -1,6 +1,6 @@
-import type { TagFilter } from '#common'
+import type { Rule } from '#common'
 
-import { ADDON_CLASS, filterHighlightColor, tagFilterMatchesTag } from '#common'
+import { ADDON_CLASS, ruleHighlightColor, ruleMatchesTag } from '#common'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
 
@@ -11,14 +11,14 @@ const COLOR_PROP = '--ao3e-highlight-color'
 const TAG_SELECTOR = 'a.tag'
 
 /**
- * Highlights "favourite" tags: any tag matching a hideTags filter that
- * highlights — a `'highlight'` filter, or an `'invert'` filter that hasn't
- * opted out — gets a coloured background wherever it appears. Purely visual:
- * it never hides or force-shows a work (that's HideWorks' job).
+ * Highlights "favourite" tags: any tag matching a rule that highlights — a
+ * `'highlight'` rule, or an `'invert'` rule that hasn't opted out — gets a
+ * coloured background wherever it appears. Purely visual: it never hides or
+ * force-shows a work (that's HideWorks' job).
  */
 export class HighlightTags extends Unit {
   static override get name() { return 'HighlightTags' }
-  override get enabled() { return this.options.hideTags.enabled }
+  override get enabled() { return this.options.rules.enabled }
 
   static override async clean(): Promise<void> {
     // The highlight class sits on native page elements (not our own nodes), so
@@ -31,10 +31,10 @@ export class HighlightTags extends Unit {
   }
 
   override async ready(): Promise<void> {
-    const { filters, defaultHighlightColor } = this.options.hideTags
-    const highlights: { filter: TagFilter, color: string }[] = []
+    const { filters, colors } = this.options.rules
+    const highlights: { filter: Rule, color: string }[] = []
     for (const filter of filters) {
-      const color = filterHighlightColor(filter, defaultHighlightColor)
+      const color = ruleHighlightColor(filter, colors)
       if (color !== null)
         highlights.push({ filter, color })
     }
@@ -44,7 +44,7 @@ export class HighlightTags extends Unit {
     let count = 0
     for (const el of this.root.querySelectorAll(TAG_SELECTOR)) {
       const tag = getTagFromElement(el)
-      const match = highlights.find(h => tagFilterMatchesTag(h.filter, tag))
+      const match = highlights.find(h => ruleMatchesTag(h.filter, tag))
       if (!match)
         continue
       el.classList.add(HIGHLIGHT_CLASS)

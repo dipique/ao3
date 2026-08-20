@@ -1,4 +1,4 @@
-import type { AuthorFilter, Tag, TagFilter } from '#common'
+import type { Rule, RuleTarget } from '#common'
 
 import { api, createLogger, options } from '#common'
 
@@ -20,6 +20,27 @@ const logger = createLogger('BG/menus')
 function onCreated() {
   if (browser.runtime.lastError)
     logger.error('Error creating menu item:', browser.runtime.lastError)
+}
+
+/**
+ * The exact rule a menu item points at: what it targets, the value, and (for a
+ * pseud) which pseud. The same shape the in-page menus use — see
+ * `content_script/persistentFilters.ts` — kept separate only because the
+ * background can't import the content script.
+ */
+interface RuleKey {
+  target: RuleTarget
+  value: string
+  pseud?: string
+  /** How the toast names it, e.g. `tag "Fluff"`. */
+  describe: string
+}
+
+function ruleMatches(rule: Rule, key: RuleKey): boolean {
+  return rule.matcher === 'exact'
+    && rule.target === key.target
+    && rule.value === key.value
+    && (rule.pseud ?? undefined) === (key.pseud ?? undefined)
 }
 
 if (browser.contextMenus) {
@@ -57,9 +78,36 @@ if (browser.contextMenus) {
     },
   }
 
-  const exactTagFilterPredicate = (tag: Tag) => (f: TagFilter) => f.name === tag.name && f.matcher === 'exact' && (f.type === undefined || f.type === tag.type)
-  const authorFilterPredicate = (author: AuthorFilter) => (f: AuthorFilter) => f.userId === author.userId && f.pseud === undefined
-  const authorPseudFilterPredicate = (author: AuthorFilter) => (f: AuthorFilter) => f.userId === author.userId && f.pseud === author.pseud
+  /** Every menu item, paired with the rule key it acts on. */
+  const PAIRS = [
+    {
+      hide: menus.tag.hide,
+      show: menus.tag.show,
+      async key(linkUrl: string, _parts: string[], tabId: number): Promise<RuleKey> {
+        const tag = await api.getTag.sendToTab(tabId, linkUrl)
+        return { target: tag.type ?? 'tag', value: tag.name, describe: `tag "${tag.name}"` }
+      },
+    },
+    {
+      hide: menus.author.hide,
+      show: menus.author.show,
+      async key(_linkUrl: string, parts: string[]): Promise<RuleKey> {
+        return { target: 'author', value: parts[1]!, describe: `author "${parts[1]}"` }
+      },
+    },
+    {
+      hide: menus.author.hidePseud,
+      show: menus.author.showPseud,
+      async key(_linkUrl: string, parts: string[]): Promise<RuleKey> {
+        return {
+          target: 'author',
+          value: parts[1]!,
+          pseud: parts[3],
+          describe: `pseud "${parts[3]}" of author "${parts[1]}"`,
+        }
+      },
+    },
+  ]
 
   function sendHideToast(tab: browser.tabs.Tab, action: 'hide' | 'show', what: string, alreadyExisted: boolean, wasInverted?: boolean) {
     const actionVerb = action === 'hide'
@@ -69,98 +117,50 @@ if (browser.contextMenus) {
     void api.toast.sendToTab(tab.id!, `The ${what} has been ${actionVerb}.`, { type: 'success' })
   }
 
+  /**
+   * Apply one menu click: find the rule this link already has (if any), drop it,
+   * and add the chosen behaviour back unless the click was undoing what was
+   * already there. Priority is left off, so the rule takes its behaviour's
+   * default — the same thing the in-page menus write.
+   */
+  async function applyMenuClick(hiding: boolean, key: RuleKey, tab: browser.tabs.Tab) {
+    const rules = await options.get('rules')
+    const filters = rules.filters
+    const index = filters.findIndex(f => ruleMatches(f, key))
+    const old = index !== -1 ? filters[index] : undefined
+    const wasShown = old ? old.behavior === 'invert' : undefined
+
+    if (old)
+      filters.splice(index, 1)
+
+    sendHideToast(tab, hiding ? 'hide' : 'show', key.describe, !!old, wasShown)
+
+    // Clicking the behaviour it already had removes the rule; anything else replaces it.
+    if (!old || wasShown === hiding) {
+      filters.push({
+        target: key.target,
+        value: key.value,
+        ...(key.pseud !== undefined ? { pseud: key.pseud } : {}),
+        matcher: 'exact',
+        ...(hiding ? {} : { behavior: 'invert' as const }),
+      })
+    }
+
+    await options.set({ rules: { ...rules, enabled: true, filters } })
+  }
+
   async function onMenuClick(info: browser.contextMenus.OnClickData, tab: browser.tabs.Tab) {
     if (!info.linkUrl)
       return
 
-    const url = new URL(info.linkUrl!)
-    const parts = url.pathname.split('/').filter(Boolean)
+    const parts = new URL(info.linkUrl).pathname.split('/').filter(Boolean)
 
-    async function onMenuClickForHideWorks<
-      Item extends Record<string, any>,
-      Filter,
-    >(
-      hideId: string | number,
-      showId: string | number,
-      getFilters: () => Promise<Filter[]>,
-      getItem: () => Promise<Item>,
-      predicate: (f: Item) => (f: Filter) => boolean,
-      isShown: (f: Filter) => boolean,
-      createFilter: (f: Item, shown: boolean) => Filter,
-      setFilters: (filters: Filter[]) => Promise<void>,
-      formatItem: (f: Item) => string,
-    ) {
-      if (info.menuItemId === hideId || info.menuItemId === showId) {
-        const item = await getItem()
-        const filters = await getFilters()
-        const filterIndex = filters.findIndex(predicate(item))
-        const oldFilter = filterIndex !== -1 ? filters[filterIndex] : undefined
-        const wasShown = oldFilter ? isShown(oldFilter) : undefined
-
-        if (oldFilter) {
-          filters.splice(filterIndex, 1)
-        }
-
-        if (info.menuItemId === hideId) {
-          sendHideToast(tab, 'hide', formatItem(item), !!oldFilter, wasShown)
-
-          if (!oldFilter || wasShown) {
-            filters.push(createFilter(item, false))
-          }
-        }
-        else if (info.menuItemId === showId) {
-          sendHideToast(tab, 'show', formatItem(item), !!oldFilter, wasShown)
-
-          if (!oldFilter || !wasShown) {
-            filters.push(createFilter(item, true))
-          }
-        }
-
-        await setFilters(filters)
-      }
+    for (const pair of PAIRS) {
+      if (info.menuItemId !== pair.hide && info.menuItemId !== pair.show)
+        continue
+      const key = await pair.key(info.linkUrl, parts, tab.id!)
+      await applyMenuClick(info.menuItemId === pair.hide, key, tab)
     }
-
-    await onMenuClickForHideWorks(
-      menus.tag.hide,
-      menus.tag.show,
-      async () => (await options.get('hideTags')).filters,
-      async () => api.getTag.sendToTab(tab.id!, info.linkUrl!),
-      exactTagFilterPredicate,
-      (f: TagFilter) => f.behavior === 'invert',
-      (tag: Tag, shown: boolean): TagFilter => ({ ...tag, matcher: 'exact', ...(shown ? { behavior: 'invert' } : {}) }),
-      async (filters: TagFilter[]) => await options.set({
-        hideTags: { enabled: true, filters },
-      }),
-      (tag: Tag) => `tag "${tag.name}"`,
-    )
-
-    await onMenuClickForHideWorks(
-      menus.author.hide,
-      menus.author.show,
-      async () => (await options.get('hideAuthors')).filters,
-      async () => ({ userId: parts[1]! }),
-      authorFilterPredicate,
-      (f: AuthorFilter) => f.behavior === 'invert',
-      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, ...(shown ? { behavior: 'invert' } : {}) }),
-      async (filters: AuthorFilter[]) => await options.set({
-        hideAuthors: { enabled: true, filters },
-      }),
-      (author: AuthorFilter) => `author "${author.userId}"`,
-    )
-
-    await onMenuClickForHideWorks(
-      menus.author.hidePseud,
-      menus.author.showPseud,
-      async () => (await options.get('hideAuthors')).filters,
-      async () => ({ userId: parts[1]!, pseud: parts[3] } as AuthorFilter),
-      authorPseudFilterPredicate,
-      (f: AuthorFilter) => f.behavior === 'invert',
-      (author: AuthorFilter, shown: boolean): AuthorFilter => ({ userId: author.userId, pseud: author.pseud, ...(shown ? { behavior: 'invert' } : {}) }),
-      async (filters: AuthorFilter[]) => await options.set({
-        hideAuthors: { enabled: true, filters },
-      }),
-      (author: AuthorFilter) => `pseud "${author.pseud}" of author "${author.userId}"`,
-    )
   }
 
   if (process.env.BROWSER === 'firefox') {
@@ -168,63 +168,22 @@ if (browser.contextMenus) {
       if (!info.linkUrl)
         return
 
-      const url = new URL(info.linkUrl!)
-      const parts = url.pathname.split('/').filter(Boolean)
+      const parts = new URL(info.linkUrl).pathname.split('/').filter(Boolean)
 
       const menuInstanceId = nextMenuInstanceId++
       lastMenuInstanceId = menuInstanceId
 
-      async function onMenuShownForHideWorks<
-        Item extends Record<string, any>,
-        Filter,
-      >(
-        hideId: string | number,
-        showId: string | number,
-        getFilters: () => Promise<Filter[]>,
-        getItem: () => Promise<Item>,
-        predicate: (f: Item) => (f: Filter) => boolean,
-        isShown: (f: Filter) => boolean,
-      ) {
-        if (info.menuIds.includes(hideId) || info.menuIds.includes(showId)) {
-          const filters = await getFilters()
-          const filter = filters.find(predicate(await getItem()))
-          const shown = filter ? isShown(filter) : false
+      for (const pair of PAIRS) {
+        if (!info.menuIds.includes(pair.hide!) && !info.menuIds.includes(pair.show!))
+          continue
+        const key = await pair.key(info.linkUrl, parts, tab.id!)
+        const { filters } = await options.get('rules')
+        const rule = filters.find(f => ruleMatches(f, key))
+        const shown = rule ? rule.behavior === 'invert' : false
 
-          await browser.contextMenus.update(hideId, {
-            checked: !!filter && !shown,
-          })
-          await browser.contextMenus.update(showId, {
-            checked: !!filter && shown,
-          })
-        }
+        await browser.contextMenus.update(pair.hide!, { checked: !!rule && !shown })
+        await browser.contextMenus.update(pair.show!, { checked: !!rule && shown })
       }
-
-      await onMenuShownForHideWorks(
-        menus.tag.hide,
-        menus.tag.show,
-        async () => (await options.get('hideTags')).filters,
-        async () => api.getTag.sendToTab(tab.id!, info.linkUrl!),
-        exactTagFilterPredicate,
-        (f: TagFilter) => f.behavior === 'invert',
-      )
-
-      await onMenuShownForHideWorks(
-        menus.author.hide,
-        menus.author.show,
-        async () => (await options.get('hideAuthors')).filters,
-        async () => ({ userId: parts[1] } as AuthorFilter),
-        authorFilterPredicate,
-        (f: AuthorFilter) => f.behavior === 'invert',
-      )
-
-      await onMenuShownForHideWorks(
-        menus.author.hidePseud,
-        menus.author.showPseud,
-        async () => (await options.get('hideAuthors')).filters,
-        async () => ({ userId: parts[1], pseud: parts[3] } as AuthorFilter),
-        authorPseudFilterPredicate,
-        (f: AuthorFilter) => f.behavior === 'invert',
-      )
 
       // Abort if the menu got closed
       if (menuInstanceId !== lastMenuInstanceId)
@@ -234,7 +193,6 @@ if (browser.contextMenus) {
     }
 
     browser.contextMenus.onShown.addListener((info, tab) => {
-      console.log(info, tab)
       if (!tab)
         return
       onMenuShown(info, tab).catch(e => logger.error(e))

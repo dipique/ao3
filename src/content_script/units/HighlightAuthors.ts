@@ -1,6 +1,6 @@
-import type { AuthorFilter } from '#common'
+import type { Rule } from '#common'
 
-import { ADDON_CLASS, authorFilterMatchesAuthor, DEFAULT_AUTHOR_HIGHLIGHT_COLOR, filterHighlightColor } from '#common'
+import { ADDON_CLASS, ruleHighlightColor, ruleMatchesAuthor } from '#common'
 import { isOrphanAccount } from '#content_script/authorPage.js'
 import { Unit } from '#content_script/Unit.js'
 
@@ -19,15 +19,15 @@ function parseAuthorLink(link: HTMLAnchorElement): { userId: string, pseud?: str
 }
 
 /**
- * Highlights bylines of "favourite" authors: any author link matching a
- * hideAuthors filter that highlights — a `'highlight'` filter, or an `'invert'`
- * filter that hasn't opted out — gets a coloured background wherever it appears.
+ * Highlights bylines of "favourite" authors: any author link matching an author
+ * rule that highlights — a `'highlight'` rule, or an `'invert'` rule that
+ * hasn't opted out — gets a coloured background wherever it appears.
  * Purely visual: it never hides or force-shows a work (that's HideWorks' job).
  * The author analogue of {@link HighlightTags}.
  */
 export class HighlightAuthors extends Unit {
   static override get name() { return 'HighlightAuthors' }
-  override get enabled() { return this.options.hideAuthors.enabled }
+  override get enabled() { return this.options.rules.enabled }
 
   static override async clean(): Promise<void> {
     // The highlight class sits on native page elements (not our own nodes), so
@@ -40,11 +40,10 @@ export class HighlightAuthors extends Unit {
   }
 
   override async ready(): Promise<void> {
-    const { filters, defaultHighlightColor } = this.options.hideAuthors
-    const defaultColor = defaultHighlightColor || DEFAULT_AUTHOR_HIGHLIGHT_COLOR
-    const highlights: { filter: AuthorFilter, color: string }[] = []
+    const { filters, colors } = this.options.rules
+    const highlights: { filter: Rule, color: string }[] = []
     for (const filter of filters) {
-      const color = filterHighlightColor(filter, defaultColor)
+      const color = ruleHighlightColor(filter, colors)
       if (color !== null)
         highlights.push({ filter, color })
     }
@@ -59,7 +58,7 @@ export class HighlightAuthors extends Unit {
       // The orphan account isn't a real user; nothing to favourite there.
       if (!author || isOrphanAccount(author.userId))
         continue
-      const match = highlights.find(h => authorFilterMatchesAuthor(h.filter, author))
+      const match = highlights.find(h => ruleMatchesAuthor(h.filter, author))
       if (!match)
         continue
       el.classList.add(HIGHLIGHT_CLASS)

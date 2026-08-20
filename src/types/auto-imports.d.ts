@@ -9,8 +9,7 @@ declare global {
   const Binding: typeof import('../options_ui/directives/vLayoutVar').Binding
   const EffectScope: typeof import('vue').EffectScope
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
-  const OptionRowHideAuthorsContext: typeof import('../options_ui/composables/context').OptionRowHideAuthorsContext
-  const OptionRowHideTagsContext: typeof import('../options_ui/composables/context').OptionRowHideTagsContext
+  const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
   const computed: typeof import('vue').computed

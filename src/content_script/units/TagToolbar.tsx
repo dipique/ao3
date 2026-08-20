@@ -9,7 +9,7 @@ import MdiTagOff from '~icons/mdi/tag-off.jsx'
 import type { FilterBehavior, Tag } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { DEFAULT_HIGHLIGHT_COLOR, options } from '#common'
+import { options, ruleTargetColor } from '#common'
 import {
   attachMenuTrigger,
   buildIndicators,
@@ -24,7 +24,7 @@ import {
   resetFilterSidebarCaches,
   toggleTagFilter,
 } from '#content_script/filterSidebar.js'
-import { clearTagBehavior, tagBehavior, toggleTagBehavior } from '#content_script/persistentFilters.js'
+import { clearRule, ruleBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
 import React from '#dom'
@@ -86,8 +86,9 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem
     })
   }
 
-  const { filters } = await options.get('hideTags')
-  const behavior = tagBehavior(filters, tag)
+  const { filters } = await options.get('rules')
+  const key = tagKey(tag)
+  const behavior = ruleBehavior(filters, key)
   // The three behaviours are mutually exclusive; the active one is shown disabled
   // (it's the current state), with a "Clear" row to return to no rule.
   items.push(
@@ -98,7 +99,7 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem
       danger: true,
       active: behavior === 'hide',
       disabled: behavior === 'hide',
-      onSelect: () => toggleTagBehavior(tag, 'hide'),
+      onSelect: () => toggleRuleBehavior(key, 'hide'),
     },
     {
       icon: () => <MdiEyeCheck />,
@@ -106,7 +107,7 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem
       scope: 'settings',
       active: behavior === 'invert',
       disabled: behavior === 'invert',
-      onSelect: () => toggleTagBehavior(tag, 'invert'),
+      onSelect: () => toggleRuleBehavior(key, 'invert'),
     },
     {
       icon: () => <MdiStar />,
@@ -114,7 +115,7 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem
       scope: 'settings',
       active: behavior === 'highlight',
       disabled: behavior === 'highlight',
-      onSelect: () => toggleTagBehavior(tag, 'highlight'),
+      onSelect: () => toggleRuleBehavior(key, 'highlight'),
     },
     {
       // Hides the tag itself wherever it's listed, leaving the work alone. Once
@@ -124,7 +125,7 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem
       scope: 'settings',
       active: behavior === 'hideFilter',
       disabled: behavior === 'hideFilter',
-      onSelect: () => toggleTagBehavior(tag, 'hideFilter'),
+      onSelect: () => toggleRuleBehavior(key, 'hideFilter'),
     },
   )
   if (behavior) {
@@ -132,7 +133,7 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem
       icon: () => <MdiCloseCircleOutline />,
       label: 'Clear',
       scope: 'settings',
-      onSelect: () => clearTagBehavior(tag),
+      onSelect: () => clearRule(key),
     })
   }
 
@@ -178,8 +179,7 @@ export class TagToolbar extends Unit {
     entries.length = 0
 
     const hasFields = hasTagFilterFields()
-    const highlightColor = this.options.hideTags.defaultHighlightColor || DEFAULT_HIGHLIGHT_COLOR
-    const { filters } = this.options.hideTags
+    const { filters, colors } = this.options.rules
 
     for (const link of this.root.querySelectorAll<HTMLAnchorElement>(TAG_LINK_SELECTOR)) {
       const name = link.textContent?.trim()
@@ -192,8 +192,10 @@ export class TagToolbar extends Unit {
       const entry: TagEntry = {
         link,
         tag,
-        behavior: tagBehavior(filters, tag),
-        highlightColor,
+        behavior: ruleBehavior(filters, tagKey(tag)),
+        // The star's colour follows the tag's own type, so a highlighted
+        // relationship can read differently from a highlighted freeform.
+        highlightColor: ruleTargetColor(tag.type ?? 'tag', colors),
         hasFields,
         indicator: null,
       }

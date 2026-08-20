@@ -579,8 +579,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: #9a0000;
 }
 
-.AO3E--indicator--invert,
-.AO3E--indicator--saved {
+.AO3E--indicator--invert {
   color: #2f8f4e;
 }
 
@@ -588,13 +587,13 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: var(--ao3e-indicator-color, #d8a200);
 }
 
-/* Read: deliberately muted — it marks a work as done with, not as noteworthy. */
-.AO3E--indicator--read {
-  color: #6b7280;
-}
-
-.AO3E--indicator--favorite {
-  color: #c2185b;
+/* Per-work marks (read, favorite, and the finer dispositions). Each mark carries
+   its own colour in the mark table — see common/workMarks.ts — which the
+   indicator hands over as a custom property, so adding a mark needs no CSS. The
+   fallback is the muted grey `read` used to have: a mark says a work is dealt
+   with, not that it's noteworthy. */
+.AO3E--indicator--mark {
+  color: var(--ao3e-indicator-color, #6b7280);
 }
 
 /* ---------------------------------------------------------------------------

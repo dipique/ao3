@@ -57,7 +57,7 @@ export async function saveMarkedForLaterIndex(userId: string, ids: Iterable<stri
  * changed it. Synchronous, with the write dispatched unawaited, because the
  * strictest caller is AO3's own mark button: it submits a form and navigates, so
  * there's no time for a storage round-trip (the same reason
- * {@link file://./workMarks.ts}'s `applyReadMark` works this way).
+ * {@link file://./workMarks.ts}'s mark writers work this way).
  *
  * A no-op until the index has been loaded this run — without the loaded set the
  * new one can't be computed without a read, and the cost of skipping is one stale

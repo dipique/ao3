@@ -1,35 +1,41 @@
-import type { EntityFilter } from '#common'
+import type { Rule } from '#common'
 
-import { ADDON_CLASS, DEFAULT_SERIES_HIGHLIGHT_COLOR, DEFAULT_WORK_HIGHLIGHT_COLOR, entityFilterMatches, filterHighlightColor } from '#common'
+import { ADDON_CLASS, ruleHighlightColor, ruleMatchesEntity } from '#common'
 import { Unit } from '#content_script/Unit.js'
 
 const COLOR_PROP = '--ao3e-highlight-color'
 
 /**
  * Highlights links to "favourite" works or series: any `/works/:id` (or
- * `/series/:id`) link matching a hideWorks/hideSeries filter that highlights — a
- * `'highlight'` filter, or an `'invert'` filter that hasn't opted out — gets a
- * coloured background wherever it appears. Purely visual: it never hides or
- * force-shows a work (that's HideWorks' job). The work/series analogue of
- * HighlightTags / HighlightAuthors.
+ * `/series/:id`) link matching a rule that highlights — a `'highlight'` rule, or
+ * an `'invert'` rule that hasn't opted out — gets a coloured background wherever
+ * it appears. Purely visual: it never hides or force-shows a work (that's
+ * HideWorks' job). The work/series analogue of HighlightTags / HighlightAuthors.
  *
- * Subclasses supply the link kind (and its option/default colour); everything
- * else is shared, since works and series highlight identically.
+ * Subclasses supply the link kind; everything else is shared, since works and
+ * series highlight identically (and their default colours come from the rule
+ * target, not from here).
  */
 abstract class HighlightEntities extends Unit {
-  /** `'works'` or `'series'` — the path segment its links use. */
-  protected abstract get kind(): 'works' | 'series'
-  /** The option list ({@link Unit.options} key) holding this kind's filters. */
-  protected abstract get filters(): EntityFilter[]
-  /** Highlight colour used by filters that don't set their own. */
-  protected abstract get defaultColor(): string
+  /** `'work'` or `'series'` — the rule target its links carry. */
+  protected abstract get target(): 'work' | 'series'
   /** CSS class applied to highlighted links (its own default colour lives in CSS). */
   protected abstract get highlightClass(): string
 
+  override get enabled() { return this.options.rules.enabled }
+
+  /** The path segment this kind's links use. */
+  private get kind(): string {
+    return this.target === 'work' ? 'works' : 'series'
+  }
+
   override async ready(): Promise<void> {
-    const highlights: { filter: EntityFilter, color: string }[] = []
-    for (const filter of this.filters) {
-      const color = filterHighlightColor(filter, this.defaultColor)
+    const { filters, colors } = this.options.rules
+    const highlights: { filter: Rule, color: string }[] = []
+    for (const filter of filters) {
+      if (filter.target !== this.target)
+        continue
+      const color = ruleHighlightColor(filter, colors)
       if (color !== null)
         highlights.push({ filter, color })
     }
@@ -49,7 +55,7 @@ abstract class HighlightEntities extends Unit {
       if (!id)
         continue
       const entity = { id, name: el.textContent!.trim() }
-      const match = highlights.find(h => entityFilterMatches(h.filter, entity))
+      const match = highlights.find(h => ruleMatchesEntity(h.filter, this.target, entity))
       if (!match)
         continue
       el.classList.add(this.highlightClass)
@@ -77,10 +83,7 @@ const HIGHLIGHT_SERIES_CLASS = `${ADDON_CLASS}--highlight-series`
 
 export class HighlightWorks extends HighlightEntities {
   static override get name() { return 'HighlightWorks' }
-  override get enabled() { return this.options.hideWorks.enabled }
-  protected override get kind() { return 'works' as const }
-  protected override get filters() { return this.options.hideWorks.filters }
-  protected override get defaultColor() { return this.options.hideWorks.defaultHighlightColor || DEFAULT_WORK_HIGHLIGHT_COLOR }
+  protected override get target() { return 'work' as const }
   protected override get highlightClass() { return HIGHLIGHT_WORK_CLASS }
 
   static override async clean(): Promise<void> {
@@ -90,10 +93,7 @@ export class HighlightWorks extends HighlightEntities {
 
 export class HighlightSeries extends HighlightEntities {
   static override get name() { return 'HighlightSeries' }
-  override get enabled() { return this.options.hideSeries.enabled }
-  protected override get kind() { return 'series' as const }
-  protected override get filters() { return this.options.hideSeries.filters }
-  protected override get defaultColor() { return this.options.hideSeries.defaultHighlightColor || DEFAULT_SERIES_HIGHLIGHT_COLOR }
+  protected override get target() { return 'series' as const }
   protected override get highlightClass() { return HIGHLIGHT_SERIES_CLASS }
 
   static override async clean(): Promise<void> {

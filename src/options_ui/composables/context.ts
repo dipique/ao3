@@ -1,17 +1,11 @@
 import type { ComponentInstance, GlobalComponents, Ref } from 'vue'
 
-import type { AuthorFilter, TagFilter } from '#common'
+import type { Rule } from '#common'
 
 export const OptionLabelId = createContext<string>('OptionLabelId')
 
-export const OptionRowHideTagsContext = createContext<{
+export const OptionRowRulesContext = createContext<{
   editDialog: Ref<ComponentInstance<GlobalComponents['Dialog']> | null>
-  edit?: (value?: TagFilter) => void
-  remove?: (value: TagFilter) => void
-}>('OptionRowHideTags')
-
-export const OptionRowHideAuthorsContext = createContext<{
-  editDialog: Ref<ComponentInstance<GlobalComponents['Dialog']> | null>
-  edit?: (value?: AuthorFilter) => void
-  remove?: (value: AuthorFilter) => void
-}>('OptionRowHideAuthors')
+  edit?: (value?: Rule) => void
+  remove?: (value: Rule) => void
+}>('OptionRowRules')

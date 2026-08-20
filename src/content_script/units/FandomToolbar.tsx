@@ -9,7 +9,7 @@ import MdiTagOff from '~icons/mdi/tag-off.jsx'
 import type { FilterBehavior, Tag } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { DEFAULT_HIGHLIGHT_COLOR, options, TagType } from '#common'
+import { options, ruleTargetColor, TagType } from '#common'
 import {
   attachMenuTrigger,
   buildIndicators,
@@ -28,7 +28,7 @@ import {
   scrapeSidebar,
   toggleFandomFilter,
 } from '#content_script/filterSidebar.js'
-import { clearTagBehavior, tagBehavior, toggleTagBehavior } from '#content_script/persistentFilters.js'
+import { clearRule, ruleBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -36,8 +36,8 @@ import React from '#dom'
  * Blurb fandom links. Unlike the text-based tags handled by TagToolbar, the
  * sidebar filters fandoms by numeric id, so include/exclude must resolve each
  * displayed name to an id first. Hide / always-show / highlight, however, are
- * persistent filters keyed by name (as a {@link TagType.Fandom} tag), so they
- * need no id and work on any page.
+ * persistent rules keyed by name (target {@link TagType.Fandom}), so they need
+ * no id and work on any page.
  */
 const FANDOM_LINK_SELECTOR = 'h5.fandoms a.tag'
 
@@ -98,8 +98,9 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
     })
   }
 
-  const { filters } = await options.get('hideTags')
-  const behavior = tagBehavior(filters, tag)
+  const { filters } = await options.get('rules')
+  const key = tagKey(tag)
+  const behavior = ruleBehavior(filters, key)
   // The active behaviour is shown disabled (current state); "Clear" removes it.
   items.push(
     {
@@ -109,7 +110,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
       danger: true,
       active: behavior === 'hide',
       disabled: behavior === 'hide',
-      onSelect: () => toggleTagBehavior(tag, 'hide'),
+      onSelect: () => toggleRuleBehavior(key, 'hide'),
     },
     {
       icon: () => <MdiEyeCheck />,
@@ -117,7 +118,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
       scope: 'settings',
       active: behavior === 'invert',
       disabled: behavior === 'invert',
-      onSelect: () => toggleTagBehavior(tag, 'invert'),
+      onSelect: () => toggleRuleBehavior(key, 'invert'),
     },
     {
       icon: () => <MdiStar />,
@@ -125,7 +126,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
       scope: 'settings',
       active: behavior === 'highlight',
       disabled: behavior === 'highlight',
-      onSelect: () => toggleTagBehavior(tag, 'highlight'),
+      onSelect: () => toggleRuleBehavior(key, 'highlight'),
     },
     {
       // Hides the fandom tag itself wherever it's listed, leaving the work
@@ -135,7 +136,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
       scope: 'settings',
       active: behavior === 'hideFilter',
       disabled: behavior === 'hideFilter',
-      onSelect: () => toggleTagBehavior(tag, 'hideFilter'),
+      onSelect: () => toggleRuleBehavior(key, 'hideFilter'),
     },
   )
   if (behavior) {
@@ -143,7 +144,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuI
       icon: () => <MdiCloseCircleOutline />,
       label: 'Clear',
       scope: 'settings',
-      onSelect: () => clearTagBehavior(tag),
+      onSelect: () => clearRule(key),
     })
   }
 
@@ -196,8 +197,8 @@ export class FandomToolbar extends Unit {
       scrapeSidebar()
     }
 
-    const highlightColor = this.options.hideTags.defaultHighlightColor || DEFAULT_HIGHLIGHT_COLOR
-    const { filters } = this.options.hideTags
+    const { filters, colors } = this.options.rules
+    const highlightColor = ruleTargetColor(TagType.Fandom, colors)
 
     for (const link of fandomLinks) {
       const name = link.textContent?.trim()
@@ -208,7 +209,7 @@ export class FandomToolbar extends Unit {
       const entry: FandomEntry = {
         link,
         tag,
-        behavior: tagBehavior(filters, tag),
+        behavior: ruleBehavior(filters, tagKey(tag)),
         highlightColor,
         hasFields,
         indicator: null,

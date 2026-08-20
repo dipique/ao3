@@ -1,6 +1,6 @@
 import { noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
 import { Unit } from '#content_script/Unit.js'
-import { applyReadMark } from '#content_script/workMarks.js'
+import { applyMarkGroup } from '#content_script/workMarks.js'
 
 /**
  * Keeps our own record in step with **AO3's own** mark buttons — the `li.mark`
@@ -9,7 +9,7 @@ import { applyReadMark } from '#content_script/workMarks.js'
  * Marked for Later index that puts the saved indicator on listings.
  *
  * Pressing one of those does exactly what the matching item in our work menu
- * does, because both end up in {@link applyReadMark}. Without this the two drift
+ * does, because both end up in the same mark writers. Without this the two drift
  * apart the moment you use the archive's UI instead of ours: you'd mark a work
  * read on the work page and it would keep turning up in listings.
  *
@@ -20,8 +20,12 @@ import { applyReadMark } from '#content_script/workMarks.js'
  *   comes off the Marked for Later list, which the index has to hear about or
  *   every listing goes on showing the saved indicator on a work you just cleared.
  * - **Mark for Later** — it's back on the to-read pile, so clear the read mark
- *   and add it to the index. Otherwise "hide read works" would go on hiding the
+ *   and add it to the index. Otherwise hiding read works would go on hiding the
  *   very work you just chose to come back to.
+ *
+ * Both directions go through {@link applyMarkGroup}, not a specific mark: a work
+ * you'd already called "gross" is read too, and AO3's blunt button must not
+ * quietly downgrade that to a plain read mark.
  *
  * AO3 renders these as `button_to` forms that POST and redirect, so pressing one
  * navigates away. The handler therefore never awaits and never calls
@@ -80,7 +84,7 @@ export class CaptureMarkButtons extends Unit {
       if (!mark)
         return
       // A no-op when our own menu already applied it before pressing this button.
-      if (this.options.workMarks.enabled && applyReadMark(this.options.workMarks, mark.id, mark.read))
+      if (this.options.workMarks.enabled && applyMarkGroup(this.options.workMarks, mark.id, mark.read))
         this.logger.debug(`Work ${mark.id} marked ${mark.read ? 'read' : 'unread'} from AO3's own button.`)
       // Mark as Read takes the work off the list; Mark for Later puts it on.
       // (A no-op unless FilterWorkToolbar has loaded the index for this page.)

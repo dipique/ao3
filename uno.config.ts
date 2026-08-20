@@ -176,7 +176,24 @@ export default {
     ...ANIMATION_SHORTCUTS,
     OTHER_SHORTCUTS,
   ],
-  safelist: ['keyframes-una-in', 'keyframes-una-out', 'keyframes-collapsible-down', 'keyframes-collapsible-up', 'sr-only'],
+  // The mark icons are picked by data (a mark's `icon` field), so no template
+  // ever spells their class out for the extractor to find — see
+  // src/options_ui/markIcons.ts, which must list the same set.
+  safelist: [
+    'keyframes-una-in',
+    'keyframes-una-out',
+    'keyframes-collapsible-down',
+    'keyframes-collapsible-up',
+    'sr-only',
+    'i-mdi-book-check',
+    'i-mdi-heart',
+    'i-mdi-thumb-up',
+    'i-mdi-sleep',
+    'i-mdi-thumb-down',
+    'i-mdi-emoticon-sick',
+    'i-mdi-clock-check',
+    'i-mdi-bookmark-check',
+  ],
   presets: [
     presetWind3(),
     presetAttributify({ strict: false }),

@@ -20,7 +20,7 @@ import {
 const defaults = {
   showTotalTime: true,
   wordsPerMinute: 200,
-  hideTags: { enabled: false, filters: [], defaultHighlightColor: '#abc' },
+  rules: { enabled: false, filters: [], colors: {} },
   textReplacements: { enabled: false, rules: [] },
   theme: { chosen: 'inherit', current: 'light' },
   user: {},
@@ -31,7 +31,7 @@ const defaults = {
 const options = {
   ...defaults,
   wordsPerMinute: 300,
-  hideTags: { enabled: true, filters: [{ name: 'x', matcher: 'exact' }], defaultHighlightColor: '#abc' },
+  rules: { enabled: true, filters: [{ target: 'tag', value: 'x', matcher: 'exact' }], colors: {} },
   theme: { chosen: 'dark', current: 'dark' },
   user: { userId: 'me' },
   verbose: true,
@@ -57,7 +57,7 @@ describe('pruneToSynced', () => {
     const pruned = pruneToSynced(options, defaults)
     assert.deepEqual(pruned, {
       wordsPerMinute: 300,
-      hideTags: { enabled: true, filters: [{ name: 'x', matcher: 'exact' }], defaultHighlightColor: '#abc' },
+      rules: { enabled: true, filters: [{ target: 'tag', value: 'x', matcher: 'exact' }], colors: {} },
       theme: { chosen: 'dark' },
     })
     assert.equal('showTotalTime' in pruned, false, 'default-valued key dropped')
@@ -81,7 +81,7 @@ describe('buildLocalUpdate', () => {
     // The writer knew every key, so "absent" really does mean "equals default".
     const rebuilt = buildLocalUpdate({}, defaults, options, syncedKeys(defaults))
     assert.equal(rebuilt.wordsPerMinute, 200, 'absent synced key -> default')
-    assert.deepEqual(rebuilt.hideTags, defaults.hideTags)
+    assert.deepEqual(rebuilt.rules, defaults.rules)
     assert.deepEqual(rebuilt.theme, { chosen: 'inherit', current: 'dark' }, 'chosen reset, current kept')
     assert.deepEqual(rebuilt.user, { userId: 'me' }, 'user preserved from existing')
     assert.equal(rebuilt.verbose, true, 'verbose preserved from existing')
@@ -91,9 +91,9 @@ describe('buildLocalUpdate', () => {
     // A device on an older build: it prunes against defaults that lack the newer
     // keys, so they're missing from its payload for a reason that has nothing to
     // do with their value. Resetting them here wiped real data.
-    const older = syncedKeys(defaults).filter(k => k !== 'hideTags' && k !== 'textReplacements')
+    const older = syncedKeys(defaults).filter(k => k !== 'rules' && k !== 'textReplacements')
     const rebuilt = buildLocalUpdate({ wordsPerMinute: 300 }, defaults, options, older)
-    assert.deepEqual(rebuilt.hideTags, options.hideTags, 'unknown-to-writer key kept as-is')
+    assert.deepEqual(rebuilt.rules, options.rules, 'unknown-to-writer key kept as-is')
     assert.equal(rebuilt.showTotalTime, true, 'known key absent from payload -> default')
   })
 
@@ -101,7 +101,7 @@ describe('buildLocalUpdate', () => {
     // Payloads written before the manifest carried `k`: the two cases are
     // indistinguishable, so prefer a stale setting over destroying data.
     const rebuilt = buildLocalUpdate({}, defaults, options)
-    assert.deepEqual(rebuilt.hideTags, options.hideTags)
+    assert.deepEqual(rebuilt.rules, options.rules)
     assert.equal(rebuilt.wordsPerMinute, 300)
     assert.deepEqual(rebuilt.user, { userId: 'me' }, 'local-only still from this device')
     assert.deepEqual(rebuilt.theme, { chosen: 'inherit', current: 'dark' })

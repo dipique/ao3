@@ -1,6 +1,6 @@
-import type { Tag, TagFilter } from '#common'
+import type { Rule, Tag } from '#common'
 
-import { ADDON_CLASS, tagFilterMatchesTag, TagType } from '#common'
+import { ADDON_CLASS, ruleMatchesTag, TagType } from '#common'
 import { checkboxTagName } from '#content_script/filterSidebar.js'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
@@ -36,14 +36,14 @@ const SIDEBAR_GROUPS: [key: string, type: TagType][] = [
  * work. Wherever such a tag is listed it's taken out of the page: a work's tag
  * list (blurbs and the work's own meta) and the "Sort and Filter" sidebar's
  * include/exclude lists. The work itself is untouched — that's HideWorks' job,
- * and `hideFilter` deliberately takes no part in it (see `filterAffectsWorks`).
+ * and `hideFilter` deliberately takes no part in it (see `ruleAffectsWorks`).
  *
  * The search view has no DOM sidebar to walk; its facet rows are filtered from
  * the same rules by `makeFacetHider` (searchView/decorate.ts).
  */
 export class HideFilters extends Unit {
   static override get name() { return 'HideFilters' }
-  override get enabled() { return this.options.hideTags.enabled }
+  override get enabled() { return this.options.rules.enabled }
 
   static override async clean(): Promise<void> {
     // Both classes sit on native page elements, so the generic ADDON_CLASS
@@ -55,7 +55,7 @@ export class HideFilters extends Unit {
   }
 
   override async ready(): Promise<void> {
-    const filters = this.options.hideTags.filters.filter(f => f.behavior === 'hideFilter')
+    const filters = this.options.rules.filters.filter(f => f.behavior === 'hideFilter')
     if (filters.length === 0)
       return
 
@@ -64,7 +64,7 @@ export class HideFilters extends Unit {
   }
 
   /** Hide matching tags in every tag list under `root`. Returns how many. */
-  private hideTagLinks(filters: TagFilter[]): number {
+  private hideTagLinks(filters: Rule[]): number {
     // Lists we hid something in, so their trailing comma can be fixed up after.
     const lists = new Set<HTMLElement>()
     let count = 0
@@ -74,7 +74,7 @@ export class HideFilters extends Unit {
       if (!name)
         continue
       const tag: Tag = { ...getTagFromElement(el), name }
-      if (!filters.some(f => tagFilterMatchesTag(f, tag)))
+      if (!filters.some(f => ruleMatchesTag(f, tag)))
         continue
 
       // Take out the whole list item when there is one (so its separator goes
@@ -98,7 +98,7 @@ export class HideFilters extends Unit {
   }
 
   /** Hide matching rows in the filter sidebar's include/exclude lists. Returns how many. */
-  private hideSidebarRows(filters: TagFilter[]): number {
+  private hideSidebarRows(filters: Rule[]): number {
     // The sidebar is page furniture, not part of a blurb — skip it when we're
     // scoped to one (the search view decorating a single freshly scraped work).
     if (!(this.root instanceof Document))
@@ -112,7 +112,7 @@ export class HideFilters extends Unit {
         if (input.checked)
           continue
         const name = checkboxTagName(input)
-        if (!name || !filters.some(f => tagFilterMatchesTag(f, { name, type })))
+        if (!name || !filters.some(f => ruleMatchesTag(f, { name, type })))
           continue
         const row = input.closest<HTMLElement>('li') ?? input.closest<HTMLElement>('label') ?? input
         row.classList.add(HIDDEN_CLASS)

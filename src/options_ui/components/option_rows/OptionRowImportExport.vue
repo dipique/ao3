@@ -22,13 +22,13 @@ const EXPORT_VARIANTS = [{
 }] as const
 
 /**
- * Option keys holding filter lists. On export we add a legacy `invert` flag to
- * each filter mirroring its `behavior`, so the file still force-shows correctly
- * if loaded by the original (upstream) extension, which reads `invert` rather
- * than `behavior`. Importing an upstream file is handled the other way round, by
- * the migrations (see {@link filterFromInvert}).
+ * Option keys holding rule lists. On export we add a legacy `invert` flag to
+ * each rule mirroring its `behavior`, so the file still force-shows correctly if
+ * loaded by the original (upstream) extension, which reads `invert` rather than
+ * `behavior`. Importing an upstream file is handled the other way round, by the
+ * migrations (see {@link filterFromInvert}).
  */
-const FILTER_OPTION_KEYS = ['option.hideTags', 'option.hideAuthors', 'option.hideWorks', 'option.hideSeries']
+const FILTER_OPTION_KEYS = ['option.rules']
 
 function addInvertFlags(items: Record<string, any>): Record<string, any> {
   const out = { ...items }

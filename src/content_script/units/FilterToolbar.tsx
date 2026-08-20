@@ -4,7 +4,7 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiGestureTapHold from '~icons/mdi/gesture-tap-hold.jsx'
 
-import { ADDON_CLASS, options } from '#common'
+import { ADDON_CLASS, hiddenByMarks, options } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -72,17 +72,16 @@ export class FilterToolbar extends Unit {
       || o.hideAuthorToolbar
       || o.subscribeAuthorToolbar
       || o.muteAuthorToolbar
-      || o.hideWorks.enabled
-      || o.hideSeries.enabled
+      || o.rules.enabled
       || o.workMarks.enabled
   }
 
   /** Whether the peek pill could apply here (the `filterToolbar` option + a hide feature). */
   private get peekAvailable(): boolean {
-    const { filterToolbar, hideTags, hideAuthors, hideCrossovers, hideLanguages, hideWorks, hideSeries, workMarks } = this.options
+    const { filterToolbar, rules, hideCrossovers, hideLanguages, workMarks } = this.options
     return filterToolbar && (
-      hideTags.enabled || hideAuthors.enabled || hideCrossovers.enabled || hideLanguages.enabled
-      || hideWorks.enabled || hideSeries.enabled || (workMarks.enabled && workMarks.hideRead)
+      rules.enabled || hideCrossovers.enabled || hideLanguages.enabled
+      || (workMarks.enabled && hiddenByMarks(workMarks.marks).size > 0)
     )
   }
 

@@ -1,10 +1,10 @@
-import MdiBookCheck from '~icons/mdi/book-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import { type EntityFilter, type TagFilter, TagType } from '#common'
-import { ADDON_CLASS, authorFilterMatchesAuthor, entityFilterMatches, filterAffectsWorks, tagFilterMatchesTag, unpackIds } from '#common'
+import type { MarkId, Rule } from '#common'
+
+import { ADDON_CLASS, hiddenByMarks, ruleAffectsWorks, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -24,6 +24,7 @@ import {
   toggleFandomFilter,
   toggleTagFilter,
 } from '#content_script/filterSidebar.js'
+import { markIcon } from '#content_script/markIcons.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -57,29 +58,32 @@ interface ReasonItem {
   rule: string
   /** If set, an inline exclude button is offered for this value. */
   exclude?: ExcludeTarget
+  /** Icon shown before this reason's group label. */
+  icon?: () => Node
 }
 
 /** Reason items grouped by display label, e.g. `Relationship` -> [items]. */
 type HideReasons = Record<string, ReasonItem[]>
 
 /**
- * Icons shown before a reason group's label. A collapsed work hides its own
- * title (and so the indicator that normally rides next to it), so the reason
- * line is the only place left to say *why* at a glance — and "you've read this"
- * is the one worth spotting without reading the text.
- *
- * Keyed by the same labels {@link addReason} groups under.
+ * Which categories of rule contributed to hiding a work. Recorded on the blurb
+ * (as `data-ao3e-hidden-by`) so the floating filter toolbar can reveal just the
+ * works hidden by, say, tag rules.
  */
-const REASON_ICONS: Record<string, () => Node> = {
-  Read: () => <MdiBookCheck />,
-}
+type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages' | 'works' | 'series' | 'marks'
 
 /**
- * Which categories of filter contributed to hiding a work. Recorded on the
- * blurb (as `data-ao3e-hidden-by`) so the floating filter toolbar can reveal
- * just the works hidden by, say, tag filters.
+ * One reason a work might be hidden, before the priority contest is settled.
+ * Reasons that lose to a higher-priority "always show" never reach the reader —
+ * saying a work is hidden by a rule that was overruled would be a lie.
  */
-type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages' | 'works' | 'series' | 'read'
+interface HideCandidate {
+  label: string
+  item: ReasonItem
+  kind: HideKind
+  /** The rule's effective priority; non-rule hides (language, crossover, marks) sit at 0. */
+  priority: number
+}
 
 function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
   if (!(label in reasons))
@@ -143,26 +147,28 @@ export class HideWorks extends Unit {
   static override get name() { return 'HideWorks' }
 
   /**
-   * Work ids marked read, unpacked once per run. Empty unless read-hiding is
-   * actually on, so {@link processBlurb} can test it without re-checking options.
+   * Work ids some mark hides, mapped to the mark responsible — resolved once per
+   * run so {@link processBlurb} can test a whole listing without re-reading
+   * options. Empty unless marks are on and at least one of them hides.
    */
-  private readIds = new Set<string>()
+  private hiddenMarks = new Map<string, MarkId>()
+
+  /** The work-affecting rules for this run (hide/always-show; never highlight-only). */
+  private rules: Rule[] = []
 
   override get enabled() {
     return (
-      this.options.hideCrossovers.enabled
+      this.options.rules.enabled
+      || this.options.hideCrossovers.enabled
       || this.options.hideLanguages.enabled
-      || this.options.hideAuthors.enabled
-      || this.options.hideTags.enabled
-      || this.options.hideWorks.enabled
-      || this.options.hideSeries.enabled
-      || this.hideReadEnabled
+      || this.marksHideAnything
     )
   }
 
-  /** Whether works marked read should be collapsed on this run. */
-  private get hideReadEnabled(): boolean {
-    return this.options.workMarks.enabled && this.options.workMarks.hideRead
+  /** Whether any mark is set to collapse the works carrying it. */
+  private get marksHideAnything(): boolean {
+    const { workMarks } = this.options
+    return workMarks.enabled && hiddenByMarks(workMarks.marks).size > 0
   }
 
   static override async clean(): Promise<void> {
@@ -183,7 +189,10 @@ export class HideWorks extends Unit {
   override async ready(): Promise<void> {
     this.logger.debug('Hiding works...')
     excludeButtons.length = 0
-    this.readIds = this.hideReadEnabled ? unpackIds(this.options.workMarks.read) : new Set()
+    this.hiddenMarks = this.options.workMarks.enabled ? hiddenByMarks(this.options.workMarks.marks) : new Map()
+    // Presentational rules are handled elsewhere (HighlightTags colours the tag,
+    // HideFilters hides it) and never hide or force-show, so they're dropped here.
+    this.rules = this.options.rules.enabled ? this.options.rules.filters.filter(ruleAffectsWorks) : []
 
     const blurbElements = document.querySelectorAll('.blurb')
 
@@ -205,111 +214,133 @@ export class HideWorks extends Unit {
       void loadFandomIdLookup().then(refreshExcludeButtons)
   }
 
+  /**
+   * Decide whether a blurb is hidden, and why.
+   *
+   * Every rule matching the work is weighed by its priority (see `rulePriority`):
+   * the strongest "always show" sets the bar, and only hide reasons *above* that
+   * bar survive. A tie goes to the force-show — "always show" is a promise, and
+   * matching a hide rule of equal strength shouldn't quietly break it. With
+   * everything at its default that reproduces the old behaviour exactly
+   * (force-show at 4, everything else at 0), while leaving a hide rule at 5+ able
+   * to win, and a force-show dropped below 4 able to lose.
+   *
+   * Hides that aren't rules at all — language, crossover, and marks — weigh 0, so
+   * an "always show" still overrules them.
+   */
   processBlurb(blurb: Blurb): { reasons: HideReasons, kinds: Set<HideKind> } {
-    const { options: { hideLanguages, hideAuthors, hideCrossovers, hideTags, hideWorks, hideSeries } } = this
+    const { options: { hideLanguages, hideCrossovers, workMarks } } = this
     const reasons: HideReasons = {}
     const kinds = new Set<HideKind>()
+
+    const hides: HideCandidate[] = []
+    /** The strongest force-show matching this work; -1 when none does. */
+    let bar = -1
+
+    /**
+     * Weigh every rule matching one subject: force-shows raise the bar, and the
+     * strongest hide becomes that subject's single candidate reason (a tag
+     * matching three hide rules is still one thing wrong with the work).
+     */
+    const weigh = (matched: Rule[]): Rule | undefined => {
+      let best: Rule | undefined
+      for (const rule of matched) {
+        const priority = rulePriority(rule)
+        if (rule.behavior === 'invert') {
+          if (priority > bar)
+            bar = priority
+          continue
+        }
+        if (!best || priority > rulePriority(best))
+          best = rule
+      }
+      return best
+    }
+
+    const addHide = (rule: Rule, label: string, kind: HideKind, item: Omit<ReasonItem, 'rule'>) => {
+      hides.push({ label, kind, priority: rulePriority(rule), item: { ...item, rule: describeRule(rule) } })
+    }
+
+    // Marks first: "you already read this" is the reason you're most likely to
+    // want to act on, and a collapsed work hides its own title.
+    const markId = blurb.work ? this.hiddenMarks.get(blurb.work.id) : undefined
+    if (markId) {
+      const config = workMarks.marks[markId]
+      hides.push({
+        label: config?.label || markId,
+        kind: 'marks',
+        priority: 0,
+        item: {
+          value: blurb.work!.name,
+          rule: `You marked this work as ${(config?.label || markId).toLowerCase()}`,
+          icon: markIcon(config?.icon),
+        },
+      })
+    }
 
     if (
       hideLanguages?.enabled
       && blurb.language
       && !hideLanguages.show.some(e => e.label === blurb.language)
     ) {
-      addReason(reasons, 'Language', { value: blurb.language, rule: `Language is "${blurb.language}"` })
-      kinds.add('languages')
+      hides.push({
+        label: 'Language',
+        kind: 'languages',
+        priority: 0,
+        item: { value: blurb.language, rule: `Language is "${blurb.language}"` },
+      })
     }
 
     if (
       hideCrossovers?.enabled
       && blurb.fandoms.length > hideCrossovers.maxFandoms
     ) {
-      addReason(reasons, 'Too many fandoms', {
-        value: `${blurb.fandoms.length} fandoms`,
-        rule: `More than ${hideCrossovers.maxFandoms} fandoms`,
-      })
-      kinds.add('crossovers')
-    }
-
-    // Presentational filters are handled elsewhere (HighlightTags colours the
-    // tag, HideFilters hides it) and never hide or force-show a work, so they're
-    // excluded from the hide decision here.
-    const tagMatches = hideTags?.enabled
-      ? blurb.tags.flatMap((tag) => {
-          const filter = hideTags.filters.find(f => filterAffectsWorks(f) && tagFilterMatchesTag(f, tag))
-          return filter ? [{ tag, filter }] : []
-        })
-      : []
-
-    // Highlight-only author filters never hide or force-show (HighlightAuthors
-    // handles them), so they're excluded from the hide decision here too.
-    const authorMatches = hideAuthors?.enabled
-      ? blurb.authors.flatMap((author) => {
-          const filter = hideAuthors.filters.find(f => filterAffectsWorks(f) && authorFilterMatchesAuthor(f, author))
-          return filter ? [{ author, filter }] : []
-        })
-      : []
-
-    // The work this blurb is for (matched by id or title), and any series it
-    // belongs to. Highlight-only filters are visual (HighlightWorks/Series) and
-    // never hide or force-show, so they're excluded from the hide decision.
-    const workMatches = hideWorks?.enabled && blurb.work
-      ? hideWorks.filters.filter(f => filterAffectsWorks(f) && entityFilterMatches(f, blurb.work!))
-      : []
-
-    const seriesMatches = hideSeries?.enabled
-      ? blurb.series.flatMap((series) => {
-          const filter = hideSeries.filters.find(f => filterAffectsWorks(f) && entityFilterMatches(f, series))
-          return filter ? [{ series, filter }] : []
-        })
-      : []
-
-    // If any matching filter is a force-show rule, the work is not hidden at all
-    // — return with no reasons. All filter kinds express this via behavior.
-    const forceShow = tagMatches.some(m => m.filter.behavior === 'invert')
-      || authorMatches.some(m => m.filter.behavior === 'invert')
-      || workMatches.some(f => f.behavior === 'invert')
-      || seriesMatches.some(m => m.filter.behavior === 'invert')
-    if (forceShow)
-      return { reasons, kinds }
-
-    // Works you've marked read. Listed first because it's the reason you're most
-    // likely to want to act on — and, like every other rule here, an "always
-    // show" filter above already force-showed the work before we got here.
-    if (blurb.work && this.readIds.has(blurb.work.id)) {
-      addReason(reasons, 'Read', { value: blurb.work.name, rule: 'You marked this work as read' })
-      kinds.add('read')
-    }
-
-    if (tagMatches.length > 0)
-      kinds.add('tags')
-    for (const { tag, filter } of tagMatches) {
-      const type = filter.type ?? tag.type
-      const label = type ? TagType.toDisplayString(type) : 'Tag'
-      addReason(reasons, label, {
-        value: tag.name,
-        rule: describeTagFilter(filter),
-        exclude: tagExcludeTarget(tag),
+      hides.push({
+        label: 'Too many fandoms',
+        kind: 'crossovers',
+        priority: 0,
+        item: {
+          value: `${blurb.fandoms.length} fandoms`,
+          rule: `More than ${hideCrossovers.maxFandoms} fandoms`,
+        },
       })
     }
 
-    if (authorMatches.length > 0)
-      kinds.add('authors')
-    for (const { author, filter } of authorMatches) {
+    for (const tag of blurb.tags) {
+      const rule = weigh(this.rules.filter(r => ruleMatchesTag(r, tag)))
+      if (!rule)
+        continue
+      const label = tag.type ? TagType.toDisplayString(tag.type) : 'Tag'
+      addHide(rule, label, 'tags', { value: tag.name, exclude: tagExcludeTarget(tag) })
+    }
+
+    for (const author of blurb.authors) {
+      const rule = weigh(this.rules.filter(r => ruleMatchesAuthor(r, author)))
+      if (!rule)
+        continue
       const value = author.pseud ? `${author.userId} (${author.pseud})` : author.userId
-      const rule = filter.pseud ? `Author ${filter.userId} (${filter.pseud})` : `Author ${filter.userId}`
-      addReason(reasons, 'Author', { value, rule })
+      addHide(rule, 'Author', 'authors', { value })
     }
 
-    if (workMatches.length > 0 && blurb.work)
-      kinds.add('works')
-    for (const filter of workMatches) {
-      addReason(reasons, 'Work', { value: blurb.work!.name, rule: describeEntityFilter(filter, 'work') })
+    if (blurb.work) {
+      const rule = weigh(this.rules.filter(r => ruleMatchesEntity(r, 'work', blurb.work!)))
+      if (rule)
+        addHide(rule, 'Work', 'works', { value: blurb.work.name })
     }
 
-    if (seriesMatches.length > 0)
-      kinds.add('series')
-    for (const { series, filter } of seriesMatches) {
-      addReason(reasons, 'Series', { value: series.name, rule: describeEntityFilter(filter, 'series') })
+    for (const series of blurb.series) {
+      const rule = weigh(this.rules.filter(r => ruleMatchesEntity(r, 'series', series)))
+      if (rule)
+        addHide(rule, 'Series', 'series', { value: series.name })
+    }
+
+    // Settle the contest: anything at or below the force-show bar is overruled,
+    // and a work with nothing left is simply shown.
+    for (const candidate of hides) {
+      if (candidate.priority <= bar)
+        continue
+      addReason(reasons, candidate.label, candidate.item)
+      kinds.add(candidate.kind)
     }
 
     return { reasons, kinds }
@@ -391,7 +422,10 @@ export class HideWorks extends Unit {
     Object.entries(reasons).forEach(([label, items], groupIndex) => {
       if (groupIndex > 0)
         container.append(document.createTextNode(' | '))
-      const icon = REASON_ICONS[label]
+      // A collapsed work hides its own title (and the indicator that normally
+      // rides next to it), so the reason line is the only place left to say
+      // *why* at a glance — worth an icon wherever the reason has one.
+      const icon = items.find(item => item.icon)?.icon
       if (icon)
         container.append(<span class={REASON_ICON_CLASS}>{icon()}</span>)
       container.append(<span class={LABEL_CLASS}>{`${label}: `}</span>)
@@ -478,31 +512,26 @@ export class HideWorks extends Unit {
   }
 }
 
-/** Human description of a tag filter's matching rule, for hover/rule display. */
-function describeTagFilter(filter: TagFilter): string {
-  switch (filter.matcher) {
-    case 'contains':
-      return `contains "${filter.name}"`
-    case 'regex':
-      return `matches /${filter.name}/`
-    default:
-      return `"${filter.name}"`
-  }
-}
+/**
+ * Human description of the rule that matched, for the hover/rule display. Names
+ * what the rule targets as well as how it matched, since one list now holds
+ * rules for tags, authors, works and series — and calls out a non-default
+ * priority, which is otherwise invisible at exactly the moment it decided things.
+ */
+function describeRule(rule: Rule): string {
+  const noun = ruleTargetLabel(rule.target)
+  const value = rule.value.trim()
 
-/** Human description of a work/series filter's matching rule, for hover/rule display. */
-function describeEntityFilter(filter: EntityFilter, noun: 'work' | 'series'): string {
-  const value = filter.value.trim()
-  if (/^\d+$/.test(value))
-    return `${noun} id ${value}`
-  switch (filter.matcher) {
-    case 'contains':
-      return `${noun} name contains "${value}"`
-    case 'regex':
-      return `${noun} name matches /${value}/`
-    default:
-      return `${noun} "${value}"`
-  }
+  const body = (rule.target === 'work' || rule.target === 'series') && /^\d+$/.test(value)
+    ? `${noun} id ${value}`
+    : rule.matcher === 'contains'
+      ? `${noun} contains "${rule.value}"`
+      : rule.matcher === 'regex'
+        ? `${noun} matches /${rule.value}/`
+        : `${noun} "${rule.value}"`
+
+  const priority = rulePriority(rule)
+  return priority === 0 ? body : `${body} (priority ${priority})`
 }
 
 /** Where a matched tag should be added if the user clicks its exclude button. */

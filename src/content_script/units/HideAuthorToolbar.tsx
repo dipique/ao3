@@ -10,7 +10,7 @@ import MdiStar from '~icons/mdi/star.jsx'
 
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, options, toast } from '#common'
+import { options, ruleTargetColor, toast } from '#common'
 import { parseMuteState, parseSubscription, submitMuteForm, submitSubscription, type Subscription } from '#content_script/authorActions.js'
 import { getAuthorPage, isOrphanAccount, resetAuthorPageCache } from '#content_script/authorPage.js'
 import {
@@ -20,7 +20,7 @@ import {
   type IndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
-import { authorBehavior, clearAuthorBehavior, toggleAuthorBehavior } from '#content_script/persistentFilters.js'
+import { authorKey, clearRule, ruleBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -88,7 +88,7 @@ export class HideAuthorToolbar extends Unit {
   override async ready(): Promise<void> {
     entries.length = 0
 
-    const highlightColor = this.options.hideAuthors.defaultHighlightColor || DEFAULT_AUTHOR_HIGHLIGHT_COLOR
+    const highlightColor = ruleTargetColor('author', this.options.rules.colors)
 
     for (const link of this.root.querySelectorAll<HTMLAnchorElement>(AUTHOR_LINK_SELECTOR)) {
       const author = parseAuthorLink(link)
@@ -114,8 +114,9 @@ export class HideAuthorToolbar extends Unit {
     const items: MenuItem[] = []
 
     if (caps.hide) {
-      const { filters } = await options.get('hideAuthors')
-      const behavior = authorBehavior(filters, author.userId)
+      const { filters } = await options.get('rules')
+      const key = authorKey(author.userId)
+      const behavior = ruleBehavior(filters, key)
       // The active behaviour is shown disabled (current state); "Clear" removes it.
       items.push(
         {
@@ -125,7 +126,7 @@ export class HideAuthorToolbar extends Unit {
           danger: true,
           active: behavior === 'hide',
           disabled: behavior === 'hide',
-          onSelect: () => toggleAuthorBehavior(author.userId, 'hide'),
+          onSelect: () => toggleRuleBehavior(key, 'hide'),
         },
         {
           icon: () => <MdiEyeCheck />,
@@ -133,7 +134,7 @@ export class HideAuthorToolbar extends Unit {
           scope: 'settings',
           active: behavior === 'invert',
           disabled: behavior === 'invert',
-          onSelect: () => toggleAuthorBehavior(author.userId, 'invert'),
+          onSelect: () => toggleRuleBehavior(key, 'invert'),
         },
         {
           icon: () => <MdiStar />,
@@ -141,7 +142,7 @@ export class HideAuthorToolbar extends Unit {
           scope: 'settings',
           active: behavior === 'highlight',
           disabled: behavior === 'highlight',
-          onSelect: () => toggleAuthorBehavior(author.userId, 'highlight'),
+          onSelect: () => toggleRuleBehavior(key, 'highlight'),
         },
       )
       if (behavior) {
@@ -149,7 +150,7 @@ export class HideAuthorToolbar extends Unit {
           icon: () => <MdiCloseCircleOutline />,
           label: 'Clear',
           scope: 'settings',
-          onSelect: () => clearAuthorBehavior(author.userId),
+          onSelect: () => clearRule(key),
         })
       }
       if (author.pseud !== undefined) {
@@ -158,8 +159,8 @@ export class HideAuthorToolbar extends Unit {
           label: 'Hide this pseud',
           scope: 'settings',
           danger: true,
-          active: authorBehavior(filters, author.userId, author.pseud) === 'hide',
-          onSelect: () => toggleAuthorBehavior(author.userId, 'hide', author.pseud),
+          active: ruleBehavior(filters, authorKey(author.userId, author.pseud)) === 'hide',
+          onSelect: () => toggleRuleBehavior(authorKey(author.userId, author.pseud), 'hide'),
         })
       }
     }
@@ -268,7 +269,7 @@ export class HideAuthorToolbar extends Unit {
 
   private syncIndicator(entry: AuthorEntry): void {
     const states: IndicatorState[] = []
-    const behavior = authorBehavior(this.options.hideAuthors.filters, entry.author.userId)
+    const behavior = ruleBehavior(this.options.rules.filters, authorKey(entry.author.userId))
     if (behavior)
       states.push(behavior)
 

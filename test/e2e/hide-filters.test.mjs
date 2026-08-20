@@ -10,14 +10,15 @@ const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 // Two 'hideFilter' rules: an exact one restricted to Additional Tags ('F'), and
-// an untyped "contains" one — the shape you get from a noise tag like
+// an any-tag "contains" one — the shape you get from a noise tag like
 // "<character> is a jerk". Neither should hide any work.
 const SEED = {
-  'option.hideTags': {
+  'option.rules': {
     enabled: true,
+    colors: {},
     filters: [
-      { name: 'Fluff', type: 'F', matcher: 'exact', behavior: 'hideFilter' },
-      { name: 'is a jerk', matcher: 'contains', behavior: 'hideFilter' },
+      { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'hideFilter' },
+      { target: 'tag', value: 'is a jerk', matcher: 'contains', behavior: 'hideFilter' },
     ],
   },
 }

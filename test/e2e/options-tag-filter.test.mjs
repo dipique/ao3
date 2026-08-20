@@ -6,9 +6,9 @@ import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helper
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
-const SEED = { 'option.hideTags': { enabled: true, filters: [] } }
+const SEED = { 'option.rules': { enabled: true, filters: [], colors: {} } }
 
-describe('options UI — hide-by-tags filter dialog', { skip }, () => {
+describe('options UI — rules dialog', { skip }, () => {
   let server
   let browser
   let page
@@ -32,20 +32,20 @@ describe('options UI — hide-by-tags filter dialog', { skip }, () => {
   })
 
   // --- helpers bound to the live page ---
-  const openAddTagDialog = async () => {
+  const openAddRuleDialog = async () => {
     for (const b of await page.$$('[i-mdi-plus-box]')) {
       await b.evaluate(el => (el.closest('button') || el).click())
       await sleep(400)
-      const isTag = await page.evaluate(() => {
+      const isRule = await page.evaluate(() => {
         const d = document.querySelector('[role="dialog"]')
         return !!(d && d.querySelector('[i-codicon-regex]') && d.querySelector('[i-codicon-whole-word]'))
       })
-      if (isTag) return true
+      if (isRule) return true
       await page.keyboard.press('Escape'); await sleep(200)
     }
     return false
   }
-  const openEditTagDialog = async () => {
+  const openEditRuleDialog = async () => {
     for (const e of await page.$$('[i-codicon-edit]')) {
       await e.evaluate(el => (el.closest('button,a,[role="button"]') || el).click())
       await sleep(400)
@@ -64,14 +64,14 @@ describe('options UI — hide-by-tags filter dialog', { skip }, () => {
     if (!b) return false
     b.click(); return true
   })
-  const lastHideTags = () => page.evaluate(() => {
-    const w = window.__writes.filter(x => 'option.hideTags' in x).map(x => x['option.hideTags'])
+  const lastRules = () => page.evaluate(() => {
+    const w = window.__writes.filter(x => 'option.rules' in x).map(x => x['option.rules'])
     return w.at(-1) ?? null
   })
   const closeDialog = async () => { await page.keyboard.press('Escape'); await sleep(250) }
 
   test('matcher icons render (codicon collection loaded)', async () => {
-    assert.ok(await openAddTagDialog(), 'the Add-tag-filter dialog should open')
+    assert.ok(await openAddRuleDialog(), 'the Add-rule dialog should open')
     const styles = await page.evaluate(() => {
       const d = document.querySelector('[role="dialog"]')
       const read = (sel) => {
@@ -88,8 +88,8 @@ describe('options UI — hide-by-tags filter dialog', { skip }, () => {
     await closeDialog()
   })
 
-  test('creating a filter with the Regex matcher persists', async () => {
-    assert.ok(await openAddTagDialog(), 'the Add-tag-filter dialog should open')
+  test('creating a rule with the Regex matcher persists', async () => {
+    assert.ok(await openAddRuleDialog(), 'the Add-rule dialog should open')
     await page.waitForSelector('[role="dialog"] input[type="text"]', { timeout: 5000 })
     await page.focus('[role="dialog"] input[type="text"]')
     await page.type('[role="dialog"] input[type="text"]', 'e2e-regex')
@@ -97,24 +97,24 @@ describe('options UI — hide-by-tags filter dialog', { skip }, () => {
     await sleep(300)
     assert.ok(await saveDialog(), 'the Save button should be present')
     await sleep(1000)
-    const stored = await lastHideTags()
+    const stored = await lastRules()
     assert.ok(
-      stored?.filters?.some(f => f.name === 'e2e-regex' && f.matcher === 'regex'),
-      `expected a persisted {name:'e2e-regex', matcher:'regex'} filter, got ${JSON.stringify(stored)}`,
+      stored?.filters?.some(f => f.value === 'e2e-regex' && f.matcher === 'regex' && f.target === 'tag'),
+      `expected a persisted {target:'tag', value:'e2e-regex', matcher:'regex'} rule, got ${JSON.stringify(stored)}`,
     )
   })
 
-  test('editing a filter to the Contains matcher persists', async () => {
-    assert.ok(await openEditTagDialog(), 'the Edit-tag-filter dialog should open')
+  test('editing a rule to the Contains matcher persists', async () => {
+    assert.ok(await openEditRuleDialog(), 'the Edit-rule dialog should open')
     await sleep(300)
     assert.ok(await clickInDialog('[i-codicon-whole-word]'), 'the Contains toggle should be present')
     await sleep(300)
     assert.ok(await saveDialog(), 'the Save button should be present')
     await sleep(1000)
-    const stored = await lastHideTags()
+    const stored = await lastRules()
     assert.ok(
-      stored?.filters?.some(f => f.name === 'e2e-regex' && f.matcher === 'contains'),
-      `expected the filter's matcher updated to 'contains', got ${JSON.stringify(stored)}`,
+      stored?.filters?.some(f => f.value === 'e2e-regex' && f.matcher === 'contains'),
+      `expected the rule's matcher updated to 'contains', got ${JSON.stringify(stored)}`,
     )
   })
 
