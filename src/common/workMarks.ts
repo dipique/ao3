@@ -54,6 +54,11 @@ export interface MarkConfig {
    * setting it takes the work off Marked for Later exactly as that mark would.
    * A work carries at most one mark from a trigger group — setting one clears
    * the rest, so `favorite` doesn't also sit in `read`.
+   *
+   * A {@link tracksProgress} mark is the one exception to the unsaving half: an
+   * ongoing work is the disposition that *isn't* "done with it", so it stays on
+   * (and is added to) Marked for Later. It still takes its place in the group,
+   * so choosing `read` clears it and vice versa.
    */
   triggerAlias?: MarkId
   /**
@@ -68,6 +73,18 @@ export interface MarkConfig {
    * how Marked for Later is drawn, since that list lives on AO3, not with us.
    */
   items?: string
+  /**
+   * This mark carries per-work progress in {@link MarkConfig.progress}, which
+   * changes what it means: the work isn't finished, it's *paused*, so whether it
+   * hides is decided per work from the blurb's chapter count rather than by
+   * carrying the mark at all (see {@link file://./workProgress.ts}).
+   */
+  tracksProgress?: boolean
+  /**
+   * Packed per-work progress, parallel to {@link items}. See {@link packProgress}.
+   * An entry whose work isn't in `items` is ignored on read and dropped on write.
+   */
+  progress?: string
 }
 
 /** The `workMarks` option: the feature switch plus the mark table. */
@@ -90,8 +107,10 @@ export const SAVED_MARK: MarkId = 'saved'
 
 /**
  * The marks a fresh install gets. `read` is the root disposition; the five below
- * it are the same disposition said more precisely, so they alias it. `saved`
- * carries no ids — it only says how the Marked for Later state is drawn.
+ * it are the same disposition said more precisely, so they alias it. `continue`
+ * aliases it too, but inverts it — the work isn't done, it's waiting — and so
+ * carries progress. `saved` carries no ids: it only says how the Marked for
+ * Later state is drawn.
  */
 export function createDefaultMarks(): Record<MarkId, MarkConfig> {
   return {
@@ -101,6 +120,16 @@ export function createDefaultMarks(): Record<MarkId, MarkConfig> {
     boring: { icon: 'boring', label: 'Boring', color: '#8a8a8a', triggerAlias: READ_MARK, items: '' },
     bad: { icon: 'bad', label: 'Bad', color: '#b45309', triggerAlias: READ_MARK, items: '' },
     gross: { icon: 'gross', label: 'Gross', color: '#4d7c0f', triggerAlias: READ_MARK, items: '' },
+    continue: {
+      icon: 'continue',
+      label: 'Ongoing',
+      color: '#0369a1',
+      triggerAlias: READ_MARK,
+      tracksProgress: true,
+      hideSearchResult: true,
+      items: '',
+      progress: '',
+    },
     saved: { icon: 'saved', label: 'Marked for later', color: '#2f8f4e' },
   }
 }
@@ -153,9 +182,53 @@ export function markHidesResults(marks: Record<MarkId, MarkConfig>, id: MarkId):
   return root === id ? false : !!marks[root]?.hideSearchResult
 }
 
+/** Whether this mark carries per-work progress (see {@link MarkConfig.tracksProgress}). */
+export function markTracksProgress(marks: Record<MarkId, MarkConfig>, id: MarkId): boolean {
+  return !!marks[id]?.tracksProgress
+}
+
+/**
+ * The ids of every mark carrying per-work progress, in table order. Everything
+ * that acts on progress derives its mark from here rather than naming one —
+ * a table synced from a device predating the mark simply won't have one, and
+ * every path must degrade to "the feature is off" rather than break.
+ */
+export function progressMarkIds(marks: Record<MarkId, MarkConfig>): MarkId[] {
+  return localMarkIds(marks).filter(id => markTracksProgress(marks, id))
+}
+
 /** The work ids carrying one mark. Empty for a mark that holds no ids. */
 export function markItems(marks: Record<MarkId, MarkConfig>, id: MarkId): Set<string> {
   return unpackIds(marks[id]?.items ?? '')
+}
+
+/**
+ * One mark's per-work progress, keyed by work id. Entries whose work doesn't
+ * carry the mark are dropped: `items` is the authority on membership, so an
+ * orphaned payload (a table hand-edited, or half-written by an older version)
+ * is data nothing vouches for.
+ */
+export function markProgress(marks: Record<MarkId, MarkConfig>, id: MarkId): Map<string, WorkProgress> {
+  const entries = unpackProgress(marks[id]?.progress ?? '')
+  if (entries.size === 0)
+    return entries
+  const items = markItems(marks, id)
+  for (const workId of [...entries.keys()]) {
+    if (!items.has(workId))
+      entries.delete(workId)
+  }
+  return entries
+}
+
+/** One work's progress under one mark, or undefined when it doesn't carry it. */
+export function progressFor(
+  marks: Record<MarkId, MarkConfig>,
+  id: MarkId,
+  workId: string,
+): WorkProgress | undefined {
+  if (!workHasMark(marks, id, workId))
+    return undefined
+  return unpackProgress(marks[id]?.progress ?? '').get(workId)
 }
 
 /** Whether one work carries one mark. Prefer {@link markItems} when checking many. */
@@ -171,7 +244,10 @@ export function workHasMark(marks: Record<MarkId, MarkConfig>, id: MarkId, workI
 export function hiddenByMarks(marks: Record<MarkId, MarkConfig>): Map<string, MarkId> {
   const out = new Map<string, MarkId>()
   for (const id of localMarkIds(marks)) {
-    if (!markHidesResults(marks, id))
+    // A progress mark hides per work, not outright: whether an ongoing work is
+    // worth showing depends on the blurb's chapter count, which only the caller
+    // holding the DOM can answer. Carrying the mark alone decides nothing.
+    if (!markHidesResults(marks, id) || markTracksProgress(marks, id))
       continue
     for (const workId of markItems(marks, id)) {
       if (!out.has(workId))
@@ -181,15 +257,51 @@ export function hiddenByMarks(marks: Record<MarkId, MarkConfig>): Map<string, Ma
   return out
 }
 
+/**
+ * Whether *anything* about the marks can collapse a work — the gate every unit
+ * that hides must test, rather than `hiddenByMarks(...).size > 0`, which now
+ * deliberately excludes progress marks. Without this a reader whose only hiding
+ * mark is the ongoing one gets the unit filtered out before it ever runs.
+ */
+export function marksHideAnything(marks: Record<MarkId, MarkConfig>): boolean {
+  if (hiddenByMarks(marks).size > 0)
+    return true
+  return progressMarkIds(marks).some(
+    id => markHidesResults(marks, id) && countIds(marks[id]?.progress ?? '') > 0,
+  )
+}
+
 // ---------------------------------------------------------------------------
-// Writing. Both helpers return a *new* mark table (or the original, unchanged,
-// when nothing moved) so callers can skip a redundant `options.set` — every
-// option write wakes the sync engine and the daily-backup check.
+// Writing. Every helper here returns a *new* mark table (or the original,
+// unchanged, when nothing moved) so callers can skip a redundant `options.set` —
+// every option write wakes the sync engine and the daily-backup check.
 // ---------------------------------------------------------------------------
 
 /** Replace one mark's packed id set, leaving the rest of the table alone. */
 function withItems(marks: Record<MarkId, MarkConfig>, id: MarkId, items: string): Record<MarkId, MarkConfig> {
   return { ...marks, [id]: { ...marks[id]!, items } }
+}
+
+/** Replace one mark's packed progress, leaving the rest of the table alone. */
+function withProgressString(marks: Record<MarkId, MarkConfig>, id: MarkId, progress: string): Record<MarkId, MarkConfig> {
+  return { ...marks, [id]: { ...marks[id]!, progress } }
+}
+
+/**
+ * Take one work's progress payload out of a mark. Called wherever the work
+ * leaves the mark's id set — both places {@link setMark} clears an id — because
+ * a payload that outlives its membership is an entry nothing ever reaches again
+ * but that still costs sync quota forever.
+ *
+ * A no-op (identity-equal) for a mark that holds no progress at all, which is
+ * every mark but the ongoing one.
+ */
+function dropProgress(marks: Record<MarkId, MarkConfig>, id: MarkId, workId: string): Record<MarkId, MarkConfig> {
+  const packed = marks[id]?.progress
+  if (typeof packed !== 'string')
+    return marks
+  const next = withProgress(packed, workId, null)
+  return next === packed ? marks : withProgressString(marks, id, next)
 }
 
 /**
@@ -212,6 +324,8 @@ export function setMark(
   const items = withId(next[id]!.items!, workId, on)
   if (items !== next[id]!.items)
     next = withItems(next, id, items)
+  if (!on)
+    next = dropProgress(next, id, workId)
 
   if (on) {
     for (const other of markGroup(marks, id)) {
@@ -220,8 +334,44 @@ export function setMark(
       const cleared = withId(next[other]!.items!, workId, false)
       if (cleared !== next[other]!.items)
         next = withItems(next, other, cleared)
+      next = dropProgress(next, other, workId)
     }
   }
+
+  return next
+}
+
+/**
+ * Record where a reader has got to in one work, under a mark that tracks
+ * progress. Membership and payload move together — marking a work ongoing *is*
+ * saying which chapter you stopped at, and splitting that into two writes would
+ * leave a window where the table says one and not the other.
+ *
+ * Returns the original table (identity-equal) only when neither half moved. The
+ * payload counts: editing just the chapter number on an already-marked work
+ * leaves `items` untouched, and the content script's `commit()` short-circuits
+ * on identity, so ignoring `progress` here would silently drop that write.
+ */
+export function setMarkProgress(
+  marks: Record<MarkId, MarkConfig>,
+  workId: string,
+  id: MarkId,
+  entry: WorkProgress,
+): Record<MarkId, MarkConfig> {
+  if (!markIsLocal(marks, id) || !markTracksProgress(marks, id))
+    return marks
+
+  // Membership first: this also clears the rest of the trigger group (and their
+  // progress), so the work can't be ongoing and read at once.
+  let next = setMark(marks, workId, id, true)
+
+  // Rebuild from the *pruned* map rather than patching the stored string, so an
+  // orphaned entry is dropped by the next write rather than carried forever.
+  const entries = markProgress(next, id)
+  entries.set(workId, entry)
+  const progress = packProgress(entries)
+  if (progress !== (next[id]!.progress ?? ''))
+    next = withProgressString(next, id, progress)
 
   return next
 }
@@ -235,6 +385,16 @@ export function setMark(
  * pressing AO3's Mark as Read on a work you'd already called `gross` must not
  * quietly downgrade it to plain `read`. Turning it *off* clears the whole group,
  * since any of them meant "done with it".
+ *
+ * A {@link MarkConfig.tracksProgress} mark is exempt from both halves, because
+ * it is the one member of the group that doesn't mean "done with it":
+ *
+ * - it doesn't *block* the promotion, so AO3's "Mark as Read" on an ongoing work
+ *   does what it says and settles the work as read;
+ * - it isn't *cleared* by turning the group off, because that's what AO3's own
+ *   "Mark for Later" button means — back on the to-read pile — and an ongoing
+ *   work already is one. Without this exemption, pressing that button would run
+ *   through CaptureMarkButtons and erase the mark and its progress.
  */
 export function setMarkGroup(
   marks: Record<MarkId, MarkConfig>,
@@ -245,12 +405,17 @@ export function setMarkGroup(
   const group = markGroup(marks, id)
   const carried = group.filter(other => workHasMark(marks, other, workId))
 
-  if (on)
-    return carried.length > 0 ? marks : setMark(marks, workId, markRoot(marks, id), true)
+  if (on) {
+    const blocking = carried.filter(other => !markTracksProgress(marks, other))
+    return blocking.length > 0 ? marks : setMark(marks, workId, markRoot(marks, id), true)
+  }
 
   let next = marks
-  for (const other of carried)
+  for (const other of carried) {
+    if (markTracksProgress(marks, other))
+      continue
     next = setMark(next, workId, other, false)
+  }
   return next
 }
 
@@ -346,4 +511,134 @@ export function withId(packed: string, id: string, present: boolean): string {
   else
     ids.delete(id)
   return packIds(ids)
+}
+
+// ---------------------------------------------------------------------------
+// The packed progress codec. Same discipline as the id codec above — sorted,
+// delta-encoded, canonical — because these ride in the same synced option, and
+// a string that varies for an unchanged map would make the sync engine's
+// hash-based change detection see a write on every save.
+//
+// Entries are comma-separated and their fields colon-separated, all base 36:
+//
+//     <idDelta>:<chapter>[:<waitUntilEpochDays>]
+//
+// The trailing field is omitted rather than left empty when there's no date, so
+// there is exactly one spelling of every map.
+// ---------------------------------------------------------------------------
+
+const FIELD_SEPARATOR = ':'
+
+/** Where a reader has got to in one still-being-written work. */
+export interface WorkProgress {
+  /** Last chapter finished. 0 means "marked, but nothing read yet". */
+  chapter: number
+  /**
+   * Don't surface the work again before this day, in **days since the epoch**
+   * rather than a timestamp — the decision is a calendar one, and a timestamp
+   * would move it across a date boundary for anyone east or west of where it
+   * was set. Absent means "as soon as there's something new".
+   */
+  waitUntil?: number
+}
+
+/** A non-negative safe integer, or null for anything else (blank, NaN, negative). */
+function wholeNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+/**
+ * Pack per-work progress into the compact delta form. Input may be in any order;
+ * the result is sorted by work id and canonical. Junk degrades rather than
+ * throws: an unusable id drops its entry, an unusable chapter reads as 0, and an
+ * unusable `waitUntil` is simply left out.
+ */
+export function packProgress(entries: Iterable<readonly [string | number, WorkProgress]>): string {
+  const seen = new Map<number, WorkProgress>()
+  for (const [raw, entry] of entries) {
+    // Digits-only, for the same reason packIds is: Number('') is 0, which would
+    // invent progress on a work id 0.
+    const n = typeof raw === 'number' ? raw : (/^\d+$/.test(raw) ? Number(raw) : Number.NaN)
+    if (!Number.isSafeInteger(n) || n < 0)
+      continue
+    const chapter = wholeNumber(entry?.chapter) ?? 0
+    const waitUntil = wholeNumber(entry?.waitUntil)
+    seen.set(n, waitUntil === null ? { chapter } : { chapter, waitUntil })
+  }
+  if (seen.size === 0)
+    return ''
+
+  let prev = 0
+  const parts = [...seen.keys()].sort((a, b) => a - b).map((n) => {
+    const { chapter, waitUntil } = seen.get(n)!
+    const delta = n - prev
+    prev = n
+    const fields = [delta.toString(RADIX), chapter.toString(RADIX)]
+    if (waitUntil !== undefined)
+      fields.push(waitUntil.toString(RADIX))
+    return fields.join(FIELD_SEPARATOR)
+  })
+  return parts.join(SEPARATOR)
+}
+
+/**
+ * Unpack progress back into a `workId -> {@link WorkProgress}` map.
+ *
+ * A malformed id delta or chapter stops the walk, exactly as {@link unpackIds}
+ * does and for the same reason: every later id is relative to this one. A
+ * malformed *date* only costs that one date, since nothing downstream depends
+ * on it.
+ */
+export function unpackProgress(packed: string): Map<string, WorkProgress> {
+  const out = new Map<string, WorkProgress>()
+  if (!packed)
+    return out
+
+  let prev = 0
+  for (const part of packed.split(SEPARATOR)) {
+    const [deltaRaw, chapterRaw, waitRaw] = part.split(FIELD_SEPARATOR)
+    const delta = Number.parseInt(deltaRaw ?? '', RADIX)
+    const chapter = Number.parseInt(chapterRaw ?? '', RADIX)
+    if (!Number.isFinite(delta) || delta < 0 || !Number.isFinite(chapter) || chapter < 0)
+      break
+    prev += delta
+    const waitUntil = waitRaw === undefined ? Number.NaN : Number.parseInt(waitRaw, RADIX)
+    out.set(String(prev), Number.isFinite(waitUntil) && waitUntil >= 0 ? { chapter, waitUntil } : { chapter })
+  }
+  return out
+}
+
+/**
+ * How many progress entries a packed string holds, without building the map.
+ * The entry separator is shared with {@link countIds}, so this is the same split.
+ */
+export function countProgress(packed: string): number {
+  return countIds(packed)
+}
+
+/**
+ * Set or remove one work's progress, returning the new packed string — or
+ * the *original* string (identity-equal) when nothing moved, so a redundant
+ * `options.set` can be skipped. A `waitUntil` that has already passed is never
+ * pruned here: the hint text says when it was, so dropping it would lose the
+ * only record of a date the reader deliberately set.
+ */
+export function withProgress(packed: string, workId: string, entry: WorkProgress | null): string {
+  const entries = unpackProgress(packed)
+  const current = entries.get(workId)
+
+  if (entry === null) {
+    if (current === undefined)
+      return packed
+    entries.delete(workId)
+    return packProgress(entries)
+  }
+
+  const chapter = wholeNumber(entry.chapter) ?? 0
+  const waitUntil = wholeNumber(entry.waitUntil) ?? undefined
+  if (current && current.chapter === chapter && current.waitUntil === waitUntil)
+    return packed
+
+  entries.set(workId, waitUntil === undefined ? { chapter } : { chapter, waitUntil })
+  return packProgress(entries)
 }

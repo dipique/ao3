@@ -1,0 +1,148 @@
+import type { WorkProgress } from '#common'
+
+import { addMonths, ADDON_CLASS, fromEpochDays, todayEpochDays, toEpochDays } from '#common'
+import React from '#dom'
+
+import { closeFloating, openPopover } from './contextMenu.tsx'
+
+/**
+ * The little form behind "Mark as ongoing…" / "Set wait-until date…": which
+ * chapter the reader finished, and (optionally) a date before which the work
+ * shouldn't come back.
+ *
+ * It rides on the same popover layer as the informational hints, with the two
+ * concessions a form needs from a thing built to be dismissed on sight — it
+ * survives scroll and resize, and it takes focus and gives it back.
+ *
+ * Two things it deliberately isn't:
+ *
+ * - **not a `<form>`.** The popover is appended to `document.body` with no
+ *   action of its own, so Enter inside a real form would reload the page.
+ *   Enter is wired to Save by hand instead.
+ * - **not live.** Nothing is written until Save. An `options.set` triggers the
+ *   content script's debounced re-run, whose `clean()` removes every `.AO3E`
+ *   element — the open popover among them — so a write per keystroke would
+ *   close the editor half a second after the reader started typing.
+ */
+
+const CLASS = `${ADDON_CLASS}--progress-editor`
+const cx = (suffix: string): string => `${CLASS}--${suffix}`
+
+export interface ProgressEditorOptions {
+  /** Work title, shown as the editor's heading and used for its accessible name. */
+  title: string
+  /** The work's current progress, when it already has some. */
+  progress?: WorkProgress
+  /**
+   * Chapters published as far as this page knows, used to prefill the chapter
+   * field for a work being marked for the first time (you've read what's there)
+   * and as the field's max. Null when the count couldn't be read.
+   */
+  published: number | null
+  /** Where to open, in viewport coordinates. */
+  at: { x: number, y: number }
+  /** Called with the edited values when the reader saves. */
+  onSave: (progress: WorkProgress) => void
+}
+
+/** One quick way to fill the date field, relative to today. */
+const DATE_PRESETS: { label: string, shift: (today: number) => number }[] = [
+  { label: '+1 week', shift: today => today + 7 },
+  { label: '+1 month', shift: today => addMonths(today, 1) },
+  { label: '+3 months', shift: today => addMonths(today, 3) },
+]
+
+/** Open the chapter/wait-until editor for one work. */
+export function openProgressEditor(opts: ProgressEditorOptions): void {
+  const today = todayEpochDays()
+  // A work being marked for the first time is almost always one you've just
+  // caught up on, so the published count is the useful default; an existing
+  // mark keeps whatever it recorded.
+  const startChapter = opts.progress?.chapter ?? opts.published ?? 0
+
+  const chapterInput = (
+    <input
+      type="number"
+      min="0"
+      inputmode="numeric"
+      class={`${cx('input')}  ${cx('chapter')}`}
+      id={`${cx('chapter')}-input`}
+    />
+  ) as HTMLElement as HTMLInputElement
+  chapterInput.value = String(startChapter)
+  if (opts.published !== null)
+    chapterInput.max = String(opts.published)
+
+  const dateInput = (
+    <input type="date" class={`${cx('input')}  ${cx('date')}`} id={`${cx('date')}-input`} />
+  ) as HTMLElement as HTMLInputElement
+  dateInput.value = opts.progress?.waitUntil !== undefined ? fromEpochDays(opts.progress.waitUntil) : ''
+
+  const presets = DATE_PRESETS.map(({ label, shift }) => {
+    const btn = (<button type="button" class={cx('preset')}>{label}</button>) as HTMLElement as HTMLButtonElement
+    btn.addEventListener('click', () => {
+      dateInput.value = fromEpochDays(shift(today))
+    })
+    return btn
+  })
+  const clearDate = (
+    <button type="button" class={cx('preset')} title="Remove the wait-until date">Clear</button>
+  ) as HTMLElement as HTMLButtonElement
+  clearDate.addEventListener('click', () => {
+    dateInput.value = ''
+  })
+
+  const save = (): void => {
+    // A blank or nonsense chapter reads as 0 ("marked, nothing read yet") rather
+    // than refusing to save — there's no wrong answer here worth an error for.
+    const chapter = Math.max(0, Math.trunc(Number(chapterInput.value.replace(/\D/g, ''))) || 0)
+    const waitUntil = toEpochDays(dateInput.value)
+    closeFloating()
+    opts.onSave(waitUntil === null ? { chapter } : { chapter, waitUntil })
+  }
+
+  const saveBtn = (<button type="button" class={cx('save')}>Save</button>) as HTMLElement as HTMLButtonElement
+  saveBtn.addEventListener('click', save)
+  const cancelBtn = (<button type="button" class={cx('cancel')}>Cancel</button>) as HTMLElement as HTMLButtonElement
+  cancelBtn.addEventListener('click', () => closeFloating())
+
+  const body = (
+    <div class={CLASS}>
+      <div class={cx('title')}>{opts.title}</div>
+      <div class={cx('field')}>
+        <label class={cx('label')} htmlFor={chapterInput.id}>Last finished chapter</label>
+        {chapterInput}
+        {opts.published !== null
+          ? <div class={cx('note')}>{`${opts.published} published so far`}</div>
+          : null}
+      </div>
+      <div class={cx('field')}>
+        <label class={cx('label')} htmlFor={dateInput.id}>Wait until (optional)</label>
+        {dateInput}
+        <div class={cx('presets')}>
+          {presets}
+          {clearDate}
+        </div>
+      </div>
+      <div class={cx('actions')}>
+        {cancelBtn}
+        {saveBtn}
+      </div>
+    </div>
+  ) as HTMLElement
+
+  // Enter saves from either field — the affordance a real <form> would have
+  // given us, without the page reload it would also have given us.
+  body.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement) {
+      e.preventDefault()
+      save()
+    }
+  })
+
+  openPopover(body, opts.at, {
+    persistent: true,
+    label: `Ongoing progress for ${opts.title}`,
+    autoFocus: chapterInput,
+  })
+}

@@ -15,7 +15,18 @@ export interface SearchViewPrefs {
   order: FacetKey[]
   sort: SortKey
   dir: 'asc' | 'desc'
+  /**
+   * The Readiness values the view opens with. Sticky, unlike every other facet
+   * selection, because it's the only thing standing between a to-read list and
+   * the works on it that aren't worth opening yet — nothing is collapsed inside
+   * the view, so if this didn't persist the feature would be off by default
+   * every single time.
+   */
+  readiness?: string[]
 }
+
+/** What the Readiness facet is set to on a first-ever open: only what's ready. */
+export const DEFAULT_READINESS: string[] = ['Ready']
 
 /** Read the stored prefs for an app id (a partial — any field may be absent). */
 export async function loadPrefs(appId: string): Promise<Partial<SearchViewPrefs>> {

@@ -1,14 +1,19 @@
+import MdiBookOpenPageVariant from '~icons/mdi/book-open-page-variant.jsx'
+import MdiCalendarClock from '~icons/mdi/calendar-clock.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiClockPlusOutline from '~icons/mdi/clock-plus-outline.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
+import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 
-import type { MarkId, WorkMarks } from '#common'
+import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markGroup, markItems, markRoot, options, parseUser, READ_MARK, ruleTargetColor, SAVED_MARK, toast } from '#common'
+import { describeProgress, fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markGroup, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { readChapterCounts } from '#content_script/blurb.js'
+import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
   attachMenuTrigger,
   buildIndicators,
@@ -20,8 +25,9 @@ import {
 import { loadMarkedForLaterIndex, noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
 import { markIcon } from '#content_script/markIcons.js'
 import { clearRule, entityKey, ruleBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { openProgressEditor } from '#content_script/progressEditor.js'
 import { Unit } from '#content_script/Unit.js'
-import { applyMark, applyMarkGroup } from '#content_script/workMarks.js'
+import { applyMark, applyMarkGroup, applyMarkProgress } from '#content_script/workMarks.js'
 import React from '#dom'
 
 /**
@@ -199,6 +205,49 @@ function noteMark(marks: WorkMarks, workId: string, markId: MarkId, on: boolean)
 }
 
 // ---------------------------------------------------------------------------
+// Chapter counts, for the progress marks. Read from whatever this page states
+// rather than kept anywhere: the count moves as the author posts, and the whole
+// point of the ongoing mark is to notice when it has.
+// ---------------------------------------------------------------------------
+
+/**
+ * Chapters published as far as this page says — from the blurb the anchor sits
+ * in, else the work page's own stats. Null when neither is there, which every
+ * caller reads as "don't guess".
+ *
+ * `closest` still resolves after HideWorks collapses a blurb, because its
+ * wrapper goes *inside* the `<li>`. On a work page the anchor is the bare `<h2>`
+ * title, nowhere near the stats, so the fallback is a `#main`-scoped descendant
+ * selector — descendant, because `TotalStats.fixDl` rewraps `dl.stats`'s rows in
+ * `<div>`s, and scoped, so a stats block fetched from elsewhere can't match.
+ */
+function publishedChapters(link: HTMLElement): number | null {
+  const dd = link.closest('li.blurb')?.querySelector('dd.chapters')
+    ?? document.querySelector('#main dl.stats dd.chapters')
+  return readChapterCounts(dd)?.written ?? null
+}
+
+/**
+ * The chapter open on a work page, from `#chapters > div.chapter`'s
+ * `id="chapter-N"`. Viewing the entire work renders every chapter, so the
+ * highest one is the one you'd have read to. Null anywhere else.
+ */
+function currentChapter(): number | null {
+  let highest = 0
+  for (const chapter of document.querySelectorAll('#chapters > div.chapter')) {
+    const n = Number(chapter.id.replace(/\D/g, ''))
+    if (Number.isFinite(n) && n > highest)
+      highest = n
+  }
+  return highest > 0 ? highest : null
+}
+
+/** The work's title as this page shows it, for the editor's heading. */
+function entityTitle(link: HTMLElement): string {
+  return link.textContent?.trim().replace(/\s+/g, ' ') || 'this work'
+}
+
+// ---------------------------------------------------------------------------
 
 abstract class FilterEntityToolbar extends Unit {
   /** `'work'` or `'series'` — used in labels, and the rule target for this kind. */
@@ -297,7 +346,7 @@ abstract class FilterEntityToolbar extends Unit {
     }
 
     if (this.marksEnabled())
-      items.push(...this.markSetItems(id))
+      items.push(...this.markSetItems(id, link))
 
     if (this.markEnabled())
       items.push(this.markItem(id))
@@ -312,22 +361,179 @@ abstract class FilterEntityToolbar extends Unit {
    * One row per mark that holds its own ids — read, favorite, and whatever finer
    * dispositions the mark table lists. All of it is local state we already hold,
    * so unlike the mark-for-later row these render their real label immediately.
+   *
+   * A mark that tracks progress is several rows rather than one toggle, since
+   * setting it means saying *where* you got to — see {@link progressItems}.
    */
-  private markSetItems(id: string): MenuItem[] {
+  private markSetItems(id: string, link: HTMLElement): MenuItem[] {
     const { marks } = this.options.workMarks
-    return localMarkIds(marks).map((markId, index) => {
+    const items: MenuItem[] = []
+    localMarkIds(marks).forEach((markId, index) => {
+      // The separator opens the mark block, so it belongs to whichever row comes
+      // first — which is why this keys off the mark's index, not the row's.
+      const separatorBefore = index === 0
+      if (markTracksProgress(marks, markId)) {
+        items.push(...this.progressItems(id, markId, link, separatorBefore))
+        return
+      }
       const config = marks[markId]!
       const has = markSets.get(markId)?.has(id) ?? false
       const noun = (config.label || markId).toLowerCase()
-      return {
+      items.push({
         icon: markIcon(config.icon),
         label: has ? `Unmark as ${noun}` : `Mark as ${noun}`,
         scope: 'settings',
-        separatorBefore: index === 0,
+        separatorBefore,
         active: has,
         onSelect: () => this.onToggleMark(id, markId, !has),
-      } satisfies MenuItem
+      })
     })
+    return items
+  }
+
+  /**
+   * The rows for a progress mark. Unmarked, there's one row and it opens the
+   * editor — you can't record "ongoing" without recording a chapter. Marked,
+   * there are the two ways to move the chapter on without a dialog, the editor
+   * (for the date, or to type a chapter by hand), and the way back out.
+   *
+   * The chapter never advances on its own: visiting a work page is not evidence
+   * you read it, and a mark that quietly moved would be a mark you couldn't
+   * trust to tell you what's new.
+   */
+  private progressItems(id: string, markId: MarkId, link: HTMLElement, separatorBefore: boolean): MenuItem[] {
+    const { marks } = this.options.workMarks
+    const config = marks[markId]!
+    const noun = (config.label || markId).toLowerCase()
+    const openEditor = (): void => this.openProgressEditor(id, markId, link)
+
+    const progress = progressFor(marks, markId, id)
+    if (!progress) {
+      return [{
+        icon: markIcon(config.icon),
+        label: `Mark as ${noun}…`,
+        scope: 'settings',
+        separatorBefore,
+        onSelect: openEditor,
+      }]
+    }
+
+    const rows: MenuItem[] = []
+    const advance = (chapter: number, label: string, icon: () => Node): void => {
+      rows.push({
+        icon,
+        label: `${label} (${chapter})`,
+        scope: 'settings',
+        // Re-recording the chapter it's already on would be a write that changed
+        // nothing, so the row is shown (it says where you are) but inert.
+        disabled: chapter === progress.chapter,
+        onSelect: () => void this.saveProgress(id, markId, { ...progress, chapter }),
+      })
+    }
+
+    const published = publishedChapters(link)
+    if (published !== null)
+      advance(published, 'Update to latest chapter', () => <MdiFastForward />)
+    const current = currentChapter()
+    if (current !== null)
+      advance(current, 'Update to current chapter', () => <MdiBookOpenPageVariant />)
+
+    rows.push({
+      icon: () => <MdiCalendarClock />,
+      label: 'Set wait-until date…',
+      scope: 'settings',
+      onSelect: openEditor,
+    })
+    rows.push({
+      icon: markIcon(config.icon),
+      label: `Unmark as ${noun}`,
+      scope: 'settings',
+      active: true,
+      onSelect: () => this.onToggleMark(id, markId, false),
+    })
+    rows[0]!.separatorBefore = separatorBefore
+    return rows
+  }
+
+  /**
+   * Open the chapter/wait-until editor for one work. Positioned where the menu
+   * was opened, since the menu closes before a row's `onSelect` runs and there's
+   * no event of our own left to read a point off.
+   */
+  private openProgressEditor(id: string, markId: MarkId, link: HTMLElement): void {
+    const { marks } = this.options.workMarks
+    openProgressEditor({
+      title: entityTitle(link),
+      progress: progressFor(marks, markId, id),
+      published: publishedChapters(link),
+      at: lastFloatingPoint(),
+      onSave: entry => void this.saveProgress(id, markId, entry),
+    })
+  }
+
+  /**
+   * Record where the reader got to, then make sure the work is on Marked for
+   * Later. In that order deliberately: the option write is dispatched unawaited
+   * and survives a frame teardown, while anything after a network call may not
+   * run at all.
+   */
+  private async saveProgress(id: string, markId: MarkId, entry: WorkProgress): Promise<void> {
+    const marks = this.options.workMarks
+    noteMark(marks, id, markId, true)
+    applyMarkProgress(marks, id, markId, entry)
+    this.syncEntriesFor(id)
+
+    const noun = (marks.marks[markId]?.label || markId).toLowerCase()
+    toast(`Marked as ${noun} — last finished chapter ${entry.chapter}.`, { type: 'success' })
+
+    // An ongoing work is the one disposition that isn't "done with it", so it
+    // belongs on the to-read list rather than off it.
+    await this.ensureSaved(id)
+  }
+
+  /**
+   * Make sure a work is on the Marked for Later list, adding it if it isn't.
+   *
+   * Deliberately not {@link onMark}: that one *toggles*, and on a work page it
+   * presses AO3's own button — which navigates, firing CaptureMarkButtons on the
+   * way out, which would clear the very mark that asked for this.
+   *
+   * The state is checked before adding rather than assumed: marking an
+   * already-saved work for later moves it to the top of the list, silently
+   * reordering a list the reader may be working through.
+   */
+  private async ensureSaved(id: string): Promise<void> {
+    if (!this.markEnabled())
+      return
+    const state = savedState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
+    if (state.busy || (state.known && state.saved))
+      return
+    if (await this.checkMarked(id) === true)
+      return
+
+    state.busy = true
+    savedState.set(id, state)
+    try {
+      await submitMark(id, true)
+      state.saved = true
+      state.known = true
+      state.cached = false
+      // ...and must not be overwritten by a re-seed from the now-stale page.
+      state.acted = true
+      noteMarkedForLater(id, true)
+      toast('Added to your Marked for Later list.', { type: 'success' })
+    }
+    catch (err) {
+      // The mark itself is already written, so this is a partial failure, not a
+      // lost action — say so without implying nothing happened.
+      this.logger.error(`Failed to add work ${id} to Marked for Later.`, err)
+      toast('Marked, but could not add this work to your Marked for Later list.', { type: 'error' })
+    }
+    finally {
+      state.busy = false
+      savedState.set(id, state)
+      this.syncEntriesFor(id)
+    }
   }
 
   /**
@@ -342,7 +548,11 @@ abstract class FilterEntityToolbar extends Unit {
     this.setMarkLocally(id, markId, on)
 
     const state = savedState.get(id)
-    const done = on && markRoot(this.options.workMarks.marks, markId) === READ_MARK
+    const { marks } = this.options.workMarks
+    // A progress mark sits in the read group without meaning what the group
+    // means — an ongoing work is precisely one you're *not* done with — so it
+    // must not take the work off the list the way its neighbours do.
+    const done = on && markRoot(marks, markId) === READ_MARK && !markTracksProgress(marks, markId)
     if (done && this.markEnabled() && state?.saved && !state.busy) {
       // onMark toasts the "removed from your Marked for Later list" message.
       await this.onMark(id)
@@ -369,16 +579,24 @@ abstract class FilterEntityToolbar extends Unit {
    * Apply the read *disposition* rather than one specific mark — what AO3's own
    * buttons mean. A work already marked with something finer keeps that mark
    * (see {@link applyMarkGroup}).
+   *
+   * The two progress-mark exemptions {@link setMarkGroup} makes have to be made
+   * here too, or the in-memory cache and storage disagree: an ongoing work would
+   * be promoted to `read` in the stored table but not in `markSets`, and the
+   * indicator would go on showing the old mark until the next full re-run.
    */
   protected setReadLocally(id: string, read: boolean): void {
     const marks = this.options.workMarks
     const carried = markGroup(marks.marks, READ_MARK).filter(markId => markSets.get(markId)?.has(id))
+    const blocking = carried.filter(markId => !markTracksProgress(marks.marks, markId))
     if (read) {
-      if (carried.length === 0)
+      // noteMark(on) clears the whole group first, so the ongoing mark comes off
+      // here exactly as it does in storage — it just didn't get a vote.
+      if (blocking.length === 0)
         noteMark(marks, id, READ_MARK, true)
     }
     else {
-      for (const markId of carried)
+      for (const markId of blocking)
         noteMark(marks, id, markId, false)
     }
     applyMarkGroup(marks, id, read)
@@ -503,10 +721,39 @@ abstract class FilterEntityToolbar extends Unit {
     return states
   }
 
+  /**
+   * Hover text for the marks that have something to say about *this* work —
+   * only the progress marks, whose indicator otherwise reads "Ongoing" and
+   * leaves the reader to open the work to find out whether it's worth opening.
+   *
+   * Undefined (so the plain label stands) whenever the chapter count can't be
+   * found: half a hint is worse than none, and `entry.link` may be detached —
+   * the module-scoped registry is shared with the search view, which resets it.
+   */
+  private markTitles(entry: EntityEntry): Record<MarkId, string> | undefined {
+    if (!this.marksEnabled())
+      return undefined
+    const { marks } = this.options.workMarks
+    let titles: Record<MarkId, string> | undefined
+    for (const markId of progressMarkIds(marks)) {
+      const progress = progressFor(marks, markId, entry.id)
+      if (!progress)
+        continue
+      const published = publishedChapters(entry.link)
+      if (published === null)
+        continue
+      const label = marks[markId]?.label || markId
+      titles ??= {}
+      titles[markId] = `${label}\n${describeProgress(progress, published, todayEpochDays())}`
+    }
+    return titles
+  }
+
   protected syncIndicator(entry: EntityEntry): void {
     const next = buildIndicators(this.computeStates(entry.id), {
       highlightColor: this.defaultColor,
       marks: this.options.workMarks.marks,
+      titles: this.markTitles(entry),
     })
     if (next)
       attachMenuTrigger(next, () => this.buildMenu(entry.id, entry.link), { indicator: true, link: entry.link })

@@ -1,6 +1,7 @@
+import type { Options } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
-import { ADDON_CLASS, getArchiveLink, logger, parseUser, toast } from '#common'
+import { ADDON_CLASS, findProgress, getArchiveLink, logger, parseUser, progressSources, readiness, READINESS_LABELS, toast, todayEpochDays } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { readSnapshot, writeSnapshot } from '#content_script/searchView/cache.ts'
@@ -46,6 +47,35 @@ function pageUrl(userId: string, page: number): string {
 
 function snapshotKey(userId: string): string {
   return `marked-for-later:${userId}`
+}
+
+/**
+ * Stamp each work with its Readiness facet value.
+ *
+ * A post-pass rather than something {@link parseWork} does, for two reasons that
+ * both come down to the same thing — readiness isn't a property of the blurb.
+ * The parser has no options access, and the snapshot cache re-runs it over
+ * yesterday's stored HTML, so a value baked in there would still say "waiting"
+ * on the morning the wait-until date came round.
+ *
+ * Nothing to do when no mark tracks progress (an older device's sync can hand us
+ * a table without one), in which case every work reads as Ready by default.
+ */
+function applyReadiness(works: Work[], options: Options): void {
+  const { workMarks } = options
+  const sources = workMarks.enabled ? progressSources(workMarks.marks) : []
+  if (sources.length === 0)
+    return
+  const today = todayEpochDays()
+  for (const work of works) {
+    const found = findProgress(sources, work.workId)
+    if (!found)
+      continue
+    // No work on AO3 has zero chapters, so a zero here means the count wasn't
+    // there to read — which readiness() takes as null and fails open on.
+    const published = work.chapters.written || null
+    work.readiness = READINESS_LABELS[readiness(found.progress, published, today)]
+  }
 }
 
 /**
@@ -116,7 +146,7 @@ function mountProgress(container: HTMLElement): Progress {
 }
 
 /** Re-scrape in the background and feed the result into the live view + cache. */
-async function refresh(userId: string, view: SearchView): Promise<void> {
+async function refresh(userId: string, view: SearchView, options: Options): Promise<void> {
   activeController?.abort()
   const controller = new AbortController()
   activeController = controller
@@ -132,6 +162,10 @@ async function refresh(userId: string, view: SearchView): Promise<void> {
     // Every work here is marked for later — keep the work menu's saved state in
     // step with the refreshed set before it re-decorates the blurbs.
     seedMarkedForLater(result.works.map(w => w.workId))
+    // Freshly parsed works carry no readiness; stamp it before the view facets
+    // them, and re-read today's date while we're at it — a background refresh
+    // can outlive midnight on a tab left open.
+    applyReadiness(result.works, options)
     view.update(result.works)
     if (result.loadedPages < result.totalPages)
       toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
@@ -146,7 +180,7 @@ async function refresh(userId: string, view: SearchView): Promise<void> {
   }
 }
 
-function makeHandlers(userId: string): { onBack: () => void, onRefresh: () => void } {
+function makeHandlers(userId: string, options: Options): { onBack: () => void, onRefresh: () => void } {
   return {
     onBack: () => teardown(),
     onRefresh: () => {
@@ -154,7 +188,7 @@ function makeHandlers(userId: string): { onBack: () => void, onRefresh: () => vo
         return
       const view = activeView
       view.setUpdating(true)
-      void refresh(userId, view).finally(() => view.setUpdating(false))
+      void refresh(userId, view, options).finally(() => view.setUpdating(false))
     },
   }
 }
@@ -242,7 +276,7 @@ export class SearchMarkedForLater extends Unit {
     try {
       const key = snapshotKey(userId)
       const container = mountContainer()
-      const handlers = makeHandlers(userId)
+      const handlers = makeHandlers(userId, this.options)
       // Local (never-synced) layout prefs for this application of the view.
       const prefs = await loadPrefs(PREFS_APP_ID)
       const config: SearchViewConfig = {
@@ -294,13 +328,17 @@ export class SearchMarkedForLater extends Unit {
           .catch(err => log.error('Failed to seed the Marked for Later index', err))
         // Render instantly from cache, then refresh in the background (unless the
         // caller knows the cache is fresh, e.g. a reopen right after a re-run).
+        // Stamped here, not in the cache: a snapshot rehydrates through
+        // parseWork, so a wait-until date that came round overnight would read
+        // stale straight out of yesterday's blurb HTML.
+        applyReadiness(cached.works, this.options)
         const view = createSearchView(cached.works, handlers, config)
         activeView = view
         activeUserId = userId
         container.replaceChildren(view.el)
         if (opts.refresh !== false) {
           view.setUpdating(true)
-          void refresh(userId, view).finally(() => view.setUpdating(false))
+          void refresh(userId, view, this.options).finally(() => view.setUpdating(false))
         }
         return
       }
@@ -323,6 +361,7 @@ export class SearchMarkedForLater extends Unit {
           return
         }
         seedMarkedForLater(result.works.map(w => w.workId))
+        applyReadiness(result.works, this.options)
         const view = createSearchView(result.works, handlers, config)
         activeView = view
         activeUserId = userId

@@ -38,8 +38,9 @@ describe('the mark table', () => {
     assert.equal(markRoot(marks, READ_MARK), READ_MARK, 'read is its own root')
     assert.deepEqual(
       markGroup(marks, 'favorite'),
-      ['read', 'favorite', 'good', 'boring', 'bad', 'gross'],
-      'the whole group, in table order',
+      ['read', 'favorite', 'good', 'boring', 'bad', 'gross', 'continue'],
+      'the whole group, in table order — `continue` is in it too, so choosing '
+      + 'one replaces the other; what it does *not* share is the unsaving',
     )
   })
 
@@ -47,7 +48,7 @@ describe('the mark table', () => {
     const marks = createDefaultMarks()
     assert.ok(markIsLocal(marks, 'favorite'))
     assert.ok(!markIsLocal(marks, SAVED_MARK), 'Marked for Later lives on AO3, not here')
-    assert.deepEqual(localMarkIds(marks), ['read', 'favorite', 'good', 'boring', 'bad', 'gross'])
+    assert.deepEqual(localMarkIds(marks), ['read', 'favorite', 'good', 'boring', 'bad', 'gross', 'continue'])
   })
 
   test('hiding is inherited from the group root', () => {

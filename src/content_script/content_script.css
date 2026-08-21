@@ -528,6 +528,103 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   max-width: min(42em, 92vw);
 }
 
+/* The ongoing-mark editor: a form in a popover, so it needs a little more room
+   than a hover hint and its own vertical rhythm. */
+.AO3E--popover:has(.AO3E--progress-editor) {
+  max-width: min(20em, 92vw);
+}
+
+.AO3E--progress-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+}
+
+.AO3E--progress-editor--title {
+  font-weight: 700;
+  line-height: 1.3;
+  /* A long title shouldn't push the fields off the bottom of the screen. */
+  max-height: 3.9em;
+  overflow: hidden;
+}
+
+.AO3E--progress-editor--field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.AO3E--progress-editor--label {
+  font-size: 0.82em;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.AO3E--progress-editor--note {
+  font-size: 0.78em;
+  opacity: 0.6;
+}
+
+.AO3E--progress-editor--input {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 0.3em 0.4em;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  border-radius: 0.3em;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 1em;
+}
+
+.AO3E--progress-editor--presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+.AO3E--progress-editor--preset {
+  padding: 0.15em 0.5em;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 1em;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78em;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.AO3E--progress-editor--preset:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.AO3E--progress-editor--actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4em;
+}
+
+.AO3E--progress-editor--cancel,
+.AO3E--progress-editor--save {
+  padding: 0.3em 0.9em;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 0.3em;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.AO3E--progress-editor--save {
+  border-color: transparent;
+  background: #0369a1;
+  color: #fff;
+  font-weight: 700;
+}
+
 .AO3E--symbols-key {
   max-height: 70vh;
   overflow: auto;

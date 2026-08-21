@@ -83,6 +83,20 @@ export interface MenuItem {
 let current: HTMLElement | null = null
 /** Tear-down for the current element's dismiss listeners. */
 let detach: (() => void) | null = null
+/** Where focus was before a focus-taking popover opened, to put it back on close. */
+let restoreFocus: HTMLElement | null = null
+/** The point the last floating element was asked to open at. */
+let lastPoint = { x: 0, y: 0 }
+
+/**
+ * Where the reader last opened a menu or popover — the gesture's own viewport
+ * point. A menu row that goes on to open a second floating element (the ongoing
+ * mark's editor) has no event of its own to position by, since the menu closes
+ * before `onSelect` runs.
+ */
+export function lastFloatingPoint(): { x: number, y: number } {
+  return { ...lastPoint }
+}
 
 /** Remove whichever floating element (menu or popover) is open. */
 export function closeFloating(): void {
@@ -93,6 +107,14 @@ export function closeFloating(): void {
   if (current) {
     current.remove()
     current = null
+  }
+  // Only ever set by a popover that took focus, so this doesn't yank focus
+  // around for the menus, which never move it in the first place.
+  if (restoreFocus) {
+    const target = restoreFocus
+    restoreFocus = null
+    if (target.isConnected)
+      target.focus()
   }
 }
 
@@ -189,22 +211,53 @@ export function openMenu(items: MenuItem[], at: { x: number, y: number }): void 
   mount(menu, at)
 }
 
+/**
+ * How a popover should behave beyond "show this and dismiss it on the next
+ * click". The defaults suit the informational popovers, which are read and
+ * dismissed; anything the reader has to *type into* needs all three.
+ */
+export interface PopoverOptions {
+  /**
+   * Survive scroll and resize instead of closing on either. A popover holding
+   * fields needs this on both counts: focusing an input the browser considers
+   * off-screen scrolls it into view, and a mobile virtual keyboard opening fires
+   * `resize` — so without it the editor closes the instant a field is tapped.
+   */
+  persistent?: boolean
+  /** Accessible name, so the dialog role isn't announced as an unnamed dialog. */
+  label?: string
+  /**
+   * Focus this once the popover is placed, and put focus back where it was on
+   * close. `Escape` is otherwise the only keyboard affordance a popover has.
+   */
+  autoFocus?: HTMLElement | null
+}
+
 /** Open an informational popover showing `content`, positioned at `at`. */
-export function openPopover(content: Node | string, at: { x: number, y: number }): void {
+export function openPopover(content: Node | string, at: { x: number, y: number }, opts: PopoverOptions = {}): void {
   const box = (
     <div class={`${ADDON_CLASS}  ${POPOVER_CLASS}`} role="dialog">{content}</div>
   ) as HTMLElement
-  mount(box, at)
+  if (opts.label) {
+    box.setAttribute('aria-label', opts.label)
+    // Only a popover that takes focus behaves like a modal at all; saying so on
+    // a hover hint would trap a screen reader inside a tooltip.
+    if (opts.autoFocus)
+      box.setAttribute('aria-modal', 'true')
+  }
+  mount(box, at, opts)
 }
 
 /**
  * Append `node` to the body, clamp it inside the viewport at `at`, and wire up the
- * shared dismiss handlers (outside pointerdown, Escape, scroll, resize). Replaces
- * any currently-open floating element.
+ * shared dismiss handlers (outside pointerdown, Escape, and — unless the caller
+ * opted out — scroll and resize). Replaces any currently-open floating element.
  */
-function mount(node: HTMLElement, at: { x: number, y: number }): void {
+function mount(node: HTMLElement, at: { x: number, y: number }, opts: PopoverOptions = {}): void {
+  const previous = document.activeElement
   closeFloating()
   current = node
+  lastPoint = { x: at.x, y: at.y }
 
   // Render hidden first so we can measure, then clamp into the viewport.
   node.style.position = 'fixed'
@@ -222,7 +275,18 @@ function mount(node: HTMLElement, at: { x: number, y: number }): void {
   node.style.top = `${top}px`
   node.style.visibility = ''
 
+  // A global re-run removes every `.AO3E` node, ours included, without going
+  // through closeFloating — so a handler that fires afterwards would be acting
+  // on a detached element. Treat that as "already dismissed" and tidy up.
+  const stale = (): boolean => {
+    if (current?.isConnected)
+      return false
+    closeFloating()
+    return true
+  }
   const onPointerDown = (e: Event): void => {
+    if (stale())
+      return
     if (current && !current.contains(e.target as Node))
       closeFloating()
   }
@@ -238,8 +302,10 @@ function mount(node: HTMLElement, at: { x: number, y: number }): void {
   const timer = setTimeout(addOutside, 0)
 
   document.addEventListener('keydown', onKeyDown, true)
-  window.addEventListener('scroll', onScrollOrResize, true)
-  window.addEventListener('resize', onScrollOrResize, true)
+  if (!opts.persistent) {
+    window.addEventListener('scroll', onScrollOrResize, true)
+    window.addEventListener('resize', onScrollOrResize, true)
+  }
 
   detach = (): void => {
     clearTimeout(timer)
@@ -247,5 +313,10 @@ function mount(node: HTMLElement, at: { x: number, y: number }): void {
     document.removeEventListener('keydown', onKeyDown, true)
     window.removeEventListener('scroll', onScrollOrResize, true)
     window.removeEventListener('resize', onScrollOrResize, true)
+  }
+
+  if (opts.autoFocus) {
+    restoreFocus = previous instanceof HTMLElement ? previous : null
+    opts.autoFocus.focus()
   }
 }

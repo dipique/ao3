@@ -17,7 +17,7 @@ import React from '#dom'
 
 import type { MenuItem } from './contextMenu.tsx'
 
-import { openMenu, openPopover } from './contextMenu.tsx'
+import { closeFloating, openMenu, openPopover } from './contextMenu.tsx'
 
 /**
  * Attaches the right-click / long-press / indicator triggers that open the
@@ -116,9 +116,17 @@ interface Trigger {
 
 const triggers = new Map<HTMLElement, Trigger>()
 
-/** Drop every registered trigger. Called from each menu unit's `clean()`. */
+/**
+ * Drop every registered trigger. Called from each menu unit's `clean()`.
+ *
+ * Also shuts whatever menu or popover is open, because the very next thing a
+ * `clean()` does is remove every `.AO3E` node — which takes the floating element
+ * with it but leaves its four document/window listeners pointing at a node
+ * nothing else can reach.
+ */
 export function clearMenuTriggers(): void {
   triggers.clear()
+  closeFloating()
 }
 
 /**
@@ -457,6 +465,13 @@ export interface IndicatorOptions {
   highlightColor?: string
   /** The mark table, so `mark:*` states can resolve their icon, label and colour. */
   marks?: Record<MarkId, MarkConfig>
+  /**
+   * Hover text to show for a mark instead of its plain label — what a mark with
+   * per-work state (the ongoing mark's chapter/readiness hint) has to say
+   * about *this* work. Falls back to the label wherever the caller couldn't work one
+   * out, so a half-built hint never replaces a correct one.
+   */
+  titles?: Record<MarkId, string>
 }
 
 /** One indicator's rendered parts, whatever kind of state it came from. */
@@ -490,7 +505,7 @@ function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] 
     const config = opts.marks![id]!
     out.push({
       suffix: `mark  ${INDICATOR_CLASS}--mark-${id}`,
-      label: config.label || id,
+      label: opts.titles?.[id] || config.label || id,
       icon: markIcon(config.icon),
       color: config.color,
     })

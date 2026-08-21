@@ -4,7 +4,7 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiGestureTapHold from '~icons/mdi/gesture-tap-hold.jsx'
 
-import { ADDON_CLASS, hiddenByMarks, options } from '#common'
+import { ADDON_CLASS, marksHideAnything, options } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -83,7 +83,7 @@ export class FilterToolbar extends Unit {
     const { filterToolbar, rules, hideCrossovers, hideLanguages, workMarks } = this.options
     return filterToolbar && (
       rules.enabled || hideCrossovers.enabled || hideLanguages.enabled
-      || (workMarks.enabled && hiddenByMarks(workMarks.marks).size > 0)
+      || (workMarks.enabled && marksHideAnything(workMarks.marks))
     )
   }
 

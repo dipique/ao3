@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { MarkId } from '#common'
 
-import { countIds, localMarkIds, markHidesResults, markIsLocal, markRoot, SAVED_MARK } from '#common'
+import { countIds, localMarkIds, markHidesResults, markIsLocal, markRoot, markTracksProgress, SAVED_MARK } from '#common'
 
 import { markIconClass } from '../../markIcons.ts'
 
@@ -36,6 +36,11 @@ function aliasOf(id: MarkId): MarkId | null {
  * Whether works carrying this mark are collapsed out of listings. Reads through
  * the alias, and writing the inherited value back clears the override so the
  * mark goes on following its root.
+ *
+ * A progress mark is exempt from that clearing: it ships with an explicit
+ * `hideSearchResult: true` that happens to differ from — or, if `read` is set to
+ * hide, happens to match — what it would inherit, and deleting the field on a
+ * match would silently hand its hiding over to an unrelated setting.
  */
 function hideModel(id: MarkId) {
   return computed({
@@ -46,7 +51,7 @@ function hideModel(id: MarkId) {
       const config = marks.value[id]
       if (!config)
         return
-      if (root && v === inherited)
+      if (root && v === inherited && !markTracksProgress(marks.value, id))
         delete config.hideSearchResult
       else
         config.hideSearchResult = v
@@ -62,23 +67,39 @@ const rows = computed(() => local.value.map(id => ({
   count: count(id),
   alias: aliasOf(id),
   hide: hideModel(id),
+  // A progress mark's hiding is a per-work decision (is there anything new to
+  // read yet?), so the switch means something different enough to say so.
+  hideLabel: markTracksProgress(marks.value, id) ? 'Hide until ready' : 'Hide in listings',
+  hideAria: `Hide works marked ${label(id)} ${markTracksProgress(marks.value, id) ? 'until ready' : 'in listings'}`,
+  tracksProgress: markTracksProgress(marks.value, id),
 })))
 
 /**
  * Rough size of the packed sets. Marks live in the synced options, which share a
  * 100 KB quota across every setting, so this is shown once the list is big enough
  * to be worth knowing about rather than hidden away as a surprise later.
+ *
+ * Counts `progress` as well as `items`: a progress mark stores roughly as much
+ * again in its payload, so summing only the ids would under-report by half.
  */
 const packedKb = computed(() =>
-  local.value.reduce((sum, id) => sum + (marks.value[id]?.items?.length ?? 0), 0) / 1024)
+  local.value.reduce(
+    (sum, id) => sum + (marks.value[id]?.items?.length ?? 0) + (marks.value[id]?.progress?.length ?? 0),
+    0,
+  ) / 1024)
 const showSize = computed(() => packedKb.value >= 1)
 
 function clear(id: MarkId) {
   const n = count(id)
   const config = marks.value[id]
   // eslint-disable-next-line no-alert
-  if (n && config && confirm(`Clear all ${n} "${label(id)}" marks? This can't be undone (a daily backup may still have them).`))
+  if (n && config && confirm(`Clear all ${n} "${label(id)}" marks? This can't be undone (a daily backup may still have them).`)) {
     config.items = ''
+    // The payload is keyed by the ids just dropped, so it has to go with them —
+    // otherwise every entry is orphaned, unreachable, and still costs quota.
+    if (typeof config.progress === 'string')
+      config.progress = ''
+  }
 }
 </script>
 
@@ -86,19 +107,26 @@ function clear(id: MarkId) {
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Work marks"
-    subtitle="Mark a work read — or favorite, good, boring, bad, gross — from its right-click (or long-press) menu. Works are also marked read automatically whenever you press AO3's own “Mark as Read” button, so your read list fills itself in as you browse."
+    subtitle="Mark a work read — or favorite, good, boring, bad, gross, ongoing — from its right-click (or long-press) menu. Works are also marked read automatically whenever you press AO3's own “Mark as Read” button, so your read list fills itself in as you browse."
   >
     <div flex="~ col gap-3" mt-2>
       <p text="sm muted-fg">
         A work carries one mark at a time: the finer dispositions all mean "read", so choosing one replaces whatever it
-        had. Any of them takes the work off your Marked for Later list, and — where "hide in listings" is on — collapses
-        it out of results the same way your other rules do. An "always show" rule still wins over that.
+        had. Those take the work off your Marked for Later list, and — where "hide in listings" is on — collapse it out
+        of results the same way your other rules do. An "always show" rule still wins over that.
+      </p>
+
+      <p text="sm muted-fg">
+        "Ongoing" is the exception: it means you're waiting on more chapters, not that you're done. It keeps the work on
+        your Marked for Later list (adding it if it isn't there) and records the last chapter you finished, plus an
+        optional date to wait until. With "hide until ready" on, the work is collapsed only while there's nothing new to
+        read or that date hasn't come round.
       </p>
 
       <div flex="~ col gap-2" text="sm" border-t pt-3>
         <div grid="~ cols-[1fr_min-content_min-content]" items-center gap-x-4 gap-y-2>
           <span text="xs muted-fg uppercase tracking-wide">Mark</span>
-          <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>Hide in listings</span>
+          <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>Hide</span>
           <span />
 
           <template v-for="row in rows" :key="row.id">
@@ -107,11 +135,11 @@ function clear(id: MarkId) {
               <span flex="~ col gap-0.5">
                 <span>{{ row.label }}</span>
                 <span text="xs muted-fg">
-                  {{ row.count.toLocaleString() }} {{ row.count === 1 ? 'work' : 'works' }}<template v-if="row.alias"> · counts as {{ label(row.alias) }}</template>
+                  {{ row.count.toLocaleString() }} {{ row.count === 1 ? 'work' : 'works' }}<template v-if="row.tracksProgress"> · stays on Marked for Later</template><template v-else-if="row.alias"> · counts as {{ label(row.alias) }}</template>
                 </span>
               </span>
             </span>
-            <Switch v-model="row.hide.value" :aria-label="`Hide works marked ${row.label} in listings`" />
+            <Switch v-model="row.hide.value" :title="row.hideLabel" :aria-label="row.hideAria" />
             <Button
               variant="outline"
               size="sm"

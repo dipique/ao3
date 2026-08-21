@@ -10,6 +10,7 @@ import {
   cloneFilterState,
   computeView,
   emptyFilterState,
+  facetValues,
   matches,
   sortWorks,
 } from '../../src/content_script/searchView/engine.ts'
@@ -234,5 +235,31 @@ describe('searchView in-memory engine', () => {
       for (const key of Object.keys(expectedCounts))
         assert.deepEqual([...facetCounts[key].entries()].sort(), [...expectedCounts[key].entries()].sort())
     }
+  })
+})
+
+describe('the readiness facet', () => {
+  test('a work with no readiness reads as Ready', () => {
+    // Untracked works — everything on a to-read list that isn't marked ongoing —
+    // are ready to read by definition, and the fallback is also what keeps every
+    // other test in this file (whose factory has no readiness field) honest.
+    assert.deepEqual(facetValues(work(), 'readiness'), ['Ready'])
+  })
+
+  test('a precomputed value is used as-is', () => {
+    // The host stamps this in a post-pass; the engine never derives it, since it
+    // depends on the mark table and on today's date.
+    assert.deepEqual(facetValues(work({ readiness: 'Waiting' }), 'readiness'), ['Waiting'])
+  })
+
+  test('filtering to Ready drops the works that are not', () => {
+    const set = [
+      work({ workId: '1', markedOrder: 0 }),
+      work({ workId: '2', markedOrder: 1, readiness: 'Waiting' }),
+      work({ workId: '3', markedOrder: 2, readiness: 'Caught up' }),
+    ]
+    const state = emptyFilterState()
+    state.facets.readiness.include.add('Ready')
+    assert.deepEqual(applyFilters(set, state).map(w => w.workId), ['1'])
   })
 })

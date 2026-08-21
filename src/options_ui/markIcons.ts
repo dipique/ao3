@@ -16,6 +16,7 @@ export const MARK_ICON_CLASSES: Record<string, string> = {
   boring: 'i-mdi-sleep',
   bad: 'i-mdi-thumb-down',
   gross: 'i-mdi-emoticon-sick',
+  continue: 'i-mdi-calendar-clock',
   saved: 'i-mdi-clock-check',
 }
 

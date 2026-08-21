@@ -2,9 +2,9 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import type { MarkId, Rule } from '#common'
+import type { MarkId, ProgressSource, Rule } from '#common'
 
-import { ADDON_CLASS, hiddenByMarks, ruleAffectsWorks, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType } from '#common'
+import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -153,6 +153,17 @@ export class HideWorks extends Unit {
    */
   private hiddenMarks = new Map<string, MarkId>()
 
+  /**
+   * The hiding progress marks' entries for this run, unpacked once. Separate
+   * from {@link hiddenMarks} because carrying a progress mark isn't itself a
+   * reason to hide — {@link processBlurb} weighs each work's own progress
+   * against the chapter count on its blurb.
+   */
+  private progress: ProgressSource[] = []
+
+  /** Today, as days since the epoch — fixed for the run so a listing is consistent. */
+  private today = 0
+
   /** The work-affecting rules for this run (hide/always-show; never highlight-only). */
   private rules: Rule[] = []
 
@@ -161,14 +172,19 @@ export class HideWorks extends Unit {
       this.options.rules.enabled
       || this.options.hideCrossovers.enabled
       || this.options.hideLanguages.enabled
-      || this.marksHideAnything
+      || this.marksCanHide
     )
   }
 
-  /** Whether any mark is set to collapse the works carrying it. */
-  private get marksHideAnything(): boolean {
+  /**
+   * Whether any mark is set to collapse the works carrying it. Goes through
+   * {@link marksHideAnything} rather than `hiddenByMarks`, which excludes
+   * progress marks — a reader whose only hiding mark is the ongoing one would
+   * otherwise have this unit filtered out before `ready()` ever ran.
+   */
+  private get marksCanHide(): boolean {
     const { workMarks } = this.options
-    return workMarks.enabled && hiddenByMarks(workMarks.marks).size > 0
+    return workMarks.enabled && marksHideAnything(workMarks.marks)
   }
 
   static override async clean(): Promise<void> {
@@ -189,7 +205,14 @@ export class HideWorks extends Unit {
   override async ready(): Promise<void> {
     this.logger.debug('Hiding works...')
     excludeButtons.length = 0
-    this.hiddenMarks = this.options.workMarks.enabled ? hiddenByMarks(this.options.workMarks.marks) : new Map()
+    const { workMarks } = this.options
+    this.hiddenMarks = workMarks.enabled ? hiddenByMarks(workMarks.marks) : new Map()
+    // Only the *hiding* progress marks matter here; one left visible is still
+    // tracked and still shows its indicator, it just never collapses a work.
+    this.progress = workMarks.enabled
+      ? progressSources(workMarks.marks).filter(source => markHidesResults(workMarks.marks, source.id))
+      : []
+    this.today = todayEpochDays()
     // Presentational rules are handled elsewhere (HighlightTags colours the tag,
     // HideFilters hides it) and never hide or force-show, so they're dropped here.
     this.rules = this.options.rules.enabled ? this.options.rules.filters.filter(ruleAffectsWorks) : []
@@ -276,6 +299,29 @@ export class HideWorks extends Unit {
           icon: markIcon(config?.icon),
         },
       })
+    }
+
+    // An ongoing work is collapsed only while it isn't worth opening — there's
+    // nothing new since the reader stopped, or a wait-until date they set hasn't
+    // come round yet. Weighed at 0 like every other non-rule hide, so an "always
+    // show" rule still overrules it.
+    const ongoing = blurb.work ? findProgress(this.progress, blurb.work.id) : null
+    if (ongoing) {
+      const published = blurb.chapters?.written ?? null
+      const state = readiness(ongoing.progress, published, this.today)
+      if (state !== 'ready') {
+        const config = workMarks.marks[ongoing.id]
+        hides.push({
+          label: hiddenLabel(state, config?.label || ongoing.id),
+          kind: 'marks',
+          priority: 0,
+          item: {
+            value: blurb.work!.name,
+            rule: describeProgress(ongoing.progress, published, this.today),
+            icon: markIcon(config?.icon),
+          },
+        })
+      }
     }
 
     if (
@@ -439,7 +485,7 @@ export class HideWorks extends Unit {
         // The rule stays in `title` for desktop hover; tap/click/long-press (and
         // right-click) opens it as a popover so it's reachable without a pointer.
         const valueSpan = <span class={VALUE_CLASS} title={title}>{text}</span>
-        attachPopoverTrigger(valueSpan, () => title)
+        attachPopoverTrigger(valueSpan, () => hintNode(title))
         container.append(valueSpan)
 
         const excludeButton = item.exclude ? this.buildExcludeButton(item.exclude) : null
@@ -510,6 +556,22 @@ export class HideWorks extends Unit {
     }
     toggleFandomFilter('exclude', id, target.name)
   }
+}
+
+/**
+ * The hover text as nodes, one line per line.
+ *
+ * `openPopover` renders a string as a text node, where the `\n` of a two-line
+ * hint — the ongoing mark's, which says what's unread *and* what the wait-until
+ * date does — collapses like any other HTML whitespace and reads as one run-on
+ * sentence. The `title=` attribute honours the newline, so only the
+ * tap/long-press path needs this.
+ */
+function hintNode(text: string): Node {
+  const fragment = document.createDocumentFragment()
+  for (const line of text.split('\n'))
+    fragment.append(<div>{line}</div>)
+  return fragment
 }
 
 /**

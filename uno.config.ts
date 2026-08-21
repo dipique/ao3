@@ -191,6 +191,7 @@ export default {
     'i-mdi-sleep',
     'i-mdi-thumb-down',
     'i-mdi-emoticon-sick',
+    'i-mdi-calendar-clock',
     'i-mdi-clock-check',
     'i-mdi-bookmark-check',
   ],

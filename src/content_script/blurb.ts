@@ -11,6 +11,14 @@ export interface BlurbEntity {
   name: string
 }
 
+/** The two numbers in a `dd.chapters` cell: chapters posted, and the author's target. */
+export interface ChapterCounts {
+  /** Chapters actually published — the left number, the only one that counts anything real. */
+  written: number
+  /** The author's stated total, or null for the `?` of an open-ended work. */
+  total: number | null
+}
+
 export interface Blurb {
   language?: string | null
   fandoms: string[]
@@ -20,6 +28,34 @@ export interface Blurb {
   work?: BlurbEntity
   /** Series the blurb belongs to (the "Part N of …" links), plus any series-listing title. */
   series: BlurbEntity[]
+  /** The blurb's chapter counts, or null when it has no `dd.chapters` at all. */
+  chapters: ChapterCounts | null
+}
+
+/**
+ * Parse a `dd.chapters` cell into its two numbers. Null when there's no such
+ * cell — series and user blurbs have none — so every caller fails open rather
+ * than guessing at a count.
+ *
+ * Reads the **text**, `\D`-stripping each half, and deliberately not the
+ * `data-ao3e-original` attribute Stats stashes: on a multi-chapter work Stats
+ * reassigns to the inner `<a>` before stashing, and AO3 renders the total
+ * outside that anchor, so the attribute holds only the left number. It's also
+ * stale-prone, since `Stats.clean()` reads the attribute off the `dd` and never
+ * restores an anchor-stashed one. Stripping non-digits sidesteps all of it: the
+ * thin spaces Stats inserts as thousands separators aren't digits either.
+ *
+ *     <dd class="chapters"><a href="…" data-ao3e-original="9">9</a>/23</dd>
+ *     <dd class="chapters">1/1</dd>
+ */
+export function readChapterCounts(el: Element | null | undefined): ChapterCounts | null {
+  const text = el?.textContent?.trim()
+  if (!text)
+    return null
+  const [writtenRaw, totalRaw] = text.split('/')
+  const written = Number((writtenRaw ?? '').replace(/\D/g, '')) || 0
+  const total = totalRaw && /\d/.test(totalRaw) ? Number(totalRaw.replace(/\D/g, '')) : null
+  return { written, total }
 }
 
 /** Parse the `:id` from a `/works/:id` or `/series/:id` link, ignoring any trailing path. */
@@ -94,7 +130,17 @@ export function getBlurb(blurbElement: Element): Blurb {
     series.push({ id, name: link.textContent!.trim() })
   }
 
-  return { language, fandoms, authors, tags, work, series }
+  return {
+    language,
+    fandoms,
+    authors,
+    tags,
+    work,
+    series,
+    // Carried on the blurb so the hide pass — which decides per work whether an
+    // ongoing one is worth showing — needn't go back to the DOM for it.
+    chapters: readChapterCounts(blurbElement.querySelector('dd.chapters')),
+  }
 }
 
 // ===========================================================================
@@ -120,7 +166,7 @@ export interface Work {
   summaryText: string
   language: string | null
   words: number
-  chapters: { written: number, total: number | null }
+  chapters: ChapterCounts
   complete: boolean
   kudos: number
   hits: number
@@ -140,6 +186,15 @@ export interface Work {
   characters: string[]
   freeforms: string[]
   restricted: boolean
+  /**
+   * How ready this work is to be read on, when it carries a progress mark —
+   * the Readiness facet's value. Deliberately *not* set by {@link parseWork}:
+   * it depends on the mark table and on today's date, neither of which the
+   * parser can see, and the snapshot cache rehydrates through this same parser
+   * (so a value baked in here would be a day stale on the next visit). The host
+   * fills it in a post-pass before handing the works to the view.
+   */
+  readiness?: string
 }
 
 /** Digits-only parse of a stat cell ("1,101" -> 1101); missing/blank -> 0. */
@@ -189,10 +244,8 @@ export function parseWork(el: HTMLLIElement, markedOrder: number): Work {
     return { userId: parts[2] ?? '', pseud: parts[4], text: a.textContent!.trim() }
   })
 
-  const chaptersText = el.querySelector('dd.chapters')?.textContent?.trim() ?? ''
-  const [writtenRaw, totalRaw] = chaptersText.split('/')
-  const written = Number((writtenRaw ?? '').replace(/\D/g, '')) || 0
-  const total = totalRaw && /\d/.test(totalRaw) ? Number(totalRaw.replace(/\D/g, '')) : null
+  const chapters = readChapterCounts(el.querySelector('dd.chapters')) ?? { written: 0, total: null }
+  const { written, total } = chapters
   const complete = !!el.querySelector('.required-tags .complete-yes')
     || (total !== null && total > 0 && written >= total)
 
@@ -210,7 +263,7 @@ export function parseWork(el: HTMLLIElement, markedOrder: number): Work {
     summaryText: el.querySelector('blockquote.userstuff.summary')?.textContent?.trim() ?? '',
     language: el.querySelector('dd.language')?.textContent?.trim() || null,
     words: statNumber(el.querySelector('dd.words')),
-    chapters: { written, total },
+    chapters,
     complete,
     kudos: statNumber(el.querySelector('dd.kudos')),
     hits: statNumber(el.querySelector('dd.hits')),

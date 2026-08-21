@@ -8,7 +8,8 @@ import type { Work } from '#content_script/blurb.js'
 
 /** A facetable field. Each maps a work to zero or more string values. */
 export type FacetKey
-  = | 'rating'
+  = | 'readiness'
+    | 'rating'
     | 'warnings'
     | 'categories'
     | 'fandoms'
@@ -20,6 +21,7 @@ export type FacetKey
 
 /** Facet groups in sidebar display order. */
 export const FACET_KEYS: FacetKey[] = [
+  'readiness',
   'rating',
   'warnings',
   'categories',
@@ -32,6 +34,7 @@ export const FACET_KEYS: FacetKey[] = [
 ]
 
 export const FACET_LABELS: Record<FacetKey, string> = {
+  readiness: 'Readiness',
   rating: 'Rating',
   warnings: 'Archive Warnings',
   categories: 'Categories',
@@ -70,6 +73,11 @@ export const SORT_LABELS: Record<SortKey, string> = {
 
 export function facetValues(work: Work, key: FacetKey): string[] {
   switch (key) {
+    // Precomputed by the host, not derived here: readiness depends on the mark
+    // table and on what day it is, neither of which belongs in a pure engine.
+    // A work with none is Ready — an untracked work on your to-read list is
+    // exactly that, with nothing standing between you and reading it.
+    case 'readiness': return [work.readiness ?? 'Ready']
     case 'rating': return work.rating ? [work.rating] : []
     case 'warnings': return work.warnings
     case 'categories': return work.categories

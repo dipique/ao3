@@ -21,10 +21,12 @@ import {
   emptyFilterState,
   FACET_KEYS,
   FACET_LABELS,
+  facetValues,
   SORT_LABELS,
   sortWorks,
 } from './engine.ts'
 import { registerFacetBridge } from './facetBridge.ts'
+import { DEFAULT_READINESS } from './prefs.ts'
 
 const ROOT = `${ADDON_CLASS}--search-view`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
@@ -170,6 +172,20 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       state.sort = config.prefs.sort
     if (config.prefs.dir)
       state.dir = config.prefs.dir
+    // Readiness is the one facet with a default selection, seeded here rather
+    // than in emptyFilterState(), which must go on meaning "nothing filtered" —
+    // it's what "Reset filters" and every other caller start from.
+    for (const value of config.prefs.readiness ?? DEFAULT_READINESS)
+      state.facets.readiness.include.add(value)
+    // ...but only values this set actually has. `update()` prunes selections
+    // whose values have gone, and does it on a *refresh* — a sticky "Waiting"
+    // with nothing waiting would open on "No works match" with nothing on screen
+    // to explain why.
+    const present = new Set(works.flatMap(work => facetValues(work, 'readiness')))
+    for (const value of [...state.facets.readiness.include]) {
+      if (!present.has(value))
+        state.facets.readiness.include.delete(value)
+    }
   }
   // The user's custom facet-group order (persisted locally), applied on every
   // (re)build and mutated by the per-group reorder arrows.
@@ -240,7 +256,15 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     const collapsed = facetGroups
       .filter(g => !(g.details as HTMLDetailsElement).open)
       .map(g => g.key)
-    config.onPrefsChange({ collapsed, order: [...facetOrder], sort: state.sort, dir: state.dir })
+    // savePrefs takes a whole SearchViewPrefs, so everything persisted has to be
+    // rebuilt here — there's no partial write.
+    config.onPrefsChange({
+      collapsed,
+      order: [...facetOrder],
+      sort: state.sort,
+      dir: state.dir,
+      readiness: [...state.facets.readiness.include],
+    })
   }
 
   const countEl = (<span class={cx('count')} />) as HTMLElement
@@ -302,6 +326,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     const fresh = emptyFilterState()
     state.text = fresh.text
     state.facets = fresh.facets
+    // "Reset filters" restores the default, not "no filter": showing only what's
+    // ready is the state the view is meant to sit in, and resetting to
+    // everything would quietly turn the feature off.
+    for (const value of DEFAULT_READINESS)
+      state.facets.readiness.include.add(value)
     state.wordsMin = null
     state.wordsMax = null
     state.sort = fresh.sort
@@ -356,6 +385,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       }
     }
     filterChanged()
+    // Readiness is the one facet whose selection is a saved preference rather
+    // than something dialled in for this visit.
+    if (key === 'readiness')
+      persist()
   }
 
   function facetRow(key: FacetKey, { value, count }: FacetValueCount): FacetRowRef {
