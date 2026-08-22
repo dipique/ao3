@@ -16,7 +16,7 @@ const RULES = [
   { target: 'tag', value: 'Slow Burn', matcher: 'exact', behavior: 'hide' },
   { target: 'tag', value: 'slow build', matcher: 'exact', behavior: 'hide' },
   { target: 'tag', value: 'Enemies to Lovers', matcher: 'exact', behavior: 'hide' },
-  { target: 'fandom', value: 'Teen Wolf (TV)', matcher: 'exact', behavior: 'hide' },
+  { target: 'f', value: 'Teen Wolf (TV)', matcher: 'exact', behavior: 'hide' },
   { target: 'author', value: 'someone', pseud: 'BurnNotice', matcher: 'exact', behavior: 'hide' },
   { target: 'tag', value: 'A.B.O. Dynamics', matcher: 'exact', behavior: 'hide' },
   { target: 'tag', value: '5*Stars', matcher: 'exact', behavior: 'hide' },
@@ -104,8 +104,8 @@ describe('options UI — rules search', { skip }, () => {
   })
 
   test('the target column is not searched', async () => {
-    // "fandom" is a target, and one rule's target is exactly that — but no rule
-    // has it in its text, so this must find nothing.
+    // "Fandom" is what the target column shows for one of these rules, but no
+    // rule has the word in its text — so this must find nothing.
     await search('fandom')
     const listed = await rows()
     await search('')

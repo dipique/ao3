@@ -24,16 +24,105 @@ function matchesQuery(rule: Rule, text: string): boolean {
 /** How many rules the filter is showing, and how many there are in total. */
 const shown = computed(() => filters.value.filter(rule => matchesQuery(rule, needle.value)).length)
 
+/**
+ * Click a header to sort by it: ascending, then descending, then off. "Off"
+ * matters — the default grouping (by target, then value) is the one that puts
+ * like rules together, and it is worth being able to get back to without
+ * reloading the page.
+ */
+type SortKey = 'behavior' | 'priority' | 'value' | 'target'
+
+/** Column id -> sort key. Anything absent (the actions column) isn't sortable. */
+const SORT_KEYS: Record<string, SortKey> = {
+  behavior: 'behavior',
+  priority: 'priority',
+  value: 'value',
+  target: 'target',
+}
+
+/**
+ * The order the Action column sorts in. Alphabetical would interleave the two
+ * hiding behaviours with the two that don't hide anything; this is the order the
+ * help text introduces them, strongest effect first.
+ */
+const BEHAVIOR_RANK: Record<string, number> = { hide: 0, invert: 1, highlight: 2, hideFilter: 3 }
+
+const sortKey = ref<SortKey | null>(null)
+const sortDir = ref<'asc' | 'desc'>('asc')
+
+function sortKeyFor(columnId: string): SortKey | undefined {
+  return SORT_KEYS[columnId]
+}
+
+function toggleSort(key: SortKey): void {
+  if (sortKey.value !== key) {
+    sortKey.value = key
+    sortDir.value = 'asc'
+  }
+  else if (sortDir.value === 'asc') {
+    sortDir.value = 'desc'
+  }
+  else {
+    sortKey.value = null
+  }
+}
+
+/** What a screen reader should hear about this column's current sort. */
+function ariaSort(columnId: string): 'ascending' | 'descending' | 'none' | undefined {
+  const key = sortKeyFor(columnId)
+  if (!key)
+    return undefined
+  if (sortKey.value !== key)
+    return 'none'
+  return sortDir.value === 'asc' ? 'ascending' : 'descending'
+}
+
+/** Spell the next click out, since a three-way toggle isn't guessable. */
+function sortHint(columnId: string): string {
+  const key = sortKeyFor(columnId)
+  if (!key)
+    return ''
+  if (sortKey.value !== key)
+    return 'Sort ascending'
+  return sortDir.value === 'asc' ? 'Sort descending' : 'Clear sort'
+}
+
+function compareBy(a: Rule, b: Rule, key: SortKey): number {
+  switch (key) {
+    case 'behavior':
+      return (BEHAVIOR_RANK[a.behavior ?? 'hide'] ?? 0) - (BEHAVIOR_RANK[b.behavior ?? 'hide'] ?? 0)
+    case 'priority':
+      return rulePriority(a) - rulePriority(b)
+    case 'value':
+      return a.value.localeCompare(b.value, undefined, { sensitivity: 'base' })
+    case 'target':
+      // By the label, not the raw target, so the order matches the column. The
+      // fallback is not decoration: `ruleTargetLabel` returns undefined for a
+      // target it doesn't know, which an old export or a hand-edited import can
+      // still carry, and sorting must not be what takes the options page down.
+      return (ruleTargetLabel(a.target) ?? '').localeCompare(ruleTargetLabel(b.target) ?? '')
+  }
+}
+
 /** Group by what a rule targets, then by value, so like rules sit together. */
 function renderData(rules: Rule[]) {
-  return rules
+  const rows = rules
     // Filter *after* mapping: the index is the rule's position in the stored
     // list, which is what the table keys rows by. Filtering first would renumber
     // them against a list that no longer matches storage.
     .map((rule, index) => [index, rule] as [number, Rule])
     .filter(([_i, rule]) => matchesQuery(rule, needle.value))
-    .sort(([_ai, a], [_bi, b]) =>
-      a.target.localeCompare(b.target) || a.value.localeCompare(b.value))
+
+  const key = sortKey.value
+  if (!key)
+    return rows.sort(([_ai, a], [_bi, b]) => a.target.localeCompare(b.target) || a.value.localeCompare(b.value))
+
+  const dir = sortDir.value === 'desc' ? -1 : 1
+  // Every key but `value` has heavy ties, so the rule text breaks them — and it
+  // stays ascending whichever way the column is pointing, so the rows inside a
+  // group don't shuffle when you reverse the sort.
+  return rows.sort(([_ai, a], [_bi, b]) =>
+    dir * compareBy(a, b, key) || a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }))
 }
 
 /** The colour a highlight star should show for a rule (its own, else its target's). */
@@ -86,10 +175,34 @@ const context = OptionRowRulesContext.inject()
         w-full
         class="[&_td,&_th]:h-7 [&_td,&_th]:min-h-7 [&_td,&_th]:align-middle"
       >
-        <template #header="{ inner }">
-          <th scope="col" sticky top-0 z-10 bg-default text-muted-fg font-medium>
+        <template #header="{ inner, header }">
+          <th
+            scope="col" sticky top-0 z-10 bg-default text-muted-fg font-medium
+            :aria-sort="ariaSort(header.column.props.id)"
+          >
             <div flex="~ items-center justify-center " h-8 border-b>
-              <Render :render="inner" />
+              <button
+                v-if="sortKeyFor(header.column.props.id)"
+                type="button"
+                class="input-ring"
+                flex="~ items-center justify-center gap-0.5"
+                h-6 w-full cursor-pointer rounded-md px-1
+                :title="sortHint(header.column.props.id)"
+                @click="toggleSort(sortKeyFor(header.column.props.id)!)"
+              >
+                <Render :render="inner" />
+                <!-- Written out rather than a bound class: UnoCSS only ships the
+                     icons it can see spelled out in a template. -->
+                <Icon
+                  v-if="sortKey === sortKeyFor(header.column.props.id) && sortDir === 'asc'"
+                  i-mdi-arrow-up text="3" label="sorted ascending"
+                />
+                <Icon
+                  v-else-if="sortKey === sortKeyFor(header.column.props.id)"
+                  i-mdi-arrow-down text="3" label="sorted descending"
+                />
+              </button>
+              <Render v-else :render="inner" />
             </div>
           </th>
         </template>
@@ -104,6 +217,11 @@ const context = OptionRowRulesContext.inject()
           </tr>
         </template>
         <RulesDataTable.Column accessor="behavior">
+          <template #header>
+            <th w-1>
+              <Icon i-mdi-lightning-bolt text="3.5" label="Action" />
+            </th>
+          </template>
           <template #cell="cell">
             <td w-1>
               <Tooltip>
@@ -183,7 +301,7 @@ const context = OptionRowRulesContext.inject()
             </th>
           </template>
           <template #header>
-            <th colspan="2">
+            <th>
               Rule
             </th>
           </template>
