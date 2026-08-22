@@ -7,10 +7,31 @@ const RulesDataTable = useDataTable<Rule>()
 
 const { filters, colors } = useOption('rules')
 
+/**
+ * Free-text filter over the rule *text* only — not the target, not the pseud.
+ * A long rule list is searched for the tag you half-remember, and matching the
+ * other columns would surface rules whose text has nothing to do with what you
+ * typed. Case-insensitive "contains"; no wildcards, deliberately, so a typed
+ * `*` or `.` finds a rule that literally has one.
+ */
+const query = ref('')
+const needle = computed(() => query.value.trim().toLowerCase())
+
+function matchesQuery(rule: Rule, text: string): boolean {
+  return !text || rule.value.toLowerCase().includes(text)
+}
+
+/** How many rules the filter is showing, and how many there are in total. */
+const shown = computed(() => filters.value.filter(rule => matchesQuery(rule, needle.value)).length)
+
 /** Group by what a rule targets, then by value, so like rules sit together. */
 function renderData(rules: Rule[]) {
   return rules
+    // Filter *after* mapping: the index is the rule's position in the stored
+    // list, which is what the table keys rows by. Filtering first would renumber
+    // them against a list that no longer matches storage.
     .map((rule, index) => [index, rule] as [number, Rule])
+    .filter(([_i, rule]) => matchesQuery(rule, needle.value))
     .sort(([_ai, a], [_bi, b]) =>
       a.target.localeCompare(b.target) || a.value.localeCompare(b.value))
 }
@@ -29,7 +50,33 @@ const context = OptionRowRulesContext.inject()
 </script>
 
 <template>
-  <div mx="-4" relative mt-4>
+  <div flex="~ items-center gap-2" mt-4>
+    <Input
+      v-model="query"
+      type="text"
+      placeholder="Search rules…"
+      aria-label="Search rules by text"
+      autocomplete="off"
+      spellcheck="false"
+      text="sm" h-8 w-full py-1 pl-2
+    >
+      <button
+        v-if="query"
+        class="input-ring"
+        text="4 muted-fg hover:default-fg"
+        absolute inset-y-0 right-1 my-auto h-5 w-5 cursor-pointer rounded-md
+        aria-label="Clear rule search"
+        @click="query = ''"
+      >
+        <Icon i-codicon-close label="Clear" />
+      </button>
+    </Input>
+    <span v-if="needle" text="xs muted-fg" ws-nowrap>
+      {{ shown }} of {{ filters.length }}
+    </span>
+  </div>
+
+  <div mx="-4" relative mt-2>
     <div mx="sm:4" max-h-96 overflow-auto border rounded-md bg-default>
       <RulesDataTable
         id="rules-filters"
@@ -187,6 +234,9 @@ const context = OptionRowRulesContext.inject()
           </template>
         </RulesDataTable.Column>
       </RulesDataTable>
+      <p v-if="needle && shown === 0" text="sm center muted-fg" py-6>
+        No rules match “{{ query.trim() }}”.
+      </p>
     </div>
   </div>
 </template>
