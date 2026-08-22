@@ -1,6 +1,8 @@
 import { ADDON_CLASS } from '#common'
 import React from '#dom'
 
+import { ensureSurfaceTheme } from './theme.ts'
+
 /**
  * The floating in-page context menu + popover layer.
  *
@@ -231,12 +233,31 @@ export interface PopoverOptions {
    * close. `Escape` is otherwise the only keyboard affordance a popover has.
    */
   autoFocus?: HTMLElement | null
+  /**
+   * How much room the content needs. The caller knows this; the stylesheet
+   * shouldn't have to guess it from what's inside (which is what a
+   * `:has(.some-child)` rule amounts to — a width rule that silently stops
+   * applying when its content is renamed).
+   *
+   * - `hint` — a line or two of text. The default.
+   * - `form` — fields and buttons: a little wider, with room to breathe.
+   * - `wide` — a whole help fragment, which scrolls rather than clipping.
+   */
+  size?: PopoverSize
 }
+
+/** @see {@link PopoverOptions.size} */
+export type PopoverSize = 'hint' | 'form' | 'wide'
 
 /** Open an informational popover showing `content`, positioned at `at`. */
 export function openPopover(content: Node | string, at: { x: number, y: number }, opts: PopoverOptions = {}): void {
   const box = (
-    <div class={`${ADDON_CLASS}  ${POPOVER_CLASS}`} role="dialog">{content}</div>
+    <div
+      class={`${ADDON_CLASS}  ${POPOVER_CLASS}  ${POPOVER_CLASS}--${opts.size ?? 'hint'}`}
+      role="dialog"
+    >
+      {content}
+    </div>
   ) as HTMLElement
   if (opts.label) {
     box.setAttribute('aria-label', opts.label)
@@ -254,6 +275,10 @@ export function openPopover(content: Node | string, at: { x: number, y: number }
  * opted out — scroll and resize). Replaces any currently-open floating element.
  */
 function mount(node: HTMLElement, at: { x: number, y: number }, opts: PopoverOptions = {}): void {
+  // Both surfaces read their colours from the `data-ao3e-theme` token block, so
+  // make sure the page has been measured before the first one is painted.
+  ensureSurfaceTheme()
+
   const previous = document.activeElement
   closeFloating()
   current = node

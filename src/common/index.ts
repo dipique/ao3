@@ -14,7 +14,7 @@ export type { FandomCache, ScrapedTag, ScrapedTagType } from './fandomCache.ts'
 export { type Logger as BaseLogger, createLogger, logger } from './logger.ts'
 
 export { options } from './options.ts'
-export type { Options } from './options.ts'
+export type { Options, ThemeOption } from './options.ts'
 
 export * from './syncCodec.ts'
 

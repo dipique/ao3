@@ -2,9 +2,12 @@
   --stack-gap: 10px;
   --safe-area-gap: env(safe-area-inset-bottom);
 
-  --toast-bg: #fff;
-  --toast-fg: #000;
-  --toast-border-color: #eaeaea;
+  /* Custom properties inherit through the shadow boundary, so these pick up the
+     floating-surface palette the content script stamps on <html>. The fallbacks
+     are the old hard-coded values, which is what the options page still gets. */
+  --toast-bg: var(--ao3e-surface-bg, #fff);
+  --toast-fg: var(--ao3e-surface-fg, #000);
+  --toast-border-color: var(--ao3e-surface-border, #eaeaea);
 
   --toast-width: 320px;
   position: fixed;

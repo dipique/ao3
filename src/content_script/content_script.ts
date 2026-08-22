@@ -3,6 +3,7 @@ import { debounce } from '@antfu/utils'
 import { ADDON_CLASS, api, isExtensionContextValid, logger, options, toast } from '#common'
 
 import { setMenusEnabled } from './contextTrigger.tsx'
+import { applySurfaceTheme } from './theme.ts'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
 
@@ -49,6 +50,13 @@ async function run() {
   else {
     await waitForReady()
   }
+
+  // The floating-surface palette. Our menu/popover/toast are drawn entirely by
+  // us, so they have to be told which skin they're sitting on — and that reads
+  // the body's computed background, so it can only be measured once the body
+  // exists and AO3's stylesheet has applied. Hence here, not at the top of the
+  // run: at `document_start` there is no body to sample.
+  applySurfaceTheme(opts.theme?.chosen)
 
   await Promise.all(enabled.map(u => u.ready()))
 }

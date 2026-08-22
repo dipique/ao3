@@ -1,3 +1,52 @@
+/* ---------------------------------------------------------------------------
+   Floating surface palette.
+
+   The menu, the popover and the toast are the only things we draw that AO3's
+   skin doesn't reach: they're appended to `document.body` (the toast into a
+   shadow root) and painted entirely by us, so left hard-coded they'd be a white
+   card sitting on a black page. Everything about their colour lives in these
+   tokens, and `content_script/theme.ts` stamps `data-ao3e-theme` on <html> to
+   pick a set.
+
+   Deliberately NOT a `prefers-color-scheme` query: an AO3 skin is chosen per
+   account and has nothing to say about the OS setting, so a reader on a dark
+   skin and a light desktop -- or the reverse -- would get the wrong one. The
+   theme module samples the page's real background instead.
+   --------------------------------------------------------------------------- */
+:root {
+  --ao3e-surface-bg: #fff;
+  --ao3e-surface-fg: #111;
+  --ao3e-surface-border: rgba(0, 0, 0, 0.18);
+  --ao3e-surface-divider: rgba(0, 0, 0, 0.12);
+  --ao3e-surface-hover: rgba(0, 0, 0, 0.07);
+  --ao3e-surface-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  --ao3e-surface-accent: #1b6ec2;
+  --ao3e-surface-accent-fg: #fff;
+  --ao3e-surface-danger: #9a0000;
+  --ao3e-field-bg: #fff;
+  --ao3e-field-fg: #111;
+  --ao3e-field-border: rgba(0, 0, 0, 0.3);
+}
+
+:root[data-ao3e-theme='dark'] {
+  --ao3e-surface-bg: #23262b;
+  --ao3e-surface-fg: #e9e7e4;
+  --ao3e-surface-border: rgba(255, 255, 255, 0.16);
+  --ao3e-surface-divider: rgba(255, 255, 255, 0.14);
+  --ao3e-surface-hover: rgba(255, 255, 255, 0.09);
+  /* A shadow can't separate a dark card from a dark page, so the border does
+     the work and the shadow only adds depth. */
+  --ao3e-surface-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+  --ao3e-surface-accent: #6cb2f5;
+  --ao3e-surface-accent-fg: #10151b;
+  /* Full-strength #9a0000 is unreadable on a dark card; this keeps the "this is
+     destructive" reading at a contrast ratio that actually passes. */
+  --ao3e-surface-danger: #ff9a90;
+  --ao3e-field-bg: #16191d;
+  --ao3e-field-fg: #e9e7e4;
+  --ao3e-field-border: rgba(255, 255, 255, 0.26);
+}
+
 /* Work images max width */
 #workskin img {
   max-width: 100%;
@@ -201,7 +250,7 @@ dd.finish-at {
 
 .AO3E--hide-works--exclude.AO3E--hide-works--exclude-active {
   opacity: 1;
-  color: #9a0000;
+  color: var(--ao3e-surface-danger);
 }
 
 .AO3E--hide-works--exclude:disabled {
@@ -312,11 +361,11 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   align-items: center;
   gap: 0.35em;
   padding: 0.45em 0.8em !important;
-  border: 1px solid rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid var(--ao3e-surface-border) !important;
   border-radius: 999px !important;
-  background: #fff !important;
-  color: #111 !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+  background: var(--ao3e-surface-bg) !important;
+  color: var(--ao3e-surface-fg) !important;
+  box-shadow: var(--ao3e-surface-shadow) !important;
   cursor: pointer;
   font-size: 0.875rem;
   line-height: 1;
@@ -328,7 +377,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--filter-toolbar--button:hover,
 .AO3E--filter-toolbar--button:focus {
-  border-color: rgba(0, 0, 0, 0.45) !important;
+  border-color: var(--ao3e-field-border) !important;
 }
 
 .AO3E--filter-toolbar--button[aria-pressed="true"] {
@@ -398,11 +447,11 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   max-width: min(20em, 90vw);
   padding: 0.25em 0;
   margin: 0;
-  border: 1px solid rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--ao3e-surface-border);
   border-radius: 0.5em;
-  background: #fff;
-  color: #111;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  background: var(--ao3e-surface-bg);
+  color: var(--ao3e-surface-fg);
+  box-shadow: var(--ao3e-surface-shadow);
   font-size: 0.875rem;
   line-height: 1.3;
 }
@@ -427,7 +476,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--menu--item:hover,
 .AO3E--menu--item:focus {
-  background: rgba(0, 0, 0, 0.07) !important;
+  background: var(--ao3e-surface-hover) !important;
 }
 
 .AO3E--menu--item:disabled {
@@ -437,7 +486,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--menu--item.AO3E--menu--active {
   font-weight: 600;
-  box-shadow: inset 2px 0 0 #1b6ec2 !important;
+  box-shadow: inset 2px 0 0 var(--ao3e-surface-accent) !important;
 }
 
 /* The active behaviour is rendered disabled (you can't re-pick the current
@@ -449,15 +498,15 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 }
 
 .AO3E--menu--item.AO3E--menu--active .AO3E--menu--icon {
-  color: #1b6ec2;
+  color: var(--ao3e-surface-accent);
 }
 
 .AO3E--menu--item.AO3E--menu--danger .AO3E--menu--icon {
-  color: #9a0000;
+  color: var(--ao3e-surface-danger);
 }
 
 .AO3E--menu--item.AO3E--menu--active.AO3E--menu--danger {
-  box-shadow: inset 2px 0 0 #9a0000 !important;
+  box-shadow: inset 2px 0 0 var(--ao3e-surface-danger) !important;
 }
 
 .AO3E--menu--icon {
@@ -477,7 +526,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--menu--separator {
   height: 1px;
   margin: 0.25em 0;
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--ao3e-surface-divider);
 }
 
 /* Scope groups. A menu on a search page offers rows that rewrite a saved setting
@@ -485,7 +534,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
    last very differently, so each group says which it is. The heading doubles as
    the group's divider, so no separator is drawn between groups. */
 .AO3E--menu--group:not(:first-child) {
-  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  border-top: 1px solid var(--ao3e-surface-divider);
   margin-top: 0.25em !important;
   padding-top: 0.25em !important;
 }
@@ -513,25 +562,24 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   z-index: 2147483600;
   max-width: min(24em, 90vw);
   padding: 0.6em 0.8em;
-  border: 1px solid rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--ao3e-surface-border);
   border-radius: 0.5em;
-  background: #fff;
-  color: #111;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  background: var(--ao3e-surface-bg);
+  color: var(--ao3e-surface-fg);
+  box-shadow: var(--ao3e-surface-shadow);
   font-size: 0.875rem;
   line-height: 1.4;
 }
 
-/* The "Show Symbol Key" popover holds a whole help fragment, so it's wider and
-   scrolls rather than clipping. */
-.AO3E--popover:has(.AO3E--symbols-key) {
-  max-width: min(42em, 92vw);
+/* Size is declared by the caller (see `PopoverOptions.size`), not sniffed from
+   the content: `form` for fields and buttons, `wide` for a whole help fragment
+   that scrolls rather than clipping. */
+.AO3E--popover--form {
+  max-width: min(20em, 92vw);
 }
 
-/* The ongoing-mark editor: a form in a popover, so it needs a little more room
-   than a hover hint and its own vertical rhythm. */
-.AO3E--popover:has(.AO3E--progress-editor) {
-  max-width: min(20em, 92vw);
+.AO3E--popover--wide {
+  max-width: min(42em, 92vw);
 }
 
 .AO3E--progress-editor {
@@ -570,10 +618,10 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   width: 100%;
   margin: 0;
   padding: 0.3em 0.4em;
-  border: 1px solid rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--ao3e-field-border);
   border-radius: 0.3em;
-  background: #fff;
-  color: #111;
+  background: var(--ao3e-field-bg);
+  color: var(--ao3e-field-fg);
   font: inherit;
   font-size: 1em;
 }
@@ -586,7 +634,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--progress-editor--preset {
   padding: 0.15em 0.5em;
-  border: 1px solid rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--ao3e-field-border);
   border-radius: 1em;
   background: transparent;
   color: inherit;
@@ -597,7 +645,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 }
 
 .AO3E--progress-editor--preset:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--ao3e-surface-hover);
 }
 
 .AO3E--progress-editor--actions {
@@ -609,7 +657,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--progress-editor--cancel,
 .AO3E--progress-editor--save {
   padding: 0.3em 0.9em;
-  border: 1px solid rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--ao3e-field-border);
   border-radius: 0.3em;
   background: transparent;
   color: inherit;
@@ -620,8 +668,8 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--progress-editor--save {
   border-color: transparent;
-  background: #0369a1;
-  color: #fff;
+  background: var(--ao3e-surface-accent);
+  color: var(--ao3e-surface-accent-fg);
   font-weight: 700;
 }
 
@@ -685,7 +733,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--indicator--exclude,
 .AO3E--indicator--hide {
-  color: #9a0000;
+  color: var(--ao3e-surface-danger);
 }
 
 .AO3E--indicator--invert {
@@ -1146,7 +1194,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--search-view--toggle-exclude.AO3E--search-view--active {
   opacity: 1;
-  color: #9a0000;
+  color: var(--ao3e-surface-danger);
 }
 
 /* Per-blurb action button (e.g. "Mark as Read"), added to the blurb's actions. */

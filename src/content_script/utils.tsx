@@ -58,6 +58,10 @@ export function getTagFromElement(tagElement: Element): Tag {
 }
 
 export function isDarkTheme(): boolean {
+  // At `document_start` there is no body yet. "Not dark" is the right answer for
+  // a page we cannot measure — it matches AO3's default skin.
+  if (!document.body)
+    return false
   const bgColor = window.getComputedStyle(document.body).backgroundColor
   if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
     return isDark(bgColor)

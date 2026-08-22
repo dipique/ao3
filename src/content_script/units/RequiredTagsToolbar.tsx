@@ -123,7 +123,7 @@ function showSymbolsKey(): void {
     .then(content => openPopover(content, {
       x: window.innerWidth / 2,
       y: Math.max(48, window.innerHeight / 4),
-    }))
+    }, { size: 'wide', label: 'Symbols key' }))
     .catch(() => toast('Could not load the symbols key.', { type: 'error' }))
 }
 

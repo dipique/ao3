@@ -142,6 +142,7 @@ export function openProgressEditor(opts: ProgressEditorOptions): void {
 
   openPopover(body, opts.at, {
     persistent: true,
+    size: 'form',
     label: `Ongoing progress for ${opts.title}`,
     autoFocus: chapterInput,
   })
