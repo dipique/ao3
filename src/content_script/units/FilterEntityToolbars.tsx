@@ -11,7 +11,7 @@ import MdiStar from '~icons/mdi/star.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markGroup, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markGroup, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -228,18 +228,46 @@ function publishedChapters(link: HTMLElement): number | null {
 }
 
 /**
- * The chapter open on a work page, from `#chapters > div.chapter`'s
- * `id="chapter-N"`. Viewing the entire work renders every chapter, so the
- * highest one is the one you'd have read to. Null anywhere else.
+ * The chapter open on a work page. Null anywhere else.
+ *
+ * Two different pages have to be told apart, because they number chapters
+ * differently:
+ *
+ * - **Viewing the whole work** renders every chapter, and `div.chapter`'s
+ *   `id="chapter-N"` counts them, so the highest is both the published count and
+ *   the chapter you'd have read to.
+ * - **Viewing one chapter** renders exactly one `div.chapter`, and it is always
+ *   `id="chapter-1"` — the id numbers what is *on the page*, not what it is in
+ *   the work. Reading chapter 7 alone would report chapter 1, quietly recording
+ *   the wrong place every time. The chapter dropdown is the only thing on that
+ *   page that names the work's own chapter number, in its option text
+ *   ("7. Some Title"), so that is what we read.
+ *
+ * Only the server-rendered `selected` *attribute* counts, never the live
+ * selection: changing the dropdown without submitting leaves you looking at the
+ * chapter you were already on.
  */
 function currentChapter(): number | null {
-  let highest = 0
-  for (const chapter of document.querySelectorAll('#chapters > div.chapter')) {
-    const n = Number(chapter.id.replace(/\D/g, ''))
-    if (Number.isFinite(n) && n > highest)
-      highest = n
+  const rendered = document.querySelectorAll('#chapters > div.chapter')
+
+  // More than one chapter on the page means the whole work is being shown.
+  if (rendered.length > 1) {
+    let highest = 0
+    for (const chapter of rendered) {
+      const n = Number(chapter.id.replace(/\D/g, ''))
+      if (Number.isFinite(n) && n > highest)
+        highest = n
+    }
+    return highest > 0 ? highest : null
   }
-  return highest > 0 ? highest : null
+
+  const option = document.querySelector<HTMLOptionElement>('#chapter_index option[selected]')
+  const numbered = Number(option?.textContent?.match(/^\s*(\d+)\s*\./)?.[1])
+  if (Number.isFinite(numbered) && numbered > 0)
+    return numbered
+
+  // A single-chapter work has no dropdown; one rendered chapter is chapter one.
+  return rendered.length === 1 ? 1 : null
 }
 
 /** The work's title as this page shows it, for the editor's heading. */
@@ -269,9 +297,9 @@ abstract class FilterEntityToolbar extends Unit {
    * id and the link the menu/indicator hang off. Works use the blurb title;
    * series use each series link.
    */
-  protected links(): { id: string, link: HTMLElement }[] {
+  protected links(): { id: string, link: HTMLElement, clickToOpen?: boolean }[] {
     const idRe = new RegExp(`^/${this.kind}/(\\d+)(?:/|$)`)
-    const out: { id: string, link: HTMLElement }[] = []
+    const out: { id: string, link: HTMLElement, clickToOpen?: boolean }[] = []
     const selector = this.kind === 'works'
       ? '.blurb .header h4.heading a[href*="/works/"]'
       : 'a[href*="/series/"]'
@@ -292,10 +320,10 @@ abstract class FilterEntityToolbar extends Unit {
   override async ready(): Promise<void> {
     this.entries.length = 0
 
-    for (const { id, link } of this.links()) {
+    for (const { id, link, clickToOpen } of this.links()) {
       const entry: EntityEntry = { link, id, indicator: null }
       this.entries.push(entry)
-      attachMenuTrigger(link, () => this.buildMenu(id, link))
+      attachMenuTrigger(link, () => this.buildMenu(id, link), { clickToOpen })
       this.syncIndicator(entry)
     }
 
@@ -466,6 +494,7 @@ abstract class FilterEntityToolbar extends Unit {
       title: entityTitle(link),
       progress: progressFor(marks, markId, id),
       published: publishedChapters(link),
+      current: currentChapter(),
       at: lastFloatingPoint(),
       onSave: entry => void this.saveProgress(id, markId, entry),
     })
@@ -710,7 +739,12 @@ abstract class FilterEntityToolbar extends Unit {
     const behavior = ruleBehavior(this.options.rules.filters, entityKey(this.noun, id))
     if (behavior)
       states.push(behavior)
-    if (this.markEnabled() && savedState.get(id)?.saved)
+    // A work carrying a progress mark is kept on Marked for Later deliberately
+    // (see `ensureSaved`), so the clock would be on every one of them saying
+    // something the calendar already implies. Drop it and let the mark speak.
+    const ongoing = this.marksEnabled()
+      && progressMarkIds(this.options.workMarks.marks).some(markId => markSets.get(markId)?.has(id))
+    if (this.markEnabled() && !ongoing && savedState.get(id)?.saved)
       states.push(markIndicatorState(SAVED_MARK))
     if (this.marksEnabled()) {
       for (const [markId, ids] of markSets) {
@@ -722,19 +756,25 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   /**
-   * Hover text for the marks that have something to say about *this* work —
-   * only the progress marks, whose indicator otherwise reads "Ongoing" and
-   * leaves the reader to open the work to find out whether it's worth opening.
+   * What the marks with per-work state have to say about *this* work: hover text
+   * and indicator colour, both derived from the same readiness. Only the
+   * progress marks have any — every other indicator means one thing everywhere.
    *
-   * Undefined (so the plain label stands) whenever the chapter count can't be
-   * found: half a hint is worse than none, and `entry.link` may be detached —
-   * the module-scoped registry is shared with the search view, which resets it.
+   * Both are left out (so the mark's own label and colour stand) whenever the
+   * chapter count can't be found: half a hint is worse than none, and
+   * `entry.link` may be detached, since the module-scoped registry is shared
+   * with the search view, which resets it.
    */
-  private markTitles(entry: EntityEntry): Record<MarkId, string> | undefined {
+  private markOverrides(entry: EntityEntry): {
+    titles?: Record<MarkId, string>
+    colors?: Record<MarkId, string>
+  } {
     if (!this.marksEnabled())
-      return undefined
+      return {}
     const { marks } = this.options.workMarks
+    const today = todayEpochDays()
     let titles: Record<MarkId, string> | undefined
+    let colors: Record<MarkId, string> | undefined
     for (const markId of progressMarkIds(marks)) {
       const progress = progressFor(marks, markId, entry.id)
       if (!progress)
@@ -744,16 +784,21 @@ abstract class FilterEntityToolbar extends Unit {
         continue
       const label = marks[markId]?.label || markId
       titles ??= {}
-      titles[markId] = `${label}\n${describeProgress(progress, published, todayEpochDays())}`
+      titles[markId] = `${label}\n${describeProgress(progress, published, today)}`
+      const color = readinessColor(readiness(progress, published, today), marks[markId]?.color)
+      if (color) {
+        colors ??= {}
+        colors[markId] = color
+      }
     }
-    return titles
+    return { titles, colors }
   }
 
   protected syncIndicator(entry: EntityEntry): void {
     const next = buildIndicators(this.computeStates(entry.id), {
       highlightColor: this.defaultColor,
       marks: this.options.workMarks.marks,
-      titles: this.markTitles(entry),
+      ...this.markOverrides(entry),
     })
     if (next)
       attachMenuTrigger(next, () => this.buildMenu(entry.id, entry.link), { indicator: true, link: entry.link })
@@ -836,9 +881,51 @@ abstract class FilterEntityToolbar extends Unit {
 const workEntries: EntityEntry[] = []
 const seriesEntries: EntityEntry[] = []
 
-/** The work id from a `/works/:id` URL, or null when we're not on a work page. */
+/**
+ * The work id for the page we are on, or null when this isn't a work page.
+ *
+ * Usually the URL says it. But AO3 also serves a chapter at its own permalink —
+ * `/chapters/:id`, carrying no work id and *not* redirecting to the `/works/`
+ * form — and there the URL knows nothing, so the id has to come out of the
+ * markup. Without this the work menu simply never appeared on those pages, while
+ * the author menu (which reads its own link) went on working, so the page looked
+ * half-decorated rather than broken.
+ *
+ * Every fallback below sits in a container that only exists on a work page, so a
+ * listing can't match one by accident, and each points at *this* work rather
+ * than one it merely links to (a series, or an "inspired by" work).
+ */
 function workPageId(): string | null {
-  return location.pathname.match(/^\/works\/(\d+)(?:\/|$)/)?.[1] ?? null
+  const fromUrl = location.pathname.match(/^\/works\/(\d+)(?:\/|$)/)?.[1]
+  if (fromUrl)
+    return fromUrl
+
+  const selectors = [
+    // The chapter's own permalink, on its heading.
+    '#chapters .chapter h3.title a[href*="/works/"]',
+    // The chapter-index jump form.
+    '#chapter_index form[action*="/works/"]',
+    // The work navigation's Entire Work / Share / Comments rows.
+    'ul.work.navigation a[href*="/works/"]',
+  ]
+  for (const selector of selectors) {
+    for (const el of document.querySelectorAll(selector)) {
+      const raw = el.getAttribute('href') ?? el.getAttribute('action')
+      if (!raw)
+        continue
+      let path: string
+      try {
+        path = new URL(raw, location.origin).pathname
+      }
+      catch {
+        continue
+      }
+      const id = path.match(/^\/works\/(\d+)(?:\/|$)/)?.[1]
+      if (id)
+        return id
+    }
+  }
+  return null
 }
 
 /**
@@ -929,8 +1016,11 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     const found = super.links()
     const title = workPageTitle(this.root)
     const id = workPageId()
+    // The work page's own title opens on a plain click as well as the usual
+    // right-click/long-press. Unlike a blurb's title it isn't a link, so there
+    // is no navigation to suppress and nothing else a click could have meant.
     if (title && id)
-      found.push({ id, link: title })
+      found.push({ id, link: title, clickToOpen: true })
     return found
   }
 

@@ -4,8 +4,8 @@ import type { FacetKey, SortKey } from './engine.ts'
 
 /**
  * Local (never-synced) per-application UI preferences for the search view: which
- * facet groups are collapsed, the user's custom facet ordering, and the last sort
- * field/direction. Persisted in `browser.storage.local` via {@link cache}, keyed
+ * facet groups are collapsed, the user's custom facet ordering, the last sort
+ * field/direction, and how wide the filter column was dragged. Persisted in `browser.storage.local` via {@link cache}, keyed
  * by an app id so each place the view is used (e.g. `marked-for-later`) keeps its
  * own layout. Deliberately *not* part of the synced options — layout is a
  * per-device convenience, not a setting worth carrying across machines.
@@ -23,7 +23,18 @@ export interface SearchViewPrefs {
    * every single time.
    */
   readiness?: string[]
+  /**
+   * Width of the filter column in pixels, as last dragged. Pixels rather than
+   * `em` because the drag is in pixels and round-tripping through a font size
+   * that AO3 skins are free to change would make the handle drift from the
+   * pointer. Absent means the default, and the view clamps whatever it reads
+   * against the space actually available.
+   */
+  sidebarWidth?: number
 }
+
+/** Filter-column width bounds, in pixels. */
+export const SIDEBAR_WIDTH = { min: 160, max: 640, default: 240 }
 
 /** What the Readiness facet is set to on a first-ever open: only what's ready. */
 export const DEFAULT_READINESS: string[] = ['Ready']

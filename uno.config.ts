@@ -188,6 +188,7 @@ export default {
     'i-mdi-book-check',
     'i-mdi-heart',
     'i-mdi-thumb-up',
+    'i-mdi-chili-hot',
     'i-mdi-sleep',
     'i-mdi-thumb-down',
     'i-mdi-emoticon-sick',

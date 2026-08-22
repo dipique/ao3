@@ -33,12 +33,12 @@ function marksWith(entries = {}) {
 describe('the mark table', () => {
   test('the finer dispositions all behave as read', () => {
     const marks = createDefaultMarks()
-    for (const id of ['favorite', 'good', 'boring', 'bad', 'gross'])
+    for (const id of ['favorite', 'good', 'hot', 'boring', 'bad', 'gross'])
       assert.equal(markRoot(marks, id), READ_MARK, `${id} should alias read`)
     assert.equal(markRoot(marks, READ_MARK), READ_MARK, 'read is its own root')
     assert.deepEqual(
       markGroup(marks, 'favorite'),
-      ['read', 'favorite', 'good', 'boring', 'bad', 'gross', 'continue'],
+      ['read', 'bad', 'boring', 'gross', 'good', 'hot', 'favorite', 'continue'],
       'the whole group, in table order — `continue` is in it too, so choosing '
       + 'one replaces the other; what it does *not* share is the unsaving',
     )
@@ -48,7 +48,23 @@ describe('the mark table', () => {
     const marks = createDefaultMarks()
     assert.ok(markIsLocal(marks, 'favorite'))
     assert.ok(!markIsLocal(marks, SAVED_MARK), 'Marked for Later lives on AO3, not here')
-    assert.deepEqual(localMarkIds(marks), ['read', 'favorite', 'good', 'boring', 'bad', 'gross', 'continue'])
+    // Order is the menu's order, not an implementation detail: `read`, then its
+    // finer readings worst to best, then the one that isn't a verdict.
+    assert.deepEqual(
+      localMarkIds(marks),
+      ['read', 'bad', 'boring', 'gross', 'good', 'hot', 'favorite', 'continue'],
+    )
+  })
+
+  test('hot behaves exactly as good does', () => {
+    // Added as a peer of the other verdicts, so nothing about it should be
+    // special — same root, same group, same inherited hiding.
+    const marks = createDefaultMarks()
+    assert.equal(markRoot(marks, 'hot'), markRoot(marks, 'good'))
+    assert.deepEqual(markGroup(marks, 'hot'), markGroup(marks, 'good'))
+    assert.equal(markHidesResults(marks, 'hot'), markHidesResults(marks, 'good'))
+    assert.equal(marks.hot.hideSearchResult, marks.good.hideSearchResult)
+    assert.ok(markIsLocal(marks, 'hot'), 'it holds its own ids')
   })
 
   test('hiding is inherited from the group root', () => {

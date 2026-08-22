@@ -24,8 +24,8 @@ import { Unit } from '#content_script/Unit.js'
 const HANDLE_CLASS = `${ADDON_CLASS}--reader-handle`
 const LEFT_HANDLE_CLASS = `${ADDON_CLASS}--reader-handle-left`
 const RIGHT_HANDLE_CLASS = `${ADDON_CLASS}--reader-handle-right`
-/** Body class set while a handle is being dragged (kills text selection page-wide). */
-const RESIZING_CLASS = `${ADDON_CLASS}--reader-resizing`
+/** Body class set while any of our handles is being dragged (kills text selection page-wide). */
+const RESIZING_CLASS = `${ADDON_CLASS}--resizing`
 
 /** localStorage keys. Namespaced so they don't collide with AO3's own storage. */
 const LS_SCALE = 'ao3e:reader:fontScale'

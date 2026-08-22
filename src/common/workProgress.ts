@@ -32,6 +32,31 @@ export const READINESS_LABELS: Record<Readiness, string> = {
   caughtUp: 'Caught up',
 }
 
+/**
+ * Indicator colour per state, or null to keep the mark's own colour.
+ *
+ * A progress mark is the one mark whose indicator means something different
+ * work to work: "open this now" and "nothing here yet" are opposite answers
+ * wearing the same calendar. Both non-ready states are ones you'd otherwise have
+ * to hover to discover, and both show up unhidden in the Marked-for-Later view,
+ * so they say so in colour:
+ *
+ * - `ready` keeps the mark's colour — this is the state the mark is *for*.
+ * - `waiting` is amber: deliberately parked, come back later.
+ * - `caughtUp` is the muted grey the `read` mark uses, because that is what it
+ *   amounts to until the author posts again — dormant rather than pending.
+ */
+export const READINESS_COLORS: Record<Readiness, string | null> = {
+  ready: null,
+  waiting: '#d97706',
+  caughtUp: '#6b7280',
+}
+
+/** The colour an indicator should paint for one state, given the mark's own. */
+export function readinessColor(state: Readiness, base: string | undefined): string | undefined {
+  return READINESS_COLORS[state] ?? base
+}
+
 // ---------------------------------------------------------------------------
 // Days since the epoch. A wait-until date is a calendar decision ("check back
 // in March"), so it's stored as a day number rather than a timestamp: computed
@@ -158,7 +183,7 @@ export function describeWaitUntil(progress: WorkProgress | undefined, today: num
   if (waitUntil === undefined)
     return 'Ready (no Wait Until date set)'
   return waitUntil > today
-    ? `Not Ready (future Wait Until date of ${formatEpochDays(waitUntil)})`
+    ? `Not Ready (wait until ${formatEpochDays(waitUntil)})`
     : `Ready (passed Wait Until date ${formatEpochDays(waitUntil)})`
 }
 

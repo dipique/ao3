@@ -472,6 +472,13 @@ export interface IndicatorOptions {
    * out, so a half-built hint never replaces a correct one.
    */
   titles?: Record<MarkId, string>
+  /**
+   * Colour for a mark instead of its configured one, for the same reason as
+   * {@link titles}: a mark carrying per-work state can mean different things on
+   * different works, and the ongoing mark's readiness is the case in point.
+   * Falls back to the mark's own colour.
+   */
+  colors?: Record<MarkId, string>
 }
 
 /** One indicator's rendered parts, whatever kind of state it came from. */
@@ -507,7 +514,7 @@ function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] 
       suffix: `mark  ${INDICATOR_CLASS}--mark-${id}`,
       label: opts.titles?.[id] || config.label || id,
       icon: markIcon(config.icon),
-      color: config.color,
+      color: opts.colors?.[id] || config.color,
     })
   }
   return out

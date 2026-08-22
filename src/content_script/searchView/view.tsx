@@ -26,9 +26,11 @@ import {
   sortWorks,
 } from './engine.ts'
 import { registerFacetBridge } from './facetBridge.ts'
-import { DEFAULT_READINESS } from './prefs.ts'
+import { DEFAULT_READINESS, SIDEBAR_WIDTH } from './prefs.ts'
 
 const ROOT = `${ADDON_CLASS}--search-view`
+/** Body class while the filter column is being dragged — see ReaderMode, same idea. */
+const RESIZING_CLASS = `${ADDON_CLASS}--resizing`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
 const HIDDEN_CLASS = cx('hidden')
 const ACTIVE_CLASS = cx('active')
@@ -249,6 +251,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   const FACET_FILTER_THRESHOLD = 10
   let facetGroups: FacetGroupRef[] = []
 
+  // Filled in once the tree below is built; every use guards for that, because
+  // `clampSidebar` runs one line later to seed the width.
+  let layoutEl: HTMLElement | null = null
+  let sidebarWidth = clampSidebar(config.prefs?.sidebarWidth ?? SIDEBAR_WIDTH.default)
+
   /** Snapshot the persistable layout prefs (collapse/order/sort) to the host. */
   function persist(): void {
     if (!config.onPrefsChange)
@@ -264,6 +271,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       sort: state.sort,
       dir: state.dir,
       readiness: [...state.facets.readiness.include],
+      sidebarWidth,
     })
   }
 
@@ -272,6 +280,102 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   const resultsOl = (<ol class={`work index group ${cx('results')}`} />) as HTMLElement as HTMLOListElement
   const facetsEl = (<div class={cx('facets')} />) as HTMLElement
   const pagerEl = (<nav class={cx('pager')} aria-label="Results pages" />) as HTMLElement
+
+  // ---- Filter-column width -------------------------------------------------
+  // The column is a grid track, so resizing is a matter of rewriting one custom
+  // property; the handle is a real grid item sitting in the gap between the two
+  // columns rather than something floated over them, so nothing can end up
+  // underneath it.
+  const resizerEl = (
+    <div
+      class={cx('resizer')}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Filter column width"
+      tabindex="0"
+      title="Drag to resize the filters — double-click to reset"
+    />
+  ) as HTMLElement
+
+  /** Keep a width inside its bounds — and inside the space actually available. */
+  function clampSidebar(px: number): number {
+    const available = layoutEl?.getBoundingClientRect().width ?? 0
+    // Leave the results at least as much room as the filters, so dragging can
+    // never squeeze the works into a strip. Before first layout `available` is
+    // 0, in which case only the fixed bounds apply.
+    const ceiling = available > 0
+      ? Math.min(SIDEBAR_WIDTH.max, available * 0.6)
+      : SIDEBAR_WIDTH.max
+    return Math.round(Math.min(Math.max(px, SIDEBAR_WIDTH.min), Math.max(ceiling, SIDEBAR_WIDTH.min)))
+  }
+
+  /** Write the width to the grid and tell assistive tech where the divider sits. */
+  function applySidebarWidth(): void {
+    if (!layoutEl)
+      return
+    layoutEl.style.setProperty('--ao3e-sidebar-width', `${sidebarWidth}px`)
+    resizerEl.setAttribute('aria-valuenow', String(sidebarWidth))
+    resizerEl.setAttribute('aria-valuemin', String(SIDEBAR_WIDTH.min))
+    resizerEl.setAttribute('aria-valuemax', String(SIDEBAR_WIDTH.max))
+  }
+
+  /** Set the width, apply it, and persist — the one path that changes it. */
+  function setSidebarWidth(px: number): void {
+    const next = clampSidebar(px)
+    if (next === sidebarWidth)
+      return
+    sidebarWidth = next
+    applySidebarWidth()
+    persist()
+  }
+
+  resizerEl.addEventListener('pointerdown', (e: PointerEvent) => {
+    // Only the primary button, and never while the columns are stacked — there
+    // is no width to drag when the filters sit above the results.
+    if (e.button !== 0 || !layoutEl || getComputedStyle(resizerEl).display === 'none')
+      return
+    e.preventDefault()
+    resizerEl.setPointerCapture(e.pointerId)
+    document.body.classList.add(RESIZING_CLASS)
+    const left = layoutEl.getBoundingClientRect().left
+
+    const onMove = (ev: PointerEvent): void => {
+      // Width from the layout's left edge to the pointer, so the handle tracks
+      // the cursor rather than drifting by however far into it you grabbed.
+      sidebarWidth = clampSidebar(ev.clientX - left)
+      applySidebarWidth()
+    }
+    const onUp = (): void => {
+      if (resizerEl.hasPointerCapture(e.pointerId))
+        resizerEl.releasePointerCapture(e.pointerId)
+      document.body.classList.remove(RESIZING_CLASS)
+      resizerEl.removeEventListener('pointermove', onMove)
+      resizerEl.removeEventListener('pointerup', onUp)
+      resizerEl.removeEventListener('lostpointercapture', onUp)
+      // Persist once, at the end — a write per pointermove would hammer storage.
+      persist()
+    }
+    resizerEl.addEventListener('pointermove', onMove)
+    resizerEl.addEventListener('pointerup', onUp)
+    resizerEl.addEventListener('lostpointercapture', onUp)
+  })
+
+  // A divider you can only drag is unusable without a pointer, so the arrows
+  // move it too and Home puts it back.
+  resizerEl.addEventListener('keydown', (e: KeyboardEvent) => {
+    const step = e.shiftKey ? 64 : 16
+    if (e.key === 'ArrowLeft')
+      setSidebarWidth(sidebarWidth - step)
+    else if (e.key === 'ArrowRight')
+      setSidebarWidth(sidebarWidth + step)
+    else if (e.key === 'Home')
+      setSidebarWidth(SIDEBAR_WIDTH.default)
+    else
+      return
+    e.preventDefault()
+  })
+
+  resizerEl.addEventListener('dblclick', () => setSidebarWidth(SIDEBAR_WIDTH.default))
 
   // --- Controls -------------------------------------------------------------
 
@@ -993,6 +1097,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
           {resetBtn}
           {facetsEl}
         </aside>
+        {resizerEl}
         <div class={cx('main')}>
           {resultsOl}
           {pagerEl}
@@ -1000,6 +1105,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       </div>
     </div>
   ) as HTMLElement
+
+  layoutEl = el.querySelector<HTMLElement>(`.${cx('layout')}`)
+  applySidebarWidth()
 
   return { el, update, setUpdating, getState }
 }

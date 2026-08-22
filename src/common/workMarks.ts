@@ -106,20 +106,27 @@ export const READ_MARK: MarkId = 'read'
 export const SAVED_MARK: MarkId = 'saved'
 
 /**
- * The marks a fresh install gets. `read` is the root disposition; the five below
+ * The marks a fresh install gets. `read` is the root disposition; the six below
  * it are the same disposition said more precisely, so they alias it. `continue`
  * aliases it too, but inverts it — the work isn't done, it's waiting — and so
  * carries progress. `saved` carries no ids: it only says how the Marked for
  * Later state is drawn.
+ *
+ * **Insertion order is menu and indicator order** ({@link markIds} is
+ * `Object.keys`), so this list is a presentation decision as much as a data one:
+ * `read` first, then its finer readings running worst to best, then `continue`,
+ * which is the one that isn't a verdict at all. `saved` is drawn from AO3's own
+ * list rather than ours, and the menu gives it its own section regardless.
  */
 export function createDefaultMarks(): Record<MarkId, MarkConfig> {
   return {
     read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
-    favorite: { icon: 'favorite', label: 'Favorite', color: '#c2185b', triggerAlias: READ_MARK, items: '' },
-    good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: READ_MARK, items: '' },
-    boring: { icon: 'boring', label: 'Boring', color: '#8a8a8a', triggerAlias: READ_MARK, items: '' },
     bad: { icon: 'bad', label: 'Bad', color: '#b45309', triggerAlias: READ_MARK, items: '' },
+    boring: { icon: 'boring', label: 'Boring', color: '#8a8a8a', triggerAlias: READ_MARK, items: '' },
     gross: { icon: 'gross', label: 'Gross', color: '#4d7c0f', triggerAlias: READ_MARK, items: '' },
+    good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: READ_MARK, items: '' },
+    hot: { icon: 'hot', label: 'Hot', color: '#d0342c', triggerAlias: READ_MARK, items: '' },
+    favorite: { icon: 'favorite', label: 'Favorite', color: '#c2185b', triggerAlias: READ_MARK, items: '' },
     continue: {
       icon: 'continue',
       label: 'Ongoing',

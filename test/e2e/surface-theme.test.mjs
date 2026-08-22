@@ -17,6 +17,16 @@ const SEED = {
     enabled: true,
     marks: {
       read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
+      continue: {
+        icon: 'continue',
+        label: 'Ongoing',
+        color: '#0369a1',
+        triggerAlias: 'read',
+        tracksProgress: true,
+        hideSearchResult: true,
+        items: '',
+        progress: '',
+      },
       saved: { icon: 'saved', label: 'Marked for later', color: '#2f8f4e' },
     },
   },
@@ -25,7 +35,14 @@ const SEED = {
 /** A listing whose body background is `background` — the skin we want sampled. */
 function page(background) {
   return `<!doctype html>
-<html><head><title>Works</title><style>body { background-color: ${background}; }</style></head>
+<html><head><title>Works</title><style>
+  body { background-color: ${background}; }
+  /* AO3's own skin, verbatim (1_site_screen_.css:867,882). The focus rule is
+     (0,1,1) and outranks a single class, which is exactly the collision our
+     field styling has to win. */
+  input, textarea { width: 100%; border: 1px solid #bbb; box-shadow: inset 0 1px 2px #ccc; }
+  input:focus, select:focus, textarea:focus { background: #f3efec; }
+</style></head>
 <body class="logged-in">
   <div id="header"><ul class="primary navigation"><li class="dropdown"></li></ul></div>
   <div id="main">
@@ -141,5 +158,82 @@ describe('the floating surface palette', { skip }, () => {
     assert.equal(theme, 'dark', 'the chosen theme beats the sampled skin')
     assert.ok(opened, 'the menu opened')
     assert.ok(brightness(background) < 80, `menu background should be dark, got ${background}`)
+  })
+  /**
+   * Open the ongoing editor on a dark skin, focus each field in turn, and read
+   * back what it is actually painted — the regression this suite exists for.
+   */
+  const editorFields = async () => {
+    const tab = await browser.newPage()
+    const body = page('rgb(17, 17, 17)')
+    await tab.setRequestInterception(true)
+    tab.on('request', (req) => {
+      if (req.url().startsWith('https://archiveofourown.org/'))
+        void req.respond({ status: 200, contentType: 'text/html', body })
+      else
+        void req.abort()
+    })
+    await tab.evaluateOnNewDocument(installMock, SEED)
+    await tab.goto(LISTING_URL, { waitUntil: 'domcontentloaded' })
+    await tab.addStyleTag({ content: css })
+    await tab.addScriptTag({ content: js })
+    await sleep(1500)
+
+    await tab.evaluate(() => {
+      document.querySelector('#work_1 h4.heading a').dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
+      )
+    })
+    await sleep(250)
+    await tab.evaluate(() => {
+      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
+        .find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))
+      row.click()
+    })
+    await sleep(250)
+
+    const read = async (selector) => {
+      await tab.focus(selector)
+      await sleep(80)
+      return tab.$eval(selector, (el) => {
+        const style = getComputedStyle(el)
+        return {
+          background: style.backgroundColor,
+          color: style.color,
+          colorScheme: style.colorScheme,
+          focused: document.activeElement === el,
+        }
+      })
+    }
+
+    const chapter = await read('.AO3E--progress-editor--chapter')
+    const date = await read('.AO3E--progress-editor--date')
+    await tab.close()
+    return { chapter, date }
+  }
+
+  test('a focused field keeps the dark surface, against the skin focus rule', async () => {
+    const { chapter, date } = await editorFields()
+    for (const [name, field] of [['chapter', chapter], ['date', date]]) {
+      assert.ok(field.focused, `the ${name} field took focus`)
+      // #f3efec is AO3's focus background. Anything near it means the skin won.
+      assert.ok(
+        brightness(field.background) < 80,
+        `focused ${name} field should stay dark, got ${field.background}`,
+      )
+      assert.ok(
+        brightness(field.color) > 180,
+        `focused ${name} field text should stay light, got ${field.color}`,
+      )
+    }
+  })
+
+  test('the fields declare a dark color-scheme, so the browser paints its own widgets to match', async () => {
+    // The date field's segments and calendar panel, and the number input's
+    // spinner arrows, are drawn by the browser and cannot be styled directly —
+    // `color-scheme` is the only lever that reaches them.
+    const { chapter, date } = await editorFields()
+    assert.equal(chapter.colorScheme, 'dark', 'number input')
+    assert.equal(date.colorScheme, 'dark', 'date input')
   })
 })

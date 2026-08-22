@@ -26,6 +26,11 @@
   --ao3e-field-bg: #fff;
   --ao3e-field-fg: #111;
   --ao3e-field-border: rgba(0, 0, 0, 0.3);
+  /* Applied to our surfaces (never to :root — that would repaint AO3's own
+     form controls). It is what tells the browser to draw the parts of a control
+     we cannot style: the date field's segments and calendar panel, and the
+     number input's spinner arrows. */
+  --ao3e-color-scheme: light;
 }
 
 :root[data-ao3e-theme='dark'] {
@@ -45,6 +50,7 @@
   --ao3e-field-bg: #16191d;
   --ao3e-field-fg: #e9e7e4;
   --ao3e-field-border: rgba(255, 255, 255, 0.26);
+  --ao3e-color-scheme: dark;
 }
 
 /* Work images max width */
@@ -116,16 +122,16 @@
 }
 
 .AO3E--reader-handle:hover::before,
-.AO3E--reader-resizing .AO3E--reader-handle::before,
+.AO3E--resizing .AO3E--reader-handle::before,
 .AO3E--reader-handle:hover::after,
-.AO3E--reader-resizing .AO3E--reader-handle::after {
+.AO3E--resizing .AO3E--reader-handle::after {
   opacity: 0.7;
   transform: translate(-50%, -50%) scale(1.3);
 }
 
 /* While a handle is being dragged, suppress text selection everywhere and keep
    the resize cursor even as the pointer leaves the thin handle. */
-.AO3E--reader-resizing {
+.AO3E--resizing {
   cursor: ew-resize;
   -webkit-user-select: none;
   user-select: none;
@@ -452,6 +458,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   background: var(--ao3e-surface-bg);
   color: var(--ao3e-surface-fg);
   box-shadow: var(--ao3e-surface-shadow);
+  color-scheme: var(--ao3e-color-scheme);
   font-size: 0.875rem;
   line-height: 1.3;
 }
@@ -567,6 +574,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   background: var(--ao3e-surface-bg);
   color: var(--ao3e-surface-fg);
   box-shadow: var(--ao3e-surface-shadow);
+  color-scheme: var(--ao3e-color-scheme);
   font-size: 0.875rem;
   line-height: 1.4;
 }
@@ -613,17 +621,34 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   opacity: 0.6;
 }
 
+/* AO3's skin styles bare `input` elements, and one of its rules is
+   `input:focus, select:focus, textarea:focus { background: #f3efec }` — a
+   specificity of (0,1,1), which beats this single class. Unfought, focusing a
+   field repainted it pale cream and left our light-on-dark text on top of it,
+   unreadable. The `!important`s here are that fight, and the reason the focus
+   state is spelled out separately rather than inherited. Same story for the
+   inset light-grey `box-shadow` AO3 puts on every input. */
 .AO3E--progress-editor--input {
   box-sizing: border-box;
   width: 100%;
   margin: 0;
   padding: 0.3em 0.4em;
-  border: 1px solid var(--ao3e-field-border);
+  border: 1px solid var(--ao3e-field-border) !important;
   border-radius: 0.3em;
-  background: var(--ao3e-field-bg);
-  color: var(--ao3e-field-fg);
+  background: var(--ao3e-field-bg) !important;
+  color: var(--ao3e-field-fg) !important;
+  box-shadow: none !important;
+  color-scheme: var(--ao3e-color-scheme);
   font: inherit;
   font-size: 1em;
+}
+
+.AO3E--progress-editor--input:focus {
+  background: var(--ao3e-field-bg) !important;
+  color: var(--ao3e-field-fg) !important;
+  border-color: var(--ao3e-surface-accent) !important;
+  outline: 2px solid var(--ao3e-surface-accent);
+  outline-offset: -1px;
 }
 
 .AO3E--progress-editor--presets {
@@ -921,16 +946,50 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   cursor: pointer;
 }
 
+/* The view sizes itself against its own box, not the window. AO3 skins are free
+   to constrain `#main` to a fixed column, and plenty do — so the window can be
+   1400px wide while the space the view actually has is a few hundred. A viewport
+   media query never fires in that case, and the two-column grid stays on,
+   squeezing the results track down to a sliver while the sidebar keeps its
+   13em. The container query is what makes the breakpoint mean what it says. */
+.AO3E--search-view {
+  container-type: inline-size;
+  container-name: ao3e-search-view;
+}
+
+/* Three tracks: filters, the drag handle, results. The handle is a real grid
+   item in the gap rather than something floated over the columns, so there is
+   nothing for it to land on top of. Its width is the whole gap, so the columns
+   sit exactly as far apart as they did before it existed. */
 .AO3E--search-view--layout {
   display: grid;
-  grid-template-columns: minmax(13em, 17em) 1fr;
-  gap: 1.5em;
+  grid-template-columns: var(--ao3e-sidebar-width, 15em) 1.5em minmax(0, 1fr);
   align-items: start;
 }
 
+@container ao3e-search-view (max-width: 62em) {
+  .AO3E--search-view--layout {
+    grid-template-columns: 1fr;
+    gap: 1.5em;
+  }
+
+  /* Stacked, there is no column edge to drag. */
+  .AO3E--search-view--resizer {
+    display: none;
+  }
+}
+
+/* Kept for anything without container query support: a narrow *window* is still
+   a narrow view, so this catches the common case on its own. */
 @media (max-width: 62em) {
   .AO3E--search-view--layout {
     grid-template-columns: 1fr;
+    gap: 1.5em;
+  }
+
+  /* Stacked, there is no column edge to drag. */
+  .AO3E--search-view--resizer {
+    display: none;
   }
 }
 
@@ -938,6 +997,45 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
    forced wide by long unbreakable blurb content. */
 .AO3E--search-view--main {
   min-width: 0;
+}
+
+/* Sticky so the filters stay reachable while the results scroll past them —
+   which only makes sense while it is *beside* the results. See the
+   single-column override below. */
+/* The drag handle. A wide invisible hit area with a thin visible line down the
+   middle, so it's grabbable without drawing a 24px bar between the columns. */
+.AO3E--search-view--resizer {
+  position: relative;
+  align-self: stretch;
+  min-height: 2em;
+  cursor: ew-resize;
+  /* The pointer drag owns horizontal gestures; without this, touch scrolling
+     steals them and the handle can't be dragged on a touchscreen. */
+  touch-action: none;
+}
+
+.AO3E--search-view--resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: var(--ao3e-surface-divider);
+  transition: background 0.12s ease;
+}
+
+.AO3E--search-view--resizer:hover::before,
+.AO3E--search-view--resizer:focus-visible::before,
+.AO3E--resizing .AO3E--search-view--resizer::before {
+  background: var(--ao3e-surface-accent);
+}
+
+.AO3E--search-view--resizer:focus-visible {
+  outline: 2px solid var(--ao3e-surface-accent);
+  outline-offset: 2px;
 }
 
 .AO3E--search-view--sidebar {
@@ -949,6 +1047,26 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   flex-direction: column;
   gap: 0.75em;
   font-size: 0.9em;
+}
+
+/* One column means the sidebar sits *above* the results, not beside them — so
+   sticking it pins the whole filter panel on top of whatever you scrolled to,
+   and the works read straight through it. Scrolled back into the flow it just
+   scrolls away like any other block. */
+@container ao3e-search-view (max-width: 62em) {
+  .AO3E--search-view--sidebar {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+@media (max-width: 62em) {
+  .AO3E--search-view--sidebar {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
 }
 
 .AO3E--search-view--pager {

@@ -34,11 +34,18 @@ export interface ProgressEditorOptions {
   /** The work's current progress, when it already has some. */
   progress?: WorkProgress
   /**
-   * Chapters published as far as this page knows, used to prefill the chapter
-   * field for a work being marked for the first time (you've read what's there)
-   * and as the field's max. Null when the count couldn't be read.
+   * Chapters published as far as this page knows. Prefills the chapter field on
+   * a listing, where the whole work is all we can see, and caps the field
+   * everywhere. Null when the count couldn't be read.
    */
   published: number | null
+  /**
+   * The chapter open on a work page, when that is where this was opened from.
+   * Takes precedence over {@link published}: on a work page you are marking the
+   * chapter in front of you, which is the whole reason to mark from there rather
+   * than from a listing. Null on a listing, or when it couldn't be read.
+   */
+  current?: number | null
   /** Where to open, in viewport coordinates. */
   at: { x: number, y: number }
   /** Called with the edited values when the reader saves. */
@@ -55,10 +62,10 @@ const DATE_PRESETS: { label: string, shift: (today: number) => number }[] = [
 /** Open the chapter/wait-until editor for one work. */
 export function openProgressEditor(opts: ProgressEditorOptions): void {
   const today = todayEpochDays()
-  // A work being marked for the first time is almost always one you've just
-  // caught up on, so the published count is the useful default; an existing
-  // mark keeps whatever it recorded.
-  const startChapter = opts.progress?.chapter ?? opts.published ?? 0
+  // An existing mark keeps whatever it recorded. Otherwise: on a work page the
+  // chapter you have open is where you are, and on a listing the best guess is
+  // that you have caught up on what is published.
+  const startChapter = opts.progress?.chapter ?? opts.current ?? opts.published ?? 0
 
   const chapterInput = (
     <input
@@ -76,7 +83,11 @@ export function openProgressEditor(opts: ProgressEditorOptions): void {
   const dateInput = (
     <input type="date" class={`${cx('input')}  ${cx('date')}`} id={`${cx('date')}-input`} />
   ) as HTMLElement as HTMLInputElement
-  dateInput.value = opts.progress?.waitUntil !== undefined ? fromEpochDays(opts.progress.waitUntil) : ''
+  // No date yet starts at today rather than blank, so the relative presets have a
+  // visible base to move from — "+1 month" reads as a month from *this*, not as a
+  // value appearing out of an empty field. Today means "ready now", which is what
+  // no date meant anyway; Clear puts it back to genuinely unset.
+  dateInput.value = fromEpochDays(opts.progress?.waitUntil ?? today)
 
   const presets = DATE_PRESETS.map(({ label, shift }) => {
     const btn = (<button type="button" class={cx('preset')}>{label}</button>) as HTMLElement as HTMLButtonElement
@@ -96,7 +107,13 @@ export function openProgressEditor(opts: ProgressEditorOptions): void {
     // A blank or nonsense chapter reads as 0 ("marked, nothing read yet") rather
     // than refusing to save — there's no wrong answer here worth an error for.
     const chapter = Math.max(0, Math.trunc(Number(chapterInput.value.replace(/\D/g, ''))) || 0)
-    const waitUntil = toEpochDays(dateInput.value)
+    // "Wait until today" is precisely what "no wait-until date" means — both say
+    // the work is ready now — so today is stored as no date at all. That is what
+    // lets the field default to today for the presets' sake without every mark
+    // then carrying a date it never actually needed, and it keeps the hint
+    // reading "no Wait Until date set" for the works that have none.
+    const parsed = toEpochDays(dateInput.value)
+    const waitUntil = parsed === null || parsed === today ? null : parsed
     closeFloating()
     opts.onSave(waitUntil === null ? { chapter } : { chapter, waitUntil })
   }

@@ -11,11 +11,12 @@
  */
 export const MARK_ICON_CLASSES: Record<string, string> = {
   read: 'i-mdi-book-check',
-  favorite: 'i-mdi-heart',
-  good: 'i-mdi-thumb-up',
-  boring: 'i-mdi-sleep',
   bad: 'i-mdi-thumb-down',
+  boring: 'i-mdi-sleep',
   gross: 'i-mdi-emoticon-sick',
+  good: 'i-mdi-thumb-up',
+  hot: 'i-mdi-chili-hot',
+  favorite: 'i-mdi-heart',
   continue: 'i-mdi-calendar-clock',
   saved: 'i-mdi-clock-check',
 }

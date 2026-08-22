@@ -1,6 +1,7 @@
 import MdiBookCheck from '~icons/mdi/book-check.jsx'
 import MdiBookmarkCheck from '~icons/mdi/bookmark-check.jsx'
 import MdiCalendarClock from '~icons/mdi/calendar-clock.jsx'
+import MdiChiliHot from '~icons/mdi/chili-hot.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiEmoticonSick from '~icons/mdi/emoticon-sick.jsx'
 import MdiHeart from '~icons/mdi/heart.jsx'
@@ -22,11 +23,12 @@ import React from '#dom'
  */
 const MARK_ICONS: Record<string, () => Node> = {
   read: () => <MdiBookCheck />,
-  favorite: () => <MdiHeart />,
-  good: () => <MdiThumbUp />,
-  boring: () => <MdiSleep />,
   bad: () => <MdiThumbDown />,
+  boring: () => <MdiSleep />,
   gross: () => <MdiEmoticonSick />,
+  good: () => <MdiThumbUp />,
+  hot: () => <MdiChiliHot />,
+  favorite: () => <MdiHeart />,
   continue: () => <MdiCalendarClock />,
   saved: () => <MdiClockCheck />,
 }

@@ -143,7 +143,7 @@ describe('the hint text', () => {
     )
     assert.equal(
       describeWaitUntil({ chapter: 1, waitUntil: toEpochDays('2026-03-15') }, TODAY),
-      'Not Ready (future Wait Until date of 3/15/26)',
+      'Not Ready (wait until 3/15/26)',
     )
   })
 
