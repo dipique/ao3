@@ -84,7 +84,13 @@ export interface Options {
   openMenuOnClick: boolean
   /** On your own Marked for Later page, add a button that loads every page into one filterable view. */
   searchMarkedForLater: boolean
-  /** How many works to render per page in the Search Marked for Later view (paging keeps large lists fast). */
+  /**
+   * On a non-canonical ("uncommon") tag's page — the one AO3 offers no sort or
+   * filter for — add a link that loads every page of its works into the same
+   * filterable view.
+   */
+  searchTagWorks: boolean
+  /** How many works to render per page in the search views (paging keeps large lists fast). */
   searchPerPage: number
   /**
    * Auto-select a default language in AO3's Sort & Filter Language dropdown
@@ -173,6 +179,7 @@ export const options = createStorage<Options>({
     contextMenusEnabled: true,
     openMenuOnClick: false,
     searchMarkedForLater: true,
+    searchTagWorks: true,
     searchPerPage: 50,
     searchLanguage: { enabled: false, language: null },
     wordCountToolbar: { enabled: false, ranges: DEFAULT_WORD_COUNT_RANGES.map(range => ({ ...range })) },

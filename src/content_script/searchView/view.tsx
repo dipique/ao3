@@ -114,6 +114,20 @@ export interface SearchViewConfig {
   prefs?: Partial<SearchViewPrefs>
   /** Called whenever a persisted layout pref changes (collapse, sort, reorder). */
   onPrefsChange?: (prefs: SearchViewPrefs) => void
+  /**
+   * Overrides for individual sort-option labels. The `marked` sort is really
+   * "the order the source listed them in", which reads as the date you marked a
+   * work for later on a to-read list and as the Archive's own ordering anywhere
+   * else — so the label has to come from the host.
+   */
+  sortLabels?: Partial<Record<SortKey, string>>
+  /**
+   * Readiness values the view opens (and resets) with when the user has no saved
+   * selection. Defaults to {@link DEFAULT_READINESS} — "only what's ready", which
+   * is triage for a to-read list but would silently hide works when browsing, so
+   * hosts that aren't triaging pass `[]`.
+   */
+  defaultReadiness?: string[]
 }
 
 const DEFAULT_PER_PAGE = 50
@@ -167,6 +181,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
   // start blank. cloneFilterState so we never mutate the caller's snapshot.
   const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
+  const defaultReadiness = config.defaultReadiness ?? DEFAULT_READINESS
+  const sortLabels: Record<SortKey, string> = { ...SORT_LABELS, ...config.sortLabels }
   // Seed the sort from saved prefs on a fresh open. An in-memory reopen
   // (initialState) already carries the user's live sort, so it wins.
   if (!config.initialState && config.prefs) {
@@ -177,7 +193,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // Readiness is the one facet with a default selection, seeded here rather
     // than in emptyFilterState(), which must go on meaning "nothing filtered" —
     // it's what "Reset filters" and every other caller start from.
-    for (const value of config.prefs.readiness ?? DEFAULT_READINESS)
+    for (const value of config.prefs.readiness ?? defaultReadiness)
       state.facets.readiness.include.add(value)
     // ...but only values this set actually has. `update()` prunes selections
     // whose values have gone, and does it on a *refresh* — a sticky "Waiting"
@@ -390,7 +406,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   const sortSelect = (
     <select class={cx('select')} aria-label="Sort by">
-      {(Object.keys(SORT_LABELS) as SortKey[]).map(key => <option value={key}>{SORT_LABELS[key]}</option>)}
+      {(Object.keys(sortLabels) as SortKey[]).map(key => <option value={key}>{sortLabels[key]}</option>)}
     </select>
   ) as HTMLElement as HTMLSelectElement
   sortSelect.value = state.sort
@@ -430,10 +446,12 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     const fresh = emptyFilterState()
     state.text = fresh.text
     state.facets = fresh.facets
-    // "Reset filters" restores the default, not "no filter": showing only what's
-    // ready is the state the view is meant to sit in, and resetting to
-    // everything would quietly turn the feature off.
-    for (const value of DEFAULT_READINESS)
+    // "Reset filters" restores the host's default readiness, not "no filter": on
+    // a to-read list, showing only what's ready is the state the view is meant to
+    // sit in, and resetting to everything would quietly turn the feature off.
+    // Hosts that browse rather than triage default to nothing, so this is a no-op
+    // for them.
+    for (const value of defaultReadiness)
       state.facets.readiness.include.add(value)
     state.wordsMin = null
     state.wordsMax = null

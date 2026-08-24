@@ -7,6 +7,7 @@ import { FandomToolbar } from '#content_script/units/FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from '#content_script/units/FilterEntityToolbars.tsx'
 import { HideAuthorToolbar } from '#content_script/units/HideAuthorToolbar.tsx'
 import { HideFilters } from '#content_script/units/HideFilters.ts'
+import { HideWorks } from '#content_script/units/HideWorks.tsx'
 import { HighlightAuthors } from '#content_script/units/HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from '#content_script/units/HighlightEntities.ts'
 import { HighlightTags } from '#content_script/units/HighlightTags.ts'
@@ -18,13 +19,19 @@ import { WordCountToolbar } from '#content_script/units/WordCountToolbar.tsx'
 import type { FacetKey } from './engine.ts'
 
 /**
- * Per-blurb enhancements — units that act on one blurb independently, with no
- * cross-blurb state. Safe to run lazily, one blurb at a time, as pages are shown.
- * Stats adds the kudos/hits ratio, reading time and thousands separators; the
- * highlight units colour favourite tags/authors/works/series, and HideFilters
- * takes the muted ones out of each blurb's tag list.
+ * Per-blurb enhancements — units that decide one blurb's fate from that blurb
+ * alone. Safe to run lazily, one at a time, as pages are shown. HideWorks
+ * collapses the works the reader's rules hide (first, as on a native listing, so
+ * the rest decorate what it leaves); Stats adds the kudos/hits ratio, reading
+ * time and thousands separators; the highlight units colour favourite
+ * tags/authors/works/series, and HideFilters takes the muted ones out of each
+ * blurb's tag list.
+ *
+ * The view mounts every blurb but decorates each at most once (see its
+ * `decorated` set), which is what keeps HideWorks — the one unit here that
+ * rewrites a blurb rather than adding to it — from wrapping the same work twice.
  */
-const BLURB_UNITS = [Stats, HighlightTags, HideFilters, HighlightAuthors, HighlightWorks, HighlightSeries] as typeof Unit[]
+const BLURB_UNITS = [HideWorks, Stats, HighlightTags, HideFilters, HighlightAuthors, HighlightWorks, HighlightSeries] as typeof Unit[]
 
 /**
  * Context-menu toolbars — units that keep a shared registry of every decorated

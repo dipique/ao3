@@ -1,205 +1,34 @@
-import type { Options } from '#common'
 import type { Work } from '#content_script/blurb.js'
+import type { SearchSource } from '#content_script/searchView/host.tsx'
+import type { ViewState } from '#content_script/searchView/view.tsx'
 
-import { ADDON_CLASS, findProgress, getArchiveLink, logger, parseUser, progressSources, readiness, READINESS_LABELS, toast, todayEpochDays } from '#common'
-import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
+import { ADDON_CLASS, getArchiveLink, parseUser, toast } from '#common'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
-import { readSnapshot, writeSnapshot } from '#content_script/searchView/cache.ts'
-import { decorateBlurb, decorateContainer, makeFacetHider } from '#content_script/searchView/decorate.ts'
-import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.ts'
-import { detectPageCount, scrapeListing } from '#content_script/searchView/scrape.ts'
-import { createSearchView, type SearchView, type SearchViewConfig, type ViewState } from '#content_script/searchView/view.tsx'
+import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
+import { applyReadiness } from '#content_script/searchView/readiness.ts'
+import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { Unit } from '#content_script/Unit.js'
 import { seedMarkedForLater, submitMark } from '#content_script/units/FilterEntityToolbars.tsx'
 import { applyMarkGroup } from '#content_script/workMarks.js'
 import React from '#dom'
 
 const FEATURE = `${ADDON_CLASS}--search-marked-for-later`
-const cx = (suffix: string): string => `${FEATURE}--${suffix}`
-const BUTTON_CLASS = cx('button')
-/** Added to the native list + pagination to hide them while the view is shown. */
-const NATIVE_HIDDEN_CLASS = cx('native-hidden')
-
-// Module state so the static clean()/teardown can reach the live view + scrape.
-let activeView: SearchView | null = null
-let activeUserId: string | null = null
-let activeController: AbortController | null = null
-let busy = false
-/**
- * Set when a global re-run (e.g. an options change from a context menu) closed an
- * open view, carrying the userId + state needed to reopen it where it left off.
- * Cleared by {@link teardown}, so a user-initiated close (Back) stays closed.
- */
-let reopen: { userId: string, state: ViewState } | null = null
-
-const log = logger.child('SearchMarkedForLater')
+const BUTTON_CLASS = `${FEATURE}--button`
 
 /**
  * Identifies this use of the search view for local layout prefs (collapsed
  * groups, facet order, sort). One id for the whole feature — not per-user — so a
  * user's layout follows them across accounts on the same device.
  */
-const PREFS_APP_ID = 'marked-for-later'
-
-function pageUrl(userId: string, page: number): string {
-  return getArchiveLink(`/users/${userId}/readings?show=to-read&page=${page}`)
-}
-
-function snapshotKey(userId: string): string {
-  return `marked-for-later:${userId}`
-}
-
-/**
- * Stamp each work with its Readiness facet value.
- *
- * A post-pass rather than something {@link parseWork} does, for two reasons that
- * both come down to the same thing — readiness isn't a property of the blurb.
- * The parser has no options access, and the snapshot cache re-runs it over
- * yesterday's stored HTML, so a value baked in there would still say "waiting"
- * on the morning the wait-until date came round.
- *
- * Nothing to do when no mark tracks progress (an older device's sync can hand us
- * a table without one), in which case every work reads as Ready by default.
- */
-function applyReadiness(works: Work[], options: Options): void {
-  const { workMarks } = options
-  const sources = workMarks.enabled ? progressSources(workMarks.marks) : []
-  if (sources.length === 0)
-    return
-  const today = todayEpochDays()
-  for (const work of works) {
-    const found = findProgress(sources, work.workId)
-    if (!found)
-      continue
-    // No work on AO3 has zero chapters, so a zero here means the count wasn't
-    // there to read — which readiness() takes as null and fails open on.
-    const published = work.chapters.written || null
-    work.readiness = READINESS_LABELS[readiness(found.progress, published, today)]
-  }
-}
-
-/**
- * Record the list: the blurb snapshot this view re-renders from, plus the id
- * index every *other* listing reads to show its saved indicators
- * ({@link file://./../markedForLaterIndex.ts}). This page is the only place that
- * sees the whole list, so the two are always written together — an index that
- * lags the snapshot would show the clock on works already triaged away.
- */
-async function persist(userId: string, works: Work[]): Promise<void> {
-  await writeSnapshot(snapshotKey(userId), works)
-  await saveMarkedForLaterIndex(userId, works.map(work => work.workId))
-}
-
-/** Restore the native page: abort any scrape, remove our view, un-hide the list. */
-function teardown(): void {
-  activeController?.abort()
-  activeController = null
-  activeView = null
-  activeUserId = null
-  busy = false
-  // A teardown means "don't come back" unless the caller re-arms reopen after.
-  reopen = null
-  for (const el of document.querySelectorAll(`.${FEATURE}`))
-    el.remove()
-  for (const el of document.querySelectorAll(`.${NATIVE_HIDDEN_CLASS}`))
-    el.classList.remove(NATIVE_HIDDEN_CLASS)
-  // Release the context-menu triggers on the now-removed blurbs (the native
-  // page's still-connected triggers are left intact).
-  pruneDetachedTriggers()
-}
-
-/** Hide the native list + pagination and insert an empty view container after the subnav. */
-function mountContainer(): HTMLElement {
-  for (const el of document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'))
-    el.classList.add(NATIVE_HIDDEN_CLASS)
-  const container = (<div class={`${ADDON_CLASS}  ${FEATURE}`} />) as HTMLElement
-  const anchor = document.querySelector('#main ul.navigation.actions')
-    ?? document.querySelector('#main ol.reading.work.index.group')
-  anchor?.after(container)
-  return container
-}
-
-interface Progress {
-  update: (done: number, total: number) => void
-}
-
-/** Determinate progress panel shown while a fresh scrape runs. */
-function mountProgress(container: HTMLElement): Progress {
-  const label = (<div class={cx('progress-label')}>Preparing…</div>) as HTMLElement
-  const fill = (<div class={cx('progress-fill')} />) as HTMLElement
-  const cancel = (<button type="button" class={cx('progress-cancel')}>Cancel</button>) as HTMLElement
-  cancel.addEventListener('click', () => teardown())
-  const panel = (
-    <div class={cx('progress')}>
-      {label}
-      <div class={cx('progress-track')}>{fill}</div>
-      {cancel}
-    </div>
-  )
-  container.replaceChildren(panel)
-  return {
-    update(done, total) {
-      label.textContent = `Loaded ${done} of ${total} pages…`
-      fill.style.width = `${total ? Math.round((done / total) * 100) : 0}%`
-    },
-  }
-}
-
-/** Re-scrape in the background and feed the result into the live view + cache. */
-async function refresh(userId: string, view: SearchView, options: Options): Promise<void> {
-  activeController?.abort()
-  const controller = new AbortController()
-  activeController = controller
-  try {
-    const result = await scrapeListing({
-      pageCount: detectPageCount(document),
-      pageUrl: page => pageUrl(userId, page),
-      signal: controller.signal,
-    })
-    if (controller.signal.aborted)
-      return
-    await persist(userId, result.works)
-    // Every work here is marked for later — keep the work menu's saved state in
-    // step with the refreshed set before it re-decorates the blurbs.
-    seedMarkedForLater(result.works.map(w => w.workId))
-    // Freshly parsed works carry no readiness; stamp it before the view facets
-    // them, and re-read today's date while we're at it — a background refresh
-    // can outlive midnight on a tab left open.
-    applyReadiness(result.works, options)
-    view.update(result.works)
-    if (result.loadedPages < result.totalPages)
-      toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
-  }
-  catch (err) {
-    if ((err as Error)?.name !== 'AbortError')
-      log.error('Background refresh failed', err)
-  }
-  finally {
-    if (activeController === controller)
-      activeController = null
-  }
-}
-
-function makeHandlers(userId: string, options: Options): { onBack: () => void, onRefresh: () => void } {
-  return {
-    onBack: () => teardown(),
-    onRefresh: () => {
-      if (!activeView)
-        return
-      const view = activeView
-      view.setUpdating(true)
-      void refresh(userId, view, options).finally(() => view.setUpdating(false))
-    },
-  }
-}
+const SOURCE_ID = 'marked-for-later'
 
 /**
  * Adds a "Search Marked for Later" button to your own to-read page that loads
  * every page of the list into one in-memory, instantly filterable/sortable view
  * (rendered in place; a "Back to list" button restores the native page). A
  * cached snapshot renders instantly on revisit while a fresh scrape runs in the
- * background. The view itself ({@link createSearchView}) is source-agnostic — the
- * only Marked-for-Later-specific code lives here.
+ * background. Everything generic about that lives in the shared search-view host
+ * ({@link file://./../searchView/host.tsx}); this unit is only the source.
  */
 export class SearchMarkedForLater extends Unit {
   static override get name() { return 'SearchMarkedForLater' }
@@ -207,13 +36,8 @@ export class SearchMarkedForLater extends Unit {
 
   static override async clean(): Promise<void> {
     // A global re-run (options change, navigation) tears the view down. If it was
-    // open, snapshot it so ready() can reopen it where the user left off — teardown
-    // clears `reopen`, so re-arm it afterwards from the snapshot.
-    const snapshot = activeView && activeUserId
-      ? { userId: activeUserId, state: activeView.getState() }
-      : null
-    teardown()
-    reopen = snapshot
+    // open, snapshot it so ready() can reopen it where the user left off.
+    suspendSearchView()
   }
 
   override async ready(): Promise<void> {
@@ -248,57 +72,53 @@ export class SearchMarkedForLater extends Unit {
     // If a global re-run closed an open view, reopen it (from cache, no re-scrape)
     // where the user left off — so e.g. a "Hide tag" context-menu action doesn't
     // dump them back to the native list.
-    const pending = reopen
-    reopen = null
-    if (pending && pending.userId.toLowerCase() === pageUser.toLowerCase())
-      void this.openView(pageUser, { initialState: pending.state, refresh: false })
+    const pending = takeReopen(snapshotKey(pageUser))
+    if (pending)
+      void this.openView(pageUser, { initialState: pending, refresh: false })
   }
 
-  /** View options shared by both render paths: page size + blurb decoration. */
-  viewConfig(): SearchViewConfig {
-    return {
-      perPage: this.options.searchPerPage,
-      decorateBlurb: blurb => decorateBlurb(blurb, this.options),
-      decorateContainer: root => decorateContainer(root, this.options),
-      hideFacetValue: makeFacetHider(this.options),
-    }
-  }
-
-  /**
-   * Open the in-memory view for `userId`. `initialState` restores a prior
-   * snapshot (a reopen after a global re-run); `refresh: false` skips the
-   * background re-scrape when the cache is already known to be fresh.
-   */
   async openView(userId: string, opts: { initialState?: ViewState, refresh?: boolean } = {}): Promise<void> {
-    if (busy || document.querySelector(`.${FEATURE}`))
-      return
-    busy = true
-    try {
-      const key = snapshotKey(userId)
-      const container = mountContainer()
-      const handlers = makeHandlers(userId, this.options)
-      // Local (never-synced) layout prefs for this application of the view.
-      const prefs = await loadPrefs(PREFS_APP_ID)
-      const config: SearchViewConfig = {
-        ...this.viewConfig(),
-        initialState: opts.initialState,
-        prefs,
-        onPrefsChange: (next) => {
-          void savePrefs(PREFS_APP_ID, next).catch(err => log.error('Failed to save search-view prefs', err))
-        },
+    await openSearchView(this.source(userId), this.options, opts)
+  }
+
+  /** Everything the shared host needs to know about a Marked for Later list. */
+  source(userId: string): SearchSource {
+    return {
+      id: SOURCE_ID,
+      cacheKey: snapshotKey(userId),
+      pageUrl: page => getArchiveLink(`/users/${userId}/readings?show=to-read&page=${page}`),
+      pageCount: () => detectPageCount(document),
+      nativeElements: () => document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
+      mount: (container) => {
+        const anchor = document.querySelector('#main ul.navigation.actions')
+          ?? document.querySelector('#main ol.reading.work.index.group')
+        anchor?.after(container)
+      },
+      prepare: (works) => {
+        // Every work here is marked for later — keep the work menu's saved state
+        // in step with the set before it decorates the blurbs.
+        seedMarkedForLater(works.map(work => work.workId))
+        applyReadiness(works, this.options)
+      },
+      // This page is the only place that sees the whole list, so the id index
+      // every *other* listing reads ({@link file://./../markedForLaterIndex.ts})
+      // is written with the snapshot — an index that lagged it would show the
+      // clock on works already triaged away.
+      onPersist: works => saveMarkedForLaterIndex(userId, works.map(work => work.workId)),
+      viewConfig: {
         // Each blurb gets a "Mark as Read" button; on success the view drops the
-        // work and reports the reduced set, which we persist so the snapshot (and
-        // a reopen from cache) stays in sync with the server.
+        // work and reports the reduced set, which the host persists so the
+        // snapshot (and a reopen from cache) stays in sync with the server.
         blurbAction: {
           label: 'Mark as Read',
           title: 'Mark as read — remove this work from your Marked for Later list',
-          run: async (work) => {
+          run: async (work: Work) => {
             try {
               // save: false ⇒ POST /works/:id/mark_as_read (leaves reading history).
               await submitMark(work.workId, false)
             }
             catch (err) {
-              log.error('Mark as read failed', err)
+              this.logger.error('Mark as read failed', err)
               toast('Could not mark this work as read.', { type: 'error' })
               throw err
             }
@@ -310,79 +130,13 @@ export class SearchMarkedForLater extends Unit {
               applyMarkGroup(this.options.workMarks, work.workId, true)
           },
         },
-        onWorksChanged: (works) => {
-          void persist(userId, works).catch(err => log.error('Failed to persist after mark-as-read', err))
-        },
-      }
-
-      const cached = await readSnapshot(key)
-      if (cached && cached.works.length) {
-        // Every work in this list is by definition marked for later; seed the
-        // shared session state before the view decorates the blurbs so the work
-        // menu offers "Mark as read" and shows the saved indicator.
-        seedMarkedForLater(cached.works.map(w => w.workId))
-        // Record the same ids as the index other listings read. The refresh below
-        // normally overwrites this within seconds — it's here so a snapshot taken
-        // before the index existed (or a refresh that fails) still counts.
-        void saveMarkedForLaterIndex(userId, cached.works.map(w => w.workId))
-          .catch(err => log.error('Failed to seed the Marked for Later index', err))
-        // Render instantly from cache, then refresh in the background (unless the
-        // caller knows the cache is fresh, e.g. a reopen right after a re-run).
-        // Stamped here, not in the cache: a snapshot rehydrates through
-        // parseWork, so a wait-until date that came round overnight would read
-        // stale straight out of yesterday's blurb HTML.
-        applyReadiness(cached.works, this.options)
-        const view = createSearchView(cached.works, handlers, config)
-        activeView = view
-        activeUserId = userId
-        container.replaceChildren(view.el)
-        if (opts.refresh !== false) {
-          view.setUpdating(true)
-          void refresh(userId, view, this.options).finally(() => view.setUpdating(false))
-        }
-        return
-      }
-
-      // No cache: scrape with a progress bar before showing the view.
-      const progress = mountProgress(container)
-      const controller = new AbortController()
-      activeController = controller
-      try {
-        const result = await scrapeListing({
-          pageCount: detectPageCount(document),
-          pageUrl: page => pageUrl(userId, page),
-          onProgress: progress.update,
-          signal: controller.signal,
-        })
-        await persist(userId, result.works)
-        if (!result.works.length) {
-          toast('No works found in your Marked for Later list.', { type: 'error' })
-          teardown()
-          return
-        }
-        seedMarkedForLater(result.works.map(w => w.workId))
-        applyReadiness(result.works, this.options)
-        const view = createSearchView(result.works, handlers, config)
-        activeView = view
-        activeUserId = userId
-        container.replaceChildren(view.el)
-        if (result.loadedPages < result.totalPages)
-          toast(`Loaded ${result.loadedPages} of ${result.totalPages} pages — some couldn't be fetched.`, { type: 'error' })
-      }
-      catch (err) {
-        if ((err as Error)?.name !== 'AbortError') {
-          this.logger.error('Failed to load Marked for Later', err)
-          toast('Could not load your Marked for Later list.', { type: 'error' })
-        }
-        teardown()
-      }
-      finally {
-        if (activeController === controller)
-          activeController = null
-      }
-    }
-    finally {
-      busy = false
+      },
+      emptyMessage: 'No works found in your Marked for Later list.',
+      errorMessage: 'Could not load your Marked for Later list.',
     }
   }
+}
+
+function snapshotKey(userId: string): string {
+  return `${SOURCE_ID}:${userId}`
 }

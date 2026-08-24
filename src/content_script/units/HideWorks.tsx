@@ -2,7 +2,7 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import type { MarkId, ProgressSource, Rule } from '#common'
+import type { MarkId, Options, ProgressSource, Rule } from '#common'
 
 import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
@@ -143,28 +143,72 @@ function refreshExcludeButtons(): void {
 // Registered once; iterating an empty registry between page runs is a no-op.
 onFilterChange(refreshExcludeButtons)
 
+/**
+ * Everything a run works out from the options before it can weigh a single
+ * blurb. Cached against the options object rather than recomputed per unit,
+ * because the search view decorates its results one blurb at a time: a page of
+ * fifty builds fifty of these units from the same options, and unpacking the
+ * mark table fifty times over would be the most expensive thing on that path.
+ *
+ * Any options change hands out a fresh object and so a fresh entry — `today`
+ * included, which keeps the "fixed for the run, so a listing is consistent"
+ * guarantee and merely holds it until the next re-run.
+ */
+interface RunState {
+  hiddenMarks: Map<string, MarkId>
+  progress: ProgressSource[]
+  today: number
+  rules: Rule[]
+}
+
+const runStates = new WeakMap<Options, RunState>()
+
+function runState(options: Options): RunState {
+  const cached = runStates.get(options)
+  if (cached)
+    return cached
+  const { workMarks } = options
+  const state: RunState = {
+    hiddenMarks: workMarks.enabled ? hiddenByMarks(workMarks.marks) : new Map(),
+    // Only the *hiding* progress marks matter here; one left visible is still
+    // tracked and still shows its indicator, it just never collapses a work.
+    progress: workMarks.enabled
+      ? progressSources(workMarks.marks).filter(source => markHidesResults(workMarks.marks, source.id))
+      : [],
+    today: todayEpochDays(),
+    // Presentational rules are handled elsewhere (HighlightTags colours the tag,
+    // HideFilters hides it) and never hide or force-show, so they're dropped here.
+    rules: options.rules.enabled ? options.rules.filters.filter(ruleAffectsWorks) : [],
+  }
+  runStates.set(options, state)
+  return state
+}
+
 export class HideWorks extends Unit {
   static override get name() { return 'HideWorks' }
 
+  // The four fields below are this run's {@link RunState}, copied out in
+  // `ready()` so {@link processBlurb} can weigh a blurb without re-reading
+  // options. See {@link runState} for why they're derived once and shared.
+
   /**
-   * Work ids some mark hides, mapped to the mark responsible — resolved once per
-   * run so {@link processBlurb} can test a whole listing without re-reading
-   * options. Empty unless marks are on and at least one of them hides.
+   * Work ids some mark hides, mapped to the mark responsible. Empty unless marks
+   * are on and at least one of them hides.
    */
   private hiddenMarks = new Map<string, MarkId>()
 
   /**
-   * The hiding progress marks' entries for this run, unpacked once. Separate
-   * from {@link hiddenMarks} because carrying a progress mark isn't itself a
-   * reason to hide — {@link processBlurb} weighs each work's own progress
-   * against the chapter count on its blurb.
+   * The hiding progress marks' entries, unpacked. Separate from
+   * {@link hiddenMarks} because carrying a progress mark isn't itself a reason to
+   * hide — {@link processBlurb} weighs each work's own progress against the
+   * chapter count on its blurb.
    */
   private progress: ProgressSource[] = []
 
   /** Today, as days since the epoch — fixed for the run so a listing is consistent. */
   private today = 0
 
-  /** The work-affecting rules for this run (hide/always-show; never highlight-only). */
+  /** The work-affecting rules (hide/always-show; never highlight-only). */
   private rules: Rule[] = []
 
   override get enabled() {
@@ -202,22 +246,35 @@ export class HideWorks extends Unit {
     }
   }
 
+  /**
+   * The blurbs this run covers. Normally every blurb under the unit's root; when
+   * the root *is* a blurb, that blurb alone — the search view decorates its
+   * results one at a time, and those blurbs were never on the page for a
+   * document-wide scan to have found.
+   */
+  private rootBlurbs(): Iterable<Element> {
+    const { root } = this
+    if (root instanceof Element && root.matches('.blurb'))
+      return [root]
+    return root.querySelectorAll('.blurb')
+  }
+
   override async ready(): Promise<void> {
     this.logger.debug('Hiding works...')
-    excludeButtons.length = 0
-    const { workMarks } = this.options
-    this.hiddenMarks = workMarks.enabled ? hiddenByMarks(workMarks.marks) : new Map()
-    // Only the *hiding* progress marks matter here; one left visible is still
-    // tracked and still shows its indicator, it just never collapses a work.
-    this.progress = workMarks.enabled
-      ? progressSources(workMarks.marks).filter(source => markHidesResults(workMarks.marks, source.id))
-      : []
-    this.today = todayEpochDays()
-    // Presentational rules are handled elsewhere (HighlightTags colours the tag,
-    // HideFilters hides it) and never hide or force-show, so they're dropped here.
-    this.rules = this.options.rules.enabled ? this.options.rules.filters.filter(ruleAffectsWorks) : []
+    // A full-page run owns the exclude-button registry and starts it fresh; a
+    // per-blurb run only adds to it, or it would drop every button but the last
+    // blurb's. (Neither page offering the search view today has a filter
+    // sidebar, so in practice it stays empty there — but the view is meant to be
+    // reusable on pages that do have one.)
+    if (this.root === document)
+      excludeButtons.length = 0
+    const run = runState(this.options)
+    this.hiddenMarks = run.hiddenMarks
+    this.progress = run.progress
+    this.today = run.today
+    this.rules = run.rules
 
-    const blurbElements = document.querySelectorAll('.blurb')
+    const blurbElements = this.rootBlurbs()
 
     let usedFandomExclude = false
     for (const blurbElement of blurbElements) {

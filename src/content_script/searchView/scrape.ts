@@ -39,11 +39,21 @@ async function fetchPageDoc(url: string, signal?: AbortSignal, retries = 3): Pro
   }
 }
 
+/**
+ * Where the blurbs sit in a fetched listing page. AO3's search results and a
+ * user's readings use `ol.work.index.group`; a tag's own page lists its works in
+ * a `ul.index.group` inside the works listbox — and puts a *second* such list
+ * (bookmarks) further down, so that one has to be scoped to its listbox.
+ */
+export const DEFAULT_BLURB_SELECTOR = 'ol.work.index.group > li.blurb'
+
 export interface ScrapeOptions {
   /** Total number of pages to fetch (see {@link detectPageCount}). */
   pageCount: number
   /** Builds the URL for a given 1-based page number. */
   pageUrl: (page: number) => string
+  /** Where the blurbs are (see {@link DEFAULT_BLURB_SELECTOR}). */
+  blurbSelector?: string
   onProgress?: (done: number, total: number) => void
   signal?: AbortSignal
   /** Max simultaneous requests. Default 3 — polite for AO3. */
@@ -57,12 +67,12 @@ export interface ScrapeResult {
 }
 
 /** Collect and parse the blurbs from already-fetched listing documents. */
-export function collectWorks(docs: Document[]): Work[] {
+export function collectWorks(docs: Document[], blurbSelector: string = DEFAULT_BLURB_SELECTOR): Work[] {
   const works: Work[] = []
   const seen = new Set<string>()
   let order = 0
   for (const doc of docs) {
-    for (const li of doc.querySelectorAll('ol.work.index.group > li.blurb')) {
+    for (const li of doc.querySelectorAll(blurbSelector)) {
       if (!(li instanceof HTMLLIElement))
         continue
       // Adopt into the live document so the node can be mounted in the view.
@@ -85,7 +95,7 @@ export function collectWorks(docs: Document[]): Work[] {
  * gets `loadedPages < totalPages` and can warn about the partial result.
  */
 export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> {
-  const { pageCount, pageUrl, onProgress, signal, concurrency = 3 } = opts
+  const { pageCount, pageUrl, blurbSelector, onProgress, signal, concurrency = 3 } = opts
   // Sparse by page index; failed pages stay holes and are filtered out below.
   const docs: (Document | undefined)[] = []
   let done = 0
@@ -117,7 +127,7 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
     throw new DOMException('Scrape aborted', 'AbortError')
 
   return {
-    works: collectWorks(docs.filter((d): d is Document => d !== undefined)),
+    works: collectWorks(docs.filter((d): d is Document => d !== undefined), blurbSelector),
     loadedPages: pageCount - failures,
     totalPages: pageCount,
   }

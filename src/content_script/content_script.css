@@ -869,11 +869,12 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 }
 
 /* ---------------------------------------------------------------------------
-   Search Marked for Later. A button on the to-read page swaps the native paged
-   list for an in-memory, filterable/sortable view (search-view, below). These
-   rules cover the button, the native-list hide, and the scrape progress panel.
+   Search-view host. A control on a native paged listing swaps it for an
+   in-memory, filterable/sortable view (search-view, below). These rules cover
+   the controls that open one, the native-list hide, and the scrape progress
+   panel — shared by every place the view is offered.
    --------------------------------------------------------------------------- */
-.AO3E--search-marked-for-later--native-hidden {
+.AO3E--search-host--native-hidden {
   display: none !important;
 }
 
@@ -881,7 +882,19 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   cursor: pointer;
 }
 
-.AO3E--search-marked-for-later--progress {
+/* Sits at the end of the "this tag has not been marked common" sentence, so it
+   reads as part of it rather than as a button dropped into the prose. */
+.AO3E--search-tag-works--link {
+  cursor: pointer;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+}
+
+.AO3E--search-host--progress {
   display: flex;
   flex-direction: column;
   gap: 0.75em;
@@ -890,21 +903,21 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   text-align: center;
 }
 
-.AO3E--search-marked-for-later--progress-track {
+.AO3E--search-host--progress-track {
   height: 0.6em;
   border-radius: 999px;
   background: rgba(128, 128, 128, 0.25);
   overflow: hidden;
 }
 
-.AO3E--search-marked-for-later--progress-fill {
+.AO3E--search-host--progress-fill {
   height: 100%;
   width: 0%;
   background: #2f8f4e;
   transition: width 0.2s ease;
 }
 
-.AO3E--search-marked-for-later--progress-cancel {
+.AO3E--search-host--progress-cancel {
   align-self: center;
   cursor: pointer;
 }

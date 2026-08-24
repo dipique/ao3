@@ -59,8 +59,15 @@
     </OptionRow>
     <OptionDivider />
     <OptionRow
+      title="Search an uncommon tag's works"
+      subtitle="AO3 lets you sort and filter a tag's works only once the tag has been marked common (canonical); for every other tag you get a plain paged list and nothing else. On those pages, add a “Search these works” link that loads every page of the list into the same view you can instantly filter and sort by tags, fandoms, rating, length, kudos and more."
+    >
+      <OptionSwitch option-id="searchTagWorks" />
+    </OptionRow>
+    <OptionDivider />
+    <OptionRow
       title="Results per page"
-      subtitle="How many works to show per page in the Search Marked for Later view. Lower values stay fast even with very large lists; higher values show more at once but take longer to render."
+      subtitle="How many works to show per page in the search views above. Lower values stay fast even with very large lists; higher values show more at once but take longer to render."
     >
       <OptionSearchPerPage />
     </OptionRow>
