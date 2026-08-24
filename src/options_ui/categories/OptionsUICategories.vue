@@ -16,7 +16,7 @@ const { height: lastHeight } = useElementSize(computed(() => lastRef.value?.$el)
 
 <template>
   <div
-    flex="~ col gap8"
+    flex="~ col gap6"
     px="2 md:4"
     :style="{ marginBottom: `calc(max(0px, 100vh - ${lastHeight}px - var(--header-height) - var(--footer-height)))` }"
   >
