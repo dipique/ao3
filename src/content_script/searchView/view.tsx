@@ -481,10 +481,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   ) as HTMLElement as HTMLButtonElement
   backBtn.addEventListener('click', handlers.onBack)
   const refreshBtn = (
-    <button type="button" class={cx('refresh')}>
+    <button type="button" class={cx('refresh')} title="Refresh">
       <MdiRefresh />
-      {' '}
-      Refresh
     </button>
   ) as HTMLElement as HTMLButtonElement
   refreshBtn.addEventListener('click', handlers.onRefresh)
@@ -1008,9 +1006,14 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     }
 
     const noun = total === 1 ? 'work' : 'works'
-    countEl.textContent = total === 0
-      ? `No ${works.length === 1 ? 'work' : 'works'} match`
-      : `Showing ${start + 1}–${start + onPage.size} of ${total} ${noun}`
+    if (total === 0) {
+      countEl.textContent = `No ${works.length === 1 ? 'work' : 'works'} match`
+    }
+    else {
+      const range = `${start + 1}–${start + onPage.size}`
+      const countStr = works.length > total ? `${total} (${works.length})` : String(total)
+      countEl.textContent = `Showing ${range} of ${countStr} ${noun}`
+    }
     renderPager(pageCount)
     syncFacets(facetCounts, resultCounts)
   }
@@ -1043,6 +1046,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   function setUpdating(updating: boolean): void {
     updatingEl.classList.toggle(cx('updating-on'), updating)
+    refreshBtn.classList.toggle(cx('refresh-spinning'), updating)
   }
 
   function getState(): ViewState {

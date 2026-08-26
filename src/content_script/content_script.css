@@ -882,6 +882,11 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   cursor: pointer;
 }
 
+/* Hide the button while the search view is open — it doesn't do anything there. */
+#main:has(.AO3E--search-host) li:has(.AO3E--search-marked-for-later--button) {
+  display: none;
+}
+
 /* Sits at the end of the "this tag has not been marked common" sentence, so it
    reads as part of it rather than as a button dropped into the prose. */
 .AO3E--search-tag-works--link {
@@ -952,7 +957,26 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--search-view--refresh {
   margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0.2em;
+  color: inherit;
   cursor: pointer;
+  line-height: 0;
+  border-radius: 0.2em;
+  opacity: 0.65;
+}
+
+.AO3E--search-view--refresh:hover {
+  opacity: 1;
+}
+
+@keyframes AO3E--refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+.AO3E--search-view--refresh-spinning svg {
+  animation: AO3E--refresh-spin 0.8s linear infinite;
 }
 
 .AO3E--search-view--back {
@@ -1006,10 +1030,22 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   }
 }
 
-/* The results column. min-width:0 lets the grid track shrink instead of being
-   forced wide by long unbreakable blurb content. */
+/* The results column. Flex row so the works list and pager sit side by side;
+   min-width:0 lets the grid track shrink instead of being forced wide by long
+   unbreakable blurb content. */
 .AO3E--search-view--main {
   min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 1em;
+}
+
+/* The works list takes the remaining space. float:none overrides any AO3
+   site-level float applied to the ol.index.group element. */
+.AO3E--search-view--results {
+  flex: 1;
+  min-width: 0;
+  float: none;
 }
 
 /* Sticky so the filters stay reachable while the results scroll past them —
@@ -1084,17 +1120,17 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 .AO3E--search-view--pager {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  flex-shrink: 0;
+  align-items: stretch;
   gap: 0.3em;
-  margin-top: 1em;
 }
 
 .AO3E--search-view--page {
   cursor: pointer;
-  min-width: 2.2em;
-  padding: 0.2em 0.5em;
+  padding: 0.2em 0.6em;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .AO3E--search-view--page:disabled {
