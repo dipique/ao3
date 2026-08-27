@@ -288,6 +288,12 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
    Floating filter toolbar. A single pill, fixed to the bottom-right on listing
    pages where any filter hid works, that toggles the peek above.
    --------------------------------------------------------------------------- */
+/* Nothing left to show — see FilterToolbar's syncVisible. Needs to outrank the
+   `display: flex` below, which a bare [hidden] attribute would lose to. */
+.AO3E--filter-toolbar[hidden] {
+  display: none !important;
+}
+
 .AO3E--filter-toolbar {
   position: fixed;
   right: 1em;
@@ -750,6 +756,12 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   height: max(0.75em, 1rem) !important;
   top: 0 !important;
   vertical-align: middle;
+}
+
+/* Matches the search view's own facet toggles (see --toggle-require/-include),
+   so a tag's indicator and the sidebar row for the same value read alike. */
+.AO3E--indicator--require {
+  color: #0a5ad6;
 }
 
 .AO3E--indicator--include {

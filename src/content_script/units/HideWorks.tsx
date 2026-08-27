@@ -3,27 +3,22 @@ import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
 import type { MarkId, Options, ProgressSource, Rule } from '#common'
+import type { FilterTarget } from '#content_script/filterTarget.js'
+import type { FacetKey } from '#content_script/searchView/engine.ts'
 
 import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
-  type CheckboxGroup,
-  hasCheckboxGroupFields,
-  hasFandomFilterFields,
-  hasTagFilterFields,
-  isCheckboxGroupSelected,
-  isFandomSelected,
-  isTagSelected,
   loadFandomIdLookup,
-  onFilterChange,
   resetFilterSidebarCaches,
-  resolveFandomIdSync,
-  resolveFandomIdWithFetch,
-  toggleCheckboxGroupFilter,
-  toggleFandomFilter,
-  toggleTagFilter,
 } from '#content_script/filterSidebar.js'
+import {
+  facetForTagType,
+  filterTargetFor,
+  nativeTargetForTag,
+  onFilterTargetChange,
+} from '#content_script/filterTarget.js'
 import { markIcon } from '#content_script/markIcons.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -37,16 +32,23 @@ const EXCLUDE_CLASS = `${ADDON_CLASS}--hide-works--exclude`
 const EXCLUDE_ACTIVE_CLASS = `${ADDON_CLASS}--hide-works--exclude-active`
 
 /**
- * Where an inline "exclude" button adds the value in the filter sidebar:
- * - `tag`: text tags (relationship/character/freeform), by name.
- * - `fandom`: id-based, resolved from the name/href.
- * - `checkbox`: a fixed group (rating/warning/category) whose full set of
- *   checkboxes is always present, matched by name.
+ * The value an inline "exclude" button excludes, and the tag type that decides
+ * where it lands — the search view's matching facet when the blurb is inside
+ * one, else the sidebar field/checkbox AO3 filters that type with. See
+ * {@link file://../filterTarget.tsx}.
  */
-type ExcludeTarget
-  = | { kind: 'tag', name: string }
-    | { kind: 'fandom', name: string, href?: string }
-    | { kind: 'checkbox', group: CheckboxGroup, name: string }
+interface ExcludeTarget {
+  name: string
+  type?: TagType
+  /** The tag's own page, so an unknown fandom's id can be fetched on demand. */
+  href?: string
+  /**
+   * For a value that isn't a tag at all — a work's language. Naming the facet
+   * outright is also what says there is no sidebar equivalent, so the button
+   * appears only inside a search view.
+   */
+  facet?: FacetKey
+}
 
 interface ReasonItem {
   /** The actual matched value (tag/fandom/author/language) to display. */
@@ -92,22 +94,29 @@ function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
 }
 
 // ---------------------------------------------------------------------------
-// Inline exclude buttons. Registered across all hidden works on the page so a
-// filter change made anywhere (here, or a tag/fandom toolbar) re-syncs them.
+// Inline exclude buttons. Registered across all hidden works on the page (or in
+// the search view) so a filter change made anywhere — here, or a tag/fandom
+// toolbar, or the view's own facet rows — re-syncs them.
 // ---------------------------------------------------------------------------
 
-const excludeButtons: { button: HTMLButtonElement, target: ExcludeTarget }[] = []
-
-const CHECKBOX_GROUP_NOUNS: Record<CheckboxGroup, string> = {
-  rating: 'rating',
-  archive_warning: 'warning',
-  category: 'category',
+interface ExcludeButton {
+  button: HTMLButtonElement
+  target: ExcludeTarget
+  /** Where this button's exclude lands; resolved when the button was built. */
+  filter: FilterTarget
 }
 
+const excludeButtons: ExcludeButton[] = []
+
+/** What to call the thing being excluded, in the button's hover text. */
 function excludeNoun(target: ExcludeTarget): string {
-  switch (target.kind) {
-    case 'fandom': return 'fandom'
-    case 'checkbox': return CHECKBOX_GROUP_NOUNS[target.group]
+  if (target.facet === 'language')
+    return 'language'
+  switch (target.type) {
+    case TagType.Fandom: return 'fandom'
+    case TagType.Rating: return 'rating'
+    case TagType.ArchiveWarning: return 'warning'
+    case TagType.Category: return 'category'
     default: return 'tag'
   }
 }
@@ -122,26 +131,13 @@ function setExcludeButtonState(button: HTMLButtonElement, target: ExcludeTarget,
   button.setAttribute('aria-label', label)
 }
 
-function excludeTargetSelected(target: ExcludeTarget): boolean {
-  switch (target.kind) {
-    case 'tag':
-      return isTagSelected('exclude', target.name)
-    case 'checkbox':
-      return isCheckboxGroupSelected('exclude', target.group, target.name)
-    case 'fandom': {
-      const id = resolveFandomIdSync(target.name)
-      return id != null && isFandomSelected('exclude', id)
-    }
-  }
-}
-
 function refreshExcludeButtons(): void {
-  for (const { button, target } of excludeButtons)
-    setExcludeButtonState(button, target, excludeTargetSelected(target))
+  for (const { button, target, filter } of excludeButtons)
+    setExcludeButtonState(button, target, filter.isSelected('exclude', target.name))
 }
 
 // Registered once; iterating an empty registry between page runs is a no-op.
-onFilterChange(refreshExcludeButtons)
+onFilterTargetChange(refreshExcludeButtons)
 
 /**
  * Everything a run works out from the options before it can weigh a single
@@ -263,9 +259,8 @@ export class HideWorks extends Unit {
     this.logger.debug('Hiding works...')
     // A full-page run owns the exclude-button registry and starts it fresh; a
     // per-blurb run only adds to it, or it would drop every button but the last
-    // blurb's. (Neither page offering the search view today has a filter
-    // sidebar, so in practice it stays empty there — but the view is meant to be
-    // reusable on pages that do have one.)
+    // blurb's — which is exactly how the search view runs this unit, one blurb
+    // at a time, and its buttons exclude into the view's own facets.
     if (this.root === document)
       excludeButtons.length = 0
     const run = runState(this.options)
@@ -288,8 +283,9 @@ export class HideWorks extends Unit {
         usedFandomExclude = true
     }
 
-    // Fandom exclude buttons need the id lookup to show their initial state and
-    // to filter on click. Load it lazily, then re-sync any buttons we built.
+    // A fandom exclude button pointed at the sidebar needs the id lookup to show
+    // its initial state and to filter on click. Load it lazily, then re-sync any
+    // buttons we built.
     if (usedFandomExclude)
       void loadFandomIdLookup().then(refreshExcludeButtons)
   }
@@ -390,7 +386,14 @@ export class HideWorks extends Unit {
         label: 'Language',
         kind: 'languages',
         priority: 0,
-        item: { value: blurb.language, rule: `Language is "${blurb.language}"` },
+        item: {
+          value: blurb.language,
+          rule: `Language is "${blurb.language}"`,
+          // AO3's sidebar picks one language at a time and can't exclude any, so
+          // this row is the search view's alone — there the language is just
+          // another facet, and dropping it takes these placeholders out too.
+          exclude: { name: blurb.language, facet: 'language' },
+        },
       })
     }
 
@@ -471,7 +474,7 @@ export class HideWorks extends Unit {
     }
 
     const showValues = this.options.hideShowMatchedValues
-    const reasonsNode = this.buildReasons(reasons, showValues)
+    const reasonsNode = this.buildReasons(blurb, reasons, showValues)
 
     const isHiddenSpan: HTMLSpanElement = <span title="This work is hidden."><MdiEyeOff /></span>
     const wasHiddenSpan: HTMLSpanElement = <span title="This work was hidden."><MdiEye /></span>
@@ -518,7 +521,7 @@ export class HideWorks extends Unit {
     return reasonsNode.usedFandomExclude
   }
 
-  buildReasons(reasons: HideReasons, showValues: boolean): { node: HTMLElement, usedFandomExclude: boolean } {
+  buildReasons(blurb: Element, reasons: HideReasons, showValues: boolean): { node: HTMLElement, usedFandomExclude: boolean } {
     const container: HTMLElement = <em class={REASONS_CLASS}></em>
     let usedFandomExclude = false
 
@@ -545,10 +548,12 @@ export class HideWorks extends Unit {
         attachPopoverTrigger(valueSpan, () => hintNode(title))
         container.append(valueSpan)
 
-        const excludeButton = item.exclude ? this.buildExcludeButton(item.exclude) : null
-        if (excludeButton) {
-          container.append(excludeButton)
-          if (item.exclude!.kind === 'fandom')
+        const excluder = item.exclude ? this.buildExcludeButton(blurb, item.exclude) : null
+        if (excluder) {
+          container.append(excluder.button)
+          // Only the sidebar's fandom filter needs the id lookup; a search
+          // view's fandom facet matches the name it already scraped.
+          if (excluder.filter.kind === 'native' && item.exclude!.type === TagType.Fandom)
             usedFandomExclude = true
         }
       })
@@ -558,15 +563,20 @@ export class HideWorks extends Unit {
   }
 
   /**
-   * Build an inline exclude button, or null when this page has no matching
-   * filter sidebar to add the value to.
+   * Build an inline exclude button and register it, or null when nothing here
+   * can filter the value: the blurb is on a plain listing with no filter
+   * sidebar, and not inside a search view either. Returns the registry entry, so
+   * the caller can see which of the two filters it ended up pointing at.
    */
-  buildExcludeButton(target: ExcludeTarget): HTMLButtonElement | null {
-    if (target.kind === 'tag' && !hasTagFilterFields())
-      return null
-    if (target.kind === 'fandom' && !hasFandomFilterFields())
-      return null
-    if (target.kind === 'checkbox' && !hasCheckboxGroupFields(target.group))
+  buildExcludeButton(blurb: Element, target: ExcludeTarget): ExcludeButton | null {
+    const filter = filterTargetFor(
+      blurb,
+      target.facet ?? facetForTagType(target.type),
+      // A named facet means the value is not a tag, so there is nothing in AO3's
+      // sidebar to fall back to.
+      target.facet ? null : nativeTargetForTag(target, target.href),
+    )
+    if (!filter)
       return null
 
     const button = (
@@ -575,43 +585,19 @@ export class HideWorks extends Unit {
       </button>
     ) as HTMLElement as HTMLButtonElement
 
-    setExcludeButtonState(button, target, excludeTargetSelected(target))
+    setExcludeButtonState(button, target, filter.isSelected('exclude', target.name))
 
     button.addEventListener('click', (e) => {
       e.preventDefault()
-      void this.onExcludeClick(button, target)
+      // No state written back here: every filter notifies once it has actually
+      // moved (the native fandom one only after its id resolves), and that
+      // notification is what re-syncs this button along with everything else.
+      filter.toggle('exclude', target.name)
     })
 
-    excludeButtons.push({ button, target })
-    return button
-  }
-
-  async onExcludeClick(button: HTMLButtonElement, target: ExcludeTarget): Promise<void> {
-    if (target.kind === 'tag') {
-      if (!toggleTagFilter('exclude', target.name))
-        this.logger.warn(`No exclude field for tag "${target.name}"; cannot update filter.`)
-      return
-    }
-
-    if (target.kind === 'checkbox') {
-      if (!toggleCheckboxGroupFilter('exclude', target.group, target.name))
-        this.logger.warn(`No exclude checkbox for ${target.group} "${target.name}"; cannot update filter.`)
-      return
-    }
-
-    // Fandoms filter by id, which may require an async lookup/fetch.
-    button.disabled = true
-    await loadFandomIdLookup()
-    let id = resolveFandomIdSync(target.name)
-    if (id == null && target.href)
-      id = await resolveFandomIdWithFetch(target.name, target.href)
-    button.disabled = false
-
-    if (id == null) {
-      this.logger.warn(`Could not resolve an id for fandom "${target.name}"; cannot filter.`)
-      return
-    }
-    toggleFandomFilter('exclude', id, target.name)
+    const entry: ExcludeButton = { button, target, filter }
+    excludeButtons.push(entry)
+    return entry
   }
 }
 
@@ -653,23 +639,11 @@ function describeRule(rule: Rule): string {
   return priority === 0 ? body : `${body} (priority ${priority})`
 }
 
-/** Where a matched tag should be added if the user clicks its exclude button. */
-function tagExcludeTarget(tag: BlurbTag): ExcludeTarget | undefined {
-  switch (tag.type) {
-    // Fandoms are filtered by id (resolved from the name and link).
-    case TagType.Fandom:
-      return { kind: 'fandom', name: tag.name, href: tag.href }
-    // Ratings, warnings and categories have a fixed set of exclude checkboxes
-    // present on every works-filter page, matched by name.
-    case TagType.Rating:
-      return { kind: 'checkbox', group: 'rating', name: tag.name }
-    case TagType.ArchiveWarning:
-      return { kind: 'checkbox', group: 'archive_warning', name: tag.name }
-    case TagType.Category:
-      return { kind: 'checkbox', group: 'category', name: tag.name }
-    // Relationships, characters, additional tags (and untyped tags) are
-    // excludable by name through the excluded-tag-names field.
-    default:
-      return { kind: 'tag', name: tag.name }
-  }
+/**
+ * What a matched tag's exclude button excludes. Which filter field, checkbox or
+ * facet that turns into is `filterTarget`'s business — all this has to carry is
+ * the tag itself, plus its link so an unknown fandom's id can still be fetched.
+ */
+function tagExcludeTarget(tag: BlurbTag): ExcludeTarget {
+  return { name: tag.name, type: tag.type, href: tag.href }
 }

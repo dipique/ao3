@@ -6,6 +6,7 @@ import MdiGestureTapHold from '~icons/mdi/gesture-tap-hold.jsx'
 
 import { ADDON_CLASS, marksHideAnything, options } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
+import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -24,6 +25,49 @@ const PEEK_CLASS = `${ADDON_CLASS}--peek-hidden`
  * matches them all regardless of which filter kind was responsible.
  */
 const HIDDEN_SELECTOR = 'li[data-ao3e-hidden-by]'
+
+/**
+ * How many works the reader's filters have hidden *in the listing they're
+ * looking at* — the only ones peek could reveal. Two kinds are in the page but
+ * not in front of the reader, and neither counts: the native listing a custom
+ * search view is standing in for, and the works that view is holding back
+ * because they're filtered out or on another of its pages.
+ *
+ * Recounted rather than cached because a search view marks its works as it
+ * decorates them, a page at a time — the number simply isn't known when this
+ * unit runs, and changes with every filter and page turn after it.
+ */
+function countHidden(): number {
+  let count = 0
+  for (const el of document.querySelectorAll(HIDDEN_SELECTOR)) {
+    if (el.classList.contains(VIEW_HIDDEN_CLASS) || el.closest(`.${NATIVE_HIDDEN_CLASS}`))
+      continue
+    count++
+  }
+  return count
+}
+
+/**
+ * The mounted toolbar's peek pill, so a listing that fills in *after* this unit
+ * ran can bring the count up to date. Null when the page has no peek pill.
+ */
+let syncPeek: (() => void) | null = null
+let peekPending = false
+
+/**
+ * Bring the peek pill in line with what's actually hidden now — adding or
+ * dropping it as that count crosses zero. Called by the search view after every
+ * render, and when it closes; coalesced to one pass per frame.
+ */
+export function refreshFilterToolbar(): void {
+  if (!syncPeek || peekPending)
+    return
+  peekPending = true
+  requestAnimationFrame(() => {
+    peekPending = false
+    syncPeek?.()
+  })
+}
 
 /**
  * Document listener that collapses the panel on an outside click. Kept at module
@@ -95,12 +139,15 @@ export class FilterToolbar extends Unit {
 
   static override async clean(): Promise<void> {
     detachOutsideHandler()
+    syncPeek = null
     document.body.classList.remove(PEEK_CLASS)
   }
 
   override async ready(): Promise<void> {
-    const count = this.peekAvailable ? document.querySelectorAll(HIDDEN_SELECTOR).length : 0
-    const showPeek = count > 0
+    // The pill is built whenever peeking *could* apply here, not only when
+    // something is hidden already: a custom search view hides its works long
+    // after this runs, and there'd be nothing left to add the pill to.
+    const showPeek = this.peekAvailable
     const showMenus = this.menuFeaturesActive
     // The reader pill needs the actual work text present, not just a work URL.
     const showReader = this.onWorkPage && document.querySelector('#workskin') !== null
@@ -110,18 +157,21 @@ export class FilterToolbar extends Unit {
       return
     }
 
-    document.body.append(this.buildToolbar(count, showPeek, showMenus, showReader))
+    document.body.append(this.buildToolbar(showPeek, showMenus, showReader))
     this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}, reader: ${showReader}).`)
   }
 
-  buildToolbar(count: number, showPeek: boolean, showMenus: boolean, showReader: boolean): HTMLElement {
+  buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean): HTMLElement {
     const panel = <div class={PANEL_CLASS} role="group" />
     if (showReader)
       panel.append(this.buildReaderButton())
-    if (showPeek)
-      panel.append(this.buildPeekButton(count))
-    if (showMenus)
-      panel.append(this.buildMenusButton())
+    // Built up front but only put in the panel while it has something to say —
+    // see syncVisible below. The menus pill is kept to hand as the insertion
+    // point, so the peek pill always comes back in the same place.
+    const peek = showPeek ? this.buildPeekButton() : null
+    const menusButton = showMenus ? this.buildMenusButton() : null
+    if (menusButton)
+      panel.append(menusButton)
 
     const fab: HTMLButtonElement = (
       <button type="button" class={FAB_CLASS} aria-haspopup="true" aria-expanded="false">
@@ -136,6 +186,28 @@ export class FilterToolbar extends Unit {
         {fab}
       </div>
     )
+
+    // The peek pill comes and goes with the count, and with nothing left in the
+    // panel there is nothing for the fab to open — so the whole toolbar steps
+    // out of the corner rather than leaving a button that opens an empty box.
+    const syncVisible = (): void => {
+      if (peek) {
+        const count = peek.sync()
+        if (count > 0 && !peek.button.isConnected) {
+          if (menusButton)
+            menusButton.before(peek.button)
+          else
+            panel.append(peek.button)
+        }
+        else if (count === 0 && peek.button.isConnected) {
+          peek.button.remove()
+        }
+      }
+      container.hidden = panel.children.length === 0
+    }
+    if (peek)
+      syncPeek = syncVisible
+    syncVisible()
 
     let open = false
     const setOpen = (next: boolean): void => {
@@ -164,8 +236,8 @@ export class FilterToolbar extends Unit {
     return container
   }
 
-  buildPeekButton(count: number): HTMLElement {
-    const noun = count === 1 ? 'work' : 'works'
+  /** The peek pill, plus the sync that relabels it and reports the current count. */
+  buildPeekButton(): { button: HTMLButtonElement, sync: () => number } {
     const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`} />
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
@@ -175,7 +247,11 @@ export class FilterToolbar extends Unit {
       </button>
     ) as HTMLElement as HTMLButtonElement
 
-    const sync = () => {
+    const sync = (): number => {
+      const count = countHidden()
+      if (count === 0)
+        return 0
+      const noun = count === 1 ? 'work' : 'works'
       const peeking = document.body.classList.contains(PEEK_CLASS)
       icon.replaceChildren(peeking ? <MdiEyeOff /> : <MdiEye />)
       text.textContent = `${peeking ? 'Hide' : 'Show'} ${count} filtered ${noun}`
@@ -185,15 +261,15 @@ export class FilterToolbar extends Unit {
         : 'Temporarily show works your filters hid (does not change your filters)'
       button.title = label
       button.setAttribute('aria-label', label)
+      return count
     }
 
     button.addEventListener('click', () => {
       document.body.classList.toggle(PEEK_CLASS)
       sync()
     })
-    sync()
 
-    return button
+    return { button, sync }
   }
 
   buildMenusButton(): HTMLElement {

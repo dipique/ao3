@@ -3,11 +3,13 @@ import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS, logger, toast } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
+import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
 import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
 
 import { readSnapshot, writeSnapshot } from './cache.ts'
+import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
 import { loadPrefs, savePrefs } from './prefs.ts'
 import { scrapeListing } from './scrape.ts'
@@ -23,11 +25,6 @@ import { createSearchView } from './view.tsx'
  * open at a time — each source belongs to a different AO3 page, and a content
  * script only ever sees one.
  */
-
-const HOST = `${ADDON_CLASS}--search-host`
-const cx = (suffix: string): string => `${HOST}--${suffix}`
-/** Added to the native list + pagination to hide them while the view is shown. */
-const NATIVE_HIDDEN_CLASS = cx('native-hidden')
 
 const log = logger.child('searchView')
 
@@ -148,6 +145,9 @@ export function closeSearchView(): void {
   // Release the context-menu triggers on the now-removed blurbs (the native
   // page's still-connected triggers are left intact).
   pruneDetachedTriggers()
+  // The view's collapsed works went with it, and the native listing's are back:
+  // both change what the peek pill should be counting.
+  refreshFilterToolbar()
 }
 
 /**
@@ -321,6 +321,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       perPage: options.searchPerPage,
       decorateBlurb: blurb => decorateBlurb(blurb, options),
       decorateContainer: root => decorateContainer(root, options),
+      onRendered: refreshFilterToolbar,
       hideFacetValue: makeFacetHider(options),
       ...source.viewConfig,
       initialState: opts.initialState,

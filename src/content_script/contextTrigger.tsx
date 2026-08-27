@@ -1,3 +1,4 @@
+import MdiCheckCircle from '~icons/mdi/check-circle.jsx'
 import MdiContentCopy from '~icons/mdi/content-copy.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
@@ -424,17 +425,18 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
 // ---------------------------------------------------------------------------
 
 /**
- * A state an indicator can show. The fixed six describe a rule or the sidebar
- * filter; `mark:<id>` covers the per-work marks, which are data (see
+ * A state an indicator can show. The fixed seven describe a rule or the filter
+ * the item sits in; `mark:<id>` covers the per-work marks, which are data (see
  * {@link file://../common/workMarks.ts}) and so can't be enumerated here.
  */
-export type IndicatorState = 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'hideFilter' | `mark:${MarkId}`
+export type IndicatorState = 'require' | 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'hideFilter' | `mark:${MarkId}`
 
 /** The non-mark states, in display order. Marks follow them, in mark-table order. */
-const FILTER_STATES = ['include', 'exclude', 'hide', 'invert', 'highlight', 'hideFilter'] as const
+const FILTER_STATES = ['require', 'include', 'exclude', 'hide', 'invert', 'highlight', 'hideFilter'] as const
 type FilterState = typeof FILTER_STATES[number]
 
 const FILTER_ICONS: Record<FilterState, () => Node> = {
+  require: () => <MdiCheckCircle />,
   include: () => <MdiPlusCircle />,
   exclude: () => <MdiMinusCircle />,
   hide: () => <MdiEyeOff />,
@@ -445,6 +447,9 @@ const FILTER_ICONS: Record<FilterState, () => Node> = {
 
 /** Hover text, so an icon's meaning doesn't depend on recognising it. */
 const FILTER_LABELS: Record<FilterState, string> = {
+  // Search-view only: AO3's own sidebar has no "every shown work must have this"
+  // filter, so this one can never light up on a native listing.
+  require: 'Required in the filter',
   include: 'Included in the filter',
   exclude: 'Excluded from the filter',
   hide: 'Hidden',

@@ -1,13 +1,12 @@
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
-import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
-import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import type { FilterBehavior, Tag } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
+import type { FilterTarget } from '#content_script/filterTarget.js'
 
 import { options, ruleTargetColor, TagType } from '#common'
 import {
@@ -18,26 +17,29 @@ import {
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
 import {
-  hasFandomFilterFields,
-  isFandomSelected,
   loadFandomIdLookup,
-  onFilterChange,
   resetFilterSidebarCaches,
-  resolveFandomIdSync,
-  resolveFandomIdWithFetch,
   scrapeSidebar,
-  toggleFandomFilter,
 } from '#content_script/filterSidebar.js'
+import {
+  activeFilterDirs,
+  filterMenuItems,
+  filterTargetFor,
+  nativeFandomTarget,
+  onFilterTargetChange,
+} from '#content_script/filterTarget.js'
 import { clearRule, ruleBehavior, ruleIndicatorBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { findFacetBridge } from '#content_script/searchView/facetBridge.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
 /**
  * Blurb fandom links. Unlike the text-based tags handled by TagToolbar, the
  * sidebar filters fandoms by numeric id, so include/exclude must resolve each
- * displayed name to an id first. Hide / always-show / highlight, however, are
- * persistent rules keyed by name (target {@link TagType.Fandom}), so they need
- * no id and work on any page.
+ * displayed name to an id first — the one thing the in-memory search view's
+ * fandom facet doesn't need, since it filters the works it already holds by
+ * name. Hide / always-show / highlight, however, are persistent rules keyed by
+ * name (target {@link TagType.Fandom}), so they need no id and work on any page.
  */
 const FANDOM_LINK_SELECTOR = 'h5.fandoms a.tag'
 
@@ -46,58 +48,23 @@ interface FandomEntry {
   tag: Tag
   behavior: FilterBehavior | null
   highlightColor: string
-  hasFields: boolean
+  /** The search view's fandom facet, or the sidebar's fandom filter, or neither. */
+  filter: FilterTarget | null
   indicator: HTMLElement | null
 }
 
 const entries: FandomEntry[] = []
 
 function computeStates(entry: FandomEntry): IndicatorState[] {
-  const states: IndicatorState[] = []
-  if (entry.hasFields) {
-    const id = resolveFandomIdSync(entry.tag.name)
-    if (id != null) {
-      if (isFandomSelected('include', id))
-        states.push('include')
-      if (isFandomSelected('exclude', id))
-        states.push('exclude')
-    }
-  }
+  const states: IndicatorState[] = activeFilterDirs(entry.filter, entry.tag.name)
   const behavior = ruleIndicatorBehavior(entry.behavior)
   if (behavior)
     states.push(behavior)
   return states
 }
 
-/** Resolve the fandom's id (cached, else fetched) and toggle its sidebar filter. */
-async function toggleFandom(direction: 'include' | 'exclude', tag: Tag, link: HTMLAnchorElement): Promise<void> {
-  let id = resolveFandomIdSync(tag.name)
-  id ??= await resolveFandomIdWithFetch(tag.name, link.href)
-  if (id == null)
-    return
-  toggleFandomFilter(direction, id, tag.name)
-}
-
-async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem[]> {
-  const items: MenuItem[] = []
-
-  if (hasFandomFilterFields()) {
-    const id = resolveFandomIdSync(tag.name)
-    items.push({
-      icon: () => <MdiPlusCircle />,
-      label: 'Include in filter',
-      scope: 'search',
-      active: id != null && isFandomSelected('include', id),
-      onSelect: () => toggleFandom('include', tag, link),
-    })
-    items.push({
-      icon: () => <MdiMinusCircle />,
-      label: 'Exclude from filter',
-      scope: 'search',
-      active: id != null && isFandomSelected('exclude', id),
-      onSelect: () => toggleFandom('exclude', tag, link),
-    })
-  }
+async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement, filter: FilterTarget | null): Promise<MenuItem[]> {
+  const items: MenuItem[] = filterMenuItems(filter, tag.name)
 
   const { filters } = await options.get('rules')
   const key = tagKey(tag)
@@ -157,7 +124,7 @@ function syncIndicator(entry: FandomEntry): void {
   const states = computeStates(entry)
   const next = buildIndicators(states, { highlightColor: entry.highlightColor })
   if (next)
-    attachMenuTrigger(next, () => buildFandomMenu(entry.tag, entry.link), { indicator: true, link: entry.link })
+    attachMenuTrigger(next, () => buildFandomMenu(entry.tag, entry.link, entry.filter), { indicator: true, link: entry.link })
 
   if (entry.indicator && next)
     entry.indicator.replaceWith(next)
@@ -169,7 +136,7 @@ function syncIndicator(entry: FandomEntry): void {
   entry.indicator = next
 }
 
-onFilterChange(() => {
+onFilterTargetChange(() => {
   for (const entry of entries)
     syncIndicator(entry)
 })
@@ -191,9 +158,12 @@ export class FandomToolbar extends Unit {
     if (fandomLinks.length === 0)
       return
 
-    const hasFields = hasFandomFilterFields()
-    // Include/exclude needs the id lookup; hide/highlight (by name) doesn't.
-    if (hasFields) {
+    // Inside a search view the facet bridge filters by name, so the whole id
+    // apparatus is beside the point; on a native listing include/exclude needs
+    // the lookup, while hide/highlight (by name) never does.
+    const bridged = !!findFacetBridge(fandomLinks[0]!)
+    const nativeFilter = bridged ? null : nativeFandomTarget()
+    if (nativeFilter) {
       await loadFandomIdLookup()
       scrapeSidebar()
     }
@@ -212,12 +182,14 @@ export class FandomToolbar extends Unit {
         tag,
         behavior: ruleBehavior(filters, tagKey(tag)),
         highlightColor,
-        hasFields,
+        // The native fallback carries this link's href, so a fandom missing from
+        // the index can still be resolved from its own page on first use.
+        filter: filterTargetFor(link, 'fandoms', nativeFilter && nativeFandomTarget(link.href)),
         indicator: null,
       }
       entries.push(entry)
 
-      attachMenuTrigger(link, () => buildFandomMenu(tag, link), { clickToOpen: this.options.openMenuOnClick })
+      attachMenuTrigger(link, () => buildFandomMenu(tag, link, entry.filter), { clickToOpen: this.options.openMenuOnClick })
       syncIndicator(entry)
     }
 

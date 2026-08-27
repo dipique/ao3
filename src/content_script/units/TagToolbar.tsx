@@ -1,13 +1,12 @@
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
-import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
-import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import type { FilterBehavior, Tag } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
+import type { FilterTarget } from '#content_script/filterTarget.js'
 
 import { options, ruleTargetColor } from '#common'
 import {
@@ -17,13 +16,15 @@ import {
   type IndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
+import { resetFilterSidebarCaches } from '#content_script/filterSidebar.js'
 import {
-  hasTagFilterFields,
-  isTagSelected,
-  onFilterChange,
-  resetFilterSidebarCaches,
-  toggleTagFilter,
-} from '#content_script/filterSidebar.js'
+  activeFilterDirs,
+  facetForTagType,
+  filterMenuItems,
+  filterTargetFor,
+  nativeTagTarget,
+  onFilterTargetChange,
+} from '#content_script/filterTarget.js'
 import { clearRule, ruleBehavior, ruleIndicatorBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
@@ -38,28 +39,25 @@ const TAG_LINK_SELECTOR = '.blurb ul.tags a.tag'
 
 /**
  * A decorated tag link: the link itself (a menu trigger), the parsed tag, its
- * persistent hide/show/highlight behaviour (snapshot from options this run), and
- * the indicator node currently shown after it (or null when nothing is active).
- * Rebuilt each `ready()`; the ephemeral include/exclude part is re-synced on
- * filter change.
+ * persistent hide/show/highlight behaviour (snapshot from options this run), the
+ * filter its include/exclude rows drive (the search view the blurb sits in, else
+ * the page's sidebar — null when neither can filter this tag), and the indicator
+ * node currently shown after it (or null when nothing is active). Rebuilt each
+ * `ready()`; the ephemeral include/exclude part is re-synced on filter change.
  */
 interface TagEntry {
   link: HTMLAnchorElement
   tag: Tag
   behavior: FilterBehavior | null
   highlightColor: string
-  hasFields: boolean
+  filter: FilterTarget | null
   indicator: HTMLElement | null
 }
 
 const entries: TagEntry[] = []
 
 function computeStates(entry: TagEntry): IndicatorState[] {
-  const states: IndicatorState[] = []
-  if (entry.hasFields && isTagSelected('include', entry.tag.name))
-    states.push('include')
-  if (entry.hasFields && isTagSelected('exclude', entry.tag.name))
-    states.push('exclude')
+  const states: IndicatorState[] = activeFilterDirs(entry.filter, entry.tag.name)
   const behavior = ruleIndicatorBehavior(entry.behavior)
   if (behavior)
     states.push(behavior)
@@ -67,25 +65,8 @@ function computeStates(entry: TagEntry): IndicatorState[] {
 }
 
 /** Build the tag's menu fresh at open time (so include/exclude + saved state are current). */
-async function buildTagMenu(tag: Tag, link: HTMLAnchorElement): Promise<MenuItem[]> {
-  const items: MenuItem[] = []
-
-  if (hasTagFilterFields()) {
-    items.push({
-      icon: () => <MdiPlusCircle />,
-      label: 'Include in filter',
-      scope: 'search',
-      active: isTagSelected('include', tag.name),
-      onSelect: () => void toggleTagFilter('include', tag.name),
-    })
-    items.push({
-      icon: () => <MdiMinusCircle />,
-      label: 'Exclude from filter',
-      scope: 'search',
-      active: isTagSelected('exclude', tag.name),
-      onSelect: () => void toggleTagFilter('exclude', tag.name),
-    })
-  }
+async function buildTagMenu(tag: Tag, link: HTMLAnchorElement, filter: FilterTarget | null): Promise<MenuItem[]> {
+  const items: MenuItem[] = filterMenuItems(filter, tag.name)
 
   const { filters } = await options.get('rules')
   const key = tagKey(tag)
@@ -147,7 +128,7 @@ function syncIndicator(entry: TagEntry): void {
   const states = computeStates(entry)
   const next = buildIndicators(states, { highlightColor: entry.highlightColor })
   if (next)
-    attachMenuTrigger(next, () => buildTagMenu(entry.tag, entry.link), { indicator: true, link: entry.link })
+    attachMenuTrigger(next, () => buildTagMenu(entry.tag, entry.link, entry.filter), { indicator: true, link: entry.link })
 
   if (entry.indicator && next)
     entry.indicator.replaceWith(next)
@@ -159,9 +140,10 @@ function syncIndicator(entry: TagEntry): void {
   entry.indicator = next
 }
 
-// Re-sync the include/exclude indicators when any control mutates the sidebar
-// filter. Registered once; a no-op over an empty registry between page runs.
-onFilterChange(() => {
+// Re-sync the include/exclude indicators when any control mutates the filter —
+// AO3's sidebar or a search view's facets. Registered once; a no-op over an empty
+// registry between page runs.
+onFilterTargetChange(() => {
   for (const entry of entries)
     syncIndicator(entry)
 })
@@ -179,7 +161,9 @@ export class TagToolbar extends Unit {
   override async ready(): Promise<void> {
     entries.length = 0
 
-    const hasFields = hasTagFilterFields()
+    // Resolved once per run: the sidebar lookup behind it is page-wide, and a
+    // run covers one page (or one search view) at a time.
+    const nativeFilter = nativeTagTarget()
     const { filters, colors } = this.options.rules
 
     for (const link of this.root.querySelectorAll<HTMLAnchorElement>(TAG_LINK_SELECTOR)) {
@@ -197,12 +181,12 @@ export class TagToolbar extends Unit {
         // The star's colour follows the tag's own type, so a highlighted
         // relationship can read differently from a highlighted freeform.
         highlightColor: ruleTargetColor(tag.type ?? 'tag', colors),
-        hasFields,
+        filter: filterTargetFor(link, facetForTagType(tag.type), nativeFilter),
         indicator: null,
       }
       entries.push(entry)
 
-      attachMenuTrigger(link, () => buildTagMenu(tag, link), { clickToOpen: this.options.openMenuOnClick })
+      attachMenuTrigger(link, () => buildTagMenu(tag, link, entry.filter), { clickToOpen: this.options.openMenuOnClick })
       syncIndicator(entry)
     }
 

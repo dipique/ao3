@@ -1,8 +1,9 @@
 import type { Options } from '#common'
 import type { Unit } from '#content_script/Unit.js'
 
-import { ruleMatchesTag, TagType } from '#common'
+import { ruleMatchesTag } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
+import { FACET_TAG_TYPES } from '#content_script/filterTarget.js'
 import { FandomToolbar } from '#content_script/units/FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from '#content_script/units/FilterEntityToolbars.tsx'
 import { HideAuthorToolbar } from '#content_script/units/HideAuthorToolbar.tsx'
@@ -65,20 +66,6 @@ export function decorateContainer(root: HTMLElement, options: Options): void {
   pruneDetachedTriggers()
   for (const U of CONTAINER_UNITS)
     runUnit(U, options, root)
-}
-
-/**
- * The tag type each facet group's values are. Language and completion status are
- * not tags at all, so no tag filter can speak about them.
- */
-const FACET_TAG_TYPES: Partial<Record<FacetKey, TagType>> = {
-  rating: TagType.Rating,
-  warnings: TagType.ArchiveWarning,
-  categories: TagType.Category,
-  fandoms: TagType.Fandom,
-  relationships: TagType.Relationship,
-  characters: TagType.Character,
-  freeforms: TagType.Freeform,
 }
 
 /**

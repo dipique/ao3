@@ -25,14 +25,15 @@ import {
   SORT_LABELS,
   sortWorks,
 } from './engine.ts'
-import { registerFacetBridge } from './facetBridge.ts'
+import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
+import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
 import { DEFAULT_READINESS, SIDEBAR_WIDTH } from './prefs.ts'
 
-const ROOT = `${ADDON_CLASS}--search-view`
+const ROOT = VIEW_ROOT
 /** Body class while the filter column is being dragged — see ReaderMode, same idea. */
 const RESIZING_CLASS = `${ADDON_CLASS}--resizing`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
-const HIDDEN_CLASS = cx('hidden')
+const HIDDEN_CLASS = VIEW_HIDDEN_CLASS
 const ACTIVE_CLASS = cx('active')
 // Name tiebreaker for facet-row ordering; mirrors engine's value sort.
 const rowCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
@@ -103,6 +104,13 @@ export interface SearchViewConfig {
   hideFacetValue?: (key: FacetKey, value: string) => boolean
   /** Called after a {@link BlurbAction} removes a work, so the host can persist. */
   onWorksChanged?: (works: Work[]) => void
+  /**
+   * Called whenever the view has finished re-rendering — a filter, a sort, a page
+   * turn, or fresh works. What the reader can actually see has changed, which is
+   * what page-level furniture outside the view (the floating filter toolbar's
+   * count of hidden works) needs to know.
+   */
+  onRendered?: () => void
   /** Restore a prior {@link SearchView.getState} snapshot (filters, sort, page). */
   initialState?: ViewState
   /**
@@ -505,6 +513,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       }
     }
     filterChanged()
+    // The blurbs carry the same selection a second time (the little include /
+    // exclude / require icons the tag menus leave next to a tag), so tell them
+    // it moved — whether the toggle came from a facet row or from one of those
+    // menus. Mirrors what the native sidebar's `notifyFilterChange` does.
+    notifyFacetChange()
     // Readiness is the one facet whose selection is a saved preference rather
     // than something dialled in for this visit.
     if (key === 'readiness')
@@ -1016,6 +1029,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     }
     renderPager(pageCount)
     syncFacets(facetCounts, resultCounts)
+    config.onRendered?.()
   }
 
   function mountResults(): void {
@@ -1042,6 +1056,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     mountResults()
     renderFacets()
     render()
+    // Selections may have been dropped just above; the re-mounted blurbs are
+    // decorated fresh, but anything else watching the filter needs telling.
+    notifyFacetChange()
   }
 
   function setUpdating(updating: boolean): void {

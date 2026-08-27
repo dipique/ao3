@@ -1,6 +1,6 @@
 import type { WordCountRange } from '#common'
 
-import type { FacetKey } from './engine.ts'
+import type { FacetDir, FacetKey } from './engine.ts'
 
 /**
  * Lets the shared context-menu decorators (e.g. the required-tags 2×2 square)
@@ -12,10 +12,14 @@ import type { FacetKey } from './engine.ts'
  * one is found the blurb lives in a search view and include/exclude should toggle
  * that view's facets; otherwise there is no bridge and the decorator falls back to
  * the native sidebar.
+ *
+ * Unlike the native sidebar the engine also understands `require` (AND within a
+ * group), so a bridged decorator can offer all three directions — see
+ * {@link file://../filterTarget.ts}, which is what the decorators actually call.
  */
 export interface FacetBridge {
-  isSelected: (key: FacetKey, dir: 'include' | 'exclude', value: string) => boolean
-  toggle: (key: FacetKey, dir: 'include' | 'exclude', value: string) => void
+  isSelected: (key: FacetKey, dir: FacetDir, value: string) => boolean
+  toggle: (key: FacetKey, dir: FacetDir, value: string) => void
   /** The view's current word-count bounds, or null when it isn't filtering by length. */
   getWordCount: () => WordCountRange | null
   /** Replace those bounds (null clears them) and re-run the filter. */
@@ -57,4 +61,22 @@ export function findFacetBridge(el: Element | null): FacetBridge | null {
       return bridge
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// Change notification. The search view's own facet UI and the blurb decorators
+// are two views of one filter, so whichever moves must tell the other: the
+// sidebar mirror of `notifyFilterChange` in `filterSidebar.tsx`. Consumers
+// normally subscribe through `onFilterTargetChange`, which covers both.
+// ---------------------------------------------------------------------------
+
+const changeListeners = new Set<() => void>()
+
+export function onFacetChange(fn: () => void): void {
+  changeListeners.add(fn)
+}
+
+export function notifyFacetChange(): void {
+  for (const fn of changeListeners)
+    fn()
 }
