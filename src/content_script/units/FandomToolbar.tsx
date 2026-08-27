@@ -28,7 +28,7 @@ import {
   scrapeSidebar,
   toggleFandomFilter,
 } from '#content_script/filterSidebar.js'
-import { clearRule, ruleBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { clearRule, ruleBehavior, ruleIndicatorBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -63,8 +63,9 @@ function computeStates(entry: FandomEntry): IndicatorState[] {
         states.push('exclude')
     }
   }
-  if (entry.behavior)
-    states.push(entry.behavior)
+  const behavior = ruleIndicatorBehavior(entry.behavior)
+  if (behavior)
+    states.push(behavior)
   return states
 }
 

@@ -20,7 +20,7 @@ import {
   type IndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
-import { authorKey, clearRule, ruleBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { authorKey, clearRule, ruleBehavior, ruleIndicatorBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -269,7 +269,7 @@ export class HideAuthorToolbar extends Unit {
 
   private syncIndicator(entry: AuthorEntry): void {
     const states: IndicatorState[] = []
-    const behavior = ruleBehavior(this.options.rules.filters, authorKey(entry.author.userId))
+    const behavior = ruleIndicatorBehavior(ruleBehavior(this.options.rules.filters, authorKey(entry.author.userId)))
     if (behavior)
       states.push(behavior)
 

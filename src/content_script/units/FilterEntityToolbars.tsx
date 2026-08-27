@@ -24,7 +24,7 @@ import {
 } from '#content_script/contextTrigger.js'
 import { loadMarkedForLaterIndex, noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
 import { markIcon } from '#content_script/markIcons.js'
-import { clearRule, entityKey, ruleBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { clearRule, entityKey, ruleBehavior, ruleIndicatorBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { openProgressEditor } from '#content_script/progressEditor.js'
 import { Unit } from '#content_script/Unit.js'
 import { applyMark, applyMarkGroup, applyMarkProgress } from '#content_script/workMarks.js'
@@ -736,7 +736,7 @@ abstract class FilterEntityToolbar extends Unit {
 
   protected computeStates(id: string): IndicatorState[] {
     const states: IndicatorState[] = []
-    const behavior = ruleBehavior(this.options.rules.filters, entityKey(this.noun, id))
+    const behavior = ruleIndicatorBehavior(ruleBehavior(this.options.rules.filters, entityKey(this.noun, id)))
     if (behavior)
       states.push(behavior)
     // A work carrying a progress mark is kept on Marked for Later deliberately

@@ -31,6 +31,11 @@
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    // No TypeScript that survives into the output: no enums, no namespaces with
+    // bodies, no parameter properties. Node's type stripping only erases types,
+    // so anything here that needed a real transform would put the unit tests
+    // that import it behind a flag newer Node no longer offers.
+    "erasableSyntaxOnly": true,
     "skipLibCheck": true,
     "noErrorTruncation": true
   },

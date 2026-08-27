@@ -66,6 +66,20 @@
     </OptionRow>
     <OptionDivider />
     <OptionRow
+      title="Search text-search results"
+      subtitle="On the results page of a works search (the “Search Works” form, or the search box in the header), add a “Search these results” button that loads the results into the same view you can instantly filter and sort by tags, fandoms, rating, length, kudos and more — things AO3's own results page offers no way to narrow by."
+    >
+      <OptionSwitch option-id="searchTextResults" />
+    </OptionRow>
+    <OptionDivider />
+    <OptionRow
+      title="Maximum works to load"
+      subtitle="A ceiling on how many works any of the search views above will load. Each is fetched twenty to a page from AO3's donated servers, and a text search for a common word can match hundreds of thousands — so a list bigger than this loads only up to the ceiling, in the order the Archive lists it, and only after you confirm. Raise it if you routinely search large lists and don't mind the wait."
+    >
+      <OptionSearchMaxResults />
+    </OptionRow>
+    <OptionDivider />
+    <OptionRow
       title="Results per page"
       subtitle="How many works to show per page in the search views above. Lower values stay fast even with very large lists; higher values show more at once but take longer to render."
     >

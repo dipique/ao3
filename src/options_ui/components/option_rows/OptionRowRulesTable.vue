@@ -43,9 +43,10 @@ const SORT_KEYS: Record<string, SortKey> = {
 /**
  * The order the Action column sorts in. Alphabetical would interleave the two
  * hiding behaviours with the two that don't hide anything; this is the order the
- * help text introduces them, strongest effect first.
+ * help text introduces them, strongest effect first — which puts the disabled
+ * rules last, together, where a sort by action is the quickest way to find them.
  */
-const BEHAVIOR_RANK: Record<string, number> = { hide: 0, invert: 1, highlight: 2, hideFilter: 3 }
+const BEHAVIOR_RANK: Record<string, number> = { hide: 0, invert: 1, highlight: 2, hideFilter: 3, none: 4 }
 
 const sortKey = ref<SortKey | null>(null)
 const sortDir = ref<'asc' | 'desc'>('asc')
@@ -211,6 +212,7 @@ const context = OptionRowRulesContext.inject()
             bg="hover:muted/50"
             transition-colors
             class="[&:not(:last-child)]:border-b"
+            :class="row.data.behavior === 'none' ? 'op50' : ''"
             @dblclick="context.edit?.(row.data)"
           >
             <Render :render="inner" />
@@ -234,12 +236,14 @@ const context = OptionRowRulesContext.inject()
                   />
                   <Icon v-else-if="cell.value === 'invert'" i-tabler-eye-exclamation op100 label="Show" />
                   <Icon v-else-if="cell.value === 'hideFilter'" i-mdi-tag-off op100 label="Hide tag" />
+                  <Icon v-else-if="cell.value === 'none'" i-mdi-cancel op40 label="Disabled" />
                   <Icon v-else i-tabler-eye-off op40 label="Hide" />
                 </div>
                 <template #content>
                   <span v-if="cell.value === 'highlight'">Highlight the match on results (does not hide).</span>
                   <span v-else-if="cell.value === 'invert'">Always show matching works - unless a hide rule outranks this one.</span>
                   <span v-else-if="cell.value === 'hideFilter'">Hide the matching tags themselves, on works and in the filter sidebar (does not hide works).</span>
+                  <span v-else-if="cell.value === 'none'">Disabled - the rule is kept, but does nothing at all.</span>
                   <span v-else>Hide matching works.</span>
                 </template>
               </Tooltip>

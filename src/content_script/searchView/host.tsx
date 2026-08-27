@@ -48,6 +48,12 @@ export interface SearchSource {
   pageUrl: (page: number) => string
   /** How many pages that listing has. Read from the live page, at load time. */
   pageCount: () => number
+  /**
+   * How many works the listing says it holds, when it says so at all. Only used
+   * to explain a truncated load ({@link budgetFor}) — the cap itself is counted
+   * in pages, which every listing reports.
+   */
+  resultCount?: () => number | null
   /** Where blurbs sit in a fetched page (see `DEFAULT_BLURB_SELECTOR`). */
   blurbSelector?: string
   /** The native elements hidden while the view is up, restored when it closes. */
@@ -68,6 +74,48 @@ export interface SearchSource {
   emptyMessage: string
   /** Shown when the load fails outright. */
   errorMessage: string
+}
+
+/**
+ * Works per page in every AO3 listing the view scrapes from. Only used to turn
+ * the reader's works ceiling into a page ceiling; a listing that ever served
+ * fewer just means we fetch a page or two more than strictly needed, and the
+ * hard trim on the collected works still holds the ceiling exactly.
+ */
+const WORKS_PER_PAGE = 20
+
+/** How much of a listing we're willing to fetch, and how much it actually has. */
+interface Budget {
+  /** Pages to fetch: the listing's own count, capped by {@link limit}. */
+  pages: number
+  /** Pages the listing really has. `> pages` means the load is truncated. */
+  totalPages: number
+  /** Works to keep. Never exceeded, whatever the pages turn out to hold. */
+  limit: number
+}
+
+/**
+ * Work out how much of `source` to load under the reader's `searchMaxResults`
+ * ceiling. AO3 serves a text search for a common word half a million works deep
+ * — 25,000 page requests — so no source is ever scraped whole on trust.
+ */
+function budgetFor(source: SearchSource, options: Options): Budget {
+  // A ceiling under one page would fetch nothing at all; one page is the floor.
+  const limit = Math.max(WORKS_PER_PAGE, Math.floor(options.searchMaxResults) || WORKS_PER_PAGE)
+  const totalPages = Math.max(1, source.pageCount())
+  return { limit, totalPages, pages: Math.min(totalPages, Math.ceil(limit / WORKS_PER_PAGE)) }
+}
+
+/** Whether `budget` leaves part of the listing unread. */
+function isTruncated(budget: Budget): boolean {
+  return budget.pages < budget.totalPages
+}
+
+/** Drop everything past the budget's ceiling, in place. */
+function applyLimit(works: Work[], budget: Budget): Work[] {
+  if (works.length > budget.limit)
+    works.length = budget.limit
+  return works
 }
 
 let active: { source: SearchSource, view: SearchView } | null = null
@@ -164,20 +212,75 @@ function mountProgress(container: HTMLElement): (done: number, total: number) =>
   }
 }
 
+/**
+ * Ask before loading a listing too big to load whole. What comes back isn't
+ * "the results" but the first N of them in the source's own order, which is a
+ * different thing to search — so the reader gets to see the numbers and decide,
+ * rather than discovering the truncation from a toast after the fact.
+ *
+ * Resolves true to go ahead, false if the reader backed out.
+ */
+function mountLimitGate(
+  container: HTMLElement,
+  source: SearchSource,
+  budget: Budget,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const n = (value: number): string => value.toLocaleString()
+  const found = source.resultCount?.()
+  // Prefer the listing's own total; fall back to what its page count implies.
+  const total = found && found > 0
+    ? `${n(found)} works`
+    : `about ${n(budget.totalPages * WORKS_PER_PAGE)} works (${n(budget.totalPages)} pages)`
+
+  return new Promise<boolean>((resolve) => {
+    if (signal.aborted) {
+      resolve(false)
+      return
+    }
+    const load = (<button type="button" class={cx('gate-load')}>{`Load the first ${n(budget.limit)}`}</button>) as HTMLElement
+    const cancel = (<button type="button" class={cx('gate-cancel')}>Cancel</button>) as HTMLElement
+    load.addEventListener('click', () => resolve(true))
+    cancel.addEventListener('click', () => resolve(false))
+    signal.addEventListener('abort', () => resolve(false), { once: true })
+    container.replaceChildren(
+      <div class={cx('gate')}>
+        <div class={cx('gate-title')}>Too many results to load</div>
+        <p class={cx('gate-body')}>
+          {`This list holds ${total} — far more than can be fetched a page at a time. `}
+          {`Only the first ${n(budget.limit)} would be loaded, in the order the Archive lists them, `}
+          so narrowing the search first will give you a better set to filter.
+        </p>
+        <p class={cx('gate-note')}>
+          You can raise the limit in the extension's Search &amp; browsing options.
+        </p>
+        <div class={cx('gate-actions')}>
+          {cancel}
+          {load}
+        </div>
+      </div>,
+    )
+  })
+}
+
 /** Re-scrape in the background and feed the result into the live view + cache. */
-async function refresh(source: SearchSource, view: SearchView): Promise<void> {
+async function refresh(source: SearchSource, view: SearchView, options: Options): Promise<void> {
   controller?.abort()
   const own = new AbortController()
   controller = own
   try {
+    // Re-budgeted rather than reused: the reader may have changed the ceiling,
+    // and the listing may have grown, since the view was opened.
+    const budget = budgetFor(source, options)
     const result = await scrapeListing({
-      pageCount: source.pageCount(),
+      pageCount: budget.pages,
       pageUrl: source.pageUrl,
       blurbSelector: source.blurbSelector,
       signal: own.signal,
     })
     if (own.signal.aborted)
       return
+    applyLimit(result.works, budget)
     await persist(source, result.works)
     source.prepare?.(result.works)
     view.update(result.works)
@@ -237,7 +340,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
           return
         const { view } = active
         view.setUpdating(true)
-        void refresh(source, view).finally(() => view.setUpdating(false))
+        void refresh(source, view, options).finally(() => view.setUpdating(false))
       },
     }
 
@@ -251,6 +354,9 @@ export async function openSearchView(source: SearchSource, options: Options, opt
 
     const cached = await readSnapshot(source.cacheKey)
     if (cached && cached.works.length) {
+      // A snapshot taken under a higher ceiling than the reader now has; trim it
+      // to what they asked for rather than waiting for the refresh to say so.
+      applyLimit(cached.works, budgetFor(source, options))
       // The snapshot itself is already on disk — but whatever the source keeps in
       // step with it may not be (a snapshot from before that record existed, or a
       // refresh that failed), so re-derive it from the cache. The refresh below
@@ -261,23 +367,33 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       const view = show(cached.works)
       if (opts.refresh !== false) {
         view.setUpdating(true)
-        void refresh(source, view).finally(() => view.setUpdating(false))
+        void refresh(source, view, options).finally(() => view.setUpdating(false))
       }
       return
     }
 
-    // No cache: scrape with a progress bar before showing the view.
-    const onProgress = mountProgress(container)
+    // No cache: scrape with a progress bar before showing the view. A listing
+    // too big for the reader's ceiling gets a say-so first — it's their request
+    // being narrowed, not ours.
+    const budget = budgetFor(source, options)
     const own = new AbortController()
+    // Registered before the gate so a "Back"/re-run teardown, which aborts the
+    // live controller, also releases a gate still waiting on an answer.
     controller = own
+    if (isTruncated(budget) && !await mountLimitGate(container, source, budget, own.signal)) {
+      closeSearchView()
+      return
+    }
+    const onProgress = mountProgress(container)
     try {
       const result = await scrapeListing({
-        pageCount: source.pageCount(),
+        pageCount: budget.pages,
         pageUrl: source.pageUrl,
         blurbSelector: source.blurbSelector,
         onProgress,
         signal: own.signal,
       })
+      applyLimit(result.works, budget)
       await persist(source, result.works)
       if (!result.works.length) {
         toast(source.emptyMessage, { type: 'error' })

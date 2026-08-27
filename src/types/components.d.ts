@@ -51,6 +51,7 @@ declare module 'vue' {
     OptionRowWordCountRanges: typeof import('./../options_ui/components/option_rows/OptionRowWordCountRanges.vue')['default']
     OptionRowWorkMarks: typeof import('./../options_ui/components/option_rows/OptionRowWorkMarks.vue')['default']
     OptionSearchLanguage: typeof import('./../options_ui/components/options/OptionSearchLanguage.vue')['default']
+    OptionSearchMaxResults: typeof import('./../options_ui/components/options/OptionSearchMaxResults.vue')['default']
     OptionSearchPerPage: typeof import('./../options_ui/components/options/OptionSearchPerPage.vue')['default']
     OptionsUIFooter: typeof import('./../options_ui/components/OptionsUIFooter.vue')['default']
     OptionsUIHeader: typeof import('./../options_ui/components/OptionsUIHeader.vue')['default']

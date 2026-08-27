@@ -59,6 +59,17 @@ export function ruleBehavior(rules: Rule[], key: RuleTargetKey): FilterBehavior 
   return rule ? (rule.behavior ?? 'hide') : null
 }
 
+/**
+ * The behaviour an on-page indicator should draw for a rule, or `null` for
+ * nothing. Everything {@link ruleBehavior} returns except `'none'`: a disabled
+ * rule is meant to be invisible, and a badge for a rule that does nothing would
+ * be a badge for nothing. (The menu still offers "Clear", so the rule is
+ * reachable from the page once you open it.)
+ */
+export function ruleIndicatorBehavior(behavior: FilterBehavior | null): Exclude<FilterBehavior, 'none'> | null {
+  return behavior && behavior !== 'none' ? behavior : null
+}
+
 /** Toggle `behavior` for an exact key in the rules list (re-selecting clears it). */
 export async function toggleRuleBehavior(key: RuleTargetKey, behavior: FilterBehavior): Promise<void> {
   const rules = await options.get('rules')

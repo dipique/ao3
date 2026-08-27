@@ -50,6 +50,13 @@ OptionRowRulesContext.provide({
               Use it for noise tags that only cost you reading time. You can set it from a tag's context menu ("Hide
               this filter"), but removing it again has to be done here.
             </p>
+            <p>
+              A rule marked <Icon i-mdi-cancel op40 label="Disabled" title="Disabled" /> is disabled: it is kept
+              exactly as written — value, matcher, priority and colour — but does nothing at all, and leaves no
+              indicator on the page. Use it to put a rule aside without losing it (or the work of writing its regex)
+              while you see how the site reads without it. Sorting by the action column brings the disabled rules
+              together at the end.
+            </p>
             <h2 mt-6 py-1>
               Priority
             </h2>

@@ -8,8 +8,10 @@ type Callback<Fn extends (...args: any) => Promise<any>> = (...args: Parameters<
 class APIMethod<Name extends string, Fn extends (...args: any) => Promise<any>> {
   #callbacks: Array<Callback<Fn>> = []
   #boundCallback: typeof APIMethod.prototype.callback
+  private readonly name: Name
 
-  constructor(private readonly name: Name) {
+  constructor(name: Name) {
+    this.name = name
     this.#boundCallback = this.callback.bind(this)
   }
 

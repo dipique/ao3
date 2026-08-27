@@ -60,8 +60,14 @@ const behaviorDefaultPriority = computed(() => DEFAULT_BEHAVIOR_PRIORITY[behavio
 // afterwards is what "manually overridden" means. Only 'invert' starts above 0,
 // which is what makes "always show" win by default.
 watch(behavior, (next, previous) => {
-  if (next !== previous)
-    priority.value = DEFAULT_BEHAVIOR_PRIORITY[next]
+  if (next === previous)
+    return
+  // Disabling a rule is meant to keep it exactly as it was, so that turning it
+  // back on restores what you had — priority included. Neither direction of the
+  // 'none' switch touches it.
+  if (next === 'none' || previous === 'none')
+    return
+  priority.value = DEFAULT_BEHAVIOR_PRIORITY[next]
 })
 
 // A behaviour that stops applying when the target changes falls back to hiding.
@@ -81,7 +87,10 @@ context.edit = (rule?: Rule) => {
   matcher.value = initial.value.matcher
   behavior.value = initial.value.behavior ?? 'hide'
   priority.value = rulePriority(initial.value)
-  noHighlight.value = initial.value.behavior === 'invert' && initial.value.color === 'transparent'
+  // The 'transparent' sentinel is only ever written by an invert rule opting out
+  // of its highlight, so reading it without checking the behaviour costs nothing
+  // — and lets a *disabled* invert rule remember the opt-out until it's back on.
+  noHighlight.value = initial.value.color === 'transparent'
   color.value = initial.value.color && initial.value.color !== 'transparent'
     ? initial.value.color
     : resolvedDefault.value
@@ -103,11 +112,15 @@ function save() {
   const behaviorValue = behavior.value === 'hide' ? undefined : behavior.value
   const priorityValue = priority.value === behaviorDefaultPriority.value ? undefined : priority.value
   const colorValue
-    = behavior.value === 'invert' && noHighlight.value
-      ? 'transparent'
-      : showColor.value && color.value !== resolvedDefault.value
-        ? color.value
-        : undefined
+    // Disabling keeps the rule whole: the colour it will highlight in again once
+    // re-enabled survives, even though the picker is hidden while it's off.
+    = behavior.value === 'none'
+      ? initial.value.color
+      : behavior.value === 'invert' && noHighlight.value
+        ? 'transparent'
+        : showColor.value && color.value !== resolvedDefault.value
+          ? color.value
+          : undefined
   const pseudValue = isAuthor.value ? (pseud.value || undefined) : undefined
 
   if (creating.value) {
@@ -230,7 +243,14 @@ function save() {
             <SelectItem v-if="canHideFilter" value="hideFilter">
               Hide the tag itself (does not hide works)
             </SelectItem>
+            <SelectItem value="none">
+              None — keep the rule, but do nothing
+            </SelectItem>
           </Select>
+          <p v-if="behavior === 'none'" text="xs muted-fg" pl-1>
+            The rule is kept exactly as it is — value, matcher, priority and color — but matches nothing anywhere:
+            no hiding, no highlight, no indicator on the page. Switch it back to another behavior to turn it on again.
+          </p>
         </label>
 
         <label flex="~ col gap-1">
@@ -242,7 +262,11 @@ function save() {
             :max="MAX_PRIORITY"
             text="base" h-10 w-full py-2 pl-2
           />
-          <p text="xs muted-fg" pl-1>
+          <p v-if="behavior === 'none'" text="xs muted-fg" pl-1>
+            {{ MIN_PRIORITY }}–{{ MAX_PRIORITY }}. Nothing while the rule is disabled — kept for whenever it is
+            turned back on.
+          </p>
+          <p v-else text="xs muted-fg" pl-1>
             {{ MIN_PRIORITY }}–{{ MAX_PRIORITY }}. When several rules match one work, the highest priority decides
             whether it is hidden; a tie goes to "always show". Choosing a behavior resets this to its default
             ({{ behaviorDefaultPriority }} for this one), so raise a hide rule above an "always show" to make it win

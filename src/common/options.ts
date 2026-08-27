@@ -90,8 +90,23 @@ export interface Options {
    * filterable view.
    */
   searchTagWorks: boolean
+  /**
+   * On a works text-search results page (`/works/search?…`), add a button that
+   * loads the results into the same filterable view. Bounded by
+   * {@link Options.searchMaxResults} — a bare word matches hundreds of thousands
+   * of works, and AO3 pages them twenty at a time.
+   */
+  searchTextResults: boolean
   /** How many works to render per page in the search views (paging keeps large lists fast). */
   searchPerPage: number
+  /**
+   * Ceiling on how many works a search view will scrape into memory. Every page
+   * of the listing is a request to AO3's donated infrastructure, so a listing
+   * bigger than this is loaded only as far as the ceiling — and only after the
+   * reader confirms, since what they get is the first N in the source's own
+   * order rather than the whole set.
+   */
+  searchMaxResults: number
   /**
    * Auto-select a default language in AO3's Sort & Filter Language dropdown
    * (works/bookmark listings and the advanced search page). Only applied when no
@@ -180,7 +195,9 @@ export const options = createStorage<Options>({
     openMenuOnClick: false,
     searchMarkedForLater: true,
     searchTagWorks: true,
+    searchTextResults: true,
     searchPerPage: 50,
+    searchMaxResults: 1000,
     searchLanguage: { enabled: false, language: null },
     wordCountToolbar: { enabled: false, ranges: DEFAULT_WORD_COUNT_RANGES.map(range => ({ ...range })) },
     searchWordCount: { enabled: false, from: null, to: null },

@@ -128,15 +128,20 @@ if (browser.contextMenus) {
     const filters = rules.filters
     const index = filters.findIndex(f => ruleMatches(f, key))
     const old = index !== -1 ? filters[index] : undefined
-    const wasShown = old ? old.behavior === 'invert' : undefined
+    // A disabled rule stands for nothing, so a click sets a behaviour rather
+    // than toggling against one — otherwise "Hide" on a disabled rule would read
+    // as undoing a hide and delete it. It's still spliced out below, so the
+    // click replaces it instead of leaving a duplicate key behind.
+    const active = old && old.behavior !== 'none' ? old : undefined
+    const wasShown = active ? active.behavior === 'invert' : undefined
 
     if (old)
       filters.splice(index, 1)
 
-    sendHideToast(tab, hiding ? 'hide' : 'show', key.describe, !!old, wasShown)
+    sendHideToast(tab, hiding ? 'hide' : 'show', key.describe, !!active, wasShown)
 
     // Clicking the behaviour it already had removes the rule; anything else replaces it.
-    if (!old || wasShown === hiding) {
+    if (!active || wasShown === hiding) {
       filters.push({
         target: key.target,
         value: key.value,
@@ -178,7 +183,9 @@ if (browser.contextMenus) {
           continue
         const key = await pair.key(info.linkUrl, parts, tab.id!)
         const { filters } = await options.get('rules')
-        const rule = filters.find(f => ruleMatches(f, key))
+        // A disabled rule leaves both boxes clear — nothing is in force, which
+        // is exactly what the checkmarks report.
+        const rule = filters.find(f => ruleMatches(f, key) && f.behavior !== 'none')
         const shown = rule ? rule.behavior === 'invert' : false
 
         await browser.contextMenus.update(pair.hide!, { checked: !!rule && !shown })

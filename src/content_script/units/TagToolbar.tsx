@@ -24,7 +24,7 @@ import {
   resetFilterSidebarCaches,
   toggleTagFilter,
 } from '#content_script/filterSidebar.js'
-import { clearRule, ruleBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { clearRule, ruleBehavior, ruleIndicatorBehavior, tagKey, toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
 import React from '#dom'
@@ -60,8 +60,9 @@ function computeStates(entry: TagEntry): IndicatorState[] {
     states.push('include')
   if (entry.hasFields && isTagSelected('exclude', entry.tag.name))
     states.push('exclude')
-  if (entry.behavior)
-    states.push(entry.behavior)
+  const behavior = ruleIndicatorBehavior(entry.behavior)
+  if (behavior)
+    states.push(behavior)
   return states
 }
 

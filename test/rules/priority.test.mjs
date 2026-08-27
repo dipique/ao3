@@ -10,6 +10,7 @@ import {
   DEFAULT_BEHAVIOR_PRIORITY,
   DEFAULT_HIGHLIGHT_COLOR,
   isTagTarget,
+  ruleAffectsWorks,
   ruleHighlightColor,
   ruleMatchesAuthor,
   ruleMatchesEntity,
@@ -27,6 +28,7 @@ describe('rulePriority', () => {
     assert.equal(rulePriority(rule({ behavior: 'hide' })), 0)
     assert.equal(rulePriority(rule({ behavior: 'highlight' })), 0)
     assert.equal(rulePriority(rule({ behavior: 'hideFilter' })), 0)
+    assert.equal(rulePriority(rule({ behavior: 'none' })), 0)
     // The one non-zero default: "always show" has to beat an ordinary hide, which
     // is what it meant before priorities existed.
     assert.equal(rulePriority(rule({ behavior: 'invert' })), 4)
@@ -130,6 +132,8 @@ describe('highlight colours', () => {
   test('only highlight and invert rules highlight', () => {
     assert.equal(ruleHighlightColor(rule({ behavior: 'hide' })), null)
     assert.equal(ruleHighlightColor(rule({ behavior: 'hideFilter' })), null)
+    // A disabled rule keeps its colour on the rule but never paints with it.
+    assert.equal(ruleHighlightColor(rule({ behavior: 'none', color: '#abcdefff' })), null)
     assert.equal(ruleHighlightColor(rule({ behavior: 'highlight' })), DEFAULT_HIGHLIGHT_COLOR)
     assert.equal(ruleHighlightColor(rule({ behavior: 'invert' })), DEFAULT_HIGHLIGHT_COLOR)
   })
@@ -144,5 +148,23 @@ describe('highlight colours', () => {
       DEFAULT_AUTHOR_HIGHLIGHT_COLOR,
     )
     assert.equal(ruleHighlightColor(rule({ behavior: 'highlight', color: '#abcdefff' })), '#abcdefff')
+  })
+})
+
+describe('ruleAffectsWorks', () => {
+  test('only hiding and force-showing decide whether a work is shown', () => {
+    assert.equal(ruleAffectsWorks(rule({})), true, 'hide is the default behaviour')
+    assert.equal(ruleAffectsWorks(rule({ behavior: 'hide' })), true)
+    assert.equal(ruleAffectsWorks(rule({ behavior: 'invert' })), true)
+    assert.equal(ruleAffectsWorks(rule({ behavior: 'highlight' })), false)
+    assert.equal(ruleAffectsWorks(rule({ behavior: 'hideFilter' })), false)
+  })
+
+  test('a disabled rule takes no part, whatever else it carries', () => {
+    assert.equal(ruleAffectsWorks(rule({ behavior: 'none' })), false)
+    // Priority and colour survive for when it is turned back on; neither lets it
+    // back into the contest while it is off.
+    assert.equal(ruleAffectsWorks(rule({ behavior: 'none', priority: 9, color: '#abcdefff' })), false)
+    assert.equal(rulePriority(rule({ behavior: 'none', priority: 7 })), 7)
   })
 })

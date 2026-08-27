@@ -899,6 +899,55 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   text-decoration: underline;
 }
 
+.AO3E--search-text-results--button {
+  cursor: pointer;
+}
+
+/* Hide the button while the search view is open — it doesn't do anything there. */
+#main:has(.AO3E--search-host) li:has(.AO3E--search-text-results--button) {
+  display: none;
+}
+
+/* Shown in place of the progress panel when the listing is bigger than the
+   reader's result ceiling, asking whether to load the first N anyway. */
+.AO3E--search-host--gate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  max-width: 34em;
+  margin: 3em auto;
+  padding: 1.25em 1.5em;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 6px;
+}
+
+.AO3E--search-host--gate-title {
+  font-weight: bold;
+  font-size: 1.1em;
+}
+
+.AO3E--search-host--gate-body,
+.AO3E--search-host--gate-note {
+  margin: 0;
+}
+
+.AO3E--search-host--gate-note {
+  opacity: 0.75;
+  font-size: 0.9em;
+}
+
+.AO3E--search-host--gate-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75em;
+  margin-top: 0.4em;
+}
+
+.AO3E--search-host--gate-load,
+.AO3E--search-host--gate-cancel {
+  cursor: pointer;
+}
+
 .AO3E--search-host--progress {
   display: flex;
   flex-direction: column;

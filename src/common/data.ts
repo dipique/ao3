@@ -1,65 +1,81 @@
 /**
- * Enum of the tag types that AO3 supports (except "Media" and "Banned" which are not shown on works)
+ * The tag types AO3 supports (except "Media" and "Banned", which are not shown
+ * on works), by the single-letter code we store.
  * @see https://archiveofourown.org/faq/tags#tagtypes
  * @see https://github.com/otwcode/otwarchive/blob/bd57a26224017d4b871fb70a9787d7fe3c29d249/app/models/tag.rb#L15
  *
- * The values are abbreviated to save space in browser.storage
+ * The values are abbreviated to save space in browser.storage.
+ *
+ * A plain object rather than an `enum`, because an enum is one of the few
+ * TypeScript constructs that emits runtime code, and so cannot be *erased* — it
+ * has to be *transformed*. Node's built-in type stripping only erases, which put
+ * every unit test that reaches this module behind a `--experimental-transform-types`
+ * that newer Node no longer has. The codes and the `TagType.Rating` spelling are
+ * unchanged, so nothing stored or written against it had to move.
  */
-export enum TagType {
-  Rating = 'r',
-  ArchiveWarning = 'w',
-  Category = 'c',
-  Fandom = 'f',
-  Relationship = 'R',
-  Character = 'C',
-  Freeform = 'F',
-}
+const TAG_TYPE_CODES = {
+  Rating: 'r',
+  ArchiveWarning: 'w',
+  Category: 'c',
+  Fandom: 'f',
+  Relationship: 'R',
+  Character: 'C',
+  Freeform: 'F',
+} as const
 
-// eslint-disable-next-line ts/no-namespace
-export declare namespace TagType {
-  export function values(): TagType[]
-  export function toDisplayString(type: TagType): string
-  export function toCSSClass(type: TagType): string
-}
+/**
+ * One of the codes above. A union of string literals, which is what an enum's
+ * member type was in practice — with the difference that a bare `'f'` is now
+ * assignable to it, where the enum demanded `TagType.Fandom`.
+ */
+export type TagType = typeof TAG_TYPE_CODES[keyof typeof TAG_TYPE_CODES]
 
-Object.defineProperties(TagType, {
-  values: {
-    enumerable: false,
-    value() {
-      return Object.values(TagType) as TagType[]
-    },
+/**
+ * The codes, plus the helpers that used to hang off the enum through a merged
+ * namespace. The type above shares its name, which is the ordinary
+ * value-and-type pairing — no namespace, and so nothing to transform. (The rule
+ * only knows the merges TypeScript itself calls merges; a type and a value
+ * sharing a name is legal and is what an enum was doing all along.)
+ */
+// eslint-disable-next-line ts/no-redeclare
+export const TagType = {
+  ...TAG_TYPE_CODES,
+
+  /** Every tag type, in declaration order. */
+  values(): TagType[] {
+    // The codes object, not this one — `Object.values(TagType)` would hand back
+    // these three functions along with the codes.
+    return Object.values(TAG_TYPE_CODES)
   },
-  toDisplayString: {
-    enumerable: false,
-    value(type: TagType) {
-      switch (type) {
-        case TagType.Rating: return 'Rating'
-        case TagType.ArchiveWarning: return 'Archive Warning'
-        case TagType.Category: return 'Category'
-        case TagType.Fandom: return 'Fandom'
-        case TagType.Relationship: return 'Relationship'
-        case TagType.Character: return 'Character'
-        case TagType.Freeform: return 'Additional Tags'
-      }
-    },
+
+  /** What AO3 calls this tag type in its own headings. */
+  toDisplayString(type: TagType): string {
+    switch (type) {
+      case TagType.Rating: return 'Rating'
+      case TagType.ArchiveWarning: return 'Archive Warning'
+      case TagType.Category: return 'Category'
+      case TagType.Fandom: return 'Fandom'
+      case TagType.Relationship: return 'Relationship'
+      case TagType.Character: return 'Character'
+      case TagType.Freeform: return 'Additional Tags'
+    }
   },
-  toCSSClass: {
-    enumerable: false,
-    value(type: TagType) {
-      switch (type) {
-        // Special cases that are not in ul.tags
-        case TagType.Rating: return 'rating'
-        case TagType.Category: return 'category'
-        // All other cases
-        case TagType.ArchiveWarning: return 'warnings'
-        case TagType.Fandom: return 'fandoms'
-        case TagType.Relationship: return 'relationships'
-        case TagType.Character: return 'characters'
-        case TagType.Freeform: return 'freeforms'
-      }
-    },
+
+  /** The class AO3 puts on this tag type's list in a blurb. */
+  toCSSClass(type: TagType): string {
+    switch (type) {
+      // Special cases that are not in ul.tags
+      case TagType.Rating: return 'rating'
+      case TagType.Category: return 'category'
+      // All other cases
+      case TagType.ArchiveWarning: return 'warnings'
+      case TagType.Fandom: return 'fandoms'
+      case TagType.Relationship: return 'relationships'
+      case TagType.Character: return 'characters'
+      case TagType.Freeform: return 'freeforms'
+    }
   },
-})
+}
 
 /**
  * Represents a tag on AO3
@@ -136,17 +152,26 @@ export interface User {
  *   the filter sidebar, and from the search view's facets — without affecting
  *   whether the work is shown. For noise tags ("Story", "X is a jerk") that only
  *   cost you reading time. Tag rules only; see {@link ruleAffectsWorks}.
+ * - `'none'`: do nothing at all. The rule is kept — its value, matcher, priority
+ *   and colour intact — but matches nothing anywhere: no hiding, no highlight,
+ *   no indicator. For putting a rule aside without losing it (or the work of
+ *   writing its regex) to try the page without it. Note that an export read by
+ *   the *upstream* extension, which knows only a boolean `invert`, sees a
+ *   disabled rule as a plain hide rule; our own exports round-trip it intact.
  */
-export type FilterBehavior = 'hide' | 'invert' | 'highlight' | 'hideFilter'
+export type FilterBehavior = 'hide' | 'invert' | 'highlight' | 'hideFilter' | 'none'
 
 /**
  * Whether a rule takes part in deciding if a work is shown — i.e. it hides the
  * work (`hide`) or force-shows it (`invert`). The purely presentational
- * behaviours (`highlight`, `hideFilter`) only change how the *match* is drawn, so
- * they're skipped when HideWorks collects its reasons.
+ * behaviours (`highlight`, `hideFilter`) only change how the *match* is drawn,
+ * and `none` does nothing whatever, so they're all skipped when HideWorks
+ * collects its reasons. Stated as the behaviours that do count rather than the
+ * ones that don't, so a behaviour added later stays out until it's let in.
  */
 export function ruleAffectsWorks(rule: { behavior?: FilterBehavior }): boolean {
-  return rule.behavior !== 'highlight' && rule.behavior !== 'hideFilter'
+  const behavior = rule.behavior ?? 'hide'
+  return behavior === 'hide' || behavior === 'invert'
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +197,10 @@ export const DEFAULT_BEHAVIOR_PRIORITY: Record<FilterBehavior, number> = {
   invert: 4,
   highlight: 0,
   hideFilter: 0,
+  // A disabled rule never enters the contest, so its priority is only ever the
+  // one it will have again when re-enabled — which the editor preserves rather
+  // than resetting to this.
+  none: 0,
 }
 
 /**
