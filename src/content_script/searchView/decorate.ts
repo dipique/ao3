@@ -22,11 +22,12 @@ import type { FacetKey } from './engine.ts'
 /**
  * Per-blurb enhancements — units that decide one blurb's fate from that blurb
  * alone. Safe to run lazily, one at a time, as pages are shown. HideWorks
- * collapses the works the reader's rules hide (first, as on a native listing, so
- * the rest decorate what it leaves); Stats adds the kudos/hits ratio, reading
- * time and thousands separators; the highlight units colour favourite
- * tags/authors/works/series, and HideFilters takes the muted ones out of each
- * blurb's tag list.
+ * collapses the works the reader's rules collapse (first, as on a native
+ * listing, so the rest decorate what it leaves — the works a rule *hides* never
+ * reach a page at all; see {@link file://./hidden.ts}); Stats adds the kudos/hits
+ * ratio, reading time and thousands separators; the highlight units colour
+ * favourite tags/authors/works/series, and HideFilters takes the muted ones out
+ * of each blurb's tag list.
  *
  * The view mounts every blurb but decorates each at most once (see its
  * `decorated` set), which is what keeps HideWorks — the one unit here that

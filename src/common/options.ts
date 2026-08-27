@@ -21,6 +21,15 @@ export interface Options {
   wordsPerMinute: number
   showKudosHitsRatio: boolean
 
+  /**
+   * How the hides that *aren't* rules — work marks, the crossover filter and the
+   * language filter — take a work out of a listing: `true` collapses it to a
+   * reason line with a "Show" button, `false` hides it outright.
+   *
+   * Rules answer this for themselves, through their `'collapse'` / `'hide'`
+   * {@link Rule.behavior}; this switch used to speak for them too, which is why
+   * it reads as a general "collapse or hide" rather than naming these three.
+   */
   hideShowReason: boolean
   hideShowMatchedValues: boolean
   hideCrossovers: { enabled: boolean, maxFandoms: number }

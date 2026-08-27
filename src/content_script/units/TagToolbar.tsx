@@ -1,3 +1,4 @@
+import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
@@ -71,7 +72,7 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement, filter: FilterTar
   const { filters } = await options.get('rules')
   const key = tagKey(tag)
   const behavior = ruleBehavior(filters, key)
-  // The three behaviours are mutually exclusive; the active one is shown disabled
+  // The behaviours are mutually exclusive; the active one is shown disabled
   // (it's the current state), with a "Clear" row to return to no rule.
   items.push(
     {
@@ -82,6 +83,14 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement, filter: FilterTar
       active: behavior === 'hide',
       disabled: behavior === 'hide',
       onSelect: () => toggleRuleBehavior(key, 'hide'),
+    },
+    {
+      icon: () => <MdiArrowCollapseVertical />,
+      label: 'Collapse',
+      scope: 'settings',
+      active: behavior === 'collapse',
+      disabled: behavior === 'collapse',
+      onSelect: () => toggleRuleBehavior(key, 'collapse'),
     },
     {
       icon: () => <MdiEyeCheck />,

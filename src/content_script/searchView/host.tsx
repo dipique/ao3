@@ -11,6 +11,7 @@ import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import { readSnapshot, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
+import { applyHidden } from './hidden.ts'
 import { loadPrefs, savePrefs } from './prefs.ts'
 import { scrapeListing } from './scrape.ts'
 import { createSearchView } from './view.tsx'
@@ -177,6 +178,18 @@ export function takeReopen(cacheKey: string): ViewState | null {
   return state
 }
 
+/**
+ * Everything the works need before the view sees them, cached or fresh: the
+ * source's own seeding (readiness, saved state), and the one pass every source
+ * shares — working out which works the reader's rules take away outright, so the
+ * view can page around them. Deliberately after {@link persist}: what's stamped
+ * here answers to today's options, and the snapshot is the blurbs alone.
+ */
+function prepare(source: SearchSource, works: Work[], options: Options): void {
+  source.prepare?.(works)
+  applyHidden(works, options)
+}
+
 /** Write the blurb snapshot, plus whatever else the source keeps in step with it. */
 async function persist(source: SearchSource, works: Work[]): Promise<void> {
   await writeSnapshot(source.cacheKey, works)
@@ -282,7 +295,7 @@ async function refresh(source: SearchSource, view: SearchView, options: Options)
       return
     applyLimit(result.works, budget)
     await persist(source, result.works)
-    source.prepare?.(result.works)
+    prepare(source, result.works, options)
     view.update(result.works)
     if (result.loadedPages < result.totalPages)
       toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
@@ -346,7 +359,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     }
 
     const show = (works: Work[]): SearchView => {
-      source.prepare?.(works)
+      prepare(source, works, options)
       const view = createSearchView(works, handlers, config)
       active = { source, view }
       container.replaceChildren(view.el)

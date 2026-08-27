@@ -18,7 +18,10 @@ const SEED = {
   'option.rules': {
     enabled: true,
     colors: {},
-    filters: [{ target: 'tag', value: 'HideMe', matcher: 'exact', behavior: 'hide' }],
+    filters: [
+      { target: 'tag', value: 'HideMe', matcher: 'exact', behavior: 'collapse' },
+      { target: 'tag', value: 'Gone', matcher: 'exact', behavior: 'hide' },
+    ],
   },
 }
 
@@ -45,9 +48,14 @@ function blurb(id, title, tags, language = 'English') {
 }
 
 /**
- * Page 1 hides nothing at all; page 2 carries the work a rule hides and the one
- * in the wrong language. So when the page first loads there is nothing to peek
- * at — the state in which the pill used to be left off the toolbar for good.
+ * Page 1 hides nothing at all; page 2 carries the work a rule collapses, the one
+ * in the wrong language, and the one a *hide* rule matches. So when the page
+ * first loads there is nothing to peek at — the state in which the pill used to
+ * be left off the toolbar for good.
+ *
+ * Page 2 holds a fourth work on purpose: the hide rule drops it from the view's
+ * results altogether, which is what leaves exactly `PAGES * PER_PAGE` of them for
+ * the reader to count. A collapsed work would have kept its slot.
  */
 const WORKS = {
   1: [
@@ -59,6 +67,7 @@ const WORKS = {
     blurb(4, 'A rule-hidden one', ['HideMe']),
     blurb(5, 'A Spanish one', [], 'Español'),
     blurb(6, 'Yet another plain one', []),
+    blurb(7, 'A rule-gone one', ['Gone']),
   ],
 }
 
@@ -186,6 +195,25 @@ describe('hidden works in the search view', { skip }, () => {
     // count must ignore them (here they happen to add none, but the reader is
     // looking at the view either way).
     assert.ok(marked.everywhere >= marked.inView)
+  })
+
+  test('a work a hide rule matched never reaches the results at all', async () => {
+    const state = await page.evaluate(() => {
+      const lis = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
+      return {
+        mounted: lis.length,
+        count: document.querySelector('.AO3E--search-view--count')?.textContent ?? '',
+        marked: lis.filter(li => li.dataset.ao3eHiddenBy).map(li => li.querySelector('h4.heading a').textContent),
+      }
+    })
+    // The view holds it — it was scraped like any other — but it is not a result:
+    // it costs no slot, is not in the count, and carries no hidden marker for the
+    // peek pill to find. A collapsed work is the opposite on all three.
+    assert.equal(state.mounted, PAGES * PER_PAGE + 1)
+    assert.equal((await visibleTitles()).length, PAGES * PER_PAGE)
+    assert.ok(!(await visibleTitles()).includes('A rule-gone one'))
+    assert.match(state.count, new RegExp(`of ${PAGES * PER_PAGE} works`))
+    assert.deepEqual(state.marked.sort(), ['A Spanish one', 'A rule-hidden one'])
   })
 
   test('peeking reveals the collapsed works and can be turned back off', async () => {

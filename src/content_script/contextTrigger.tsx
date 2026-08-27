@@ -1,3 +1,4 @@
+import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiCheckCircle from '~icons/mdi/check-circle.jsx'
 import MdiContentCopy from '~icons/mdi/content-copy.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
@@ -429,10 +430,10 @@ export function standardLinkItems(link: HTMLAnchorElement): MenuItem[] {
  * the item sits in; `mark:<id>` covers the per-work marks, which are data (see
  * {@link file://../common/workMarks.ts}) and so can't be enumerated here.
  */
-export type IndicatorState = 'require' | 'include' | 'exclude' | 'hide' | 'invert' | 'highlight' | 'hideFilter' | `mark:${MarkId}`
+export type IndicatorState = 'require' | 'include' | 'exclude' | 'hide' | 'collapse' | 'invert' | 'highlight' | 'hideFilter' | `mark:${MarkId}`
 
 /** The non-mark states, in display order. Marks follow them, in mark-table order. */
-const FILTER_STATES = ['require', 'include', 'exclude', 'hide', 'invert', 'highlight', 'hideFilter'] as const
+const FILTER_STATES = ['require', 'include', 'exclude', 'hide', 'collapse', 'invert', 'highlight', 'hideFilter'] as const
 type FilterState = typeof FILTER_STATES[number]
 
 const FILTER_ICONS: Record<FilterState, () => Node> = {
@@ -440,6 +441,7 @@ const FILTER_ICONS: Record<FilterState, () => Node> = {
   include: () => <MdiPlusCircle />,
   exclude: () => <MdiMinusCircle />,
   hide: () => <MdiEyeOff />,
+  collapse: () => <MdiArrowCollapseVertical />,
   invert: () => <MdiEyeCheck />,
   highlight: () => <MdiStar />,
   hideFilter: () => <MdiTagOff />,
@@ -453,6 +455,7 @@ const FILTER_LABELS: Record<FilterState, string> = {
   include: 'Included in the filter',
   exclude: 'Excluded from the filter',
   hide: 'Hidden',
+  collapse: 'Collapsed',
   invert: 'Always shown',
   highlight: 'Highlighted',
   // Normally unseen — the tag it sits on is hidden — but it shows up wherever

@@ -2,11 +2,11 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import type { MarkId, Options, ProgressSource, Rule } from '#common'
+import type { HideMode, MarkId, Options, ProgressSource, Rule } from '#common'
 import type { FilterTarget } from '#content_script/filterTarget.js'
 import type { FacetKey } from '#content_script/searchView/engine.ts'
 
-import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
+import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -85,6 +85,22 @@ interface HideCandidate {
   kind: HideKind
   /** The rule's effective priority; non-rule hides (language, crossover, marks) sit at 0. */
   priority: number
+  /**
+   * What this reason asks for: the work gone, or collapsed to its reason line.
+   * A rule says so itself; the hides that aren't rules all take it from
+   * {@link Options.hideShowReason}.
+   */
+  mode: HideMode
+}
+
+/**
+ * The verdict on one blurb: how it leaves the listing (`null` when nothing hides
+ * it), why, and which categories of rule were responsible.
+ */
+export interface HideVerdict {
+  mode: HideMode | null
+  reasons: HideReasons
+  kinds: Set<HideKind>
 }
 
 function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
@@ -183,29 +199,16 @@ function runState(options: Options): RunState {
 export class HideWorks extends Unit {
   static override get name() { return 'HideWorks' }
 
-  // The four fields below are this run's {@link RunState}, copied out in
-  // `ready()` so {@link processBlurb} can weigh a blurb without re-reading
-  // options. See {@link runState} for why they're derived once and shared.
-
   /**
-   * Work ids some mark hides, mapped to the mark responsible. Empty unless marks
-   * are on and at least one of them hides.
+   * Everything {@link processBlurb} needs beyond the blurb itself — the hiding
+   * marks, the work-affecting rules, today's date. Derived from the options
+   * rather than copied out in `ready()`, so a unit built only to weigh a blurb
+   * (see {@link hideVerdict}) is as good as one that ran; {@link runState}'s
+   * cache means every unit sharing an options object shares the work.
    */
-  private hiddenMarks = new Map<string, MarkId>()
-
-  /**
-   * The hiding progress marks' entries, unpacked. Separate from
-   * {@link hiddenMarks} because carrying a progress mark isn't itself a reason to
-   * hide — {@link processBlurb} weighs each work's own progress against the
-   * chapter count on its blurb.
-   */
-  private progress: ProgressSource[] = []
-
-  /** Today, as days since the epoch — fixed for the run so a listing is consistent. */
-  private today = 0
-
-  /** The work-affecting rules (hide/always-show; never highlight-only). */
-  private rules: Rule[] = []
+  private get run(): RunState {
+    return runState(this.options)
+  }
 
   override get enabled() {
     return (
@@ -263,23 +266,18 @@ export class HideWorks extends Unit {
     // at a time, and its buttons exclude into the view's own facets.
     if (this.root === document)
       excludeButtons.length = 0
-    const run = runState(this.options)
-    this.hiddenMarks = run.hiddenMarks
-    this.progress = run.progress
-    this.today = run.today
-    this.rules = run.rules
 
     const blurbElements = this.rootBlurbs()
 
     let usedFandomExclude = false
     for (const blurbElement of blurbElements) {
       const blurb = getBlurb(blurbElement)
-      const { reasons, kinds } = this.processBlurb(blurb)
+      const { mode, reasons, kinds } = this.processBlurb(blurb)
 
-      if (Object.keys(reasons).length === 0)
+      if (!mode)
         continue
 
-      if (this.hideWork(blurbElement, reasons, kinds))
+      if (this.hideWork(blurbElement, mode, reasons, kinds))
         usedFandomExclude = true
     }
 
@@ -303,11 +301,21 @@ export class HideWorks extends Unit {
    *
    * Hides that aren't rules at all — language, crossover, and marks — weigh 0, so
    * an "always show" still overrules them.
+   *
+   * What survives then decides *how* the work goes: the strongest surviving
+   * reason picks between collapsing the work and taking it away entirely, and a
+   * tie goes to hiding — the reader who wrote a hide rule that strong asked for
+   * the work gone, and a collapse rule of merely equal strength shouldn't quietly
+   * put it back on the page. The hides that aren't rules all speak with
+   * {@link Options.hideShowReason}'s voice.
    */
-  processBlurb(blurb: Blurb): { reasons: HideReasons, kinds: Set<HideKind> } {
-    const { options: { hideLanguages, hideCrossovers, workMarks } } = this
+  processBlurb(blurb: Blurb): HideVerdict {
+    const { options: { hideLanguages, hideCrossovers, workMarks, hideShowReason } } = this
+    const { hiddenMarks, progress, today, rules } = this.run
     const reasons: HideReasons = {}
     const kinds = new Set<HideKind>()
+    /** What the hides that aren't rules ask for; a rule always says for itself. */
+    const plainMode: HideMode = hideShowReason ? 'collapse' : 'hide'
 
     const hides: HideCandidate[] = []
     /** The strongest force-show matching this work; -1 when none does. */
@@ -316,7 +324,9 @@ export class HideWorks extends Unit {
     /**
      * Weigh every rule matching one subject: force-shows raise the bar, and the
      * strongest hide becomes that subject's single candidate reason (a tag
-     * matching three hide rules is still one thing wrong with the work).
+     * matching three hide rules is still one thing wrong with the work). Between
+     * two of equal strength the one that hides outright wins, for the same reason
+     * it wins the contest below.
      */
     const weigh = (matched: Rule[]): Rule | undefined => {
       let best: Rule | undefined
@@ -327,25 +337,39 @@ export class HideWorks extends Unit {
             bar = priority
           continue
         }
-        if (!best || priority > rulePriority(best))
+        if (!best) {
+          best = rule
+          continue
+        }
+        const bestPriority = rulePriority(best)
+        if (priority > bestPriority)
+          best = rule
+        else if (priority === bestPriority && ruleHideMode(rule) === 'hide')
           best = rule
       }
       return best
     }
 
     const addHide = (rule: Rule, label: string, kind: HideKind, item: Omit<ReasonItem, 'rule'>) => {
-      hides.push({ label, kind, priority: rulePriority(rule), item: { ...item, rule: describeRule(rule) } })
+      hides.push({
+        label,
+        kind,
+        priority: rulePriority(rule),
+        mode: ruleHideMode(rule),
+        item: { ...item, rule: describeRule(rule) },
+      })
     }
 
     // Marks first: "you already read this" is the reason you're most likely to
     // want to act on, and a collapsed work hides its own title.
-    const markId = blurb.work ? this.hiddenMarks.get(blurb.work.id) : undefined
+    const markId = blurb.work ? hiddenMarks.get(blurb.work.id) : undefined
     if (markId) {
       const config = workMarks.marks[markId]
       hides.push({
         label: config?.label || markId,
         kind: 'marks',
         priority: 0,
+        mode: plainMode,
         item: {
           value: blurb.work!.name,
           rule: `You marked this work as ${(config?.label || markId).toLowerCase()}`,
@@ -358,19 +382,20 @@ export class HideWorks extends Unit {
     // nothing new since the reader stopped, or a wait-until date they set hasn't
     // come round yet. Weighed at 0 like every other non-rule hide, so an "always
     // show" rule still overrules it.
-    const ongoing = blurb.work ? findProgress(this.progress, blurb.work.id) : null
+    const ongoing = blurb.work ? findProgress(progress, blurb.work.id) : null
     if (ongoing) {
       const published = blurb.chapters?.written ?? null
-      const state = readiness(ongoing.progress, published, this.today)
+      const state = readiness(ongoing.progress, published, today)
       if (state !== 'ready') {
         const config = workMarks.marks[ongoing.id]
         hides.push({
           label: hiddenLabel(state, config?.label || ongoing.id),
           kind: 'marks',
           priority: 0,
+          mode: plainMode,
           item: {
             value: blurb.work!.name,
-            rule: describeProgress(ongoing.progress, published, this.today),
+            rule: describeProgress(ongoing.progress, published, today),
             icon: markIcon(config?.icon),
           },
         })
@@ -386,6 +411,7 @@ export class HideWorks extends Unit {
         label: 'Language',
         kind: 'languages',
         priority: 0,
+        mode: plainMode,
         item: {
           value: blurb.language,
           rule: `Language is "${blurb.language}"`,
@@ -405,6 +431,7 @@ export class HideWorks extends Unit {
         label: 'Too many fandoms',
         kind: 'crossovers',
         priority: 0,
+        mode: plainMode,
         item: {
           value: `${blurb.fandoms.length} fandoms`,
           rule: `More than ${hideCrossovers.maxFandoms} fandoms`,
@@ -413,7 +440,7 @@ export class HideWorks extends Unit {
     }
 
     for (const tag of blurb.tags) {
-      const rule = weigh(this.rules.filter(r => ruleMatchesTag(r, tag)))
+      const rule = weigh(rules.filter(r => ruleMatchesTag(r, tag)))
       if (!rule)
         continue
       const label = tag.type ? TagType.toDisplayString(tag.type) : 'Tag'
@@ -421,7 +448,7 @@ export class HideWorks extends Unit {
     }
 
     for (const author of blurb.authors) {
-      const rule = weigh(this.rules.filter(r => ruleMatchesAuthor(r, author)))
+      const rule = weigh(rules.filter(r => ruleMatchesAuthor(r, author)))
       if (!rule)
         continue
       const value = author.pseud ? `${author.userId} (${author.pseud})` : author.userId
@@ -429,35 +456,44 @@ export class HideWorks extends Unit {
     }
 
     if (blurb.work) {
-      const rule = weigh(this.rules.filter(r => ruleMatchesEntity(r, 'work', blurb.work!)))
+      const rule = weigh(rules.filter(r => ruleMatchesEntity(r, 'work', blurb.work!)))
       if (rule)
         addHide(rule, 'Work', 'works', { value: blurb.work.name })
     }
 
     for (const series of blurb.series) {
-      const rule = weigh(this.rules.filter(r => ruleMatchesEntity(r, 'series', series)))
+      const rule = weigh(rules.filter(r => ruleMatchesEntity(r, 'series', series)))
       if (rule)
         addHide(rule, 'Series', 'series', { value: series.name })
     }
 
     // Settle the contest: anything at or below the force-show bar is overruled,
-    // and a work with nothing left is simply shown.
+    // and a work with nothing left is simply shown. The strongest of what's left
+    // says how the work goes, hiding outright winning a tie.
+    let mode: HideMode | null = null
+    let winner = -1
     for (const candidate of hides) {
       if (candidate.priority <= bar)
         continue
       addReason(reasons, candidate.label, candidate.item)
       kinds.add(candidate.kind)
+      if (candidate.priority > winner || (candidate.priority === winner && candidate.mode === 'hide')) {
+        winner = candidate.priority
+        mode = candidate.mode
+      }
     }
 
-    return { reasons, kinds }
+    return { mode, reasons, kinds }
   }
 
   /**
-   * Collapse the work and prepend the reason message. Returns true if it
-   * rendered at least one fandom exclude button (so the caller knows to load
-   * the fandom id lookup).
+   * Take the work out of the listing, the way `mode` asks: `'collapse'` squeezes
+   * it down to its reason line with a "Show" button, `'hide'` drops the whole
+   * `<li>` (the peek pill can still bring it back). Returns true if it rendered
+   * at least one fandom exclude button, so the caller knows to load the fandom id
+   * lookup.
    */
-  hideWork(blurb: Element, reasons: HideReasons, kinds: Set<HideKind>): boolean {
+  hideWork(blurb: Element, mode: HideMode, reasons: HideReasons, kinds: Set<HideKind>): boolean {
     this.logger.debug('Hiding:', blurb)
     if (blurb instanceof HTMLElement && kinds.size > 0)
       blurb.dataset.ao3eHiddenBy = [...kinds].join(' ')
@@ -467,8 +503,9 @@ export class HideWorks extends Unit {
     wrapper.append(...blurb.childNodes)
     blurb.append(wrapper)
 
-    // If reasons should not be shown, just hide the entire <li>
-    if (!this.options.hideShowReason) {
+    // Nothing to explain on a work that isn't there: hide the whole <li>. The
+    // wrapper above still went on, so `clean()` and the peek CSS find it.
+    if (mode === 'hide') {
       (blurb as HTMLLIElement).hidden = true
       return false
     }
@@ -646,4 +683,19 @@ function describeRule(rule: Rule): string {
  */
 function tagExcludeTarget(tag: BlurbTag): ExcludeTarget {
   return { name: tag.name, type: tag.type, href: tag.href }
+}
+
+/**
+ * Weigh one blurb the way the unit does, without running it — for asking "would
+ * this work be hidden?" about works that aren't (yet) on screen. The search view
+ * needs the answer for every work it holds, not just the page it's showing: a
+ * work a rule hides outright is dropped from the results entirely, so a page
+ * still fills with the number of works the reader asked for.
+ *
+ * A throwaway unit rather than a free function so there is exactly one copy of
+ * the contest; `runState`'s cache means a whole listing pays for the mark table
+ * once, however many of these are built.
+ */
+export function hideVerdict(blurb: Blurb, options: Options): HideVerdict {
+  return new HideWorks(options).processBlurb(blurb)
 }

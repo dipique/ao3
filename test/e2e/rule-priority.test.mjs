@@ -10,20 +10,25 @@ const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 /**
- * One "always show" tag rule at its default strength (4), and hide rules on
+ * One "always show" tag rule at its default strength (4), and collapse rules on
  * three fandoms at 0, 5 and 4 — everything needed to see which side of a
- * priority tie each blurb lands on.
+ * priority tie each blurb lands on. Collapsing rather than hiding so a work that
+ * loses still has a reason line to read the verdict off; which of the two the
+ * winner asks for is its own contest, exercised at the end of this file.
  */
 const SEED = {
   'option.rules': {
     enabled: true,
     colors: {},
     filters: [
-      { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'hide' },
-      { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'hide', priority: 5 },
-      { target: 'f', value: 'Tied Fandom', matcher: 'exact', behavior: 'hide', priority: 4 },
+      { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse' },
+      { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'collapse', priority: 5 },
+      { target: 'f', value: 'Tied Fandom', matcher: 'exact', behavior: 'collapse', priority: 4 },
       { target: 'F', value: 'Keeper', matcher: 'exact', behavior: 'invert' },
       { target: 'F', value: 'Override', matcher: 'exact', behavior: 'invert', priority: 9 },
+      // For the hide-vs-collapse contest below: an ordinary hide rule, at the
+      // same strength as the "Soft Fandom" collapse it ties with on b8.
+      { target: 'F', value: 'Banished', matcher: 'exact', behavior: 'hide' },
     ],
   },
 }
@@ -54,6 +59,9 @@ const PAGE = `
     ${blurb('b4', ['Hard Fandom'], ['Override'])}
     ${blurb('b5', ['Tied Fandom'], ['Keeper'])}
     ${blurb('b6', ['Soft Fandom', 'Hard Fandom'], ['Keeper'])}
+    ${blurb('b7', ['A Fandom'], ['Banished'])}
+    ${blurb('b8', ['Soft Fandom'], ['Banished'])}
+    ${blurb('b9', ['Tied Fandom'], ['Banished'])}
   </ol>
 </div>
 `
@@ -101,9 +109,15 @@ describe('rule priority', { skip }, () => {
     id,
   )
 
-  /** The reason line the collapsed work shows. */
+  /** The reason line the collapsed work shows. Null on a work hidden outright. */
   const reason = id => page.evaluate(
     sel => document.getElementById(sel)?.querySelector('.AO3E--hide-works--reasons')?.textContent ?? null,
+    id,
+  )
+
+  /** Whether the whole `<li>` was taken away, rather than collapsed in place. */
+  const isHidden = id => page.evaluate(
+    sel => document.getElementById(sel)?.hidden ?? null,
     id,
   )
 
@@ -136,5 +150,27 @@ describe('rule priority', { skip }, () => {
     const text = await reason('b6')
     assert.match(text, /Hard Fandom/)
     assert.doesNotMatch(text, /Soft Fandom/)
+  })
+
+  test('a hide rule takes the work away rather than collapsing it', async () => {
+    assert.equal(await hiddenBy('b7'), 'tags')
+    assert.equal(await isHidden('b7'), true)
+    assert.equal(await reason('b7'), null, 'nothing to explain on a work that is not there')
+  })
+
+  test('a tie between hiding and collapsing goes to hiding', async () => {
+    // Both rules survive the contest at priority 0; the reader who asked for the
+    // work gone gets it gone.
+    assert.equal(await hiddenBy('b8'), 'tags')
+    assert.equal(await isHidden('b8'), true)
+  })
+
+  test('a stronger collapse keeps a work an ordinary hide would take away', async () => {
+    // "Tied Fandom" collapses at 4, "Banished" hides at 0: the strongest
+    // surviving reason says how the work goes, and both are still listed.
+    assert.equal(await isHidden('b9'), false)
+    const text = await reason('b9')
+    assert.match(text, /Tied Fandom/)
+    assert.match(text, /Banished/)
   })
 })

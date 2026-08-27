@@ -2,6 +2,7 @@ import MdiAccountCancelOutline from '~icons/mdi/account-cancel-outline.jsx'
 import MdiAccountCancel from '~icons/mdi/account-cancel.jsx'
 import MdiAccountMinus from '~icons/mdi/account-minus.jsx'
 import MdiAccountOff from '~icons/mdi/account-off.jsx'
+import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiBellOutline from '~icons/mdi/bell-outline.jsx'
 import MdiBell from '~icons/mdi/bell.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
@@ -127,6 +128,14 @@ export class HideAuthorToolbar extends Unit {
           active: behavior === 'hide',
           disabled: behavior === 'hide',
           onSelect: () => toggleRuleBehavior(key, 'hide'),
+        },
+        {
+          icon: () => <MdiArrowCollapseVertical />,
+          label: 'Collapse author',
+          scope: 'settings',
+          active: behavior === 'collapse',
+          disabled: behavior === 'collapse',
+          onSelect: () => toggleRuleBehavior(key, 'collapse'),
         },
         {
           icon: () => <MdiEyeCheck />,

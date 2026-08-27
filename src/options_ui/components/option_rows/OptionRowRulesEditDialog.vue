@@ -232,7 +232,10 @@ function save() {
           <span text="sm muted-fg">Behavior</span>
           <Select v-model="behavior" h-10 w-full>
             <SelectItem value="hide">
-              Hide matching works
+              Hide matching works completely
+            </SelectItem>
+            <SelectItem value="collapse">
+              Collapse matching works to a reason line
             </SelectItem>
             <SelectItem value="invert">
               Always show (unless a higher-priority rule hides it)
@@ -251,6 +254,14 @@ function save() {
             The rule is kept exactly as it is — value, matcher, priority and color — but matches nothing anywhere:
             no hiding, no highlight, no indicator on the page. Switch it back to another behavior to turn it on again.
           </p>
+          <p v-else-if="behavior === 'hide'" text="xs muted-fg" pl-1>
+            The work leaves the listing. In a custom search view it is dropped from the results altogether, so a page
+            still fills with the number of works you asked for.
+          </p>
+          <p v-else-if="behavior === 'collapse'" text="xs muted-fg" pl-1>
+            The work stays where it is, squeezed down to a line saying why with a button to show it — and it keeps
+            its place in a custom search view's results.
+          </p>
         </label>
 
         <label flex="~ col gap-1">
@@ -268,7 +279,8 @@ function save() {
           </p>
           <p v-else text="xs muted-fg" pl-1>
             {{ MIN_PRIORITY }}–{{ MAX_PRIORITY }}. When several rules match one work, the highest priority decides
-            whether it is hidden; a tie goes to "always show". Choosing a behavior resets this to its default
+            whether it is hidden; a tie goes to "always show", and between hiding and collapsing to hiding.
+            Choosing a behavior resets this to its default
             ({{ behaviorDefaultPriority }} for this one), so raise a hide rule above an "always show" to make it win
             anyway.
           </p>

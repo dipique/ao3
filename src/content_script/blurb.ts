@@ -197,6 +197,16 @@ export interface Work {
    * before handing the works to the view.
    */
   statuses?: string[]
+  /**
+   * The reader's rules take this work out of the listing outright (as opposed to
+   * collapsing it, which the view leaves to HideWorks to draw on the blurb). Such
+   * a work is dropped from the results altogether — out of the facet counts, the
+   * total and the paging — so a page still fills with the number of works asked
+   * for. Stamped by the host for the same reasons as {@link Work.statuses}: it
+   * depends on the options and on today's date, neither of which
+   * {@link parseWork} can see, and the snapshot cache re-parses stored HTML.
+   */
+  hidden?: boolean
 }
 
 /** Digits-only parse of a stat cell ("1,101" -> 1101); missing/blank -> 0. */

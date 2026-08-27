@@ -11,6 +11,7 @@ import {
   DEFAULT_HIGHLIGHT_COLOR,
   isTagTarget,
   ruleAffectsWorks,
+  ruleHideMode,
   ruleHighlightColor,
   ruleMatchesAuthor,
   ruleMatchesEntity,
@@ -26,6 +27,8 @@ describe('rulePriority', () => {
   test('an unset priority follows the behaviour', () => {
     assert.equal(rulePriority(rule({})), 0, 'hide is the default behaviour')
     assert.equal(rulePriority(rule({ behavior: 'hide' })), 0)
+    // Collapsing is a hide that leaves a trace, so it starts out just as strong.
+    assert.equal(rulePriority(rule({ behavior: 'collapse' })), 0)
     assert.equal(rulePriority(rule({ behavior: 'highlight' })), 0)
     assert.equal(rulePriority(rule({ behavior: 'hideFilter' })), 0)
     assert.equal(rulePriority(rule({ behavior: 'none' })), 0)
@@ -152,9 +155,10 @@ describe('highlight colours', () => {
 })
 
 describe('ruleAffectsWorks', () => {
-  test('only hiding and force-showing decide whether a work is shown', () => {
+  test('only hiding, collapsing and force-showing decide whether a work is shown', () => {
     assert.equal(ruleAffectsWorks(rule({})), true, 'hide is the default behaviour')
     assert.equal(ruleAffectsWorks(rule({ behavior: 'hide' })), true)
+    assert.equal(ruleAffectsWorks(rule({ behavior: 'collapse' })), true)
     assert.equal(ruleAffectsWorks(rule({ behavior: 'invert' })), true)
     assert.equal(ruleAffectsWorks(rule({ behavior: 'highlight' })), false)
     assert.equal(ruleAffectsWorks(rule({ behavior: 'hideFilter' })), false)
@@ -166,5 +170,15 @@ describe('ruleAffectsWorks', () => {
     // back into the contest while it is off.
     assert.equal(ruleAffectsWorks(rule({ behavior: 'none', priority: 9, color: '#abcdefff' })), false)
     assert.equal(rulePriority(rule({ behavior: 'none', priority: 7 })), 7)
+  })
+})
+
+describe('ruleHideMode', () => {
+  test('only a collapse rule collapses; everything else takes the work away', () => {
+    assert.equal(ruleHideMode(rule({ behavior: 'collapse' })), 'collapse')
+    assert.equal(ruleHideMode(rule({ behavior: 'hide' })), 'hide')
+    // A rule written before collapsing existed carries no behavior at all, and
+    // means the same thing "Hide fully" used to: the work leaves the listing.
+    assert.equal(ruleHideMode(rule({})), 'hide')
   })
 })

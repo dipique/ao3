@@ -26,8 +26,9 @@ export const NATIVE_HIDDEN_CLASS = cx('native-hidden')
 export const VIEW_ROOT = `${ADDON_CLASS}--search-view`
 
 /**
- * A work the view is holding but not showing: filtered out, or on one of the
- * pages the reader isn't on. Still in the results list, so anything counting
- * what's actually in front of the reader has to skip it.
+ * A work the view is holding but not showing: filtered out, on one of the pages
+ * the reader isn't on, or taken away by a hide rule before it could be a result
+ * at all. Still in the results list, so anything counting what's actually in
+ * front of the reader has to skip it.
  */
 export const VIEW_HIDDEN_CLASS = `${VIEW_ROOT}--hidden`

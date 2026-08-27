@@ -30,13 +30,13 @@ const [DefineBox, Box] = createReusableTemplate<{ value: string, label: string }
   >
     <Box
       value="true"
-      label="Show work as collapsed with a reason why it was hidden"
+      label="Collapse the work to a line saying why, with a button to show it"
     >
-      <span>Show reason</span>
+      <span>Collapse</span>
     </Box>
     <Box
       value="false"
-      label="Fully hide the work from view"
+      label="Take the work out of the listing entirely"
     >
       <span>Hide fully</span>
     </Box>

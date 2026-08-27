@@ -18,7 +18,10 @@ const SEED = {
   'option.rules': {
     enabled: true,
     colors: {},
-    filters: [{ target: 'tag', value: 'HideMe', matcher: 'exact', behavior: 'hide' }],
+    // Collapsing rather than hiding: this file is about the menus and the inline
+    // exclude button on a collapsed work's reason line, and a hide rule would
+    // take that work out of the view's results before either could be reached.
+    filters: [{ target: 'tag', value: 'HideMe', matcher: 'exact', behavior: 'collapse' }],
   },
 }
 
@@ -217,7 +220,7 @@ describe('tag and fandom menus in the search view', { skip }, () => {
     await sleep(300)
   })
 
-  test('a hidden work\'s reason line carries a working exclude button', async () => {
+  test('a collapsed work\'s reason line carries a working exclude button', async () => {
     const excluded = await page.evaluate(() => {
       const button = document.querySelector('.AO3E--search-view--results .AO3E--hide-works--exclude')
       if (!button)

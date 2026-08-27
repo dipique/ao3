@@ -1,3 +1,4 @@
+import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
@@ -79,6 +80,14 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement, filter: Filter
       active: behavior === 'hide',
       disabled: behavior === 'hide',
       onSelect: () => toggleRuleBehavior(key, 'hide'),
+    },
+    {
+      icon: () => <MdiArrowCollapseVertical />,
+      label: 'Collapse',
+      scope: 'settings',
+      active: behavior === 'collapse',
+      disabled: behavior === 'collapse',
+      onSelect: () => toggleRuleBehavior(key, 'collapse'),
     },
     {
       icon: () => <MdiEyeCheck />,

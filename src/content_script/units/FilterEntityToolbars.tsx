@@ -1,3 +1,4 @@
+import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiBookOpenPageVariant from '~icons/mdi/book-open-page-variant.jsx'
 import MdiCalendarClock from '~icons/mdi/calendar-clock.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
@@ -346,6 +347,14 @@ abstract class FilterEntityToolbar extends Unit {
         active: behavior === 'hide',
         disabled: behavior === 'hide',
         onSelect: () => toggleRuleBehavior(key, 'hide'),
+      },
+      {
+        icon: () => <MdiArrowCollapseVertical />,
+        label: `Collapse ${this.noun}`,
+        scope: 'settings',
+        active: behavior === 'collapse',
+        disabled: behavior === 'collapse',
+        onSelect: () => toggleRuleBehavior(key, 'collapse'),
       },
       {
         icon: () => <MdiEyeCheck />,

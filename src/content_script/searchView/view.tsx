@@ -140,6 +140,15 @@ export interface SearchViewConfig {
 
 const DEFAULT_PER_PAGE = 50
 
+/**
+ * The works that count as results: everything the reader's rules haven't taken
+ * away outright (see {@link Work.hidden}). Works a rule merely *collapses* are
+ * still results — they keep their slot, which is what collapsing is for.
+ */
+function results(works: Work[]): Work[] {
+  return works.filter(work => !work.hidden)
+}
+
 function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
   let timer: ReturnType<typeof setTimeout>
   return (...args: A) => {
@@ -186,6 +195,12 @@ function orderFacetKeys(saved: readonly string[] | undefined): FacetKey[] {
  */
 export function createSearchView(initialWorks: Work[], handlers: SearchViewHandlers, config: SearchViewConfig = {}): SearchView {
   let works = initialWorks
+  // Everything the view treats as a result. A work a rule hides outright is not
+  // one: it stays in `works` (mounted, and part of what the host persists) but
+  // counts for nothing here — no facet count, no total, no slot on a page. That
+  // is the whole difference between a hide rule and a collapse rule in a view we
+  // page ourselves; see {@link Work.hidden}.
+  let pool = results(works)
   // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
   // start blank. cloneFilterState so we never mutate the caller's snapshot.
   const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
@@ -208,7 +223,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // whose values have gone, and does it on a *refresh* — a sticky "Waiting"
     // with nothing waiting would open on "No works match" with nothing on screen
     // to explain why.
-    const present = new Set(works.flatMap(work => facetValues(work, 'status')))
+    const present = new Set(pool.flatMap(work => facetValues(work, 'status')))
     for (const value of [...state.facets.status.include]) {
       if (!present.has(value))
         state.facets.status.include.delete(value)
@@ -595,7 +610,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     facetGroups = []
     // Row identity/order is fixed from the full set; render() updates the live
     // drill-down counts and hides rows that no longer match the active filter.
-    const facets = buildFacets(works)
+    const facets = buildFacets(pool)
     // Seed the facet UI: the first build restores from the saved snapshot (an
     // in-memory reopen via initialState wins, else the persisted local prefs);
     // later rebuilds (a refresh) carry over the live on-screen state captured above.
@@ -912,6 +927,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     if (next.length === works.length)
       return
     works = next
+    pool = results(works)
     work.el.remove()
     decorated.delete(work.el)
     domOrderSig = '' // force a re-sort/re-append over the reduced set
@@ -982,7 +998,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   function render(): void {
-    const { visible, facetCounts, resultCounts } = computeView(works, state)
+    const { visible, facetCounts, resultCounts } = computeView(pool, state)
 
     // Re-sort the DOM (and cache the order) only when the sort changed or we
     // re-mounted — filtering never reorders, so this stays off the hot path.
@@ -1021,11 +1037,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
     const noun = total === 1 ? 'work' : 'works'
     if (total === 0) {
-      countEl.textContent = `No ${works.length === 1 ? 'work' : 'works'} match`
+      countEl.textContent = `No ${pool.length === 1 ? 'work' : 'works'} match`
     }
     else {
       const range = `${start + 1}–${start + onPage.size}`
-      const countStr = works.length > total ? `${total} (${works.length})` : String(total)
+      const countStr = pool.length > total ? `${total} (${pool.length})` : String(total)
       countEl.textContent = `Showing ${range} of ${countStr} ${noun}`
     }
     renderPager(pageCount)
@@ -1042,8 +1058,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   function update(nextWorks: Work[]): void {
     works = nextWorks
+    pool = results(works)
     // Drop selections for values that no longer exist so the UI stays honest.
-    const present = buildFacets(works)
+    const present = buildFacets(pool)
     for (const key of FACET_KEYS) {
       const valid = new Set(present[key].map(v => v.value))
       for (const dir of ['include', 'exclude', 'require'] as const) {

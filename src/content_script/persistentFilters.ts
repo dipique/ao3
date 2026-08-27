@@ -6,17 +6,17 @@ import { options } from '#common'
  * Toggle and read the *persistent* extension rules — the saved `rules` list (as
  * opposed to the ephemeral AO3 sidebar filters handled by `filterSidebar.tsx`).
  *
- * Every menu that sets a hide/always-show/highlight state goes through here so
- * the read-freshest → find-exact → toggle → `options.set` pattern (previously
+ * Every menu that sets a hide/collapse/always-show/highlight state goes through
+ * here so the read-freshest → find-exact → toggle → `options.set` pattern (previously
  * duplicated across the toolbars and background menus) lives in one place.
  * Choosing the behaviour an item already has clears it; choosing a different one
  * replaces it.
  *
- * The behaviours map onto {@link FilterBehavior}: `hide` hides the item,
- * `invert` force-shows it ("always show"), `highlight` only highlights it, and
- * `hideFilter` hides the tag itself. Priority is left off entirely — a rule with
- * no `priority` takes its behaviour's default (see `rulePriority`), which is
- * what these menus mean.
+ * The behaviours map onto {@link FilterBehavior}: `hide` takes the work away,
+ * `collapse` squeezes it down to a reason line, `invert` force-shows it ("always
+ * show"), `highlight` only highlights it, and `hideFilter` hides the tag itself.
+ * Priority is left off entirely — a rule with no `priority` takes its
+ * behaviour's default (see `rulePriority`), which is what these menus mean.
  */
 
 /**

@@ -36,8 +36,10 @@ OptionRowRulesContext.provide({
             <p>
               Each rule says what it applies to — a tag (of any type, or one specific type), an author, a work, or a
               series — what to match, and what to do with the works it matches.
-              Works matched by <Icon i-tabler-eye-off op40 label="Hide" title="Hide" /> are hidden;
-              works matched by <Icon i-tabler-eye-exclamation op100 label="Show" title="Show" /> are shown even when
+              Works matched by <Icon i-tabler-eye-off op40 label="Hide" title="Hide" /> leave the listing entirely;
+              works matched by <Icon i-mdi-arrow-collapse-vertical op60 label="Collapse" title="Collapse" /> stay
+              where they are, squeezed down to a line saying why with a button to show them.
+              Works matched by <Icon i-tabler-eye-exclamation op100 label="Show" title="Show" /> are shown even when
               something else would hide them.
               Matches marked <Icon i-mdi-star op100 label="Highlight" title="Highlight" /> are instead highlighted in a
               colour of your choice, without changing what is hidden.
@@ -62,14 +64,17 @@ OptionRowRulesContext.provide({
             </h2>
             <p>
               Every rule carries a priority from 0 to 9. When more than one rule matches a work, the highest priority
-              decides whether it is hidden; a tie goes to "always show". Creating a rule sets the priority its behavior
+              decides whether it is hidden; a tie goes to "always show". The strongest rule left standing also
+              decides <em>how</em> the work goes — hidden or collapsed — and there a tie goes to hiding.
+              Creating a rule sets the priority its behavior
               implies — 4 for "always show", 0 for everything else — which is why an "always show" beats an ordinary
               hide by default. Raise a hide rule to 5 or more when it should win anyway (say, a fandom you never want
               to see, whatever tags a work carries), or drop an "always show" below 4 to let ordinary hides overrule it.
             </p>
             <p>
               Hiding that isn't a rule at all — the crossover and language filters, and works you've marked read —
-              weighs 0, so an "always show" overrules it.
+              weighs 0, so an "always show" overrules it. Those three don't choose between hiding and collapsing per
+              rule either; they all follow the "Collapse or hide" setting above.
             </p>
             <h2 mt-6 py-1>
               Limitations

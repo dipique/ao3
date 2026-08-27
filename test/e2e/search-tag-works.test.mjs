@@ -49,10 +49,12 @@ function pagination(current) {
  */
 /**
  * The reader's rules have to reach these blurbs too, so the first work of each
- * page carries a tag a hide rule matches and the second carries that tag plus
- * one an "always show" rule matches — the priority contest, inside the view.
+ * page carries a tag a hide rule matches, the second carries that tag plus one an
+ * "always show" rule matches — the priority contest, inside the view — and the
+ * third carries a tag a *collapse* rule matches, which is the other half of it:
+ * a collapsed work keeps its place in the results, a hidden one leaves them.
  */
-const RULE_TAGS = [['HideMe'], ['HideMe', 'Keeper']]
+const RULE_TAGS = [['HideMe'], ['HideMe', 'Keeper'], ['Squish']]
 
 function tagPage(page) {
   const start = (page - 1) * PER_PAGE + 1
@@ -256,6 +258,7 @@ describe('search an uncommon tag\'s works', { skip }, () => {
         colors: {},
         filters: [
           { target: 'tag', value: 'HideMe', matcher: 'exact', behavior: 'hide' },
+          { target: 'tag', value: 'Squish', matcher: 'exact', behavior: 'collapse' },
           { target: 'tag', value: 'Keeper', matcher: 'exact', behavior: 'invert' },
         ],
       },
@@ -264,13 +267,28 @@ describe('search an uncommon tag\'s works', { skip }, () => {
     await sleep(2500)
     const state = await seeded.evaluate(() => {
       const lis = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
-      const hidden = lis.filter(li => li.querySelector('[data-ao3e-hidden]')).map(li => li.id)
-      return { total: lis.length, hidden, wrappers: Math.max(...lis.map(li => li.querySelectorAll('.AO3E--hide-works--wrapper').length)) }
+      const shown = lis.filter(li => !li.classList.contains('AO3E--search-view--hidden'))
+      return {
+        mounted: lis.length,
+        shown: shown.map(li => li.id),
+        collapsed: shown.filter(li => li.querySelector('[data-ao3e-hidden]')).map(li => li.id),
+        count: document.querySelector('.AO3E--search-view--count')?.textContent ?? '',
+        wrappers: Math.max(...lis.map(li => li.querySelectorAll('.AO3E--hide-works--wrapper').length)),
+      }
     })
-    // One "HideMe" work per page is collapsed; the one that also carries the
-    // "always show" tag is not, because invert outranks hide by default.
-    assert.equal(state.hidden.length, PAGES, 'one work per page should be hidden')
-    assert.ok(!state.hidden.includes('work_2'), 'an always-show rule should beat the hide rule')
+    // Every work is still mounted — the view holds them all — but the one work
+    // per page a hide rule matched is no longer a result: it costs no slot, and
+    // the count the reader is shown never knew about it.
+    assert.equal(state.mounted, PAGES * PER_PAGE)
+    assert.equal(state.shown.length, PAGES * PER_PAGE - PAGES, 'one work per page should be gone')
+    for (const id of ['work_1', 'work_6', 'work_11'])
+      assert.ok(!state.shown.includes(id), `${id} was hidden by a rule and should have left the results`)
+    assert.match(state.count, new RegExp(`of ${PAGES * PER_PAGE - PAGES} works`))
+    // The one that also carries the "always show" tag stays, because invert
+    // outranks hide by default...
+    assert.ok(state.shown.includes('work_2'), 'an always-show rule should beat the hide rule')
+    // ...and a collapse rule keeps its work in the results, squeezed down.
+    assert.deepEqual(state.collapsed, ['work_3', 'work_8', 'work_13'])
     assert.equal(state.wrappers, 1, 'no blurb should be wrapped more than once')
     await seeded.close()
   })

@@ -46,7 +46,7 @@ const SORT_KEYS: Record<string, SortKey> = {
  * help text introduces them, strongest effect first — which puts the disabled
  * rules last, together, where a sort by action is the quickest way to find them.
  */
-const BEHAVIOR_RANK: Record<string, number> = { hide: 0, invert: 1, highlight: 2, hideFilter: 3, none: 4 }
+const BEHAVIOR_RANK: Record<string, number> = { hide: 0, collapse: 1, invert: 2, highlight: 3, hideFilter: 4, none: 5 }
 
 const sortKey = ref<SortKey | null>(null)
 const sortDir = ref<'asc' | 'desc'>('asc')
@@ -234,6 +234,7 @@ const context = OptionRowRulesContext.inject()
                     :style="{ color: starColor(cell.row.data) }"
                     label="Highlight"
                   />
+                  <Icon v-else-if="cell.value === 'collapse'" i-mdi-arrow-collapse-vertical op60 label="Collapse" />
                   <Icon v-else-if="cell.value === 'invert'" i-tabler-eye-exclamation op100 label="Show" />
                   <Icon v-else-if="cell.value === 'hideFilter'" i-mdi-tag-off op100 label="Hide tag" />
                   <Icon v-else-if="cell.value === 'none'" i-mdi-cancel op40 label="Disabled" />
@@ -241,10 +242,11 @@ const context = OptionRowRulesContext.inject()
                 </div>
                 <template #content>
                   <span v-if="cell.value === 'highlight'">Highlight the match on results (does not hide).</span>
+                  <span v-else-if="cell.value === 'collapse'">Collapse matching works to a line saying why, with a button to show them.</span>
                   <span v-else-if="cell.value === 'invert'">Always show matching works - unless a hide rule outranks this one.</span>
                   <span v-else-if="cell.value === 'hideFilter'">Hide the matching tags themselves, on works and in the filter sidebar (does not hide works).</span>
                   <span v-else-if="cell.value === 'none'">Disabled - the rule is kept, but does nothing at all.</span>
-                  <span v-else>Hide matching works.</span>
+                  <span v-else>Hide matching works completely - they leave the listing.</span>
                 </template>
               </Tooltip>
             </td>

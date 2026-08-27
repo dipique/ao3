@@ -142,7 +142,14 @@ export interface User {
 
 /**
  * What a rule does with the works (and tags/authors/titles) it matches:
- * - `'hide'` (or missing): hide the work. The default.
+ * - `'hide'` (or missing): take the work out of the listing entirely. The
+ *   default. On a native listing its `<li>` is hidden outright (the peek pill
+ *   still reveals it); in one of our search views it is dropped from the results
+ *   altogether, so a page still fills with the number of works you asked for.
+ * - `'collapse'`: keep the work in the listing, squeezed down to a one-line
+ *   reason with a "Show" button. The gentler half of what `'hide'` used to be —
+ *   a collapsed work still takes its place in a listing (and its slot on a
+ *   search view's page), which is the whole point: you can see it was there.
  * - `'invert'`: force-show the work even when another rule would hide it. Also
  *   highlights the match by default (a force-shown work usually wants to stand
  *   out); opt out by setting `color` to `'transparent'`.
@@ -159,19 +166,38 @@ export interface User {
  *   the *upstream* extension, which knows only a boolean `invert`, sees a
  *   disabled rule as a plain hide rule; our own exports round-trip it intact.
  */
-export type FilterBehavior = 'hide' | 'invert' | 'highlight' | 'hideFilter' | 'none'
+export type FilterBehavior = 'hide' | 'collapse' | 'invert' | 'highlight' | 'hideFilter' | 'none'
 
 /**
- * Whether a rule takes part in deciding if a work is shown — i.e. it hides the
- * work (`hide`) or force-shows it (`invert`). The purely presentational
- * behaviours (`highlight`, `hideFilter`) only change how the *match* is drawn,
- * and `none` does nothing whatever, so they're all skipped when HideWorks
- * collects its reasons. Stated as the behaviours that do count rather than the
- * ones that don't, so a behaviour added later stays out until it's let in.
+ * Whether a rule takes part in deciding if a work is shown — i.e. it takes the
+ * work away (`hide`), squeezes it down (`collapse`) or force-shows it
+ * (`invert`). The purely presentational behaviours (`highlight`, `hideFilter`)
+ * only change how the *match* is drawn, and `none` does nothing whatever, so
+ * they're all skipped when HideWorks collects its reasons. Stated as the
+ * behaviours that do count rather than the ones that don't, so a behaviour added
+ * later stays out until it's let in.
  */
 export function ruleAffectsWorks(rule: { behavior?: FilterBehavior }): boolean {
   const behavior = rule.behavior ?? 'hide'
-  return behavior === 'hide' || behavior === 'invert'
+  return behavior === 'hide' || behavior === 'collapse' || behavior === 'invert'
+}
+
+/**
+ * How a work that lost the contest is taken out of the listing: gone entirely,
+ * or kept in place as a collapsed reason line. The two halves of what a `hide`
+ * rule used to do under the old global "collapse or hide fully" switch — which
+ * survives, rescoped, as {@link Options.hideShowReason}, for the hides that
+ * aren't rules at all (marks, crossovers, language).
+ */
+export type HideMode = 'hide' | 'collapse'
+
+/**
+ * The {@link HideMode} a work-affecting rule asks for. `invert` never reaches
+ * here — a force-show hides nothing — so a rule that isn't a `collapse` is a
+ * hide, which is also what the missing-`behavior` default has always meant.
+ */
+export function ruleHideMode(rule: { behavior?: FilterBehavior }): HideMode {
+  return rule.behavior === 'collapse' ? 'collapse' : 'hide'
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +220,10 @@ export const MAX_PRIORITY = 9
  */
 export const DEFAULT_BEHAVIOR_PRIORITY: Record<FilterBehavior, number> = {
   hide: 0,
+  // Collapsing is a hide that leaves a trace, so it starts out exactly as strong
+  // as one — which also means a tie between the two is settled by the tie-break
+  // in HideWorks (hide wins) rather than by the numbers here.
+  collapse: 0,
   invert: 4,
   highlight: 0,
   hideFilter: 0,
