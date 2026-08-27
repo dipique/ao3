@@ -62,7 +62,7 @@ const iconifyRequire = createRequire(import.meta.url)
 const iconifyCollection = (name: string) => () => iconifyRequire(`@iconify-json/${name}/icons.json`)
 
 export const ICONS_CUSTOM_COLLECTIONS = {
-  ao3e: FileSystemIconLoader(fileURLToPath(new URL('./src/icons', import.meta.url))),
+  'ao3e': FileSystemIconLoader(fileURLToPath(new URL('./src/icons', import.meta.url))),
   'codicon': iconifyCollection('codicon'),
   'mdi': iconifyCollection('mdi'),
   'tabler': iconifyCollection('tabler'),
@@ -192,6 +192,9 @@ export default {
     'i-mdi-sleep',
     'i-mdi-thumb-down',
     'i-mdi-emoticon-sick',
+    'i-mdi-emoticon-cry',
+    'i-mdi-cloud',
+    'i-mdi-close-circle',
     'i-mdi-calendar-clock',
     'i-mdi-clock-check',
     'i-mdi-bookmark-check',

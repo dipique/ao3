@@ -80,11 +80,15 @@ const READINGS_HTML = `<!doctype html>
 
 /**
  * Nothing is collapsed inside the search view — it *is* the Marked for Later
- * list, so hiding works there would empty it. The Readiness facet is the only
+ * list, so hiding works there would empty it. The Status facet is the only
  * filtering mechanism, which is why it defaults to "Ready" and why that default
  * has to stick across visits.
+ *
+ * It also carries the rest of what the reader has done with a work — the marks
+ * it holds, "Unread" when it holds none, and "Marked for later" from the id
+ * index this very page writes — so the values here are the union of all of that.
  */
-describe('the Readiness facet in the search view', { skip }, () => {
+describe('the Status facet in the search view', { skip }, () => {
   let browser
   let page
 
@@ -128,10 +132,10 @@ describe('the Readiness facet in the search view', { skip }, () => {
       .filter(li => !li.classList.contains('AO3E--search-view--hidden'))
       .map(li => li.querySelector('h4.heading a').textContent))
 
-  /** The Readiness group's rows: value, drill-down count, and whether "include" is on. */
-  const readinessRows = () => page.evaluate(() => {
+  /** The Status group's rows: value, drill-down count, and whether "include" is on. */
+  const statusRows = () => page.evaluate(() => {
     const group = [...document.querySelectorAll('.AO3E--search-view--group')]
-      .find(g => g.querySelector('.AO3E--search-view--group-label')?.textContent.trim().startsWith('Readiness'))
+      .find(g => g.querySelector('.AO3E--search-view--group-label')?.textContent.trim().startsWith('Status'))
     if (!group)
       return null
     return [...group.querySelectorAll('.AO3E--search-view--row')].map(row => ({
@@ -150,14 +154,21 @@ describe('the Readiness facet in the search view', { skip }, () => {
     await sleep(400)
   }
 
-  test('the facet exists, listing the readiness values present', async () => {
-    const rows = await readinessRows()
-    assert.notEqual(rows, null, 'no Readiness facet group was rendered')
-    assert.deepEqual(rows.map(r => r.value).sort(), ['Caught up', 'Ready'])
+  test('the facet exists, listing every status present', async () => {
+    const rows = await statusRows()
+    assert.notEqual(rows, null, 'no Status facet group was rendered')
+    // Works 1 and 2 carry the ongoing mark (one Ready, one Caught up); work 3
+    // carries nothing, so it is Unread and ready by definition. All three are on
+    // the Marked for Later list this page is, and the view writes that index
+    // before it renders.
+    assert.deepEqual(
+      rows.map(r => r.value).sort(),
+      ['Caught up', 'Marked for later', 'Ongoing', 'Ready', 'Unread'],
+    )
   })
 
   test('it defaults to Ready, with nothing else selected', async () => {
-    const rows = await readinessRows()
+    const rows = await statusRows()
     assert.deepEqual(
       rows.filter(r => r.included).map(r => r.value),
       ['Ready'],
@@ -177,27 +188,27 @@ describe('the Readiness facet in the search view', { skip }, () => {
   })
 
   test('the selection lands in the stored search-view prefs', async () => {
-    const readiness = await page.evaluate(() => {
+    const status = await page.evaluate(() => {
       const writes = window.__writes.filter(w => 'cache.searchViewPrefs' in w)
       if (!writes.length)
         return null
-      return writes[writes.length - 1]['cache.searchViewPrefs']['marked-for-later']?.readiness ?? null
+      return writes[writes.length - 1]['cache.searchViewPrefs']['marked-for-later']?.status ?? null
     })
-    assert.deepEqual(readiness, ['Ready'])
+    assert.deepEqual(status, ['Ready'])
   })
 
   test('picking Caught up as well brings the whole list back', async () => {
     await clickInclude('Caught up')
     assert.deepEqual((await visibleTitles()).sort(), ['All caught up', 'Never marked', 'Still going'])
-    const rows = await readinessRows()
+    const rows = await statusRows()
     assert.deepEqual(rows.filter(r => r.included).map(r => r.value).sort(), ['Caught up', 'Ready'])
   })
 
   test('and that change is persisted too, so it is what opens next time', async () => {
-    const readiness = await page.evaluate(() => {
+    const status = await page.evaluate(() => {
       const writes = window.__writes.filter(w => 'cache.searchViewPrefs' in w)
-      return writes[writes.length - 1]['cache.searchViewPrefs']['marked-for-later'].readiness
+      return writes[writes.length - 1]['cache.searchViewPrefs']['marked-for-later'].status
     })
-    assert.deepEqual([...readiness].sort(), ['Caught up', 'Ready'])
+    assert.deepEqual([...status].sort(), ['Caught up', 'Ready'])
   })
 })

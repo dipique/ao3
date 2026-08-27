@@ -61,10 +61,10 @@ describe('searchView in-memory engine', () => {
     const freeforms = Object.fromEntries(facets.freeforms.map(f => [f.value, f.count]))
     assert.equal(freeforms.Fluff, 2)
     assert.equal(freeforms.Angst, 2)
-    // Status facet is derived from `complete`.
-    const status = Object.fromEntries(facets.status.map(f => [f.value, f.count]))
-    assert.equal(status.Complete, 2)
-    assert.equal(status['Work in Progress'], 1)
+    // Completion facet is derived from `complete`.
+    const completion = Object.fromEntries(facets.completion.map(f => [f.value, f.count]))
+    assert.equal(completion.Complete, 2)
+    assert.equal(completion['Work in Progress'], 1)
   })
 
   test('include facet is OR within a group', () => {
@@ -238,28 +238,57 @@ describe('searchView in-memory engine', () => {
   })
 })
 
-describe('the readiness facet', () => {
-  test('a work with no readiness reads as Ready', () => {
+describe('the status facet', () => {
+  test('an unstamped work reads as Ready', () => {
     // Untracked works — everything on a to-read list that isn't marked ongoing —
     // are ready to read by definition, and the fallback is also what keeps every
-    // other test in this file (whose factory has no readiness field) honest.
-    assert.deepEqual(facetValues(work(), 'readiness'), ['Ready'])
+    // other test in this file (whose factory has no statuses field) honest.
+    assert.deepEqual(facetValues(work(), 'status'), ['Ready'])
   })
 
-  test('a precomputed value is used as-is', () => {
-    // The host stamps this in a post-pass; the engine never derives it, since it
-    // depends on the mark table and on today's date.
-    assert.deepEqual(facetValues(work({ readiness: 'Waiting' }), 'readiness'), ['Waiting'])
+  test('precomputed values are used as-is', () => {
+    // The host stamps these in a post-pass; the engine never derives them, since
+    // they depend on the mark table, the saved-work index and today's date.
+    assert.deepEqual(
+      facetValues(work({ statuses: ['Ongoing', 'Waiting'] }), 'status'),
+      ['Ongoing', 'Waiting'],
+    )
   })
 
   test('filtering to Ready drops the works that are not', () => {
     const set = [
       work({ workId: '1', markedOrder: 0 }),
-      work({ workId: '2', markedOrder: 1, readiness: 'Waiting' }),
-      work({ workId: '3', markedOrder: 2, readiness: 'Caught up' }),
+      work({ workId: '2', markedOrder: 1, statuses: ['Ongoing', 'Waiting'] }),
+      work({ workId: '3', markedOrder: 2, statuses: ['Ongoing', 'Caught up'] }),
     ]
     const state = emptyFilterState()
-    state.facets.readiness.include.add('Ready')
+    state.facets.status.include.add('Ready')
     assert.deepEqual(applyFilters(set, state).map(w => w.workId), ['1'])
+  })
+
+  test('a work carries several statuses at once, so require and exclude both bite', () => {
+    // The point of merging readiness and the marks into one group: "ongoing and
+    // still ready" is an AND within it, which only `require` can express.
+    const set = [
+      work({ workId: '1', markedOrder: 0, statuses: ['Ongoing', 'Ready'] }),
+      work({ workId: '2', markedOrder: 1, statuses: ['Ongoing', 'Caught up'] }),
+      work({ workId: '3', markedOrder: 2, statuses: ['Unread', 'Ready'] }),
+    ]
+    const required = emptyFilterState()
+    required.facets.status.require.add('Ongoing')
+    required.facets.status.require.add('Ready')
+    assert.deepEqual(applyFilters(set, required).map(w => w.workId), ['1'])
+
+    // Excluding Unread is how you ask for "everything I've formed a view on".
+    const excluded = emptyFilterState()
+    excluded.facets.status.exclude.add('Unread')
+    assert.deepEqual(applyFilters(set, excluded).map(w => w.workId), ['1', '2'])
+  })
+})
+
+describe('the completion facet', () => {
+  test('reads the work’s own complete flag', () => {
+    assert.deepEqual(facetValues(work(), 'completion'), ['Complete'])
+    assert.deepEqual(facetValues(work({ complete: false }), 'completion'), ['Work in Progress'])
   })
 })

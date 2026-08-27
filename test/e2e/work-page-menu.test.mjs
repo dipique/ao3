@@ -229,7 +229,7 @@ describe('the work menu on a work page', { skip }, () => {
     const dispositions = rows
       .filter(r => /^(?:Mark|Unmark) as /.test(r.label))
       .map(r => r.label.replace(/^(?:Mark|Unmark) as /, '').replace(/…$/, ''))
-    assert.deepEqual(dispositions, ['read', 'bad', 'boring', 'gross', 'good', 'hot', 'favorite', 'ongoing'])
+    assert.deepEqual(dispositions, ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'ongoing'])
 
     // Marked for Later is an AO3-side action, so it sits in its own scope group
     // rather than among the dispositions.

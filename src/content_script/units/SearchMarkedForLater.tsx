@@ -5,8 +5,8 @@ import type { ViewState } from '#content_script/searchView/view.tsx'
 import { ADDON_CLASS, getArchiveLink, parseUser, toast } from '#common'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
-import { applyReadiness } from '#content_script/searchView/readiness.ts'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
+import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
 import { seedMarkedForLater, submitMark } from '#content_script/units/FilterEntityToolbars.tsx'
 import { applyMarkGroup } from '#content_script/workMarks.js'
@@ -98,7 +98,7 @@ export class SearchMarkedForLater extends Unit {
         // Every work here is marked for later — keep the work menu's saved state
         // in step with the set before it decorates the blurbs.
         seedMarkedForLater(works.map(work => work.workId))
-        applyReadiness(works, this.options)
+        applyStatus(works, this.options)
       },
       // This page is the only place that sees the whole list, so the id index
       // every *other* listing reads ({@link file://./../markedForLaterIndex.ts})

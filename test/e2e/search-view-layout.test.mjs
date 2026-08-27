@@ -176,6 +176,8 @@ describe('the search view layout', { skip }, () => {
         rootW: Math.round(root.getBoundingClientRect().width),
         mainW: Math.round(m.width),
         pagerH: Math.round(p.height),
+        pagerPosition: getComputedStyle(pager).position,
+        pagerTop: Math.round(p.top),
         columns: getComputedStyle(document.querySelector('.AO3E--search-view--layout')).gridTemplateColumns,
         sidebarPosition: getComputedStyle(side).position,
         sidebarOverMain: ow > 1 && oh > 1 ? { w: Math.round(ow), h: Math.round(oh) } : null,
@@ -211,9 +213,15 @@ describe('the search view layout', { skip }, () => {
     assert.equal(r.overlaps, 0, 'and nothing overlaps the pager')
   })
 
-  test('the pager stays a single row rather than stacking', async () => {
-    const r = await measure(1400, 'width: 26em; margin: 0 auto')
-    assert.ok(r.pagerH < 40, `pager should be one row, got ${r.pagerH}px tall`)
+  test('the pager floats down beside the results as you scroll', async () => {
+    // Same reasoning as the filter column: it sits next to the works, so the
+    // page turns should still be to hand however far down the list you are.
+    // `measure` has scrolled 2000px by this point, so a pager still near the top
+    // of the viewport is one that travelled.
+    const r = await measure(1400, '')
+    assert.equal(r.pagerPosition, 'sticky', 'page turns should stay reachable')
+    assert.ok(r.pagerTop >= 0 && r.pagerTop < 120, `pager should be pinned near the top, got ${r.pagerTop}px`)
+    assert.equal(r.overlaps, 0, 'and never over the works it sits beside')
   })
 
   test('beside the results, the filters stay stuck as you scroll', async () => {

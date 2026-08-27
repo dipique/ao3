@@ -45,6 +45,17 @@ export async function loadMarkedForLaterIndex(userId: string): Promise<Set<strin
   return ids
 }
 
+/**
+ * The ids read this run, without a storage round-trip — or null when nothing has
+ * loaded the index yet, which is not the same as "no work is saved". For the
+ * callers that have to answer synchronously per work (the search view's Status
+ * facet); everything else should await {@link loadMarkedForLaterIndex}, which is
+ * what puts a set here in the first place.
+ */
+export function markedForLaterIds(): ReadonlySet<string> | null {
+  return loaded?.ids ?? null
+}
+
 /** Replace the index with a freshly scraped list. */
 export async function saveMarkedForLaterIndex(userId: string, ids: Iterable<string>): Promise<void> {
   const key = normalize(userId)

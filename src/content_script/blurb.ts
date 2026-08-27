@@ -187,14 +187,16 @@ export interface Work {
   freeforms: string[]
   restricted: boolean
   /**
-   * How ready this work is to be read on, when it carries a progress mark —
-   * the Readiness facet's value. Deliberately *not* set by {@link parseWork}:
-   * it depends on the mark table and on today's date, neither of which the
-   * parser can see, and the snapshot cache rehydrates through this same parser
-   * (so a value baked in here would be a day stale on the next visit). The host
-   * fills it in a post-pass before handing the works to the view.
+   * What the reader has done with this work — the Status facet's values: the
+   * marks it carries, whether it's unread, how ready a progress-marked work is
+   * to be read on, and whether it's on the Marked for Later list. Deliberately
+   * never set by {@link parseWork}: they depend on the mark table, the Marked
+   * for Later index and today's date, none of which the parser can see, and the
+   * snapshot cache rehydrates through this same parser (so values baked in here
+   * would be a day stale on the next visit). The host fills them in a post-pass
+   * before handing the works to the view.
    */
-  readiness?: string
+  statuses?: string[]
 }
 
 /** Digits-only parse of a stat cell ("1,101" -> 1101); missing/blank -> 0. */

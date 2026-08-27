@@ -33,12 +33,12 @@ function marksWith(entries = {}) {
 describe('the mark table', () => {
   test('the finer dispositions all behave as read', () => {
     const marks = createDefaultMarks()
-    for (const id of ['favorite', 'good', 'hot', 'boring', 'bad', 'gross'])
+    for (const id of ['favorite', 'good', 'hot', 'feelsy', 'fluff', 'boring', 'bad', 'gross', 'no'])
       assert.equal(markRoot(marks, id), READ_MARK, `${id} should alias read`)
     assert.equal(markRoot(marks, READ_MARK), READ_MARK, 'read is its own root')
     assert.deepEqual(
       markGroup(marks, 'favorite'),
-      ['read', 'bad', 'boring', 'gross', 'good', 'hot', 'favorite', 'continue'],
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'continue'],
       'the whole group, in table order — `continue` is in it too, so choosing '
       + 'one replaces the other; what it does *not* share is the unsaving',
     )
@@ -52,7 +52,7 @@ describe('the mark table', () => {
     // finer readings worst to best, then the one that isn't a verdict.
     assert.deepEqual(
       localMarkIds(marks),
-      ['read', 'bad', 'boring', 'gross', 'good', 'hot', 'favorite', 'continue'],
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'continue'],
     )
   })
 

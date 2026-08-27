@@ -8,7 +8,7 @@ import type { Work } from '#content_script/blurb.js'
 
 /** A facetable field. Each maps a work to zero or more string values. */
 export type FacetKey
-  = | 'readiness'
+  = | 'status'
     | 'rating'
     | 'warnings'
     | 'categories'
@@ -17,11 +17,11 @@ export type FacetKey
     | 'characters'
     | 'freeforms'
     | 'language'
-    | 'status'
+    | 'completion'
 
 /** Facet groups in sidebar display order. */
 export const FACET_KEYS: FacetKey[] = [
-  'readiness',
+  'status',
   'rating',
   'warnings',
   'categories',
@@ -30,11 +30,11 @@ export const FACET_KEYS: FacetKey[] = [
   'characters',
   'freeforms',
   'language',
-  'status',
+  'completion',
 ]
 
 export const FACET_LABELS: Record<FacetKey, string> = {
-  readiness: 'Readiness',
+  status: 'Status',
   rating: 'Rating',
   warnings: 'Archive Warnings',
   categories: 'Categories',
@@ -43,7 +43,7 @@ export const FACET_LABELS: Record<FacetKey, string> = {
   characters: 'Characters',
   freeforms: 'Additional Tags',
   language: 'Language',
-  status: 'Completion Status',
+  completion: 'Completion Status',
 }
 
 export type SortKey
@@ -73,11 +73,12 @@ export const SORT_LABELS: Record<SortKey, string> = {
 
 export function facetValues(work: Work, key: FacetKey): string[] {
   switch (key) {
-    // Precomputed by the host, not derived here: readiness depends on the mark
-    // table and on what day it is, neither of which belongs in a pure engine.
-    // A work with none is Ready — an untracked work on your to-read list is
-    // exactly that, with nothing standing between you and reading it.
-    case 'readiness': return [work.readiness ?? 'Ready']
+    // Precomputed by the host, not derived here: a work's statuses depend on the
+    // mark table, on the Marked for Later index and on what day it is, none of
+    // which belongs in a pure engine. A work the host never stamped falls back
+    // to Ready — an untracked work on your to-read list is exactly that, with
+    // nothing standing between you and reading it.
+    case 'status': return work.statuses ?? ['Ready']
     case 'rating': return work.rating ? [work.rating] : []
     case 'warnings': return work.warnings
     case 'categories': return work.categories
@@ -86,7 +87,7 @@ export function facetValues(work: Work, key: FacetKey): string[] {
     case 'characters': return work.characters
     case 'freeforms': return work.freeforms
     case 'language': return work.language ? [work.language] : []
-    case 'status': return [work.complete ? 'Complete' : 'Work in Progress']
+    case 'completion': return [work.complete ? 'Complete' : 'Work in Progress']
   }
 }
 

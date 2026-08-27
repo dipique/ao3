@@ -60,7 +60,7 @@ export interface FilterTarget {
 }
 
 /**
- * The tag type each facet group's values are. Readiness, language and completion
+ * The tag type each facet group's values are. Status, language and completion
  * status are not tags at all, so no tag filter can speak about them.
  */
 export const FACET_TAG_TYPES: Partial<Record<FacetKey, TagType>> = {

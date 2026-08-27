@@ -1016,8 +1016,11 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   display: inline;
 }
 
+/* Sits immediately after the count, not floated to the far end of the row: the
+   toolbar shares its line with the page's own actions (the works-search page
+   puts "Edit Your Search" there), and a refresh flung right lands next to a
+   button it has nothing to do with. */
 .AO3E--search-view--refresh {
-  margin-left: auto;
   background: none;
   border: none;
   padding: 0.2em;
@@ -1179,12 +1182,20 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   }
 }
 
+/* Sticky for the same reason the filter column is: it sits beside the results,
+   so the page turn should still be to hand however far down the list you've
+   scrolled. The results column doesn't stretch its items (`align-items:
+   flex-start`), so the pager keeps its content height and has room to travel. */
 .AO3E--search-view--pager {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   align-items: stretch;
   gap: 0.3em;
+  position: sticky;
+  top: 1em;
+  max-height: calc(100vh - 2em);
+  overflow-y: auto;
 }
 
 .AO3E--search-view--page {

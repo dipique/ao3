@@ -3,8 +3,8 @@ import type { ViewState } from '#content_script/searchView/view.tsx'
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
-import { applyReadiness } from '#content_script/searchView/readiness.ts'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
+import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -123,16 +123,16 @@ export class SearchTagWorks extends Unit {
       // itself stays: it's still the reason the reader is looking at our view.
       nativeElements: () => [listbox, link],
       mount: container => notice.after(container),
-      // Progress marks apply to any work, so the Readiness facet is worth having
-      // here too — just not switched on by default (see `defaultReadiness`).
-      prepare: works => applyReadiness(works, this.options),
+      // Marks and progress apply to any work, so the Status facet is worth
+      // having here too — just not switched on by default (see `defaultStatus`).
+      prepare: works => applyStatus(works, this.options),
       viewConfig: {
         // "marked" is really the order the source listed them in, which here is
         // the Archive's own ordering for the tag rather than anything the reader did.
         sortLabels: { marked: 'Archive order' },
         // Browsing a tag isn't triage: opening on "Ready" only would quietly hide
         // every work the reader has already started.
-        defaultReadiness: [],
+        defaultStatus: [],
       },
       emptyMessage: 'No works found for this tag.',
       errorMessage: 'Could not load the works for this tag.',

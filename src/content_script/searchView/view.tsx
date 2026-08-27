@@ -14,6 +14,7 @@ import React from '#dom'
 import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FilterState, SortKey } from './engine.ts'
 import type { SearchViewPrefs } from './prefs.ts'
 
+import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
 import {
   buildFacets,
   cloneFilterState,
@@ -25,9 +26,8 @@ import {
   SORT_LABELS,
   sortWorks,
 } from './engine.ts'
-import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
 import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
-import { DEFAULT_READINESS, SIDEBAR_WIDTH } from './prefs.ts'
+import { DEFAULT_STATUS, SIDEBAR_WIDTH } from './prefs.ts'
 
 const ROOT = VIEW_ROOT
 /** Body class while the filter column is being dragged — see ReaderMode, same idea. */
@@ -130,12 +130,12 @@ export interface SearchViewConfig {
    */
   sortLabels?: Partial<Record<SortKey, string>>
   /**
-   * Readiness values the view opens (and resets) with when the user has no saved
-   * selection. Defaults to {@link DEFAULT_READINESS} — "only what's ready", which
+   * Status values the view opens (and resets) with when the user has no saved
+   * selection. Defaults to {@link DEFAULT_STATUS} — "only what's ready", which
    * is triage for a to-read list but would silently hide works when browsing, so
    * hosts that aren't triaging pass `[]`.
    */
-  defaultReadiness?: string[]
+  defaultStatus?: string[]
 }
 
 const DEFAULT_PER_PAGE = 50
@@ -189,7 +189,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
   // start blank. cloneFilterState so we never mutate the caller's snapshot.
   const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
-  const defaultReadiness = config.defaultReadiness ?? DEFAULT_READINESS
+  const defaultStatus = config.defaultStatus ?? DEFAULT_STATUS
   const sortLabels: Record<SortKey, string> = { ...SORT_LABELS, ...config.sortLabels }
   // Seed the sort from saved prefs on a fresh open. An in-memory reopen
   // (initialState) already carries the user's live sort, so it wins.
@@ -198,19 +198,20 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       state.sort = config.prefs.sort
     if (config.prefs.dir)
       state.dir = config.prefs.dir
-    // Readiness is the one facet with a default selection, seeded here rather
+    // Status is the one facet with a default selection, seeded here rather
     // than in emptyFilterState(), which must go on meaning "nothing filtered" —
-    // it's what "Reset filters" and every other caller start from.
-    for (const value of config.prefs.readiness ?? defaultReadiness)
-      state.facets.readiness.include.add(value)
+    // it's what "Reset filters" and every other caller start from. `readiness`
+    // is what the pref was called before the group grew past it.
+    for (const value of config.prefs.status ?? config.prefs.readiness ?? defaultStatus)
+      state.facets.status.include.add(value)
     // ...but only values this set actually has. `update()` prunes selections
     // whose values have gone, and does it on a *refresh* — a sticky "Waiting"
     // with nothing waiting would open on "No works match" with nothing on screen
     // to explain why.
-    const present = new Set(works.flatMap(work => facetValues(work, 'readiness')))
-    for (const value of [...state.facets.readiness.include]) {
+    const present = new Set(works.flatMap(work => facetValues(work, 'status')))
+    for (const value of [...state.facets.status.include]) {
       if (!present.has(value))
-        state.facets.readiness.include.delete(value)
+        state.facets.status.include.delete(value)
     }
   }
   // The user's custom facet-group order (persisted locally), applied on every
@@ -294,7 +295,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       order: [...facetOrder],
       sort: state.sort,
       dir: state.dir,
-      readiness: [...state.facets.readiness.include],
+      status: [...state.facets.status.include],
       sidebarWidth,
     })
   }
@@ -454,13 +455,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     const fresh = emptyFilterState()
     state.text = fresh.text
     state.facets = fresh.facets
-    // "Reset filters" restores the host's default readiness, not "no filter": on
+    // "Reset filters" restores the host's default status, not "no filter": on
     // a to-read list, showing only what's ready is the state the view is meant to
     // sit in, and resetting to everything would quietly turn the feature off.
     // Hosts that browse rather than triage default to nothing, so this is a no-op
     // for them.
-    for (const value of defaultReadiness)
-      state.facets.readiness.include.add(value)
+    for (const value of defaultStatus)
+      state.facets.status.include.add(value)
     state.wordsMin = null
     state.wordsMax = null
     state.sort = fresh.sort
@@ -518,9 +519,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // it moved — whether the toggle came from a facet row or from one of those
     // menus. Mirrors what the native sidebar's `notifyFilterChange` does.
     notifyFacetChange()
-    // Readiness is the one facet whose selection is a saved preference rather
+    // Status is the one facet whose selection is a saved preference rather
     // than something dialled in for this visit.
-    if (key === 'readiness')
+    if (key === 'status')
       persist()
   }
 
@@ -1109,8 +1110,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       <div class={cx('toolbar')}>
         {backBtn}
         {countEl}
-        {updatingEl}
         {refreshBtn}
+        {updatingEl}
       </div>
       <div class={cx('layout')}>
         <aside class={cx('sidebar')}>

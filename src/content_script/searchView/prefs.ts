@@ -5,7 +5,8 @@ import type { FacetKey, SortKey } from './engine.ts'
 /**
  * Local (never-synced) per-application UI preferences for the search view: which
  * facet groups are collapsed, the user's custom facet ordering, the last sort
- * field/direction, and how wide the filter column was dragged. Persisted in `browser.storage.local` via {@link cache}, keyed
+ * field/direction, the sticky Status selection, and how wide the filter column
+ * was dragged. Persisted in `browser.storage.local` via {@link cache}, keyed
  * by an app id so each place the view is used (e.g. `marked-for-later`) keeps its
  * own layout. Deliberately *not* part of the synced options — layout is a
  * per-device convenience, not a setting worth carrying across machines.
@@ -16,11 +17,17 @@ export interface SearchViewPrefs {
   sort: SortKey
   dir: 'asc' | 'desc'
   /**
-   * The Readiness values the view opens with. Sticky, unlike every other facet
+   * The Status values the view opens with. Sticky, unlike every other facet
    * selection, because it's the only thing standing between a to-read list and
    * the works on it that aren't worth opening yet — nothing is collapsed inside
    * the view, so if this didn't persist the feature would be off by default
    * every single time.
+   */
+  status?: string[]
+  /**
+   * What {@link status} was called while the group was the narrower "Readiness"
+   * facet. Read as a fallback so an existing reader's selection survives the
+   * rename; never written.
    */
   readiness?: string[]
   /**
@@ -36,8 +43,8 @@ export interface SearchViewPrefs {
 /** Filter-column width bounds, in pixels. */
 export const SIDEBAR_WIDTH = { min: 160, max: 640, default: 240 }
 
-/** What the Readiness facet is set to on a first-ever open: only what's ready. */
-export const DEFAULT_READINESS: string[] = ['Ready']
+/** What the Status facet is set to on a first-ever open: only what's ready. */
+export const DEFAULT_STATUS: string[] = ['Ready']
 
 /** Read the stored prefs for an app id (a partial — any field may be absent). */
 export async function loadPrefs(appId: string): Promise<Partial<SearchViewPrefs>> {

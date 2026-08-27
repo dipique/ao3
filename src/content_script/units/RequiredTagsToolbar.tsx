@@ -56,7 +56,7 @@ function classifySymbol(span: Element): SymbolInfo | null {
     // The engine's status values are "Complete" / "Work in Progress" (not the
     // symbol's "Complete Work" title); read the state from the class instead.
     const complete = span.classList.contains('complete-yes')
-    return { facet: 'status', group: null, values: [complete ? 'Complete' : 'Work in Progress'] }
+    return { facet: 'completion', group: null, values: [complete ? 'Complete' : 'Work in Progress'] }
   }
   return null
 }
