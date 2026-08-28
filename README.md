@@ -56,9 +56,9 @@ Use `pnpm run server:dev:firefox` (will compile src/ to build/firefox/ and keep 
 ```powershell
 npm install -g pnpm
 pnpm install
-$env:BROWSER="chrome"; $env:NODE_ENV="production"; node scripts/builder/build.ts build
+npm run build:dev
 # or
-$env:BROWSER="chrome"; $env:NODE_ENV="development"; node scripts/builder/build.ts build
+npm run build:prod
 ```
 
 ### Testing
