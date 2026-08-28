@@ -11,6 +11,9 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
  * A mark table with one non-default entry — `gross` opting out of hiding — so
  * the row's switch has to be reading the stored value rather than assuming the
  * default, and `favorite` inheriting `read`'s.
+ *
+ * No mark carries an `order`, which is what a table stored before the order was
+ * editable looks like: the rows have to fall back on the order it was stored in.
  */
 const SEED = {
   'option.workMarks': {
@@ -20,6 +23,16 @@ const SEED = {
       favorite: { icon: 'favorite', label: 'Favorite', color: '#c2185b', triggerAlias: 'read', items: 'aoehq,6jan1' },
       good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: 'read', items: '' },
       gross: { icon: 'gross', label: 'Gross', color: '#4d7c0f', triggerAlias: 'read', hideSearchResult: false, items: '' },
+      continue: {
+        icon: 'continue',
+        label: 'Ongoing',
+        color: '#0369a1',
+        triggerAlias: 'read',
+        tracksProgress: true,
+        hideSearchResult: true,
+        items: '',
+        progress: '',
+      },
       saved: { icon: 'saved', label: 'Marked for later', color: '#2f8f4e' },
     },
   },
@@ -62,16 +75,27 @@ describe('options UI — work marks', { skip }, () => {
       .map(s => ({ s, label: s.getAttribute('aria-label') ?? '' }))
       .filter(({ label }) => label.startsWith('Hide works marked '))
       .map(({ s, label }) => ({
-        mark: label.slice('Hide works marked '.length).replace(' in listings', ''),
+        mark: label.slice('Hide works marked '.length).replace(/ (?:in listings|until ready)$/, ''),
         on: s.getAttribute('aria-checked') === 'true' || s.dataset.state === 'checked',
         // The count line sits in the row's first grid cell, two siblings back.
         text: s.previousElementSibling?.textContent ?? '',
       }))
   })
 
+  /** The move buttons, by the title they carry ("Move Gross up"). */
+  const moveButton = title => page.evaluate(
+    t => [...document.querySelectorAll('button')].find(b => b.title === t)?.disabled ?? null,
+    title,
+  )
+
+  const clickMove = title => page.evaluate(
+    t => [...document.querySelectorAll('button')].find(b => b.title === t)?.click(),
+    title,
+  )
+
   test('renders one row per mark that holds ids, in table order', async () => {
     const got = await rows()
-    assert.deepEqual(got.map(r => r.mark), ['Read', 'Favorite', 'Good', 'Gross'])
+    assert.deepEqual(got.map(r => r.mark), ['Read', 'Favorite', 'Good', 'Gross', 'Ongoing'])
   })
 
   test('shows each mark\'s count, and what it counts as', async () => {
@@ -106,6 +130,34 @@ describe('options UI — work marks', { skip }, () => {
     })
     assert.equal(stored?.marks?.favorite?.hideSearchResult, false, 'diverging from the root is stored')
     assert.equal(stored?.marks?.read?.hideSearchResult, true, 'the root is untouched')
+  })
+
+  test('the ends of the run, and the ongoing mark, cannot be moved', async () => {
+    assert.equal(await moveButton('Move Read up'), true, 'nothing above the first mark')
+    assert.equal(await moveButton('Move Read down'), false)
+    assert.equal(await moveButton('Move Gross down'), true, 'the last verdict cannot pass Ongoing')
+    assert.equal(await moveButton('Move Ongoing up'), null, 'Ongoing has no move buttons at all')
+    assert.equal(await moveButton('Move Ongoing down'), null)
+  })
+
+  test('moving a mark reorders the rows and stores the new order', async () => {
+    await clickMove('Move Favorite up')
+    await sleep(1000)
+
+    const got = await rows()
+    assert.deepEqual(got.map(r => r.mark), ['Favorite', 'Read', 'Good', 'Gross', 'Ongoing'])
+
+    const stored = await page.evaluate(() => {
+      const w = window.__writes.filter(x => 'option.workMarks' in x).map(x => x['option.workMarks'])
+      return w.at(-1) ?? null
+    })
+    // The whole table is renumbered, so the order is a stored fact rather than
+    // an accident of which keys happen to come first.
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(stored.marks).map(([id, m]) => [id, m.order])),
+      { favorite: 0, read: 1, good: 2, gross: 3, continue: 4, saved: 5 },
+    )
+    assert.equal(stored.marks.read.items, 'pico,4mm7y', 'the marks themselves are untouched')
   })
 
   test('renders without console errors', () => {

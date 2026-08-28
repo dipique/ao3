@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { MarkId } from '#common'
 
-import { countIds, localMarkIds, markHidesResults, markIsLocal, markRoot, markTracksProgress, SAVED_MARK } from '#common'
+import { countIds, localMarkIds, markHidesResults, markIsLocal, markRoot, markTracksProgress, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
 
 import { markIconClass } from '../../markIcons.ts'
 
@@ -12,6 +12,21 @@ const local = computed(() => localMarkIds(marks.value))
 
 /** The marks that only configure how something else is drawn (Marked for Later). */
 const external = computed(() => Object.keys(marks.value).filter(id => !markIsLocal(marks.value, id)))
+
+/**
+ * The marks whose place in the list is the reader's to choose — every verdict,
+ * but not "ongoing", which is pinned after them.
+ */
+const movable = computed(() => reorderableMarkIds(marks.value))
+
+/**
+ * Move a mark one place through that run. Writes the whole table back rather
+ * than nudging one field, because the order is renumbered from the result — and
+ * the option store saves on any change to it either way.
+ */
+function move(id: MarkId, delta: number) {
+  marks.value = moveMark(marks.value, id, delta)
+}
 
 /** The ids are stored delta-packed, so a count is a split — no need to unpack. */
 function count(id: MarkId): number {
@@ -59,20 +74,28 @@ function hideModel(id: MarkId) {
   })
 }
 
-const rows = computed(() => local.value.map(id => ({
-  id,
-  label: label(id),
-  icon: markIconClass(marks.value[id]?.icon),
-  color: marks.value[id]?.color,
-  count: count(id),
-  alias: aliasOf(id),
-  hide: hideModel(id),
-  // A progress mark's hiding is a per-work decision (is there anything new to
-  // read yet?), so the switch means something different enough to say so.
-  hideLabel: markTracksProgress(marks.value, id) ? 'Hide until ready' : 'Hide in listings',
-  hideAria: `Hide works marked ${label(id)} ${markTracksProgress(marks.value, id) ? 'until ready' : 'in listings'}`,
-  tracksProgress: markTracksProgress(marks.value, id),
-})))
+const rows = computed(() => local.value.map((id) => {
+  const at = movable.value.indexOf(id)
+  return {
+    id,
+    label: label(id),
+    icon: markIconClass(marks.value[id]?.icon),
+    color: marks.value[id]?.color,
+    count: count(id),
+    alias: aliasOf(id),
+    hide: hideModel(id),
+    // A progress mark's hiding is a per-work decision (is there anything new to
+    // read yet?), so the switch means something different enough to say so.
+    hideLabel: markTracksProgress(marks.value, id) ? 'Hide until ready' : 'Hide in listings',
+    hideAria: `Hide works marked ${label(id)} ${markTracksProgress(marks.value, id) ? 'until ready' : 'in listings'}`,
+    tracksProgress: markTracksProgress(marks.value, id),
+    // A pinned mark is in neither state, so its row draws the reason it can't
+    // move rather than two permanently dead arrows.
+    movable: at !== -1,
+    canMoveUp: at > 0,
+    canMoveDown: at !== -1 && at < movable.value.length - 1,
+  }
+}))
 
 /**
  * Rough size of the packed sets. Marks live in the synced options, which share a
@@ -123,13 +146,51 @@ function clear(id: MarkId) {
         read or that date hasn't come round.
       </p>
 
+      <p text="sm muted-fg">
+        The arrows set the order the marks appear in — in a work's right-click menu, and wherever its marks are shown.
+        "Ongoing" stays last, since it isn't one of the verdicts and shouldn't sit among them.
+      </p>
+
       <div flex="~ col gap-2" text="sm" border-t pt-3>
-        <div grid="~ cols-[1fr_min-content_min-content]" items-center gap-x-4 gap-y-2>
+        <div grid="~ cols-[min-content_1fr_min-content_min-content]" items-center gap-x-4 gap-y-2>
+          <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>Order</span>
           <span text="xs muted-fg uppercase tracking-wide">Mark</span>
           <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>Hide</span>
           <span />
 
           <template v-for="row in rows" :key="row.id">
+            <span v-if="row.movable" flex="~ col" items-center>
+              <button
+                class="input-ring"
+                text="4 muted-fg hover:default-fg"
+                cursor="pointer disabled:default" op="disabled:40"
+                rounded-md p-0.5
+                :disabled="!row.canMoveUp"
+                :title="`Move ${row.label} up`"
+                @click="move(row.id, -1)"
+              >
+                <Icon i-mdi-chevron-up :label="`Move ${row.label} up`" />
+              </button>
+              <button
+                class="input-ring"
+                text="4 muted-fg hover:default-fg"
+                cursor="pointer disabled:default" op="disabled:40"
+                rounded-md p-0.5
+                :disabled="!row.canMoveDown"
+                :title="`Move ${row.label} down`"
+                @click="move(row.id, 1)"
+              >
+                <Icon i-mdi-chevron-down :label="`Move ${row.label} down`" />
+              </button>
+            </span>
+            <span
+              v-else
+              flex="~ items-center justify-center"
+              text="3 muted-fg"
+              :title="`${row.label} always comes last — it isn't one of the read verdicts`"
+            >
+              <Icon i-mdi-pin-outline :label="`${row.label} is always last`" />
+            </span>
             <span flex="~ items-center gap-2">
               <Icon :class="row.icon" :style="row.color ? { color: row.color } : undefined" />
               <span flex="~ col gap-0.5">

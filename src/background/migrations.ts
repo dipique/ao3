@@ -1,6 +1,6 @@
 import type { cache, Language, Rule, RuleColors, RuleTarget, TagType as TagTypeT } from '#common'
 
-import { createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, packIds, RULE_TARGETS, TagType, unpackIds } from '#common'
+import { createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, normalizeMarkOrder, packIds, RULE_TARGETS, TagType, unpackIds } from '#common'
 
 /** The pre-merge `hideAuthors` filter shape. */
 interface LegacyAuthorFilter { userId: string, pseud?: string, behavior?: Rule['behavior'], color?: string }
@@ -255,8 +255,11 @@ async function migrateWorkMarks(): Promise<void> {
     return
 
   if (stored.marks && typeof stored.marks === 'object') {
-    // Already migrated — only fill in marks that didn't exist when it was written.
-    const marks = { ...createDefaultMarks(), ...stored.marks }
+    // Already migrated — only fill in marks that didn't exist when it was
+    // written. A stored mark wins whole, which is what keeps the order the
+    // reader chose (it rides along in each mark's `order`); normalizing after
+    // the merge settles the slots a newly shipped mark lands on top of.
+    const marks = normalizeMarkOrder({ ...createDefaultMarks(), ...stored.marks })
     await browser.storage.local.set({ [key]: { ...stored, marks } })
     return
   }

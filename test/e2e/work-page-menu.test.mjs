@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { createDefaultMarks, packIds, packProgress } from '../../src/common/workMarks.ts'
+import { createDefaultMarks, moveMark, packIds, packProgress } from '../../src/common/workMarks.ts'
 import { fromEpochDays, todayEpochDays } from '../../src/common/workProgress.ts'
 import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
 
@@ -236,6 +236,24 @@ describe('the work menu on a work page', { skip }, () => {
     const mfl = rows.find(r => /Marked for Later|Mark for later/i.test(r.label))
     assert.ok(mfl, rows.map(r => r.label).join(' | '))
     assert.equal(mfl.scope, 'AO3E--menu--item--account')
+  })
+
+  test('a reordered table reorders the menu', async () => {
+    // The whole point of the order being editable: the menu is built from what
+    // the table says, not from the order the marks shipped in. `favorite` is
+    // moved from the end of the verdicts to the front of them.
+    const marks = moveMark(createDefaultMarks(), 'favorite', -9)
+    const tab = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
+    await tab.click('#workskin > .preface.group > h2.title.heading')
+    await sleep(250)
+    const labels = await tab.evaluate(() =>
+      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
+    await tab.close()
+
+    const dispositions = labels
+      .filter(label => /^(?:Mark|Unmark) as /.test(label))
+      .map(label => label.replace(/^(?:Mark|Unmark) as /, '').replace(/…$/, ''))
+    assert.deepEqual(dispositions, ['favorite', 'read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'ongoing'])
   })
 
   test('an ongoing work drops the Marked-for-Later clock from its indicators', async () => {

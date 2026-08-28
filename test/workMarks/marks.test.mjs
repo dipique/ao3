@@ -9,12 +9,17 @@ import {
   localMarkIds,
   markGroup,
   markHidesResults,
+  markIds,
   markIsLocal,
+  markIsReorderable,
   markItems,
   markRoot,
   marksForWork,
+  moveMark,
+  normalizeMarkOrder,
   packIds,
   READ_MARK,
+  reorderableMarkIds,
   SAVED_MARK,
   setMark,
   setMarkGroup,
@@ -94,6 +99,91 @@ describe('the mark table', () => {
   test('nothing hides when the root does not', () => {
     const marks = createDefaultMarks()
     assert.equal(hiddenByMarks(marks).size, 0)
+  })
+})
+
+describe('the mark order', () => {
+  test('a table with no order at all still reads in the order it was stored', () => {
+    // What a table synced from a device predating the field looks like.
+    const marks = createDefaultMarks()
+    for (const config of Object.values(marks))
+      delete config.order
+    assert.deepEqual(markIds(marks), Object.keys(marks))
+  })
+
+  test('the stored order wins over where a mark sits in the table', () => {
+    const marks = createDefaultMarks()
+    marks.favorite.order = -1
+    assert.equal(markIds(marks)[0], 'favorite')
+  })
+
+  test('the ongoing mark is the one nobody gets to move', () => {
+    const marks = createDefaultMarks()
+    assert.ok(markIsReorderable(marks, 'read'))
+    assert.ok(!markIsReorderable(marks, 'continue'), 'ongoing is not a verdict')
+    assert.ok(!markIsReorderable(marks, SAVED_MARK), 'and Marked for Later lives on AO3')
+    assert.deepEqual(
+      reorderableMarkIds(marks),
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite'],
+    )
+  })
+
+  test('moving a mark changes the order everything is drawn in', () => {
+    const marks = moveMark(createDefaultMarks(), 'favorite', -1)
+    assert.deepEqual(
+      localMarkIds(marks),
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'favorite', 'fluff', 'continue'],
+    )
+    assert.deepEqual(markGroup(marks, READ_MARK), localMarkIds(marks), 'the group follows the same order')
+  })
+
+  test('a mark can be moved the length of the run', () => {
+    let marks = createDefaultMarks()
+    for (let i = 0; i < 9; i++)
+      marks = moveMark(marks, 'read', 1)
+    assert.deepEqual(
+      localMarkIds(marks),
+      ['no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'read', 'continue'],
+      'even pushed to the bottom of the verdicts, it stays above the ongoing mark',
+    )
+  })
+
+  test('a move off either end is a no-op, so no redundant write is made', () => {
+    const marks = createDefaultMarks()
+    assert.equal(moveMark(marks, 'read', -1), marks)
+    assert.equal(moveMark(marks, 'favorite', 1), marks, 'the last verdict cannot pass the ongoing mark')
+    assert.equal(moveMark(marks, 'continue', -1), marks, 'the ongoing mark does not move at all')
+    assert.equal(moveMark(marks, SAVED_MARK, -1), marks)
+    assert.equal(moveMark(marks, 'nonesuch', 1), marks)
+    assert.equal(moveMark(marks, 'read', 0), marks)
+  })
+
+  test('a move leaves the marks themselves alone', () => {
+    const before = marksWith({ read: ['1', '2'], favorite: ['3'] })
+    const after = moveMark(before, 'favorite', -1)
+    assert.deepEqual([...markItems(after, 'read')], ['1', '2'])
+    assert.deepEqual(marksForWork(after, '3'), ['favorite'])
+    assert.equal(markHidesResults(after, 'gross'), true, 'still inheriting read')
+  })
+
+  test('normalizing settles a slot two marks claim, keeping what the table read as', () => {
+    const marks = createDefaultMarks()
+    // What the top-up migration can leave behind: a newly shipped mark landing
+    // on a slot the reader had already moved something else into.
+    marks.hot.order = marks.good.order
+    const before = markIds(marks)
+    const after = normalizeMarkOrder(marks)
+    assert.deepEqual(markIds(after), before, 'nothing moves')
+    assert.deepEqual(
+      Object.values(after).map(config => config.order),
+      Object.keys(after).map((_, index) => index),
+      'every mark ends up holding its own slot',
+    )
+  })
+
+  test('normalizing a table already in order returns it untouched', () => {
+    const marks = createDefaultMarks()
+    assert.equal(normalizeMarkOrder(marks), marks)
   })
 })
 

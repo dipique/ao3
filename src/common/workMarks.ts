@@ -49,6 +49,18 @@ export interface MarkConfig {
   /** Indicator colour (any CSS colour). Falls back to the muted default in CSS. */
   color?: string
   /**
+   * Where this mark sits in menus, indicators and the options list — lowest
+   * first. A mark without one falls back to its position in the table, so a
+   * table written before the order was editable still reads in the order it was
+   * stored, and a mark synced in from a newer build lands where it was put.
+   *
+   * Stored rather than implied by key order because key order doesn't survive
+   * the round trip: the sync codec canonicalizes options key-sorted before
+   * hashing them ({@link file://./syncCodec.ts}), so a change that only moved
+   * keys around would hash identically to the old table and never sync.
+   */
+  order?: number
+  /**
    * Treat this mark as `triggerAlias` for UI and trigger purposes: it shows up
    * wherever that mark's action does, inherits its {@link hideSearchResult}, and
    * setting it takes the work off Marked for Later exactly as that mark would.
@@ -91,7 +103,7 @@ export interface MarkConfig {
 export interface WorkMarks {
   /** Track marks and offer them in the work context menu. */
   enabled: boolean
-  /** Every mark, keyed by id. Insertion order is menu/indicator order. */
+  /** Every mark, keyed by id. {@link MarkConfig.order} is menu/indicator order. */
   marks: Record<MarkId, MarkConfig>
 }
 
@@ -112,18 +124,23 @@ export const SAVED_MARK: MarkId = 'saved'
  * carries progress. `saved` carries no ids: it only says how the Marked for
  * Later state is drawn.
  *
- * **Insertion order is menu and indicator order** ({@link markIds} is
- * `Object.keys`), so this list is a presentation decision as much as a data one:
- * `read` first, then its finer readings running worst to best, then `continue`,
- * which is the one that isn't a verdict at all. `saved` is drawn from AO3's own
- * list rather than ours, and the menu gives it its own section regardless.
+ * **This list's order is menu and indicator order** — each mark is stamped with
+ * its position here as {@link MarkConfig.order}, so this is a presentation
+ * decision as much as a data one: `read` first, then its finer readings running
+ * worst to best, then `continue`, which is the one that isn't a verdict at all.
+ * `saved` is drawn from AO3's own list rather than ours, and the menu gives it
+ * its own section regardless.
  *
  * `feelsy` and `fluff` sit near the top of that run because they're the two that
  * say what a work *was* rather than how good it was — the ones you reach for
  * when picking something to read by mood.
+ *
+ * Only the starting order, though: the reader can rearrange the verdicts from
+ * the options page (see {@link moveMark}), and everything that draws them reads
+ * the stored order rather than this one.
  */
 export function createDefaultMarks(): Record<MarkId, MarkConfig> {
-  return {
+  return numbered({
     read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
     no: { icon: 'no', label: 'No', color: '#991b1b', triggerAlias: READ_MARK, items: '' },
     bad: { icon: 'bad', label: 'Bad', color: '#b45309', triggerAlias: READ_MARK, items: '' },
@@ -145,7 +162,18 @@ export function createDefaultMarks(): Record<MarkId, MarkConfig> {
       progress: '',
     },
     saved: { icon: 'saved', label: 'Marked for later', color: '#2f8f4e' },
-  }
+  })
+}
+
+/**
+ * Stamp each mark's {@link MarkConfig.order} from its position, so the table we
+ * ship is already canonical — nothing has to fall back on key order to read it,
+ * and a reorder is a change to the same field rather than to the table's shape.
+ */
+function numbered(marks: Record<MarkId, MarkConfig>): Record<MarkId, MarkConfig> {
+  for (const [index, id] of Object.keys(marks).entries())
+    marks[id]!.order = index
+  return marks
 }
 
 // ---------------------------------------------------------------------------
@@ -153,9 +181,26 @@ export function createDefaultMarks(): Record<MarkId, MarkConfig> {
 // script can call them per blurb without touching storage.
 // ---------------------------------------------------------------------------
 
-/** Every mark id, in table order. */
+/**
+ * Every mark id, in the order they're shown — {@link MarkConfig.order} lowest
+ * first, ties (and marks without one) settled by where they sit in the table.
+ *
+ * Everything else here derives its order from this one function, so a table
+ * that predates the field, or one hand-edited into a state where two marks
+ * claim the same slot, still reads in a stable, sensible order rather than
+ * shuffling between renders.
+ */
 export function markIds(marks: Record<MarkId, MarkConfig>): MarkId[] {
   return Object.keys(marks)
+    .map((id, index) => ({ id, index, at: orderOf(marks[id], index) }))
+    .sort((a, b) => a.at - b.at || a.index - b.index)
+    .map(entry => entry.id)
+}
+
+/** One mark's sort position: its stored order, or its place in the table. */
+function orderOf(config: MarkConfig | undefined, index: number): number {
+  const order = config?.order
+  return typeof order === 'number' && Number.isFinite(order) ? order : index
 }
 
 /** Whether a mark holds its own set of work ids (as opposed to `saved`, which doesn't). */
@@ -199,6 +244,87 @@ export function markHidesResults(marks: Record<MarkId, MarkConfig>, id: MarkId):
 /** Whether this mark carries per-work progress (see {@link MarkConfig.tracksProgress}). */
 export function markTracksProgress(marks: Record<MarkId, MarkConfig>, id: MarkId): boolean {
   return !!marks[id]?.tracksProgress
+}
+
+/**
+ * Whether this mark's place in the order is the reader's to choose. A mark that
+ * tracks progress is not: "ongoing" isn't a verdict on a work the way the rest
+ * of the group is — it's the one that says you're *not* done — so it stays at
+ * the end of the run rather than being shuffled in among the readings, both in
+ * the options list and in the menu it builds.
+ *
+ * A mark holding no ids of its own (`saved`) isn't in the run at all; its menu
+ * row is drawn from AO3's list, in its own section.
+ */
+export function markIsReorderable(marks: Record<MarkId, MarkConfig>, id: MarkId): boolean {
+  return markIsLocal(marks, id) && !markTracksProgress(marks, id)
+}
+
+/** The marks the reader can rearrange, in table order. */
+export function reorderableMarkIds(marks: Record<MarkId, MarkConfig>): MarkId[] {
+  return markIds(marks).filter(id => markIsReorderable(marks, id))
+}
+
+/**
+ * Move one mark `delta` places through the reorderable run, returning a new
+ * table — or the original (identity-equal) when the move would leave the run,
+ * so a redundant `options.set` can be skipped.
+ *
+ * The whole table is renumbered from the result, pinned marks last, which is
+ * what keeps {@link markIsReorderable} an invariant rather than a suggestion:
+ * however far a verdict is pushed down, it can't cross the ongoing mark,
+ * because the ongoing mark is always given a slot after every verdict.
+ */
+export function moveMark(
+  marks: Record<MarkId, MarkConfig>,
+  id: MarkId,
+  delta: number,
+): Record<MarkId, MarkConfig> {
+  const movable = reorderableMarkIds(marks)
+  const from = movable.indexOf(id)
+  const to = from + delta
+  if (from === -1 || to < 0 || to >= movable.length)
+    return marks
+
+  movable.splice(from, 1)
+  movable.splice(to, 0, id)
+  return renumbered(marks, movable)
+}
+
+/**
+ * Renumber a table into canonical form: the order it already reads as, but with
+ * every mark holding an explicit slot, no two marks claiming the same one, and
+ * the pinned marks after the verdicts. Returns the original (identity-equal)
+ * when it already is — which a table straight from {@link createDefaultMarks}
+ * always is.
+ *
+ * Used where a table arrives from somewhere that didn't have to keep it tidy:
+ * the migration that tops an existing install's marks up with newly shipped
+ * ones, which merges two orderings and can leave a slot claimed twice.
+ */
+export function normalizeMarkOrder(marks: Record<MarkId, MarkConfig>): Record<MarkId, MarkConfig> {
+  return renumbered(marks, reorderableMarkIds(marks))
+}
+
+/**
+ * Rewrite the table with the reorderable marks in the order given and the
+ * pinned ones (the progress mark, then `saved`) after them, keeping their own
+ * relative order. Keys are rebuilt in the new order as well as stamped with it:
+ * the field is what's read, but a device on a build that predates it falls back
+ * to key order, and this way it agrees.
+ */
+function renumbered(
+  marks: Record<MarkId, MarkConfig>,
+  movable: MarkId[],
+): Record<MarkId, MarkConfig> {
+  const sequence = [...movable, ...markIds(marks).filter(id => !markIsReorderable(marks, id))]
+  if (sequence.every((id, index) => marks[id]?.order === index))
+    return marks
+
+  const next: Record<MarkId, MarkConfig> = {}
+  for (const [index, id] of sequence.entries())
+    next[id] = { ...marks[id]!, order: index }
+  return next
 }
 
 /**
