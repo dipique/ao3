@@ -899,6 +899,28 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   display: none;
 }
 
+/* AO3 floats this subnav right, and the view standing in for the list contains
+   its own layout (`container-type` on .AO3E--search-view), so it can't run
+   under the float — it shrinks to clear it instead, and the results give up the
+   width of the whole subnav for the length of the page. Out of flow, the links
+   keep their corner and the view gets the column back. Only for this source:
+   the works-search view means to share its toolbar line with that page's own
+   "Edit Your Search". */
+#main:has(.AO3E--marked-for-later) {
+  /* The corner the subnav is pinned to. AO3's own skin already positions #main;
+     saying so here keeps a skin that doesn't from flinging it to the top of the
+     page instead. */
+  position: relative;
+}
+
+#main:has(.AO3E--marked-for-later) > ul.navigation.actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  /* Over the view, which now starts where the subnav used to sit. */
+  z-index: 20;
+}
+
 /* Sits at the end of the "this tag has not been marked common" sentence, so it
    reads as part of it rather than as a button dropped into the prose. */
 .AO3E--search-tag-works--link {
