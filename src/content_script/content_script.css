@@ -1481,3 +1481,80 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--search-view--hidden {
   display: none !important;
 }
+
+/* ---------------------------------------------------------------------------
+   Collapsible dashboard. AO3 draws your own sidebar (`#dashboard.own`) with a
+   thick red band top and bottom; clicking the top band folds the sidebar away
+   and leaves that band behind as a rail down the left edge of the viewport,
+   which clicks it back open. The rail's width and colour are copied off the
+   real border in JS (see `units/CollapsibleDashboard.ts`) so a custom skin's
+   band still matches.
+   --------------------------------------------------------------------------- */
+.AO3E--dashboard-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  /* AO3's site CSS gives every `button` a fixed `height: 1.286em` and
+     `content-box` sizing, which beats `top`/`bottom` stretching the rail --
+     so state the full-viewport height (and the sizing) outright. */
+  height: 100%;
+  box-sizing: border-box;
+  width: var(--ao3e-dashboard-rail-width, 15px);
+  z-index: 25;
+  /* Only ever shown in place of the folded sidebar. */
+  display: none;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  appearance: none;
+  background: var(--ao3e-dashboard-rail-color, #900);
+  cursor: pointer;
+}
+
+/* Only the wide layout. Below AO3's 62em breakpoint the sidebar stops being a
+   left column and restacks as a full-width bar above `#main`, where there is no
+   gutter to reclaim and a full-height rail down the left edge would make no
+   sense -- so the fold is simply not applied there. The remembered state is
+   untouched, and comes back when the window is wide again. */
+@media only screen and (min-width: 62.01em) {
+  html.AO3E--dashboard-collapsed .AO3E--dashboard-rail {
+    display: block;
+  }
+
+  html.AO3E--dashboard-collapsed #dashboard.own {
+    display: none !important;
+  }
+
+  /* Reclaim the gutter AO3 reserves for the sidebar (`#main.dashboard` carries
+     a 14em left margin), leaving just the rail and a little breathing room. */
+  html.AO3E--dashboard-collapsed #main.dashboard {
+    margin-left: calc(var(--ao3e-dashboard-rail-width, 15px)) !important;
+    padding-left: 1em !important;
+  }
+}
+
+/* A chevron so the rail reads as "click to open" rather than as a stray stripe. */
+.AO3E--dashboard-rail::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translate(-60%, -50%) rotate(45deg);
+  border-top: 2px solid rgba(255, 255, 255, 0.85);
+  border-right: 2px solid rgba(255, 255, 255, 0.85);
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.AO3E--dashboard-rail:hover {
+  filter: brightness(1.25);
+}
+
+.AO3E--dashboard-rail:hover::before,
+.AO3E--dashboard-rail:focus-visible::before {
+  opacity: 1;
+}

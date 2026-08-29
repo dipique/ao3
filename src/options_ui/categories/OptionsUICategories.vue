@@ -18,7 +18,7 @@ const { anyOpen, anyCollapsed, collapseAll, expandAll } = useCategoryCollapse()
 
 <template>
   <div
-    flex="~ col gap6"
+    flex="~ col gap2"
     px="2 md:4"
     :style="{ marginBottom: `calc(max(0px, 100vh - ${lastHeight}px - var(--header-height) - var(--footer-height)))` }"
   >
