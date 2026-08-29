@@ -28,6 +28,13 @@
     </OptionRow>
     <OptionDivider />
     <OptionRow
+      title="Collapsible dashboard sidebar"
+      subtitle="On your own user pages, click the red band at the top of the sidebar to fold it away; a thin red rail on the left edge brings it back. Remembered on this device only."
+    >
+      <OptionSwitch option-id="collapsibleDashboard" />
+    </OptionRow>
+    <OptionDivider />
+    <OptionRow
       title="Force alignment of work text"
       subtitle="Can sometimes help with readability"
     >

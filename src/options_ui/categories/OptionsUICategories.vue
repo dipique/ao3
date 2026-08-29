@@ -12,6 +12,8 @@ import SyncBackups from './SyncBackups.vue'
 
 const lastRef = ref<ComponentPublicInstance | null>(null)
 const { height: lastHeight } = useElementSize(computed(() => lastRef.value?.$el), undefined, { box: 'border-box' })
+
+const { anyOpen, anyCollapsed, collapseAll, expandAll } = useCategoryCollapse()
 </script>
 
 <template>
@@ -20,6 +22,28 @@ const { height: lastHeight } = useElementSize(computed(() => lastRef.value?.$el)
     px="2 md:4"
     :style="{ marginBottom: `calc(max(0px, 100vh - ${lastHeight}px - var(--header-height) - var(--footer-height)))` }"
   >
+    <div flex="~ row items-center justify-end gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        class="disabled:cursor-default disabled:op-50"
+        :disabled="!anyOpen"
+        @click="collapseAll"
+      >
+        <Icon i-mdi-unfold-less-horizontal mr-1 />
+        Collapse all
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        class="disabled:cursor-default disabled:op-50"
+        :disabled="!anyCollapsed"
+        @click="expandAll"
+      >
+        <Icon i-mdi-unfold-more-horizontal mr-1 />
+        Expand all
+      </Button>
+    </div>
     <AboutMe />
     <BlurbStats />
     <ChapterStats />

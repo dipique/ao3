@@ -157,6 +157,15 @@ export interface Options {
    * `ReaderMode`), so they never sync — this flag is only the on/off switch.
    */
   readerMode: boolean
+  /**
+   * On your own dashboard pages, clicking the red band across the top of the
+   * `#dashboard` sidebar folds it away, leaving a thin rail down the left edge
+   * of the viewport that clicks it back open. Whether it is currently folded is
+   * per-device state in the page's `localStorage` (see `CollapsibleDashboard`),
+   * so it follows you from one dashboard page to the next without syncing --
+   * this flag is only the on/off switch.
+   */
+  collapsibleDashboard: boolean
   showStatsColumns: boolean
   forceAlignment: null | 'start' | 'end' | 'justified'
   /** Hide the "muted author" notices that appear where works are hidden because of a muted author. */
@@ -214,6 +223,7 @@ export const options = createStorage<Options>({
     styleWidthEnabled: true,
     styleWidth: 40,
     readerMode: false,
+    collapsibleDashboard: false,
     showStatsColumns: true,
     forceAlignment: null,
     hideMutedAuthorNotices: false,

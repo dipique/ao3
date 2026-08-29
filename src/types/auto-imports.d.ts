@@ -140,9 +140,11 @@ declare global {
   const useBroadcastChannel: typeof import('@vueuse/core').useBroadcastChannel
   const useBrowserLocation: typeof import('@vueuse/core').useBrowserLocation
   const useCached: typeof import('@vueuse/core').useCached
+  const useCategoryCollapse: typeof import('../options_ui/composables/useCategoryCollapse').useCategoryCollapse
   const useClipboard: typeof import('@vueuse/core').useClipboard
   const useClipboardItems: typeof import('@vueuse/core').useClipboardItems
   const useCloned: typeof import('@vueuse/core').useCloned
+  const useCollapsibleCategory: typeof import('../options_ui/composables/useCategoryCollapse').useCollapsibleCategory
   const useColorMode: typeof import('@vueuse/core').useColorMode
   const useConfirmDialog: typeof import('@vueuse/core').useConfirmDialog
   const useCountdown: typeof import('@vueuse/core').useCountdown

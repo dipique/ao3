@@ -1,6 +1,7 @@
 import type { Unit } from '#content_script/Unit.js'
 
 import { CaptureMarkButtons } from './CaptureMarkButtons.ts'
+import { CollapsibleDashboard } from './CollapsibleDashboard.ts'
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { DefaultSearchLanguage } from './DefaultSearchLanguage.ts'
 import { DefaultSearchWordCount } from './DefaultSearchWordCount.ts'
@@ -31,6 +32,7 @@ export const UNITS = [
   // After StyleTweaks so it takes over #workskin's width (its inline width wins
   // over StyleTweaks' stylesheet rule) and measures the resulting column width.
   ReaderMode,
+  CollapsibleDashboard,
   TextReplace,
   HideWorks,
   // Runs after HideWorks so it can count the works HideWorks marked as hidden.
