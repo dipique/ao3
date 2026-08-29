@@ -12,7 +12,7 @@ async function main() {
     ...args,
     root: resolve('.'),
     src: resolve('src'),
-    dist: join(resolve('dist'), process.env.BROWSER!),
+    dist: join(resolve('dist'), process.env.BROWSER || 'chrome'),
     manifest: resolve('src/manifest.ts'),
     target: {},
   }

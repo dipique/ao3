@@ -141,6 +141,15 @@
   display: none !important;
 }
 
+/* A work hidden outright: HideWorks sets `hidden` on the `<li>` itself. AO3's own
+   `li.blurb { display: block }` is an author rule, so it outranks the UA
+   stylesheet's `[hidden] { display: none }` and the blurb kept its box — an empty
+   padded rectangle where the work used to be. Peek still wins over this: its
+   selector carries an extra class and attribute. */
+li.blurb[hidden] {
+  display: none !important;
+}
+
 dl.stats {
   display: flex;
   flex-flow: row wrap;

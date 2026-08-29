@@ -33,6 +33,7 @@
     "noErrorTruncation": true
   },
   "include": [
+    "src/manifest.ts",
     "src/background/**/*.ts"
   ]
 }
