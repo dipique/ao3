@@ -227,8 +227,8 @@ export function progressSources(marks: Record<MarkId, MarkConfig>): ProgressSour
 
 /**
  * The first progress mark this work carries, with its entry — the answer to
- * "is this work ongoing, and where in it am I?". Only one can apply, since a
- * work carries at most one mark per trigger group.
+ * "is this work ongoing, and where in it am I?". Only one can apply per group,
+ * since a progress mark stands alone in its own (see `markIsExclusive`).
  */
 export function findProgress(
   sources: readonly ProgressSource[],

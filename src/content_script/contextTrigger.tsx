@@ -13,7 +13,7 @@ import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import type { MarkConfig, MarkId } from '#common'
 
-import { ADDON_CLASS, isExtensionContextValid, toast } from '#common'
+import { ADDON_CLASS, isExtensionContextValid, markIds, toast } from '#common'
 import { markIcon } from '#content_script/markIcons.js'
 import React from '#dom'
 
@@ -513,7 +513,9 @@ function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] 
 
   // Marks render in the order the mark table lists them, so a work's indicators
   // read the same way everywhere regardless of what order the caller collected.
-  const ids = opts.marks ? Object.keys(opts.marks) : []
+  // Through `markIds`, not key order: a work can carry several readings at once,
+  // which makes the reader's chosen order something they actually see here.
+  const ids = opts.marks ? markIds(opts.marks) : []
   for (const id of ids) {
     if (!set.has(markIndicatorState(id)))
       continue

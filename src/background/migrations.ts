@@ -243,8 +243,9 @@ function clean(rule: Rule): Rule {
  * `hideRead` switch to a table of marks, each declaring its own icon, colour,
  * whether it hides results, and which mark it behaves as.
  *
- * A favourite was always a work you'd read, so under the new "one disposition
- * per work" rule the favourites come out of `read` rather than sitting in both.
+ * A favourite was always a work you'd read, and plain `read` is what you mark a
+ * work you have no finer opinion about, so the favourites come out of `read`
+ * rather than sitting in both.
  * Also tops up an already-migrated table with any mark added since, so a new
  * default mark reaches an existing install.
  */
