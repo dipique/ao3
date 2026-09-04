@@ -38,12 +38,12 @@ function marksWith(entries = {}) {
 describe('the mark table', () => {
   test('the finer dispositions all behave as read', () => {
     const marks = createDefaultMarks()
-    for (const id of ['favorite', 'good', 'hot', 'feelsy', 'fluff', 'boring', 'bad', 'gross', 'no'])
+    for (const id of ['favorite', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'boring', 'bad', 'gross', 'no', 'abandoned'])
       assert.equal(markRoot(marks, id), READ_MARK, `${id} should alias read`)
     assert.equal(markRoot(marks, READ_MARK), READ_MARK, 'read is its own root')
     assert.deepEqual(
       markGroup(marks, 'favorite'),
-      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'continue'],
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'continue'],
       'the whole group, in table order — `continue` is in it too, so choosing '
       + 'one replaces the other; what it does *not* share is the unsaving',
     )
@@ -57,7 +57,7 @@ describe('the mark table', () => {
     // finer readings worst to best, then the one that isn't a verdict.
     assert.deepEqual(
       localMarkIds(marks),
-      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'continue'],
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'continue'],
     )
   })
 
@@ -124,7 +124,7 @@ describe('the mark order', () => {
     assert.ok(!markIsReorderable(marks, SAVED_MARK), 'and Marked for Later lives on AO3')
     assert.deepEqual(
       reorderableMarkIds(marks),
-      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite'],
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned'],
     )
   })
 
@@ -132,18 +132,18 @@ describe('the mark order', () => {
     const marks = moveMark(createDefaultMarks(), 'favorite', -1)
     assert.deepEqual(
       localMarkIds(marks),
-      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'favorite', 'fluff', 'continue'],
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'favorite', 'fluff', 'abandoned', 'continue'],
     )
     assert.deepEqual(markGroup(marks, READ_MARK), localMarkIds(marks), 'the group follows the same order')
   })
 
   test('a mark can be moved the length of the run', () => {
     let marks = createDefaultMarks()
-    for (let i = 0; i < 9; i++)
+    for (let i = 0; i < 11; i++)
       marks = moveMark(marks, 'read', 1)
     assert.deepEqual(
       localMarkIds(marks),
-      ['no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'read', 'continue'],
+      ['no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'read', 'continue'],
       'even pushed to the bottom of the verdicts, it stays above the ongoing mark',
     )
   })
@@ -151,7 +151,7 @@ describe('the mark order', () => {
   test('a move off either end is a no-op, so no redundant write is made', () => {
     const marks = createDefaultMarks()
     assert.equal(moveMark(marks, 'read', -1), marks)
-    assert.equal(moveMark(marks, 'favorite', 1), marks, 'the last verdict cannot pass the ongoing mark')
+    assert.equal(moveMark(marks, 'abandoned', 1), marks, 'the last verdict cannot pass the ongoing mark')
     assert.equal(moveMark(marks, 'continue', -1), marks, 'the ongoing mark does not move at all')
     assert.equal(moveMark(marks, SAVED_MARK, -1), marks)
     assert.equal(moveMark(marks, 'nonesuch', 1), marks)

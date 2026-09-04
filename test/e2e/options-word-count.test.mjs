@@ -152,7 +152,7 @@ describe('options UI — word count ranges', { skip }, () => {
   })
 
   test('the default range loads, and blanking a bound makes it one-sided', async () => {
-    const inputs = await inputsIn('Default word count range')
+    const inputs = await inputsIn('Default word count')
     assert.equal(await inputs[0].evaluate(el => el.value), '2000')
     assert.equal(await inputs[1].evaluate(el => el.value), '40000')
     await retype(inputs[1], '')
@@ -161,9 +161,9 @@ describe('options UI — word count ranges', { skip }, () => {
 
   test('a negative default bound is refused, not saved', async () => {
     const before = await lastWrite('option.searchWordCount')
-    const inputs = await inputsIn('Default word count range')
+    const inputs = await inputsIn('Default word count')
     await retype(inputs[0], '-5')
-    assert.deepEqual(await errorsIn('Default word count range'), ['Word counts must be whole numbers of 0 or more.'])
+    assert.deepEqual(await errorsIn('Default word count'), ['Word counts must be whole numbers of 0 or more.'])
     assert.deepEqual(await lastWrite('option.searchWordCount'), before)
   })
 

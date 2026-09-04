@@ -118,11 +118,11 @@ export const READ_MARK: MarkId = 'read'
 export const SAVED_MARK: MarkId = 'saved'
 
 /**
- * The marks a fresh install gets. `read` is the root disposition; the nine below
- * it are the same disposition said more precisely, so they alias it. `continue`
- * aliases it too, but inverts it — the work isn't done, it's waiting — and so
- * carries progress. `saved` carries no ids: it only says how the Marked for
- * Later state is drawn.
+ * The marks a fresh install gets. `read` is the root disposition; the eleven
+ * below it are the same disposition said more precisely, so they alias it.
+ * `continue` aliases it too, but inverts it — the work isn't done, it's waiting
+ * — and so carries progress. `saved` carries no ids: it only says how the Marked
+ * for Later state is drawn.
  *
  * **This list's order is menu and indicator order** — each mark is stamped with
  * its position here as {@link MarkConfig.order}, so this is a presentation
@@ -131,9 +131,15 @@ export const SAVED_MARK: MarkId = 'saved'
  * `saved` is drawn from AO3's own list rather than ours, and the menu gives it
  * its own section regardless.
  *
- * `feelsy` and `fluff` sit near the top of that run because they're the two that
- * say what a work *was* rather than how good it was — the ones you reach for
- * when picking something to read by mood.
+ * `dark`, `feelsy` and `fluff` sit together near the top of that run because
+ * they're the ones that say what a work *was* rather than how good it was — what
+ * you reach for when picking something to read by mood — and in that order they
+ * run heaviest to lightest. `dark` is "I stopped, this went further than I read
+ * for", which is why it's a verdict and not a warning.
+ *
+ * `abandoned` — the author never finished it — sits next to `continue` rather
+ * than among the verdicts: the pair is the same work in two states, one still
+ * going and one that never will, and neither says whether it was any good.
  *
  * Only the starting order, though: the reader can rearrange the verdicts from
  * the options page (see {@link moveMark}), and everything that draws them reads
@@ -148,9 +154,11 @@ export function createDefaultMarks(): Record<MarkId, MarkConfig> {
     gross: { icon: 'gross', label: 'Gross', color: '#4d7c0f', triggerAlias: READ_MARK, items: '' },
     good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: READ_MARK, items: '' },
     hot: { icon: 'hot', label: 'Hot', color: '#d0342c', triggerAlias: READ_MARK, items: '' },
+    dark: { icon: 'dark', label: 'Dark', color: '#4c1d95', triggerAlias: READ_MARK, items: '' },
     feelsy: { icon: 'feelsy', label: 'Feelsy', color: '#0891b2', triggerAlias: READ_MARK, items: '' },
     fluff: { icon: 'fluff', label: 'Fluff', color: '#a78bfa', triggerAlias: READ_MARK, items: '' },
     favorite: { icon: 'favorite', label: 'Favorite', color: '#c2185b', triggerAlias: READ_MARK, items: '' },
+    abandoned: { icon: 'abandoned', label: 'Abandoned', color: '#78350f', triggerAlias: READ_MARK, items: '' },
     continue: {
       icon: 'continue',
       label: 'Ongoing',

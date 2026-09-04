@@ -13,8 +13,8 @@ const oneLanguage = computed(() => show.value.length === 1)
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
-    title="Language"
-    subtitle="Hide works based on their language"
+    title="Languages"
+    subtitle="Hide works that are not in a language you read."
   >
     <label for="hideWorks-languages" py-1 flex="~ row items-center gap-1">
       <span font="leading-none" text="sm muted-fg">Hide works that written in languages other than</span>

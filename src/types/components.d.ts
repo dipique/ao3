@@ -53,6 +53,7 @@ declare module 'vue' {
     OptionSearchLanguage: typeof import('./../options_ui/components/options/OptionSearchLanguage.vue')['default']
     OptionSearchMaxResults: typeof import('./../options_ui/components/options/OptionSearchMaxResults.vue')['default']
     OptionSearchPerPage: typeof import('./../options_ui/components/options/OptionSearchPerPage.vue')['default']
+    OptionSubsection: typeof import('./../options_ui/components/OptionSubsection.vue')['default']
     OptionsUIFooter: typeof import('./../options_ui/components/OptionsUIFooter.vue')['default']
     OptionsUIHeader: typeof import('./../options_ui/components/OptionsUIHeader.vue')['default']
     OptionSwitch: typeof import('./../options_ui/components/options/OptionSwitch.vue')['default']

@@ -5,8 +5,8 @@ const { enabled } = useOption('searchLanguage')
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
-    title="Default search language"
-    subtitle="Pre-select a language in the Sort &amp; Filter sidebar on works and bookmark listings"
+    title="Default language"
+    subtitle="Pre-selects a language in the Sort &amp; Filter sidebar on works and bookmark listings, and on the advanced search page."
   >
     <label py-1 flex="~ row items-center gap-1">
       <span font="leading-none" text="sm muted-fg">Default the language filter to</span>

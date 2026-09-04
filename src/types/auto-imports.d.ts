@@ -8,8 +8,10 @@ export {}
 declare global {
   const Binding: typeof import('../options_ui/directives/vLayoutVar').Binding
   const EffectScope: typeof import('vue').EffectScope
+  const OptionCategoryName: typeof import('../options_ui/composables/context').OptionCategoryName
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
+  const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
   const computed: typeof import('vue').computed
@@ -93,9 +95,11 @@ declare global {
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveRef: typeof import('@vueuse/core').resolveRef
   const resolveUnref: typeof import('@vueuse/core').resolveUnref
+  const restoreCollapsed: typeof import('../options_ui/composables/useCategoryCollapse').restoreCollapsed
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
+  const stashCollapsed: typeof import('../options_ui/composables/useCategoryCollapse').stashCollapsed
   const syncRef: typeof import('@vueuse/core').syncRef
   const syncRefs: typeof import('@vueuse/core').syncRefs
   const templateRef: typeof import('@vueuse/core').templateRef
@@ -145,6 +149,7 @@ declare global {
   const useClipboardItems: typeof import('@vueuse/core').useClipboardItems
   const useCloned: typeof import('@vueuse/core').useCloned
   const useCollapsibleCategory: typeof import('../options_ui/composables/useCategoryCollapse').useCollapsibleCategory
+  const useCollapsibleSubsection: typeof import('../options_ui/composables/useCategoryCollapse').useCollapsibleSubsection
   const useColorMode: typeof import('@vueuse/core').useColorMode
   const useConfirmDialog: typeof import('@vueuse/core').useConfirmDialog
   const useCountdown: typeof import('@vueuse/core').useCountdown
@@ -223,6 +228,7 @@ declare global {
   const useOffsetPagination: typeof import('@vueuse/core').useOffsetPagination
   const useOnline: typeof import('@vueuse/core').useOnline
   const useOption: typeof import('../options_ui/composables/useOptions').useOption
+  const useOptionSearch: typeof import('../options_ui/composables/useOptionSearch').useOptionSearch
   const useOptionsReady: typeof import('../options_ui/composables/useOptions').useOptionsReady
   const usePageLeave: typeof import('@vueuse/core').usePageLeave
   const useParallax: typeof import('@vueuse/core').useParallax
@@ -248,6 +254,7 @@ declare global {
   const useScriptTag: typeof import('@vueuse/core').useScriptTag
   const useScroll: typeof import('@vueuse/core').useScroll
   const useScrollLock: typeof import('@vueuse/core').useScrollLock
+  const useSearchableRow: typeof import('../options_ui/composables/useOptionSearch').useSearchableRow
   const useSessionStorage: typeof import('@vueuse/core').useSessionStorage
   const useShare: typeof import('@vueuse/core').useShare
   const useSlots: typeof import('vue').useSlots
@@ -318,4 +325,7 @@ declare global {
   // @ts-ignore
   export type { NavItem } from '../options_ui/composables/useNav'
   import('../options_ui/composables/useNav')
+  // @ts-ignore
+  export type { OptionRowEntry } from '../options_ui/composables/useOptionSearch'
+  import('../options_ui/composables/useOptionSearch')
 }

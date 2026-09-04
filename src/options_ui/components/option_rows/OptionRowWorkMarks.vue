@@ -130,7 +130,7 @@ function clear(id: MarkId) {
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Work marks"
-    subtitle="Mark a work read — or favorite, good, boring, bad, gross, ongoing — from its right-click (or long-press) menu. Works are also marked read automatically whenever you press AO3's own “Mark as Read” button, so your read list fills itself in as you browse."
+    subtitle="Mark a work read — or with a finer verdict, anything from Favorite to Abandoned — from its right-click (or long-press) menu. Works are also marked read automatically whenever you press AO3's own “Mark as Read” button, so your read list fills itself in as you browse."
   >
     <div flex="~ col gap-3" mt-2>
       <p text="sm muted-fg">

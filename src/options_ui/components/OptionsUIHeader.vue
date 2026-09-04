@@ -2,6 +2,11 @@
 import { vLayoutVar } from '../directives/vLayoutVar.ts'
 
 const { nav } = useNav()
+const { categoryMatches } = useOptionSearch()
+
+// While a search is running the nav lists only the categories that still have a
+// hit, so every link in it goes somewhere visible.
+const items = computed(() => nav.value.filter(item => categoryMatches(item.name)))
 </script>
 
 <template>
@@ -18,7 +23,7 @@ const { nav } = useNav()
     >
       <div flex="~ row items-center wrap">
         <a
-          v-for="item in nav"
+          v-for="item in items"
           :key="item.name"
           :href="`#${item.id}`"
           :data-state="item.active ? 'active' : 'inactive'"

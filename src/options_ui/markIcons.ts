@@ -17,9 +17,11 @@ export const MARK_ICON_CLASSES: Record<string, string> = {
   gross: 'i-mdi-emoticon-sick',
   good: 'i-mdi-thumb-up',
   hot: 'i-mdi-chili-hot',
+  dark: 'i-mdi-skull',
   feelsy: 'i-mdi-emoticon-cry',
   fluff: 'i-mdi-cloud',
   favorite: 'i-mdi-heart',
+  abandoned: 'i-mdi-book-off',
   continue: 'i-mdi-calendar-clock',
   saved: 'i-mdi-clock-check',
 }

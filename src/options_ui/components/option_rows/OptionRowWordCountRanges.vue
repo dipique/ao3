@@ -88,7 +88,7 @@ function remove(index: number) {
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Word count menu"
-    subtitle="Click a work's word count on a listing to filter by length"
+    subtitle="Click a work’s word count in a listing for a menu of lengths to filter by. Edit the ranges it offers below; they may overlap."
   >
     <div flex="~ col gap-3" pt-2>
       <p text="sm muted-fg">

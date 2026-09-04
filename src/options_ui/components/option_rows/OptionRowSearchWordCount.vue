@@ -48,8 +48,8 @@ watch([from, to], ([nextFrom, nextTo]) => {
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
-    title="Default word count range"
-    subtitle="Pre-fill the Word Count filter in the Sort &amp; Filter sidebar"
+    title="Default word count"
+    subtitle="Pre-fills AO3’s Word Count filter with a range. Leave either end blank for a one-sided range, such as “at least 50,000 words”."
   >
     <div flex="~ col gap-2" pt-2>
       <div flex="~ gap-2 items-center wrap" py-1>

@@ -58,4 +58,14 @@ h5,
 h6 {
   --at-apply: font-serif;
 }
+
+/* Search hits. The reset zeroes `mark`'s background along with everything else's,
+   so the highlight has to be restated — as a tint of the accent colour, which is
+   already defined for both themes. */
+mark {
+  background-color: rgb(var(--color-accent) / 0.4);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
 </style>

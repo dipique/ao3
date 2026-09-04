@@ -14,7 +14,7 @@ function remove(index: number) {
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Text replacement"
-    subtitle="Find and replace words in the text of works you read"
+    subtitle="Find and replace text in a work’s summary, notes and chapters as you read — for renaming a character or fixing a tic. Only what is displayed changes."
   >
     <div flex="~ col gap-3" pt-2>
       <p v-if="rules.length === 0" text="sm muted-fg">

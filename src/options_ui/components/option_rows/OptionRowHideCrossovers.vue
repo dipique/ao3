@@ -18,7 +18,7 @@ const update = debounce(100, () => {
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Crossovers"
-    subtitle="Hide works with many fandoms (often crossovers or collections)"
+    subtitle="Hide works listing more than a set number of fandoms — usually crossovers, anthologies or gift collections."
   >
     <label for="hideWorks-crossovers" py-1 flex="~ row items-center gap-1">
       <span font="leading-none" text="sm muted-fg">Hide when work has more than</span>

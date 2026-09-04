@@ -3,95 +3,87 @@
 
 <template>
   <OptionCategory
-    title="Search &amp; browsing"
-    subtitle="Tweaks for the works filter/search pages."
+    title="Search"
+    subtitle="Finding works: better search pages, filter defaults, and what to keep out of your results."
   >
     <template #icon>
       <Icon i-mdi-magnify />
     </template>
-    <OptionRow
-      title="Compress filter URLs"
-      subtitle="Shorten the URL produced by the Sort &amp; Filter sidebar so heavy filters stay under AO3's length limit. Results are unchanged."
+
+    <OptionSubsection
+      title="Instant search views"
+      subtitle="Load a whole listing into one page you can filter and sort instantly — by tag, fandom, rating, length, kudos and more — instead of clicking through twenty works at a time."
     >
-      <OptionSwitch option-id="compressSearchUrls" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Tag context menu"
-      subtitle="Right-click (or long-press on touch) a tag on a works listing for a menu to include/exclude it in the filter, or hide / always-show / highlight it. A small indicator appears next to a tag only when one of these is active. Include/exclude uses the existing sidebar checkbox when there is one."
+      <OptionRow
+        title="Search your Marked for Later list"
+        subtitle="Adds a button to your own Marked for Later page that loads every page of your to-read list into the instant search view."
+      >
+        <OptionSwitch option-id="searchMarkedForLater" />
+      </OptionRow>
+      <OptionDivider />
+      <OptionRow
+        title="Search an uncommon tag's works"
+        subtitle="AO3 only lets you sort and filter a tag's works once the tag has been made canonical; for every other tag you get a plain paged list and nothing else. Adds a “Search these works” link to those pages."
+      >
+        <OptionSwitch option-id="searchTagWorks" />
+      </OptionRow>
+      <OptionDivider />
+      <OptionRow
+        title="Search text-search results"
+        subtitle="Adds a “Search these results” button to the results of a works search, so you can narrow them by things AO3's own results page gives you no way to filter on."
+      >
+        <OptionSwitch option-id="searchTextResults" />
+      </OptionRow>
+      <OptionDivider />
+      <OptionRow
+        title="Maximum works to load"
+        subtitle="A ceiling on how many works any of the views above will load. Each is fetched twenty to a page from AO3's donated servers, and a text search for a common word can match hundreds of thousands — so a bigger list loads only up to this ceiling, in the order the Archive lists it, and only after you confirm. Raise it if you routinely search large lists and don't mind the wait."
+      >
+        <OptionSearchMaxResults />
+      </OptionRow>
+      <OptionDivider />
+      <OptionRow
+        title="Results per page"
+        subtitle="How many works to show at a time in the views above. Lower values stay fast even on very large lists; higher values show more at once but take longer to render."
+      >
+        <OptionSearchPerPage />
+      </OptionRow>
+    </OptionSubsection>
+
+    <OptionSubsection
+      title="Filter defaults"
+      subtitle="Values AO3's own Sort &amp; Filter sidebar and search forms should start with. Only applied when you haven't already chosen one, so anything in the URL wins."
     >
-      <OptionSwitch option-id="tagToolbar" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Fandom context menu"
-      subtitle="Right-click (or long-press) a fandom on a works listing for the same include/exclude and hide/always-show/highlight menu. Fandoms are filtered by id, looked up from a bundled list (with an on-demand fallback), so any fandom can be filtered — not just the sidebar's top ten."
+      <OptionRowSearchLanguage />
+      <OptionDivider />
+      <OptionRowSearchWordCount />
+      <OptionDivider />
+      <OptionRowWordCountRanges />
+    </OptionSubsection>
+
+    <OptionSubsection
+      title="Hiding &amp; highlighting works"
+      subtitle="Keep works you don't want out of your listings, and make the ones you do want stand out. Applies anywhere works are listed — search results, a tag's works, bookmarks, your dashboard."
     >
-      <OptionSwitch option-id="fandomToolbar" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Left-click opens the menu"
-      subtitle="Make a plain left-click or tap on a tag, fandom, or author link open its context menu instead of following the link. The menu's “Open” item (always available) still follows the link, so nothing is lost. Right-click and long-press open the menu either way. Holding Shift stands the extension down for one gesture: Shift+right-click gives you the browser's own menu, and Shift+click follows the link — so Ctrl+Shift+click still opens it in a new tab."
-    >
-      <OptionSwitch option-id="openMenuOnClick" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Mark for later in the work menu"
-      subtitle="Add a “Mark for later” / “Mark as read” action to a work's right-click (or long-press) menu, so you can update your Marked for Later list without opening the work. A saved indicator shows next to works you marked this session."
-    >
-      <OptionSwitch option-id="markForLaterToolbar" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Filter peek toolbar"
-      subtitle="On listing pages where your filters hid works, show a small floating button to temporarily reveal those works (and hide them again). Works for tag, author, crossover and language filters. Does not change your saved filters. The floating toolbar also hosts a toggle to disable the extension's right-click menus (restoring the browser's native menu) whenever any menu feature is on."
-    >
-      <OptionSwitch option-id="filterToolbar" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Search Marked for Later"
-      subtitle="On your own Marked for Later page, add a button that loads every page of your to-read list into one view you can instantly filter and sort by tags, fandoms, rating, length, kudos and more."
-    >
-      <OptionSwitch option-id="searchMarkedForLater" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Search an uncommon tag's works"
-      subtitle="AO3 lets you sort and filter a tag's works only once the tag has been marked common (canonical); for every other tag you get a plain paged list and nothing else. On those pages, add a “Search these works” link that loads every page of the list into the same view you can instantly filter and sort by tags, fandoms, rating, length, kudos and more."
-    >
-      <OptionSwitch option-id="searchTagWorks" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Search text-search results"
-      subtitle="On the results page of a works search (the “Search Works” form, or the search box in the header), add a “Search these results” button that loads the results into the same view you can instantly filter and sort by tags, fandoms, rating, length, kudos and more — things AO3's own results page offers no way to narrow by."
-    >
-      <OptionSwitch option-id="searchTextResults" />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Maximum works to load"
-      subtitle="A ceiling on how many works any of the search views above will load. Each is fetched twenty to a page from AO3's donated servers, and a text search for a common word can match hundreds of thousands — so a list bigger than this loads only up to the ceiling, in the order the Archive lists it, and only after you confirm. Raise it if you routinely search large lists and don't mind the wait."
-    >
-      <OptionSearchMaxResults />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRow
-      title="Results per page"
-      subtitle="How many works to show per page in the search views above. Lower values stay fast even with very large lists; higher values show more at once but take longer to render."
-    >
-      <OptionSearchPerPage />
-    </OptionRow>
-    <OptionDivider />
-    <OptionRowSearchLanguage />
-    <OptionDivider />
-    <OptionRowWordCountRanges />
-    <OptionDivider />
-    <OptionRowSearchWordCount />
-    <OptionDivider />
-    <OptionRowFandomExport />
+      <OptionRowRules />
+      <OptionDivider />
+      <OptionRowHideCrossovers />
+      <OptionDivider />
+      <OptionRowHideLanguages />
+      <OptionDivider />
+      <OptionRow
+        title="Collapse or hide"
+        subtitle="What to do with a work hidden by the two filters above, or by a mark set to hide it. Collapsing leaves a line saying why, with a button to show the work anyway. Rules choose this for themselves, per rule."
+      >
+        <OptionHideReason />
+      </OptionRow>
+      <OptionDivider />
+      <OptionRow
+        title="Show what matched"
+        subtitle="On a collapsed work, show the actual tag, fandom or author that matched instead of the name of the rule that hid it. Hover a value — or tap it on a touchscreen — to see the rule, and use its exclude (−) button to add it straight to the filter sidebar."
+      >
+        <OptionSwitch option-id="hideShowMatchedValues" />
+      </OptionRow>
+    </OptionSubsection>
   </OptionCategory>
 </template>

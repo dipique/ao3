@@ -229,7 +229,7 @@ describe('the work menu on a work page', { skip }, () => {
     const dispositions = rows
       .filter(r => /^(?:Mark|Unmark) as /.test(r.label))
       .map(r => r.label.replace(/^(?:Mark|Unmark) as /, '').replace(/…$/, ''))
-    assert.deepEqual(dispositions, ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite', 'ongoing'])
+    assert.deepEqual(dispositions, ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'ongoing'])
 
     // Marked for Later is an AO3-side action, so it sits in its own scope group
     // rather than among the dispositions.
@@ -242,7 +242,7 @@ describe('the work menu on a work page', { skip }, () => {
     // The whole point of the order being editable: the menu is built from what
     // the table says, not from the order the marks shipped in. `favorite` is
     // moved from the end of the verdicts to the front of them.
-    const marks = moveMark(createDefaultMarks(), 'favorite', -9)
+    const marks = moveMark(createDefaultMarks(), 'favorite', -10)
     const tab = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
     await tab.click('#workskin > .preface.group > h2.title.heading')
     await sleep(250)
@@ -253,7 +253,7 @@ describe('the work menu on a work page', { skip }, () => {
     const dispositions = labels
       .filter(label => /^(?:Mark|Unmark) as /.test(label))
       .map(label => label.replace(/^(?:Mark|Unmark) as /, '').replace(/…$/, ''))
-    assert.deepEqual(dispositions, ['favorite', 'read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'ongoing'])
+    assert.deepEqual(dispositions, ['favorite', 'read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'abandoned', 'ongoing'])
   })
 
   test('an ongoing work drops the Marked-for-Later clock from its indicators', async () => {

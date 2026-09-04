@@ -10,7 +10,7 @@ OptionRowRulesContext.provide({
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Rules"
-    subtitle="Hide, highlight, or always-show works by tag, fandom, author, work, or series"
+    subtitle="Hide, highlight or always-show works by tag, fandom, author, work or series. When more than one rule matches a work, the highest priority wins — and always-show wins a tie."
   >
     <OptionRowRulesTable />
 

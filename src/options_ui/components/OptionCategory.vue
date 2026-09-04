@@ -4,12 +4,22 @@ const props = defineProps<{
   subtitle: string
 }>()
 
+OptionCategoryName.provide(props.title)
+
 const { id } = useAddNav(props.title)
 const { open } = useCollapsibleCategory(props.title)
+const { showDescriptions, searching, categoryMatches, highlight } = useOptionSearch()
+
+const visible = computed(() => categoryMatches(props.title))
 </script>
 
 <template>
-  <section :id="id" card px-2 sm:px-8 style="scroll-margin-top: calc(var(--header-height, 0));">
+  <section
+    v-show="visible"
+    :id="id"
+    card px-2 sm:px-8
+    style="scroll-margin-top: calc(var(--header-height, 0px) + var(--toolbar-height, 0px));"
+  >
     <RekaCollapsibleRoot v-model:open="open">
       <!--
         The heading wraps the trigger rather than the other way round: a button's
@@ -22,12 +32,15 @@ const { open } = useCollapsibleCategory(props.title)
           flex="~ row" w-full cursor-pointer pb-2 pt-3 text-left
         >
           <span flex="~ col grow-1">
-            <span block text="2xl primary" font="serif 500">
-              {{ props.title }}
-            </span>
-            <span block font="sans light" max-w="sm:80%">
-              {{ props.subtitle }}
-            </span>
+            <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <span block text="2xl primary" font="serif 500" v-html="highlight(props.title)" />
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <span
+              v-if="showDescriptions || searching"
+              block font="sans light" max-w="sm:80%"
+              v-html="highlight(props.subtitle)"
+            />
           </span>
           <span text="4xl op80" flex="~ row items-end" pl-6>
             <slot name="icon" />

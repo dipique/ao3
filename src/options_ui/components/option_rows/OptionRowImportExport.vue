@@ -93,8 +93,8 @@ async function startExport({ keyPrefix, fileSuffix }: typeof EXPORT_VARIANTS[num
 
 <template>
   <OptionRow
-    title="Data import/export"
-    :subtitle="`Approximately ${sizeUsed}kB bytes used`"
+    title="Import &amp; export your settings"
+    :subtitle="`Save every setting, rule and mark to a file, or load one back in. Approximately ${sizeUsed}kB in use.`"
   >
     <div flex="~ row items-center gap-3">
       <Button variant="outline" @click.prevent="startImport">
