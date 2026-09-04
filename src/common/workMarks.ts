@@ -8,7 +8,10 @@
  * (`favorite`, `good`, `boring`, `bad`, `gross`) are the same decision said more
  * precisely — they declare themselves read via {@link MarkConfig.triggerAlias},
  * which is what makes them hide, unsave, and appear in menus exactly as `read`
- * does without any of that being written per-mark.
+ * does without any of that being written per-mark. A work can carry several of
+ * them at once, because they aren't competing answers to one question: a work
+ * can be hot *and* feelsy *and* a favourite. What it can't carry alongside them
+ * is a mark that stands alone in the group — see {@link markIsExclusive}.
  *
  * ## Why the ids are packed
  *
@@ -64,8 +67,10 @@ export interface MarkConfig {
    * Treat this mark as `triggerAlias` for UI and trigger purposes: it shows up
    * wherever that mark's action does, inherits its {@link hideSearchResult}, and
    * setting it takes the work off Marked for Later exactly as that mark would.
-   * A work carries at most one mark from a trigger group — setting one clears
-   * the rest, so `favorite` doesn't also sit in `read`.
+   * Marks aliasing the same root stack: a work can carry any number of them at
+   * once. What it can't do is carry one alongside a mark that stands alone in
+   * the group — the root itself, or a {@link tracksProgress} mark. See
+   * {@link markIsExclusive} for why, and {@link markClears} for the rule.
    *
    * A {@link tracksProgress} mark is the one exception to the unsaving half: an
    * ongoing work is the disposition that *isn't* "done with it", so it stays on
@@ -233,11 +238,48 @@ export function markRoot(marks: Record<MarkId, MarkConfig>, id: MarkId): MarkId 
 
 /**
  * Every mark that behaves as `id` does — the group's root plus each mark
- * aliasing it, in table order. A work carries at most one mark from a group.
+ * aliasing it, in table order. Which of them can sit on one work together is
+ * {@link markClears}.
  */
 export function markGroup(marks: Record<MarkId, MarkConfig>, id: MarkId): MarkId[] {
   const root = markRoot(marks, id)
   return markIds(marks).filter(other => markRoot(marks, other) === root)
+}
+
+/**
+ * Whether this mark stands alone in its trigger group: setting it clears every
+ * other member, and setting any other member clears it.
+ *
+ * Two marks are that way, and for the same reason — each is a statement the
+ * finer readings contradict rather than refine:
+ *
+ * - the group's **root**. Plain `read` is what you mark a work you have no
+ *   finer opinion about, so it says nothing that "hot" doesn't already say
+ *   better, and a work listed as both is carrying a verdict and its own absence.
+ * - a {@link MarkConfig.tracksProgress} mark. `continue` is the one member that
+ *   says you're *not* done, which no verdict can be true alongside.
+ *
+ * Everything between them stacks freely: those are things a work *was*, and a
+ * work can be several of them at once.
+ */
+export function markIsExclusive(marks: Record<MarkId, MarkConfig>, id: MarkId): boolean {
+  return markRoot(marks, id) === id || markTracksProgress(marks, id)
+}
+
+/**
+ * Whether setting `id` on a work takes `other` off it — same group, not the same
+ * mark, and at least one of the two {@link markIsExclusive}.
+ *
+ * The single place that rule is written. Marks are set both in the stored table
+ * ({@link setMark}) and in the content script's in-memory mirror of it, which
+ * updates indicators without waiting for the storage round-trip; the two reading
+ * one predicate is what keeps them from drifting into disagreeing about what a
+ * click just did.
+ */
+export function markClears(marks: Record<MarkId, MarkConfig>, id: MarkId, other: MarkId): boolean {
+  if (other === id || markRoot(marks, other) !== markRoot(marks, id))
+    return false
+  return markIsExclusive(marks, id) || markIsExclusive(marks, other)
 }
 
 /** Whether works carrying this mark are collapsed out of listings (inherited from the group root). */
@@ -385,9 +427,10 @@ export function workHasMark(marks: Record<MarkId, MarkConfig>, id: MarkId, workI
 }
 
 /**
- * Every work id that some mark hides, mapped to the mark responsible (the first
- * one in table order, when a work somehow carries several). Unpacks each hiding
- * mark once, so HideWorks can test a whole listing against one map.
+ * Every work id that some mark hides, mapped to the mark responsible — the
+ * first one in table order, since a work can carry several hiding marks at once
+ * and the reason line has room for one. Unpacks each hiding mark once, so
+ * HideWorks can test a whole listing against one map.
  */
 export function hiddenByMarks(marks: Record<MarkId, MarkConfig>): Map<string, MarkId> {
   const out = new Map<string, MarkId>()
@@ -453,9 +496,10 @@ function dropProgress(marks: Record<MarkId, MarkConfig>, id: MarkId, workId: str
 }
 
 /**
- * Set or clear one mark on one work. Setting a mark clears every *other* mark in
- * its trigger group — a work has one disposition, so marking it `favorite`
- * takes it out of `read` rather than sitting in both.
+ * Set or clear one mark on one work. Setting a mark clears the marks in its
+ * trigger group that can't stand beside it ({@link markClears}) — so marking a
+ * work `favorite` takes it out of plain `read` and out of `continue`, but leaves
+ * `hot` exactly where it is.
  *
  * Returns the original table (identity-equal) when nothing changed.
  */
@@ -477,7 +521,7 @@ export function setMark(
 
   if (on) {
     for (const other of markGroup(marks, id)) {
-      if (other === id || !markIsLocal(next, other))
+      if (!markIsLocal(next, other) || !markClears(marks, id, other))
         continue
       const cleared = withId(next[other]!.items!, workId, false)
       if (cleared !== next[other]!.items)

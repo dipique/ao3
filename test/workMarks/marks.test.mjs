@@ -7,9 +7,11 @@ import {
   createDefaultMarks,
   hiddenByMarks,
   localMarkIds,
+  markClears,
   markGroup,
   markHidesResults,
   markIds,
+  markIsExclusive,
   markIsLocal,
   markIsReorderable,
   markItems,
@@ -188,7 +190,7 @@ describe('the mark order', () => {
 })
 
 describe('setMark', () => {
-  test('setting a mark clears the rest of its group', () => {
+  test('setting a finer reading clears the plain root mark', () => {
     let marks = marksWith({ read: ['1'] })
     marks = setMark(marks, '1', 'favorite', true)
 
@@ -197,10 +199,27 @@ describe('setMark', () => {
     assert.deepEqual(marksForWork(marks, '1'), ['favorite'])
   })
 
-  test('replacing one fine disposition with another', () => {
+  test('the finer readings stack rather than replacing each other', () => {
+    // They aren't competing answers to one question: a work can be gross and
+    // also hot, and saying the second must not retract the first.
     let marks = marksWith({ gross: ['7'] })
     marks = setMark(marks, '7', 'good', true)
-    assert.deepEqual(marksForWork(marks, '7'), ['good'])
+    marks = setMark(marks, '7', 'hot', true)
+    assert.deepEqual(marksForWork(marks, '7'), ['gross', 'good', 'hot'], 'in table order')
+  })
+
+  test('the plain root mark clears the finer readings', () => {
+    // The other half of the same rule: plain `read` means you have no finer
+    // opinion, so it can't sit beside one.
+    let marks = marksWith({ gross: ['7'], hot: ['7'] })
+    marks = setMark(marks, '7', READ_MARK, true)
+    assert.deepEqual(marksForWork(marks, '7'), [READ_MARK])
+  })
+
+  test('clearing one of several leaves the rest', () => {
+    let marks = marksWith({ good: ['7'], hot: ['7'] })
+    marks = setMark(marks, '7', 'good', false)
+    assert.deepEqual(marksForWork(marks, '7'), ['hot'])
   })
 
   test('clearing a mark leaves the work with nothing', () => {
@@ -238,9 +257,30 @@ describe('setMarkGroup', () => {
     assert.deepEqual(marksForWork(marks, '4'), ['read'])
   })
 
-  test('unmarking clears whichever mark in the group the work had', () => {
-    let marks = marksWith({ boring: ['6'] })
+  test('unmarking clears every mark in the group the work had', () => {
+    let marks = marksWith({ boring: ['6'], fluff: ['6'] })
     marks = setMarkGroup(marks, '6', READ_MARK, false)
     assert.deepEqual(marksForWork(marks, '6'), [], 'back on the to-read pile')
+  })
+})
+
+describe('which marks can sit on one work together', () => {
+  test('the root and the progress mark stand alone; the readings stack', () => {
+    const marks = createDefaultMarks()
+    assert.ok(markIsExclusive(marks, READ_MARK), 'plain read is the absence of a verdict')
+    assert.ok(markIsExclusive(marks, 'continue'), 'ongoing is the one that says you are not done')
+    for (const id of ['no', 'bad', 'boring', 'gross', 'good', 'hot', 'feelsy', 'fluff', 'favorite'])
+      assert.ok(!markIsExclusive(marks, id), `${id} is a thing a work was, not an answer to one question`)
+  })
+
+  test('markClears is symmetric across the exclusive ones and silent between the rest', () => {
+    const marks = createDefaultMarks()
+    assert.ok(markClears(marks, 'hot', READ_MARK))
+    assert.ok(markClears(marks, READ_MARK, 'hot'))
+    assert.ok(markClears(marks, 'hot', 'continue'))
+    assert.ok(markClears(marks, 'continue', 'hot'))
+    assert.ok(!markClears(marks, 'hot', 'good'))
+    assert.ok(!markClears(marks, 'hot', 'hot'), 'a mark never clears itself')
+    assert.ok(!markClears(marks, 'hot', SAVED_MARK), 'Marked for Later is not in the group')
   })
 })

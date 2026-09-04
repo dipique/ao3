@@ -216,6 +216,14 @@ describe('items and progress stay in step', () => {
     assert.deepEqual(marksForWork(next, '7'), [])
   })
 
+  test('a finer reading replaces it too — a verdict means you are done', () => {
+    // The readings stack with each other, but not with the mark that says you
+    // haven't finished: calling a work good settles it.
+    const next = setMark(seeded(), '7', 'good', true)
+    assert.equal(next[PROGRESS_MARK].progress, '')
+    assert.deepEqual(marksForWork(next, '7'), ['good'])
+  })
+
   test('being replaced by another mark in the group drops it too', () => {
     // The second drop site: marking the work `read` clears `continue`, and the
     // payload has to go with it or it is orphaned forever.

@@ -12,7 +12,7 @@ import MdiStar from '~icons/mdi/star.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markGroup, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -192,16 +192,20 @@ function loadMarkSets(marks: WorkMarks): void {
 
 /**
  * Mirror one mark write in the cached sets, so indicators can update without
- * waiting for the options round-trip. Follows the same rule the stored table
- * does: a work carries at most one mark per trigger group.
+ * waiting for the options round-trip. Reads the same {@link markClears} the
+ * stored table does, so the two can't disagree about what a click just did:
+ * the finer readings stack, and only the marks that stand alone in the group
+ * come off.
  */
 function noteMark(marks: WorkMarks, workId: string, markId: MarkId, on: boolean): void {
   if (!on) {
     markSets.get(markId)?.delete(workId)
     return
   }
-  for (const other of markGroup(marks.marks, markId))
-    markSets.get(other)?.delete(workId)
+  for (const other of markGroup(marks.marks, markId)) {
+    if (markClears(marks.marks, markId, other))
+      markSets.get(other)?.delete(workId)
+  }
   markSets.get(markId)?.add(workId)
 }
 
@@ -401,20 +405,39 @@ abstract class FilterEntityToolbar extends Unit {
    *
    * A mark that tracks progress is several rows rather than one toggle, since
    * setting it means saying *where* you got to — see {@link progressItems}.
+   *
+   * The finer readings stack, so most rows are plain independent toggles. The
+   * one that isn't is the group's root: plain "Read" can't sit beside a verdict
+   * ({@link markIsExclusive}), so offering it on a work that already carries one
+   * would be offering a click that quietly clears it. Its row is left out
+   * instead, and comes back as soon as the last verdict does.
    */
   private markSetItems(id: string, link: HTMLElement): MenuItem[] {
     const { marks } = this.options.workMarks
     const items: MenuItem[] = []
-    localMarkIds(marks).forEach((markId, index) => {
-      // The separator opens the mark block, so it belongs to whichever row comes
-      // first — which is why this keys off the mark's index, not the row's.
-      const separatorBefore = index === 0
-      if (markTracksProgress(marks, markId)) {
-        items.push(...this.progressItems(id, markId, link, separatorBefore))
-        return
-      }
+    // The trigger groups this work already carries a stacking reading from.
+    const judged = new Set(
+      localMarkIds(marks)
+        .filter(markId => !markIsExclusive(marks, markId) && markSets.get(markId)?.has(id))
+        .map(markId => markRoot(marks, markId)),
+    )
+    for (const markId of localMarkIds(marks)) {
       const config = marks[markId]!
       const has = markSets.get(markId)?.has(id) ?? false
+      // The progress mark stands alone too, but keeps its rows: it opens an
+      // editor rather than toggling, so the reader gets to see and confirm the
+      // trade before a verdict is replaced by "actually, I'm still reading it".
+      if (!has && !markTracksProgress(marks, markId)
+        && markIsExclusive(marks, markId) && judged.has(markRoot(marks, markId))) {
+        continue
+      }
+      // The separator opens the mark block, so it belongs to whichever row comes
+      // first — which is why this keys off the block, not the mark's position.
+      const separatorBefore = items.length === 0
+      if (markTracksProgress(marks, markId)) {
+        items.push(...this.progressItems(id, markId, link, separatorBefore))
+        continue
+      }
       const noun = (config.label || markId).toLowerCase()
       items.push({
         icon: markIcon(config.icon),
@@ -424,7 +447,7 @@ abstract class FilterEntityToolbar extends Unit {
         active: has,
         onSelect: () => this.onToggleMark(id, markId, !has),
       })
-    })
+    }
     return items
   }
 
