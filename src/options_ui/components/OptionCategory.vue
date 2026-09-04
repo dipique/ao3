@@ -8,6 +8,10 @@ OptionCategoryName.provide(props.title)
 
 const { id } = useAddNav(props.title)
 const { open } = useCollapsibleCategory(props.title)
+
+// Also findable by a `#hash`, by that id or by the category's own name.
+registerAnchor({ id: id.value, kind: 'category', name: props.title, category: props.title, subsection: null })
+
 const { showDescriptions, searching, categoryMatches, highlight } = useOptionSearch()
 
 const visible = computed(() => categoryMatches(props.title))
@@ -52,7 +56,8 @@ const visible = computed(() => categoryMatches(props.title))
         </RekaCollapsibleTrigger>
       </h1>
       <div border="b-1" />
-      <RekaCollapsibleContent animate-collapsible overflow-y-hidden>
+      <!-- Both axes stated; see OptionSubsection for why. -->
+      <RekaCollapsibleContent animate-collapsible overflow-hidden>
         <slot />
       </RekaCollapsibleContent>
     </RekaCollapsibleRoot>

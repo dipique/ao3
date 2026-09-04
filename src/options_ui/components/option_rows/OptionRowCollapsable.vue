@@ -15,9 +15,10 @@ const forwarded = useForwardProps(props)
         </RekaCollapsibleTrigger>
       </template>
       <template #extra>
+        <!-- Both axes stated; see OptionSubsection for why. -->
         <RekaCollapsibleContent
           mx="-4"
-          animate-collapsible overflow-y-hidden
+          animate-collapsible overflow-hidden
         >
           <div px="4">
             <slot />

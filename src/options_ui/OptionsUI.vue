@@ -4,6 +4,10 @@ import OptionsUICategories from './categories/OptionsUICategories.vue'
 const ready = useOptionsReady()
 const themeOption = useOption('theme')
 
+// `options_ui.html#search`, `#work-text`, `#work-text-reader-mode` — see
+// {@link file://./composables/useHashNav.ts}.
+useHashNav(ready)
+
 watch(() => themeOption, () => {
   const current = themeOption.chosen.value === 'inherit' ? themeOption.current.value : themeOption.chosen.value
   document.body.classList.toggle('dark', current === 'dark')
@@ -57,6 +61,31 @@ h4,
 h5,
 h6 {
   --at-apply: font-serif;
+}
+
+/* What a `#hash` jump landed on. A scroll alone leaves you looking at a page
+   that moved without saying why — especially when the target is one row in the
+   middle of a long list — so the arrival is marked for a moment and then gets
+   out of the way. */
+.ao3e-jump-flash {
+  animation: ao3e-jump-flash 1.6s ease-out;
+}
+
+@keyframes ao3e-jump-flash {
+  from {
+    background-color: rgb(var(--color-accent) / 0.35);
+  }
+  to {
+    background-color: rgb(var(--color-accent) / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ao3e-jump-flash {
+    animation: none;
+    outline: 2px solid rgb(var(--color-accent));
+    outline-offset: 2px;
+  }
 }
 
 /* Search hits. The reset zeroes `mark`'s background along with everything else's,

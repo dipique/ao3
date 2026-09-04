@@ -24,6 +24,7 @@ import { Stats } from './Stats/Stats.ts'
 import { StyleTweaks } from './StyleTweaks.tsx'
 import { TagToolbar } from './TagToolbar.tsx'
 import { TextReplace } from './TextReplace.ts'
+import { TextReplaceTools } from './TextReplaceTools.tsx'
 import { Tools } from './Tools.tsx'
 import { WordCountToolbar } from './WordCountToolbar.tsx'
 
@@ -34,6 +35,8 @@ export const UNITS = [
   ReaderMode,
   CollapsibleDashboard,
   TextReplace,
+  // After TextReplace, whose spans are what its underlines and click-to-edit hang on.
+  TextReplaceTools,
   HideWorks,
   // Runs after HideWorks so it can count the works HideWorks marked as hidden.
   FilterToolbar,

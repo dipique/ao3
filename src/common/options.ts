@@ -170,7 +170,15 @@ export interface Options {
   forceAlignment: null | 'start' | 'end' | 'justified'
   /** Hide the "muted author" notices that appear where works are hidden because of a muted author. */
   hideMutedAuthorNotices: boolean
-  textReplacements: { enabled: boolean, rules: TextReplacement[] }
+  /**
+   * Find/replace rules applied to the displayed text of a work, plus whether the
+   * work page carries the tools for writing them from the work itself — a button
+   * beside any selection, and an underline under everything already replaced
+   * that opens the rule behind it. Off means the replacements still apply, they
+   * just aren't editable from the page; `tools` says nothing at all when
+   * `enabled` is false.
+   */
+  textReplacements: { enabled: boolean, tools: boolean, rules: TextReplacement[] }
 
   theme: ThemeOption
   user: { userId?: string }
@@ -227,7 +235,7 @@ export const options = createStorage<Options>({
     showStatsColumns: true,
     forceAlignment: null,
     hideMutedAuthorNotices: false,
-    textReplacements: { enabled: false, rules: [] },
+    textReplacements: { enabled: false, tools: false, rules: [] },
 
     theme: { chosen: 'inherit', current: 'light' },
     user: { },

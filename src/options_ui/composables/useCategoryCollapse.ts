@@ -41,6 +41,25 @@ export function restoreCollapsed(): void {
   stashed = null
 }
 
+/**
+ * Force one section open, whatever it was. Used by a `#hash` jump, which has to
+ * be able to land on something the reader had folded away — including one folded
+ * while a search was running, where the fold is sitting in the stash rather than
+ * in `collapsed`.
+ */
+function expandSection(key: string): void {
+  collapsed.value.delete(key)
+  stashed?.delete(key)
+}
+
+export function expandCategory(name: string): void {
+  expandSection(`category:${name}`)
+}
+
+export function expandSubsection(category: string | null, name: string): void {
+  expandSection(`subsection:${category ?? ''}:${name}`)
+}
+
 export function useCategoryCollapse() {
   return {
     anyOpen: computed(() => [...registry.value].some(key => !collapsed.value.has(key))),

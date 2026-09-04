@@ -713,6 +713,187 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   font-weight: 700;
 }
 
+/* ===========================================================================
+   Text replacement, on the work page itself.
+
+   Only present when the work-page tools are switched on: the underline is a
+   working aid for someone setting rules up, not a permanent mark on the prose.
+   =========================================================================== */
+
+/* One run of text a rule replaced. Underlined rather than coloured or boxed,
+   because it sits inside the work's own paragraphs and has to stay readable —
+   the point is to be findable once you go looking, not to interrupt. */
+.AO3E--replaced {
+  border-bottom: 1px dotted currentColor;
+  opacity: 0.95;
+  cursor: pointer;
+}
+
+.AO3E--replaced:hover {
+  background: var(--ao3e-surface-hover);
+  border-bottom-style: solid;
+}
+
+/* The button offered beside a selection. Fixed, because it is positioned from
+   viewport coordinates and has to stay put while the page under it scrolls. */
+.AO3E--replace-selection {
+  position: fixed;
+  z-index: 1001;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.35em;
+  margin: 0 !important;
+  padding: 0.35em 0.7em !important;
+  border: 1px solid var(--ao3e-surface-border) !important;
+  border-radius: 999px !important;
+  background: var(--ao3e-surface-bg) !important;
+  color: var(--ao3e-surface-fg) !important;
+  box-shadow: var(--ao3e-surface-shadow) !important;
+  font: inherit;
+  font-size: 0.85rem !important;
+  line-height: 1.2 !important;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.AO3E--replace-selection:hover,
+.AO3E--replace-selection:focus {
+  border-color: var(--ao3e-field-border) !important;
+  background: var(--ao3e-surface-hover) !important;
+}
+
+.AO3E--replace-selection > svg {
+  width: 1.1em !important;
+  height: 1.1em !important;
+  top: 0 !important;
+}
+
+.AO3E--replace-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+.AO3E--replace-editor--title {
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.AO3E--replace-editor--field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.AO3E--replace-editor--label {
+  font-size: 0.82em;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+/* Same fight as the progress editor's fields: AO3's skin styles bare `input`s
+   with a selector our single class doesn't outrank, so the colours, the inset
+   shadow and the focus state all have to be stated over the top of it. */
+.AO3E--replace-editor--input {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 0.3em 0.4em;
+  border: 1px solid var(--ao3e-field-border) !important;
+  border-radius: 0.3em;
+  background: var(--ao3e-field-bg) !important;
+  color: var(--ao3e-field-fg) !important;
+  box-shadow: none !important;
+  color-scheme: var(--ao3e-color-scheme);
+  font: inherit;
+  font-size: 1em;
+}
+
+.AO3E--replace-editor--input:focus {
+  background: var(--ao3e-field-bg) !important;
+  color: var(--ao3e-field-fg) !important;
+  border-color: var(--ao3e-surface-accent) !important;
+  outline: 2px solid var(--ao3e-surface-accent);
+  outline-offset: -1px;
+}
+
+.AO3E--replace-editor--checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em 0.9em;
+  font-size: 0.82em;
+}
+
+.AO3E--replace-editor--check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* "Match casing" while the match is case-sensitive: still there, saying so. */
+.AO3E--replace-editor--check--off {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.AO3E--replace-editor--checkbox {
+  width: auto !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  color-scheme: var(--ao3e-color-scheme);
+  accent-color: var(--ao3e-surface-accent);
+}
+
+.AO3E--replace-editor--error {
+  font-size: 0.8em;
+  color: var(--ao3e-surface-danger);
+}
+
+.AO3E--replace-editor--note {
+  font-size: 0.78em;
+  opacity: 0.6;
+}
+
+.AO3E--replace-editor--actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4em;
+}
+
+.AO3E--replace-editor--cancel,
+.AO3E--replace-editor--delete,
+.AO3E--replace-editor--save {
+  padding: 0.3em 0.9em;
+  border: 1px solid var(--ao3e-field-border);
+  border-radius: 0.3em;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+/* Delete sits apart from the pair that dismiss the editor, so it can't be hit
+   on the way to Cancel. */
+.AO3E--replace-editor--delete {
+  margin-right: auto;
+  border-color: transparent;
+  color: var(--ao3e-surface-danger);
+}
+
+.AO3E--replace-editor--delete:hover {
+  border-color: var(--ao3e-surface-danger);
+}
+
+.AO3E--replace-editor--save {
+  border-color: transparent;
+  background: var(--ao3e-surface-accent);
+  color: var(--ao3e-surface-accent-fg);
+  font-weight: 700;
+}
+
 .AO3E--symbols-key {
   max-height: 70vh;
   overflow: auto;

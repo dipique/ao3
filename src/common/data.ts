@@ -492,6 +492,13 @@ export interface TextReplacement {
   matchCasing?: boolean
   /** Match only whole words — `find` must not be flanked by word characters. */
   wholeWord?: boolean
+  /**
+   * Kept in the list but inert. Somewhere to park a rule the reader wants back
+   * later — or one of several variants of the same replacement — instead of
+   * deleting it, which is otherwise the only way to stop it applying and takes
+   * its wording with it.
+   */
+  disabled?: boolean
 }
 
 /** Escape a literal string for safe use inside a RegExp. */
@@ -505,9 +512,31 @@ function startsUppercase(input: string): boolean {
   return first !== first.toLowerCase() && first === first.toUpperCase()
 }
 
+/** Whether a rule can match anything at all — it has something to find, and is on. */
+export function textReplacementActive(rule: TextReplacement): boolean {
+  return !!rule.find && !rule.disabled
+}
+
+/**
+ * The matcher a rule applies. `\b` keys off `\w`, so flanking lookarounds give
+ * whole-word matches that work even when `find` starts or ends with punctuation.
+ */
+function matcherFor(rule: TextReplacement): RegExp {
+  const body = escapeRegExp(rule.find)
+  const pattern = rule.wholeWord ? `(?<!\\w)${body}(?!\\w)` : body
+  return new RegExp(pattern, rule.caseSensitive ? 'g' : 'gi')
+}
+
+/** What one match of `rule` is replaced by — mirroring a leading capital if asked. */
+function replacementFor(rule: TextReplacement, match: string): string {
+  if (rule.matchCasing && rule.replace && !rule.caseSensitive && startsUppercase(match))
+    return rule.replace.charAt(0).toUpperCase() + rule.replace.slice(1)
+  return rule.replace
+}
+
 /** Apply a single replacement rule to a string, returning the new string. */
 export function applyTextReplacement(text: string, rule: TextReplacement): string {
-  if (!rule.find)
+  if (!textReplacementActive(rule))
     return text
 
   // The simplest case — case-sensitive, anywhere — needs no regex.
@@ -517,20 +546,66 @@ export function applyTextReplacement(text: string, rule: TextReplacement): strin
     return text.split(rule.find).join(rule.replace)
   }
 
-  // `\b` keys off `\w`, so flanking lookarounds give whole-word matches that
-  // work even when `find` starts or ends with punctuation.
-  const body = escapeRegExp(rule.find)
-  const pattern = rule.wholeWord ? `(?<!\\w)${body}(?!\\w)` : body
-  const matcher = new RegExp(pattern, rule.caseSensitive ? 'g' : 'gi')
-  return text.replace(matcher, (match) => {
-    // Mirror a leading capital from the match onto the replacement.
-    if (rule.matchCasing && rule.replace && !rule.caseSensitive && startsUppercase(match))
-      return rule.replace.charAt(0).toUpperCase() + rule.replace.slice(1)
-    return rule.replace
-  })
+  return text.replace(matcherFor(rule), match => replacementFor(rule, match))
+}
+
+/**
+ * One run of the rewritten text: either a stretch of the original, or what a
+ * rule put in its place. {@link TextPart.rule} indexes the array handed to
+ * {@link replaceTextParts} — which is why the whole list is passed even though
+ * the inert entries are skipped, so the index still names the rule as the
+ * reader's own settings hold it.
+ */
+export interface TextPart {
+  text: string
+  /** Index of the rule that produced this run, or `null` for untouched source text. */
+  rule: number | null
+}
+
+/**
+ * Apply every rule, in order, and report the result as the runs it is made of.
+ * The work page uses those runs to underline what it changed and to lead each
+ * one back to the rule behind it; {@link applyTextReplacements} is the same
+ * thing with the runs joined back up.
+ *
+ * Later rules see earlier results, as they always have, but they see them one
+ * run at a time — so a match that would have straddled the seam between an
+ * earlier replacement and the text beside it isn't found. That is the price of
+ * knowing which rule wrote which words, and it buys the same output whether or
+ * not the underlining is switched on.
+ */
+export function replaceTextParts(text: string, rules: TextReplacement[]): TextPart[] {
+  let parts: TextPart[] = [{ text, rule: null }]
+
+  for (const [index, rule] of rules.entries()) {
+    if (!textReplacementActive(rule))
+      continue
+
+    const matcher = matcherFor(rule)
+    const next: TextPart[] = []
+    for (const part of parts) {
+      let at = 0
+      // The matcher is global and reused across runs, so its lastIndex has to be
+      // put back before each one.
+      matcher.lastIndex = 0
+      for (const match of part.text.matchAll(matcher)) {
+        if (match.index > at)
+          next.push({ text: part.text.slice(at, match.index), rule: part.rule })
+        next.push({ text: replacementFor(rule, match[0]), rule: index })
+        at = match.index + match[0].length
+      }
+      if (at === 0)
+        next.push(part)
+      else if (at < part.text.length)
+        next.push({ text: part.text.slice(at), rule: part.rule })
+    }
+    parts = next
+  }
+
+  return parts
 }
 
 /** Apply every rule, in order, to a string (later rules see earlier results). */
 export function applyTextReplacements(text: string, rules: TextReplacement[]): string {
-  return rules.reduce((acc, rule) => applyTextReplacement(acc, rule), text)
+  return replaceTextParts(text, rules).map(part => part.text).join('')
 }

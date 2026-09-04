@@ -1,12 +1,15 @@
 import Icon from '~icons/ao3e/icon.jsx'
 import MdiBookOpenVariant from '~icons/mdi/book-open-variant.jsx'
+import MdiCog from '~icons/mdi/cog.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
+import MdiFindReplace from '~icons/mdi/find-replace.jsx'
 import MdiGestureTapHold from '~icons/mdi/gesture-tap-hold.jsx'
 
-import { ADDON_CLASS, marksHideAnything, options } from '#common'
+import { ADDON_CLASS, api, marksHideAnything, options } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
+import { findWorkText } from '#content_script/textReplaceScope.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -98,6 +101,12 @@ function detachOutsideHandler(): void {
  *   {@link file://../contextTrigger.tsx}.)
  * - **Reader mode** — on a work page, toggles the `readerMode` option (font-zoom
  *   + drag-to-width on the work text) without a trip to the options page.
+ * - **Text replacement tools** — on a work page with text replacement on,
+ *   toggles `textReplacements.tools`: the underlines under replaced text, and
+ *   the button that turns a selection into a rule. The same switch the options
+ *   page carries, put where a reader notices they want it.
+ * - **Options** — opens the extension's options page. Always present, which is
+ *   also why the toolbar itself now always is.
  *
  * Runs after HideWorks so the hidden markers the peek counts are already in place.
  */
@@ -131,11 +140,11 @@ export class FilterToolbar extends Unit {
     )
   }
 
-  override get enabled() {
-    // `onWorkPage` only reads the URL (available at document_start); the precise
-    // `#workskin` check that actually gates the reader pill happens in `ready()`.
-    return this.peekAvailable || this.menuFeaturesActive || this.onWorkPage
-  }
+  // Every other pill comes and goes with the page and the reader's settings, but
+  // Options applies everywhere — so the toolbar does too. (The DOM checks that
+  // gate the reader and replacement pills happen in `ready()`; at
+  // `document_start` there is no page to ask.)
+  override get enabled() { return true }
 
   static override async clean(): Promise<void> {
     detachOutsideHandler()
@@ -151,18 +160,19 @@ export class FilterToolbar extends Unit {
     const showMenus = this.menuFeaturesActive
     // The reader pill needs the actual work text present, not just a work URL.
     const showReader = this.onWorkPage && document.querySelector('#workskin') !== null
+    // The replacement pill goes wherever replacements themselves apply, which is
+    // a little wider than `#workskin` — see `textReplaceScope`.
+    const showReplace = this.options.textReplacements.enabled && findWorkText() !== null
 
-    if (!showPeek && !showMenus && !showReader) {
-      this.logger.debug('Nothing to show in the filter toolbar.')
-      return
-    }
-
-    document.body.append(this.buildToolbar(showPeek, showMenus, showReader))
-    this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}, reader: ${showReader}).`)
+    document.body.append(this.buildToolbar(showPeek, showMenus, showReader, showReplace))
+    this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}, reader: ${showReader}, replace tools: ${showReplace}).`)
   }
 
-  buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean): HTMLElement {
+  buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean, showReplace: boolean): HTMLElement {
     const panel = <div class={PANEL_CLASS} role="group" />
+    panel.append(this.buildOptionsButton())
+    if (showReplace)
+      panel.append(this.buildReplaceToolsButton())
     if (showReader)
       panel.append(this.buildReaderButton())
     // Built up front but only put in the panel while it has something to say —
@@ -336,6 +346,55 @@ export class FilterToolbar extends Unit {
       sync()
     })
     sync()
+
+    return button
+  }
+
+  buildReplaceToolsButton(): HTMLElement {
+    // Optimistic local state, as with the reader pill: the options write also
+    // re-runs every unit, which rebuilds this toolbar from the saved value.
+    let on = this.options.textReplacements.tools
+    const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiFindReplace /></span>
+    const text: HTMLElement = <span />
+    const button: HTMLButtonElement = (
+      <button type="button" class={BUTTON_CLASS} aria-pressed="false">
+        {icon}
+        {text}
+      </button>
+    ) as HTMLElement as HTMLButtonElement
+
+    const sync = () => {
+      button.setAttribute('aria-pressed', String(on))
+      text.textContent = on ? 'Hide text replacement tools' : 'Show text replacement tools'
+      const label = on
+        ? 'Stop underlining replaced text and offering to replace what you select'
+        : 'Underline the text your rules replaced, and offer to make a rule out of any text you select'
+      button.title = label
+      button.setAttribute('aria-label', label)
+    }
+
+    button.addEventListener('click', () => {
+      on = !on
+      void options.set({ textReplacements: { ...this.options.textReplacements, tools: on } })
+      sync()
+    })
+    sync()
+
+    return button
+  }
+
+  buildOptionsButton(): HTMLElement {
+    const label = 'Open the AO3 Enhancements options page'
+    const button: HTMLButtonElement = (
+      <button type="button" class={BUTTON_CLASS} title={label} aria-label={label}>
+        <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiCog /></span>
+        <span>Open extension options…</span>
+      </button>
+    ) as HTMLElement as HTMLButtonElement
+
+    button.addEventListener('click', () => {
+      void api.openOptionsPage.sendToBackground()
+    })
 
     return button
   }

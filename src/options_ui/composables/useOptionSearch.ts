@@ -1,3 +1,4 @@
+import { anchorSlug, registerAnchor } from './useAnchors.ts'
 import { restoreCollapsed, stashCollapsed } from './useCategoryCollapse.ts'
 
 /**
@@ -51,20 +52,6 @@ watch(showDescriptions, (value) => {
     // Private mode / blocked storage — the switch still works for this visit.
   }
 })
-
-/**
- * Anchor id for a row. Deliberately not `kebabCase`, which splits on case
- * boundaries and turns "Compress filter URLs" into `compress-filter-ur-ls`.
- */
-function slug(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/['’]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
 
 /** Lowercase and strip accents, so "précis" is found by typing "precis". */
 function normalize(text: string): string {
@@ -151,6 +138,8 @@ export function useOptionSearch() {
     /** Same, for one sub-section within its category. */
     subsectionMatches: (category: string | null, subsection: string) =>
       !searching.value || [...rows.value.values()].some(e => e.category === category && e.subsection === subsection && entryMatches(e)),
+    /** Whether one row, by its anchor id, survives the current search. */
+    rowMatches: (id: string) => !searching.value || entryMatches(rows.value.get(id)),
     clear: () => { query.value = '' },
   }
 }
@@ -166,10 +155,15 @@ export function useOptionSearch() {
 export function useSearchableRow(source: () => { title: string, subtitle: string }) {
   const category = OptionCategoryName.inject(null)
   const subsection = OptionSubsectionName.inject(null)
-  const id = slug(subsection ? `${subsection} ${source().title}` : source().title)
+  const id = anchorSlug(subsection ? `${subsection} ${source().title}` : source().title)
 
   if (process.env.NODE_ENV === 'development' && rows.value.has(id))
     console.warn(`[options] duplicate option row id "${id}" — give one of them a distinct title or sub-section`)
+
+  // Unlike the search index above, the anchor registry keeps the row after it
+  // unmounts — a `#hash` naming a setting inside a folded-away section has to
+  // resolve to something the jump can then unfold.
+  registerAnchor({ id, kind: 'row', name: source().title, category, subsection })
 
   // A watcher rather than a one-shot write: a few descriptions are computed
   // (the fandom export counts its ids), so the index has to follow them.

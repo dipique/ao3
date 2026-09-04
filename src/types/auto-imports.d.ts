@@ -12,6 +12,7 @@ declare global {
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
+  const anchorSlug: typeof import('../options_ui/composables/useAnchors').anchorSlug
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
   const computed: typeof import('vue').computed
@@ -40,6 +41,8 @@ declare global {
   const defineComponent: typeof import('vue').defineComponent
   const eagerComputed: typeof import('@vueuse/core').eagerComputed
   const effectScope: typeof import('vue').effectScope
+  const expandCategory: typeof import('../options_ui/composables/useCategoryCollapse').expandCategory
+  const expandSubsection: typeof import('../options_ui/composables/useCategoryCollapse').expandSubsection
   const extendRef: typeof import('@vueuse/core').extendRef
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
@@ -53,6 +56,7 @@ declare global {
   const isReadonly: typeof import('vue').isReadonly
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
+  const jumpToHash: typeof import('../options_ui/composables/useHashNav').jumpToHash
   const makeDestructurable: typeof import('@vueuse/core').makeDestructurable
   const markRaw: typeof import('vue').markRaw
   const nextTick: typeof import('vue').nextTick
@@ -92,6 +96,8 @@ declare global {
   const refManualReset: typeof import('@vueuse/core').refManualReset
   const refThrottled: typeof import('@vueuse/core').refThrottled
   const refWithControl: typeof import('@vueuse/core').refWithControl
+  const registerAnchor: typeof import('../options_ui/composables/useAnchors').registerAnchor
+  const resolveAnchor: typeof import('../options_ui/composables/useAnchors').resolveAnchor
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveRef: typeof import('@vueuse/core').resolveRef
   const resolveUnref: typeof import('@vueuse/core').resolveUnref
@@ -197,6 +203,7 @@ declare global {
   const useFullscreen: typeof import('@vueuse/core').useFullscreen
   const useGamepad: typeof import('@vueuse/core').useGamepad
   const useGeolocation: typeof import('@vueuse/core').useGeolocation
+  const useHashNav: typeof import('../options_ui/composables/useHashNav').useHashNav
   const useId: typeof import('vue').useId
   const useIdle: typeof import('@vueuse/core').useIdle
   const useImage: typeof import('@vueuse/core').useImage
@@ -322,6 +329,9 @@ declare global {
 }
 // for type re-export
 declare global {
+  // @ts-ignore
+  export type { AnchorKind, Anchor } from '../options_ui/composables/useAnchors'
+  import('../options_ui/composables/useAnchors')
   // @ts-ignore
   export type { NavItem } from '../options_ui/composables/useNav'
   import('../options_ui/composables/useNav')
