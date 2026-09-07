@@ -1,0 +1,306 @@
+/* ---------------------------------------------------------------------------
+   The exported page's stylesheet.
+
+   Two halves. Below, everything AO3's own skin would have drawn — a blurb, a
+   tag list, a stats line, a work's prose — written from scratch rather than
+   fetched or vendored, because an export that carries someone else's stylesheet
+   has to keep carrying it, and this only has to cover the handful of structures
+   the view actually renders. Above it (imported), the extension's own
+   `content_script.css`, which is where the search view, the context menus, the
+   popover and the toast are painted; those lean on `currentColor` and
+   translucent greys precisely so they sit on whatever skin is underneath, and
+   here the skin underneath is this file.
+
+   Light and dark come from the device, unless the reader chose one — the same
+   `data-ao3e-theme` attribute the extension stamps on <html>, applied here so a
+   choice made on the desktop travels with the library.
+   --------------------------------------------------------------------------- */
+
+@import '../content_script/content_script.css';
+
+:root {
+  --ao3e-site-bg: #fff;
+  --ao3e-site-fg: #2a2a2a;
+  --ao3e-site-muted: #5a5a5a;
+  --ao3e-site-line: #d8d8d8;
+  --ao3e-site-rule: rgba(0, 0, 0, 0.08);
+  --ao3e-site-link: #0b5aa2;
+  --ao3e-site-panel: #f6f6f4;
+  --ao3e-site-warn-bg: #fdf3d8;
+  --ao3e-site-warn-fg: #6b4d00;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-ao3e-theme='light']) {
+    --ao3e-site-bg: #16181c;
+    --ao3e-site-fg: #e2e0dd;
+    --ao3e-site-muted: #9aa0a6;
+    --ao3e-site-line: #33373d;
+    --ao3e-site-rule: rgba(255, 255, 255, 0.1);
+    --ao3e-site-link: #7cb7f0;
+    --ao3e-site-panel: #1e2126;
+    --ao3e-site-warn-bg: #3a2f10;
+    --ao3e-site-warn-fg: #f3d78a;
+    color-scheme: dark;
+  }
+}
+
+:root[data-ao3e-theme='dark'] {
+  --ao3e-site-bg: #16181c;
+  --ao3e-site-fg: #e2e0dd;
+  --ao3e-site-muted: #9aa0a6;
+  --ao3e-site-line: #33373d;
+  --ao3e-site-rule: rgba(255, 255, 255, 0.1);
+  --ao3e-site-link: #7cb7f0;
+  --ao3e-site-panel: #1e2126;
+  --ao3e-site-warn-bg: #3a2f10;
+  --ao3e-site-warn-fg: #f3d78a;
+  color-scheme: dark;
+}
+
+/* --- The page ------------------------------------------------------------ */
+
+body.ao3e-site {
+  margin: 0 auto;
+  padding: 1rem 1rem 4rem;
+  max-width: 80rem;
+  background: var(--ao3e-site-bg);
+  color: var(--ao3e-site-fg);
+  font:
+    100%/1.5 'Lucida Grande',
+    'Lucida Sans Unicode',
+    Verdana,
+    'Helvetica Neue',
+    Helvetica,
+    Arial,
+    sans-serif;
+}
+
+.ao3e-site a {
+  color: var(--ao3e-site-link);
+}
+
+.ao3e-site-header {
+  border-bottom: 1px solid var(--ao3e-site-line);
+  margin-bottom: 1rem;
+}
+
+.ao3e-site-header h1 {
+  font-size: 1.5rem;
+  margin: 0 0 0.25rem;
+}
+
+.ao3e-site-meta,
+.ao3e-site-note {
+  color: var(--ao3e-site-muted);
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+
+/* What a reader sees when nothing replaced the shell — the browser refused to
+   run the file's scripts, which is not the same thing as an empty export. */
+.ao3e-site-inert {
+  border: 1px solid var(--ao3e-site-line);
+  border-radius: 0.5rem;
+  background: var(--ao3e-site-panel);
+  padding: 1rem;
+}
+
+.ao3e-site-inert p {
+  margin: 0.4rem 0;
+  font-size: 0.95rem;
+}
+
+.AO3E--site--status {
+  color: var(--ao3e-site-muted);
+  font-size: 0.8rem;
+  margin: 0 0 1rem;
+}
+
+.AO3E--site--status[data-ao3e-writable='false'] {
+  background: var(--ao3e-site-warn-bg);
+  color: var(--ao3e-site-warn-fg);
+  border-radius: 0.3rem;
+  padding: 0.5rem 0.7rem;
+}
+
+/* --- One work, read in the page ------------------------------------------ */
+
+.AO3E--site--nav {
+  display: flex;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--ao3e-site-line);
+  padding-bottom: 0.6rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+}
+
+.AO3E--site--work {
+  margin: 0 auto;
+  max-width: 46rem;
+}
+
+/* Why a work in the list can't be opened from the file. */
+.AO3E--site--absent {
+  color: var(--ao3e-site-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+  margin: 0.4rem 0 0;
+}
+
+/* --- AO3's structures, as much of them as the view renders ---------------- */
+
+.ao3e-site .blurb,
+.ao3e-site .work.meta.group {
+  border: 1px solid var(--ao3e-site-line);
+  border-radius: 0.25rem;
+  margin: 0 0 0.643rem;
+  padding: 0.429rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.ao3e-site .blurb .header h4,
+.ao3e-site .blurb .header h5 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.ao3e-site .blurb .header h5 {
+  font-size: 0.875rem;
+  color: var(--ao3e-site-muted);
+}
+
+.ao3e-site .blurb .header .datetime {
+  float: right;
+  color: var(--ao3e-site-muted);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+/* The rating / warning / category / completion symbols, as their text. AO3
+   draws these from a sprite the export has no copy of, so the alt text a screen
+   reader would have read is what everyone gets. */
+.ao3e-site .blurb ul.required-tags {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.3rem 0;
+  padding: 0;
+  font-size: 0.7rem;
+}
+
+.ao3e-site .blurb ul.required-tags li a {
+  display: inline-block;
+  border: 1px solid var(--ao3e-site-line);
+  border-radius: 0.2rem;
+  padding: 0 0.3rem;
+  color: var(--ao3e-site-muted);
+  text-decoration: none;
+}
+
+.ao3e-site .blurb .summary {
+  margin: 0.5rem 0;
+  border-top: 1px solid var(--ao3e-site-rule);
+  padding-top: 0.4rem;
+}
+
+.ao3e-site ul.tags {
+  list-style: none;
+  margin: 0.4rem 0;
+  padding: 0;
+}
+
+.ao3e-site ul.tags li {
+  display: inline;
+}
+
+.ao3e-site ul.tags.commas li:not(:last-child)::after {
+  content: ', ';
+}
+
+.ao3e-site ul.tags .warnings a,
+.ao3e-site ul.tags .relationships a {
+  font-weight: 600;
+}
+
+.ao3e-site dl.stats {
+  margin: 0.4rem 0 0;
+  color: var(--ao3e-site-muted);
+  font-size: 0.8rem;
+}
+
+.ao3e-site dl.stats dt,
+.ao3e-site dl.stats dd {
+  display: inline;
+  margin: 0 0.25rem 0 0;
+}
+
+/* --- A work's own page --------------------------------------------------- */
+
+.ao3e-work .work.meta.group dt {
+  font-weight: 700;
+  clear: left;
+  float: left;
+  margin-right: 0.4rem;
+}
+
+.ao3e-work .work.meta.group dd {
+  margin: 0 0 0.3rem;
+}
+
+.ao3e-work .work.meta.group ul {
+  list-style: none;
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+
+.ao3e-work .work.meta.group ul li {
+  display: inline;
+}
+
+.ao3e-work .work.meta.group ul.commas li:not(:last-child)::after {
+  content: ', ';
+}
+
+.ao3e-work .preface {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.ao3e-work .preface h2.title {
+  font-size: 1.4rem;
+  margin: 0 0 0.3rem;
+}
+
+.ao3e-work .userstuff {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1rem;
+  line-height: 1.7;
+  overflow-wrap: break-word;
+}
+
+.ao3e-work .userstuff img {
+  max-width: 100%;
+  height: auto;
+}
+
+.ao3e-work .userstuff blockquote {
+  border-left: 3px solid var(--ao3e-site-line);
+  margin: 1rem 0;
+  padding-left: 1rem;
+}
+
+.ao3e-work #chapters > div + div {
+  border-top: 1px solid var(--ao3e-site-line);
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+}
+
+.ao3e-work .chapter .title {
+  font-size: 1.2rem;
+}

@@ -15,8 +15,10 @@ import type * as vite from 'vite'
 import { ICONS_CUSTOM_COLLECTIONS, ICONS_TRANSFORM } from '#uno.config'
 
 import type { AssetPage, ViteInput } from './AssetPage.ts'
+import type { AssetSite } from './AssetSite.ts'
 import type { File } from './utils.ts'
 
+import { createAsset } from './Asset.ts'
 import { ALIAS, DEFINE, ESBUILD, ESBUILD_TARGET, IconsPlugin, LIGHTNING_CSS_TARGET } from './common.ts'
 import { logBuild, makeHash, realPath, writeFile } from './utils.ts'
 
@@ -152,6 +154,7 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
         dts: join(src, 'types/auto-imports.d.ts'),
       }),
       AssetPlugin(),
+      SiteBundlePlugin(),
       {
         name: 'origin',
         transform(code) {
@@ -165,6 +168,32 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
       ...devtoolsPlugins,
     ],
   } as vite.InlineConfig
+
+  /**
+   * Hands the exported site's app and stylesheet to the options build, as two
+   * strings ({@link file://./AssetSite.ts}).
+   *
+   * A virtual module rather than a `?raw` import of a file on disk, because
+   * there is no file: the bundle is built here, on demand, the first time the
+   * options page's module graph reaches it — which is also what puts it ahead of
+   * the build that needs it, without either build having to know about the
+   * other's schedule.
+   */
+  function SiteBundlePlugin(): vite.Plugin {
+    const id = 'virtual:site-bundle'
+    const resolved = `\0${id}`
+    return {
+      name: 'site-bundle',
+      resolveId: source => (source === id ? resolved : undefined),
+      async load(loaded) {
+        if (loaded !== resolved)
+          return
+        const site = createAsset(join(src, 'site/main.ts'), asset.opts, 'site') as AssetSite
+        await site.ensureBuilt()
+        return `export const js = ${JSON.stringify(site.js)}\nexport const css = ${JSON.stringify(site.css)}\n`
+      },
+    }
+  }
 
   function AssetPlugin() {
     return {

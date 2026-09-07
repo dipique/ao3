@@ -243,7 +243,11 @@ function splitRequired(el: Element | null): string[] {
  * work's position across the aggregated list (0 = most recently marked).
  */
 export function parseWork(el: HTMLLIElement, markedOrder: number): Work {
-  const titleLink = el.querySelector<HTMLAnchorElement>('.header h4.heading a[href^="/works/"]')
+  // Matched anywhere in the href, not at its start: a blurb on AO3 links to
+  // `/works/123`, but a blurb stored in an export has been made absolute so its
+  // links still go somewhere off the archive. `getBlurb` already reads the same
+  // link the same way.
+  const titleLink = el.querySelector<HTMLAnchorElement>('.header h4.heading a[href*="/works/"]')
   const workId = el.id.match(/work_(\d+)/)?.[1]
     ?? (titleLink ? new URL(titleLink.href).pathname.match(/^\/works\/(\d+)/)?.[1] : undefined)
     ?? ''

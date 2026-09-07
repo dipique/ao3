@@ -1,5 +1,3 @@
-import { createLogger } from './logger.ts'
-
 export { api } from './api.ts'
 export type { BackupKind, BackupSummary, SyncStatus, SyncUsage } from './api.ts'
 
@@ -13,7 +11,7 @@ export { fandomCache } from './fandomCache.ts'
 export type { FandomCache, ScrapedTag, ScrapedTagType } from './fandomCache.ts'
 export * from './listUrl.ts'
 
-export { type Logger as BaseLogger, createLogger, logger } from './logger.ts'
+export { type Logger as BaseLogger, createLogger, logBanner, logger } from './logger.ts'
 
 export { options } from './options.ts'
 export type { Options, ThemeOption } from './options.ts'
@@ -34,6 +32,3 @@ export * from './wordCount.ts'
 export * from './workMarks.ts'
 
 export * from './workProgress.ts'
-
-const manifest = browser.runtime.getManifest()
-createLogger(`${manifest.short_name} v${manifest.version}`, 'display: inline-block; background-color: #e0005a; color: #ffffff; font-weight: bold; padding: 1px 3px; border-radius: 3px;').info()

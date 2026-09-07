@@ -43,6 +43,11 @@
     "src/common/**/*.ts",
     "src/content_script/**/*.ts",
     "src/content_script/**/*.tsx",
+    // The exported site's own bundle. It is the search view and `src/common`
+    // with a stand-in `browser` under them, so it wants exactly the options
+    // those are already checked against — `erasableSyntaxOnly` included.
+    "src/site/**/*.ts",
+    "src/site/**/*.tsx",
     "src/types/env.d.ts",
     "src/types/icons.d.ts"
   ]

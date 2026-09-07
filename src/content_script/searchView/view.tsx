@@ -38,11 +38,17 @@ const ACTIVE_CLASS = cx('active')
 // Name tiebreaker for facet-row ordering; mirrors engine's value sort.
 const rowCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
+/**
+ * What the host does when the view asks. Both are optional, and each button is
+ * only drawn where its handler is: an exported copy of a list has no native
+ * listing behind it to go back to and nothing to re-scrape from, so it passes
+ * neither and gets a toolbar with just the count on it.
+ */
 export interface SearchViewHandlers {
   /** Restore the native page (remove the aggregated view). */
-  onBack: () => void
+  onBack?: () => void
   /** Re-scrape from the source and feed the result back via {@link SearchView.update}. */
-  onRefresh: () => void
+  onRefresh?: () => void
 }
 
 /** A snapshot of what the user has dialled in, so the view can be rebuilt as-is. */
@@ -496,20 +502,32 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     persist()
   })
 
-  const backBtn = (
-    <button type="button" class={cx('back')}>
-      <MdiArrowLeft />
-      {' '}
-      Back to list
-    </button>
-  ) as HTMLElement as HTMLButtonElement
-  backBtn.addEventListener('click', handlers.onBack)
-  const refreshBtn = (
-    <button type="button" class={cx('refresh')} title="Refresh">
-      <MdiRefresh />
-    </button>
-  ) as HTMLElement as HTMLButtonElement
-  refreshBtn.addEventListener('click', handlers.onRefresh)
+  const onBack = handlers.onBack
+  const backBtn = onBack
+    ? (() => {
+        const button = (
+          <button type="button" class={cx('back')}>
+            <MdiArrowLeft />
+            {' '}
+            Back to list
+          </button>
+        ) as HTMLElement as HTMLButtonElement
+        button.addEventListener('click', onBack)
+        return button
+      })()
+    : null
+  const onRefresh = handlers.onRefresh
+  const refreshBtn = onRefresh
+    ? (() => {
+        const button = (
+          <button type="button" class={cx('refresh')} title="Refresh">
+            <MdiRefresh />
+          </button>
+        ) as HTMLElement as HTMLButtonElement
+        button.addEventListener('click', onRefresh)
+        return button
+      })()
+    : null
 
   // --- Facets ---------------------------------------------------------------
 
@@ -1081,7 +1099,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   function setUpdating(updating: boolean): void {
     updatingEl.classList.toggle(cx('updating-on'), updating)
-    refreshBtn.classList.toggle(cx('refresh-spinning'), updating)
+    refreshBtn?.classList.toggle(cx('refresh-spinning'), updating)
   }
 
   function getState(): ViewState {

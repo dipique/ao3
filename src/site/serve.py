@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""Serve this exported AO3 Enhancements site on your local network.
+"""Serve a folder of AO3 Enhancements exports on your local network.
 
     python3 serve.py              # port 8765, reachable from other devices
     python3 serve.py 9000         # a different port
     python3 serve.py --host 127.0.0.1   # this machine only
 
-Standard library only, Python 3.7+. Serves the folder this file lives in, so it
-works wherever the export was unpacked — no need to be in that directory.
+Standard library only, Python 3.7+. Serves the folder this file lives in, so
+drop it beside your exports and run it from anywhere.
 
-The site is plain static files: any web server will do. This one exists so
-"unzip and read it on the iPad" needs nothing installed.
+An export is one self-contained HTML file, and most browsers will open one
+straight off the device with nothing serving it at all. Safari will not: it
+refuses to run scripts in a local file. So for a reader who would rather not
+install a second browser, a served address is the only way in, and that is what
+this is for. It is not what decides whether an export can save anything - what
+it saves (marks, filters, layout) it saves either way.
+
+There is no index page. The exports are the pages, so the root is a listing of
+them.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Windows resolves media types through the registry, where .js is regularly
 # mapped to text/plain — which browsers refuse to execute. Pin the handful of
-# types this site actually serves rather than trusting the machine's mapping.
+# types these pages actually serve rather than trusting the machine's mapping.
 TYPES = {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -76,7 +83,7 @@ def lan_address() -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Serve this exported AO3 Enhancements site.",
+        description="Serve a folder of AO3 Enhancements exports.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -95,11 +102,6 @@ def main() -> int:
     args = parser.parse_args()
     port = args.port if args.port is not None else (args.port_opt or DEFAULT_PORT)
 
-    if not os.path.exists(os.path.join(HERE, "index.html")):
-        print(f"No index.html next to this script ({HERE}).", file=sys.stderr)
-        print("Unzip the whole export and run serve.py from inside it.", file=sys.stderr)
-        return 1
-
     try:
         server = Server((args.host, port), partial(Handler, directory=HERE))
     except OSError as err:
@@ -109,7 +111,9 @@ def main() -> int:
         print(f"Something else may be using that port; try: python3 serve.py {port + 1}", file=sys.stderr)
         return 1
 
-    lines = [f"Serving {HERE}", f"  this machine    http://localhost:{port}/"]
+    exports = sorted(f for f in os.listdir(HERE) if f.lower().endswith(".html"))
+    found = f"{len(exports)} export(s)" if exports else "no exports yet - put an .html export here"
+    lines = [f"Serving {HERE} ({found})", f"  this machine    http://localhost:{port}/"]
     if args.host not in ("127.0.0.1", "localhost"):
         ip = lan_address()
         if ip:

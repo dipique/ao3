@@ -1,11 +1,13 @@
 import { debounce } from '@antfu/utils'
 
-import { ADDON_CLASS, api, isExtensionContextValid, logger, options, toast } from '#common'
+import { ADDON_CLASS, api, isExtensionContextValid, logBanner, logger, options, toast } from '#common'
 
 import { setMenusEnabled } from './contextTrigger.tsx'
 import { applySurfaceTheme } from './theme.ts'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
+
+logBanner()
 
 /**
  * Clears any old DOM elements added by the extension.

@@ -10,7 +10,7 @@ import type { Args } from './args.ts'
 
 import { logBuild, logTime, writeFile } from './utils.ts'
 
-export type AssetType = 'manifest' | 'background' | 'content_script' | 'module' | 'style' | 'page' | 'other'
+export type AssetType = 'manifest' | 'background' | 'content_script' | 'module' | 'style' | 'page' | 'site' | 'other'
 
 export interface AssetOpts extends Args {
   root: string

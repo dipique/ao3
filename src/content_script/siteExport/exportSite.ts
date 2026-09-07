@@ -1,6 +1,6 @@
 import type { Options, SnapshotDescriptor, ThemeOption } from '#common'
 
-import { LOCAL_ONLY, options, textReplacementActive } from '#common'
+import { getArchiveLink, LOCAL_ONLY, options, textReplacementActive } from '#common'
 import { readSnapshot } from '#content_script/searchView/cache.js'
 
 import type { CompressedWork } from './compress.ts'
@@ -17,6 +17,7 @@ import {
   siteShellTail,
   statusFor,
 } from './payload.ts'
+import { siteBundle } from './siteBundle.ts'
 import { readWorkTextIndex, readWorkTexts } from './workTextCache.ts'
 
 /**
@@ -76,7 +77,7 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
     if (!work.workId || seen.has(work.workId))
       continue
     seen.add(work.workId)
-    works.push({ workId: work.workId, blurbHtml: work.el.outerHTML })
+    works.push({ workId: work.workId, blurbHtml: absoluteLinks(work.el) })
   }
 
   const [index, textSettings, optionsPayload] = await Promise.all([
@@ -157,7 +158,7 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
   const blurbs = await compressEntry(JSON.stringify(works.map(work => work.blurbHtml)))
 
   const blob = new Blob([
-    siteShellHead(manifest),
+    siteShellHead(manifest, siteBundle),
     `{"v":${SITE_SCHEMA_VERSION},"manifest":`,
     scriptJson(manifest),
     ',"options":',
@@ -167,10 +168,34 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
     ',"works":[',
     workJson.join(','),
     ']}',
-    siteShellTail(),
+    siteShellTail(siteBundle),
   ], { type: 'text/html;charset=utf-8' })
 
   return { blob, fileName: exportFileName(opts.descriptor.label, new Date(generatedAt)), manifest }
+}
+
+/**
+ * A blurb's HTML with every AO3 link made absolute.
+ *
+ * A snapshot holds what the archive served, where every href is root-relative —
+ * which resolves against `archiveofourown.org` on the page it was scraped from
+ * and against the reader's own filesystem in an export. Rewriting them here
+ * rather than in the site means the file's links are right before a single
+ * script has run, and it leaves them looking like the work links they are: the
+ * view's own toolbars find a work by its `/works/:id` href, so a blurb pointed
+ * straight at an in-page route would quietly lose its menu. Opening a carried
+ * work in the page is the site's job, and it does it by intercepting the click.
+ *
+ * The nodes are the snapshot's own, already detached from any document, so this
+ * mutates them rather than parsing the HTML a second time.
+ */
+function absoluteLinks(el: HTMLElement): string {
+  for (const link of el.querySelectorAll('a[href]')) {
+    const href = link.getAttribute('href')
+    if (href?.startsWith('/'))
+      link.setAttribute('href', getArchiveLink(href))
+  }
+  return el.outerHTML
 }
 
 /**

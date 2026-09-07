@@ -27,6 +27,22 @@ export function createLogger(...args: Parameters<Logger['child']>): ReturnType<L
   return logger.child(...args)
 }
 
+/**
+ * The name-and-version badge each context prints once, on its way up.
+ *
+ * Called by an entry point rather than run when `#common` is imported. The
+ * barrel used to read the manifest at import time, which made every module in
+ * it — the pure ones included — unusable anywhere the extension APIs aren't
+ * there to answer.
+ */
+export function logBanner(): void {
+  const manifest = browser.runtime.getManifest()
+  createLogger(
+    `${manifest.short_name} v${manifest.version}`,
+    'display: inline-block; background-color: #e0005a; color: #ffffff; font-weight: bold; padding: 1px 3px; border-radius: 3px;',
+  ).info()
+}
+
 void browser.storage.local.get('option.verbose').then((value) => {
   Logger.verbose = (value['option.verbose'] as boolean | undefined) ?? false
 })

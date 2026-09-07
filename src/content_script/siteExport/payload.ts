@@ -1,17 +1,19 @@
 import type { CompressedEntry, CompressedWork } from './compress.ts'
 
 /**
- * What goes *in* the file: the manifest, the data block, the shell around them,
- * and the placeholder renderer.
+ * What goes *in* the file: the manifest, the data block, and the shell around
+ * them.
  *
  * Pure — plain functions over plain data, no `#common`, no `browser`, no DOM —
- * so the shapes below can be checked headlessly. {@link file://./exportSite.ts}
- * is the half that reads storage and assembles the result.
+ * so the shapes below can be checked headlessly. The app and the stylesheet
+ * arrive as an argument ({@link file://./siteBundle.ts}) rather than being built
+ * here, which is what keeps that true. {@link file://./exportSite.ts} is the
+ * half that reads storage and assembles the result.
  *
  * An export is one HTML file, in this order:
  *
  * ```
- * <style>                                            the view's CSS
+ * <style>                                            the app's stylesheet
  * <div id="ao3e-shell">                              inert until a script replaces it
  * <script type="application/json" id="ao3e-data">    manifest, options, entries
  * <script>                                           the app
@@ -38,6 +40,20 @@ export const SITE_DATA_ID = 'ao3e-data'
 
 /** The element that says the file is inert until the app replaces it. */
 export const SITE_SHELL_ID = 'ao3e-shell'
+
+/**
+ * The app and the stylesheet an export carries, as the shell takes them.
+ *
+ * An argument rather than something built here, which is what lets this module
+ * stay plain data with a bundler nowhere near it; where the strings actually
+ * come from is {@link file://./siteBundle.ts}'s problem.
+ */
+export interface SiteBundle {
+  /** The whole app, one IIFE, inlined into the export's closing `<script>`. */
+  js: string
+  /** Its stylesheet, inlined into the export's `<head>`. */
+  css: string
+}
 
 /** Why a work in the list is, or is not, readable offline. */
 export type SiteWorkStatus = 'cached' | 'restricted' | 'notfound' | 'error' | 'uncached'
@@ -170,251 +186,6 @@ export function scriptJson(value: unknown): string {
 }
 
 /**
- * The export's stylesheet, inlined into the head.
- *
- * Not AO3's own skin — that question belongs with the real view. This is enough
- * for the blurbs and a work to be readable on a phone: a measure, a legible
- * size, and light/dark from the device.
- */
-export const SITE_STYLESHEET = `:root {
-  color-scheme: light dark;
-  --ao3e-bg: #fff;
-  --ao3e-fg: #1a1a1a;
-  --ao3e-muted: #5a5a5a;
-  --ao3e-line: #d8d8d8;
-  --ao3e-link: #0b5aa2;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ao3e-bg: #16181c;
-    --ao3e-fg: #e6e6e6;
-    --ao3e-muted: #9aa0a6;
-    --ao3e-line: #33373d;
-    --ao3e-link: #7cb7f0;
-  }
-}
-body.ao3e-site {
-  margin: 0 auto;
-  padding: 1rem 1rem 4rem;
-  max-width: 46rem;
-  background: var(--ao3e-bg);
-  color: var(--ao3e-fg);
-  font: 16px/1.6 Georgia, "Times New Roman", serif;
-}
-.ao3e-site a { color: var(--ao3e-link); }
-.ao3e-site-header { border-bottom: 1px solid var(--ao3e-line); margin-bottom: 1rem; }
-.ao3e-site-header h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
-.ao3e-site-meta, .ao3e-site-note { color: var(--ao3e-muted); font-size: .85rem; margin: .25rem 0; }
-.ao3e-site-inert { border: 1px solid var(--ao3e-line); border-radius: .5rem; padding: 1rem; }
-.ao3e-site-inert p { margin: .4rem 0; font-size: .95rem; }
-#ao3e-filter {
-  width: 100%;
-  margin: .75rem 0 1rem;
-  padding: .5rem .6rem;
-  border: 1px solid var(--ao3e-line);
-  border-radius: .4rem;
-  background: var(--ao3e-bg);
-  color: inherit;
-  font: inherit;
-  font-size: .95rem;
-}
-.ao3e-site-list { list-style: none; margin: 0; padding: 0; }
-.ao3e-site-list > li { border-bottom: 1px solid var(--ao3e-line); padding: .9rem 0; }
-.ao3e-site-list h4 { font-size: 1.05rem; margin: 0 0 .3rem; }
-.ao3e-site-list .tags { list-style: none; display: inline; margin: 0; padding: 0; }
-.ao3e-site-list .tags li { display: inline; }
-.ao3e-site-list .tags li:not(:last-child)::after { content: ", "; }
-.ao3e-site-list dl.stats { color: var(--ao3e-muted); font-size: .8rem; }
-.ao3e-site-list dl.stats dt, .ao3e-site-list dl.stats dd { display: inline; margin: 0 .2rem 0 0; }
-.ao3e-site-uncached { color: var(--ao3e-muted); font-size: .8rem; font-style: italic; margin: .4rem 0 0; }
-.ao3e-site-empty { color: var(--ao3e-muted); padding: 2rem 0; text-align: center; }
-.ao3e-site-nav {
-  display: flex;
-  gap: 1rem;
-  border-bottom: 1px solid var(--ao3e-line);
-  padding-bottom: .6rem;
-  margin-bottom: 1.2rem;
-  font-size: .85rem;
-}
-.ao3e-work dl.work.meta { border: 1px solid var(--ao3e-line); border-radius: .4rem; padding: .8rem; font-size: .85rem; }
-.ao3e-work dl.work.meta dt { font-weight: 700; }
-.ao3e-work dl.work.meta dd { margin: 0 0 .5rem; }
-.ao3e-work dl.work.meta ul { list-style: none; display: inline; margin: 0; padding: 0; }
-.ao3e-work dl.work.meta ul li { display: inline; }
-.ao3e-work dl.work.meta ul li:not(:last-child)::after { content: ", "; }
-.ao3e-work .userstuff { overflow-wrap: break-word; }
-.ao3e-work .userstuff img { max-width: 100%; height: auto; }
-.ao3e-work #chapters > div { border-top: 1px solid var(--ao3e-line); margin-top: 2rem; padding-top: 1rem; }
-`
-
-/**
- * The placeholder view: the stored blurbs, a substring filter, and a reader that
- * inflates one work at a time.
- *
- * Deliberately small, and meant to be **replaced wholesale** by the real search
- * view once that can be built for this target — facets, sort, rules, marks.
- * Until then it is enough to be worth carrying to a tablet, because a thousand
- * works with no filter is not a thing anyone can use on one.
- *
- * It carries its own base64, inflate and CRC rather than importing
- * {@link file://./compress.ts}: this is an inline string in a generated file,
- * with no bundler between it and the page. The duplication goes when a real
- * bundle arrives and can import the module properly.
- *
- * Plain ES2017, and no template literals — this is itself a template literal.
- */
-const SITE_APP_SCRIPT = `(function () {
-  var data = JSON.parse(document.getElementById('${SITE_DATA_ID}').textContent)
-  var shell = document.getElementById('${SITE_SHELL_ID}')
-
-  var byId = {}
-  for (var i = 0; i < data.works.length; i++) byId[data.works[i].id] = data.works[i]
-  var status = {}
-  for (var j = 0; j < data.manifest.works.length; j++) status[data.manifest.works[j].id] = data.manifest.works[j]
-
-  function fail(message) {
-    shell.className = 'ao3e-site-inert'
-    shell.textContent = ''
-    var p = document.createElement('p')
-    p.appendChild(document.createTextNode(message))
-    shell.appendChild(p)
-  }
-
-  if (typeof DecompressionStream !== 'function')
-    return fail('This browser is too old to unpack the works in this file.')
-
-  function fromBase64(text) {
-    var binary = atob(text)
-    var bytes = new Uint8Array(binary.length)
-    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    return bytes
-  }
-
-  function crc32(bytes) {
-    var crc = 0xFFFFFFFF
-    for (var i = 0; i < bytes.length; i++) {
-      crc ^= bytes[i]
-      for (var bit = 0; bit < 8; bit++) crc = crc & 1 ? 0xEDB88320 ^ (crc >>> 1) : crc >>> 1
-    }
-    return (crc ^ 0xFFFFFFFF) >>> 0
-  }
-
-  var decoder = new TextDecoder()
-
-  function decompress(entry) {
-    var stream = new Response(fromBase64(entry.b64)).body.pipeThrough(new DecompressionStream('deflate-raw'))
-    return new Response(stream).arrayBuffer().then(function (buffer) {
-      var bytes = new Uint8Array(buffer)
-      if (bytes.length !== entry.size || crc32(bytes) !== entry.crc)
-        throw new Error('The copy of this work in the file is damaged.')
-      return decoder.decode(bytes)
-    })
-  }
-
-  shell.className = ''
-  shell.innerHTML = '<div id="ao3e-list">'
-    + '<input type="search" id="ao3e-filter" placeholder="Filter by title, author, fandom or tag" autocomplete="off" spellcheck="false">'
-    + '<p class="ao3e-site-meta" id="ao3e-shown"></p><ol class="ao3e-site-list" id="ao3e-works"></ol></div>'
-    + '<div id="ao3e-reader" hidden><nav class="ao3e-site-nav"><a href="#">&#8592; Back to the list</a>'
-    + '<a id="ao3e-ao3" href="https://archiveofourown.org/">Open on AO3</a></nav><div id="ao3e-body"></div></div>'
-
-  var list = document.getElementById('ao3e-works')
-  var filter = document.getElementById('ao3e-filter')
-  var reader = document.getElementById('ao3e-reader')
-  var listView = document.getElementById('ao3e-list')
-  var shown = document.getElementById('ao3e-shown')
-  var items = []
-
-  decompress(data.blurbs).then(function (json) {
-    var template = document.createElement('template')
-    var blurbs = JSON.parse(json)
-    for (var i = 0; i < blurbs.length; i++) {
-      template.innerHTML = blurbs[i]
-      if (!template.content.firstElementChild) continue
-      var el = document.importNode(template.content.firstElementChild, true)
-      var id = (el.id || '').replace('work_', '')
-
-      // Blurb links are AO3-relative and go nowhere here: point a work this file
-      // carries at its hash, and send everything else back to the archive.
-      var links = el.querySelectorAll('a[href]')
-      for (var k = 0; k < links.length; k++) {
-        var href = links[k].getAttribute('href') || ''
-        if (/^\\/works\\/\\d+(?:[?#]|$)/.test(href) && byId[id]) links[k].setAttribute('href', '#work/' + id)
-        else if (href.charAt(0) === '/') links[k].setAttribute('href', 'https://archiveofourown.org' + href)
-      }
-
-      var entry = status[id]
-      if (entry && entry.status !== 'cached') {
-        var note = document.createElement('p')
-        note.className = 'ao3e-site-uncached'
-        note.appendChild(document.createTextNode(
-          entry.status === 'restricted' ? 'Not saved \\u2014 restricted'
-            : entry.status === 'notfound' ? 'Not saved \\u2014 no longer on AO3'
-              : entry.status === 'error' ? 'Not saved \\u2014 the copy failed'
-                : 'Not saved'))
-        el.appendChild(note)
-      }
-
-      items.push({ el: el, text: (el.textContent || '').toLowerCase() })
-    }
-    render()
-    route()
-  })['catch'](function (err) {
-    fail('The list in this file could not be read. ' + err.message)
-  })
-
-  function render() {
-    var needle = filter.value.trim().toLowerCase()
-    list.textContent = ''
-    var count = 0
-    for (var i = 0; i < items.length; i++) {
-      if (needle && items[i].text.indexOf(needle) === -1) continue
-      list.appendChild(items[i].el)
-      count++
-    }
-    shown.textContent = count === items.length
-      ? count.toLocaleString() + ' works'
-      : count.toLocaleString() + ' of ' + items.length.toLocaleString() + ' works'
-    if (!count) {
-      var empty = document.createElement('li')
-      empty.className = 'ao3e-site-empty'
-      empty.appendChild(document.createTextNode('Nothing matches that.'))
-      list.appendChild(empty)
-    }
-  }
-
-  function route() {
-    var match = /^#work\\/(\\d+)$/.exec(location.hash)
-    if (!match) {
-      reader.hidden = true
-      listView.hidden = false
-      return
-    }
-    var id = match[1]
-    listView.hidden = true
-    reader.hidden = false
-    document.getElementById('ao3e-ao3').setAttribute('href', 'https://archiveofourown.org/works/' + id)
-    var body = document.getElementById('ao3e-body')
-    body.textContent = 'Unpacking\\u2026'
-    window.scrollTo(0, 0)
-    if (!byId[id]) {
-      body.textContent = 'That work is not saved in this file.'
-      return
-    }
-    decompress(byId[id]).then(function (html) {
-      // A reader who moved on while this was unpacking gets what they asked for
-      // second, not what they asked for first.
-      if (location.hash === '#work/' + id) body.innerHTML = html
-    })['catch'](function (err) {
-      body.textContent = err.message
-    })
-  }
-
-  filter.addEventListener('input', render)
-  window.addEventListener('hashchange', route)
-})()`
-
-/**
  * Everything above the data block: the CSS, the heading, and a shell that states
  * plainly that the file is inert.
  *
@@ -423,7 +194,7 @@ const SITE_APP_SCRIPT = `(function () {
  * to explain itself — otherwise an export that is working perfectly well looks
  * like one that came out empty.
  */
-export function siteShellHead(manifest: SiteManifest): string {
+export function siteShellHead(manifest: SiteManifest, bundle: SiteBundle): string {
   const { label } = manifest.source
   const total = manifest.counts.total.toLocaleString('en-US')
   const cached = manifest.counts.cached.toLocaleString('en-US')
@@ -434,7 +205,7 @@ export function siteShellHead(manifest: SiteManifest): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(label)}</title>
 <style>
-${SITE_STYLESHEET}
+${bundle.css}
 </style>
 </head>
 <body class="ao3e-site">
@@ -451,10 +222,10 @@ ${SITE_STYLESHEET}
 }
 
 /** Everything below the data block: the app, and the end of the document. */
-export function siteShellTail(): string {
+export function siteShellTail(bundle: SiteBundle): string {
   return `</script>
 <script>
-${SITE_APP_SCRIPT}
+${bundle.js}
 </script>
 </body>
 </html>
@@ -462,8 +233,8 @@ ${SITE_APP_SCRIPT}
 }
 
 /** The whole file, for a caller holding the data rather than streaming it. */
-export function siteHtml(manifest: SiteManifest, dataJson: string): string {
-  return siteShellHead(manifest) + dataJson + siteShellTail()
+export function siteHtml(manifest: SiteManifest, dataJson: string, bundle: SiteBundle): string {
+  return siteShellHead(manifest, bundle) + dataJson + siteShellTail(bundle)
 }
 
 /**

@@ -413,6 +413,10 @@ describe('options UI — site export', { skip }, () => {
    * with no server and nothing else beside it. This is the whole promise of the
    * single-file format, and a `file://` load is the only thing that proves it —
    * everything above only ever inspected the bytes.
+   *
+   * What it drives is the extension's own search view, running against a
+   * `browser` the file brought with it: the facet sidebar, the results list, a
+   * work opened from the copy inside the page.
    */
   test('the exported file works on its own, from file://', async () => {
     const { html } = await lastDownload()
@@ -426,38 +430,80 @@ describe('options UI — site export', { skip }, () => {
     reader.on('pageerror', e => errors.push(e.message))
     try {
       await reader.goto(`file://${path.replace(/\\/g, '/')}`, { waitUntil: 'load' })
-      await reader.waitForSelector('#ao3e-works li', { timeout: 15000 })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
 
       // The inert shell was replaced, so the scripts ran.
       assert.doesNotMatch(await reader.content(), /This page needs JavaScript, and none is running/)
-      assert.equal(await reader.$$eval('#ao3e-works > li', els => els.length), 3)
-      assert.match(await reader.$eval('#ao3e-shown', el => el.textContent), /^3 works/)
+      assert.equal(await reader.$$eval('.AO3E--search-view--results > li', els => els.length), 3)
+      assert.match(await reader.$eval('.AO3E--search-view--count', el => el.textContent), /of 3 works$/)
 
-      // A work this file carries opens in the page; the tag beside it still
-      // points at the archive.
-      assert.equal(
-        await reader.$eval('#ao3e-works > li h4 a', el => el.getAttribute('href')),
-        '#work/11',
+      // Storage was probed, not assumed — and a `file:` origin passes.
+      assert.equal(await reader.$eval('.AO3E--site--status', el => el.dataset.ao3eWritable), 'true')
+
+      // The whole point of shipping the real view: facets, built from the blurbs.
+      assert.ok(
+        await reader.$$eval('.AO3E--search-view--sidebar', els => els.length) > 0,
+        'the filter sidebar should be there',
       )
+
+      // A blurb's own link still names the archive — the view's work toolbars
+      // find their target by that href — and a plain click routes in the page.
       assert.match(
-        await reader.$eval('#ao3e-works > li .tags a', el => el.getAttribute('href')),
-        /^https:\/\/archiveofourown\.org\//,
+        await reader.$eval('.AO3E--search-view--results > li h4 a', el => el.getAttribute('href')),
+        /^https:\/\/archiveofourown\.org\/works\/11$/,
       )
-
-      // Hash routing, and the work unpacked on demand.
-      await reader.click('#ao3e-works > li h4 a')
-      await reader.waitForFunction(() => document.querySelector('#ao3e-body .ao3e-work') !== null, { timeout: 10000 })
-      const text = await reader.$eval('#ao3e-body', el => el.textContent)
+      await reader.click('.AO3E--search-view--results > li h4 a')
+      await reader.waitForFunction(() => location.hash === '#work/11')
+      await reader.waitForFunction(() => document.querySelector('.AO3E--site--work .userstuff') !== null, { timeout: 10000 })
+      const text = await reader.$eval('.AO3E--site--work', el => el.textContent)
       assert.match(text, /The rewritten text of work 11\./)
-      assert.equal(await reader.$eval('#ao3e-list', el => el.hidden), true)
+      assert.equal(await reader.$eval('.AO3E--site--list', el => el.hidden), true)
 
-      // Back to the list, and the filter narrows it.
-      await reader.click('#ao3e-reader .ao3e-site-nav a')
-      await reader.waitForFunction(() => !document.getElementById('ao3e-list').hidden)
-      await reader.type('#ao3e-filter', 'Work number 12')
-      await reader.waitForFunction(() => document.querySelectorAll('#ao3e-works > li').length === 1)
+      // Back to the list, and the view's own search box narrows it.
+      await reader.click('.AO3E--site--nav a')
+      await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)
+      await reader.type('.AO3E--search-view--input', 'Work number 12')
+      await reader.waitForFunction(
+        () => document.querySelectorAll('.AO3E--search-view--results > li:not(.AO3E--search-view--hidden)').length === 1,
+      )
 
       assert.deepEqual(errors, [], 'the exported page should not need anything it does not carry')
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * The reader's marks, filters and layout are kept on the one origin every
+   * local file shares — so a re-export, which lands under a new name, still
+   * finds what the last one left.
+   */
+  test('a second export finds what the first one stored', async () => {
+    const { html } = await lastDownload()
+    const dir = mkdtempSync(join(tmpdir(), 'ao3e-site-'))
+    writeFileSync(join(dir, 'first.html'), html)
+    writeFileSync(join(dir, 'second.html'), html)
+
+    const reader = await browser.newPage()
+    try {
+      await reader.goto(`file://${join(dir, 'first.html').replace(/\\/g, '/')}`, { waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      await reader.evaluate(() => browser.storage.local.set({ 'ao3e.site.witness': 'left here' }))
+      const first = await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.meta'))['ao3e.site.meta'])
+
+      await reader.goto(`file://${join(dir, 'second.html').replace(/\\/g, '/')}`, { waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      const seen = await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.witness'))['ao3e.site.witness'] ?? null)
+      assert.equal(seen, 'left here')
+
+      // Every open is counted, and the generation stays the one that seeded the
+      // settings — a second file of the same vintage must not write them again.
+      const meta = await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.meta'))['ao3e.site.meta'])
+      assert.equal(meta.opens, first.opens + 1)
+      assert.equal(meta.seededGeneration, first.seededGeneration)
+      assert.ok(meta.seededGeneration > 0)
     }
     finally {
       await reader.close()

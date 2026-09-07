@@ -3,6 +3,7 @@ import type { AssetBase, AssetOpts, AssetType } from './AssetBase.ts'
 import { AssetMain } from './AssetMain.ts'
 import { AssetManifest } from './AssetManifest.ts'
 import { AssetPage } from './AssetPage.ts'
+import { AssetSite } from './AssetSite.ts'
 import { HTML_RE, RegexMap, SCRIPT_RE, STYLE_RE } from './utils.ts'
 
 const ASSET_CACHE = new Map<string, AssetBase>()
@@ -24,6 +25,8 @@ export function createAsset(inputPath: string, opts: AssetOpts, type?: AssetType
     asset = new AssetManifest(inputPath, opts)
   else if (type === 'page')
     asset = new AssetPage(inputPath, opts)
+  else if (type === 'site')
+    asset = new AssetSite(inputPath, opts)
   else
     asset = new AssetMain(inputPath, opts, type)
 

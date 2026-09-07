@@ -4,12 +4,14 @@ import './reset.css'
 
 import { type Component, createApp } from 'vue'
 
-import { cache, options } from '#common'
+import { cache, logBanner, options } from '#common'
 
 import Icon from './components/basic/Icon.ts'
 import OptionsUI from './OptionsUI.vue'
 
 import 'uno.css'
+
+logBanner()
 
 if (process.env.NODE_ENV === 'development') {
   // Allow manual testing access to the option and cache object

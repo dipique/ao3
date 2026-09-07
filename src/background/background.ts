@@ -1,4 +1,4 @@
-import { api, cache, options, syncMeta } from '#common'
+import { api, cache, logBanner, options, syncMeta } from '#common'
 
 import { listBackups, restoreBackup } from './backups.ts'
 import {
@@ -12,6 +12,8 @@ import {
 } from './syncEngine.ts'
 
 import './menus.ts'
+
+logBanner()
 
 // --- Sync engine listeners ---
 // Registered synchronously at the top level so an MV3 wake-up event (a remote
