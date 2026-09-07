@@ -35,8 +35,18 @@ export interface SnapshotSummary {
   scrapedAt: number
   /** Works held, from the stored blurb count. */
   count: number
+  /**
+   * The works' ids, in list order — one attribute match per stored blurb, not a
+   * second blurb parser. The options page needs them to say how many of *this*
+   * list's works are cached ({@link file://../siteExport/workTextCache.ts} keys
+   * by work, not by list), and the HTML they come out of is already in hand.
+   */
+  workIds: string[]
   descriptor?: SnapshotDescriptor
 }
+
+/** The `id="work_123"` a blurb carries, which is where `parseWork` reads it from too. */
+const BLURB_ID_RE = /\bid="work_(\d+)"/
 
 /** Read and rehydrate a cached snapshot, or null if absent/stale-shaped. */
 export async function readSnapshot(key: string): Promise<CachedSnapshot | null> {
@@ -60,6 +70,7 @@ export async function listSnapshots(): Promise<SnapshotSummary[]> {
       key,
       scrapedAt: entry.scrapedAt,
       count: entry.blurbsHtml.length,
+      workIds: entry.blurbsHtml.map(html => BLURB_ID_RE.exec(html)?.[1]).filter((id): id is string => !!id),
       descriptor: entry.descriptor,
     }))
     .sort((a, b) => b.scrapedAt - a.scrapedAt)

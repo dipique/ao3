@@ -12,6 +12,7 @@ declare global {
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
+  const ago: typeof import('../options_ui/composables/useSiteExport').ago
   const anchorSlug: typeof import('../options_ui/composables/useAnchors').anchorSlug
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
@@ -44,6 +45,7 @@ declare global {
   const expandCategory: typeof import('../options_ui/composables/useCategoryCollapse').expandCategory
   const expandSubsection: typeof import('../options_ui/composables/useCategoryCollapse').expandSubsection
   const extendRef: typeof import('@vueuse/core').extendRef
+  const formatBytes: typeof import('../options_ui/composables/useSiteExport').formatBytes
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
@@ -264,6 +266,7 @@ declare global {
   const useSearchableRow: typeof import('../options_ui/composables/useOptionSearch').useSearchableRow
   const useSessionStorage: typeof import('@vueuse/core').useSessionStorage
   const useShare: typeof import('@vueuse/core').useShare
+  const useSiteExport: typeof import('../options_ui/composables/useSiteExport').useSiteExport
   const useSlots: typeof import('vue').useSlots
   const useSorted: typeof import('@vueuse/core').useSorted
   const useSpeechRecognition: typeof import('@vueuse/core').useSpeechRecognition
@@ -338,4 +341,7 @@ declare global {
   // @ts-ignore
   export type { OptionRowEntry } from '../options_ui/composables/useOptionSearch'
   import('../options_ui/composables/useOptionSearch')
+  // @ts-ignore
+  export type { SiteExportListRow } from '../options_ui/composables/useSiteExport'
+  import('../options_ui/composables/useSiteExport')
 }

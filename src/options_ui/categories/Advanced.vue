@@ -19,6 +19,16 @@
     <OptionRowFandomExport />
     <OptionDivider />
     <OptionRowImportExport />
+
+    <OptionSubsection
+      title="Site export"
+      subtitle="Save a works list — and a copy of each work's text — as a small website you can host yourself and read anywhere, including on a device with no extensions. The copies are for you: they hold other people's work, so keep the site to yourself rather than publishing it."
+    >
+      <SiteExportLists />
+      <OptionDivider />
+      <SiteExportCache />
+    </OptionSubsection>
+
     <OptionDivider />
     <OptionRow
       title="Debug mode"
