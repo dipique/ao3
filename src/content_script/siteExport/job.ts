@@ -15,7 +15,7 @@ import { readWorkTextIndex } from './workTextCache.ts'
 
 /**
  * The site export's job runner: one persisted state machine, driven from the
- * options page (the plan's §6, {@link file://../../../../plans/site-export.md}).
+ * options page.
  *
  * **Why the options page and not the background.** Both halves of the job parse
  * HTML — the listing scrape and the work-text sanitizer — and a Chrome MV3
@@ -52,7 +52,7 @@ const MAX_ERRORS = 50
 /** Works fetched between writes of the job record — the resolution a crash resumes at. */
 const PERSIST_EVERY = 5
 
-/** Simultaneous work fetches. Matches `scrapeListing`'s pool; see the plan's §7 on politeness. */
+/** Simultaneous work fetches. Matches `scrapeListing`'s pool — politeness towards AO3. */
 const CONCURRENCY = 3
 
 /**
@@ -229,8 +229,8 @@ export async function resumeJob(): Promise<void> {
 
 /**
  * Stop the running job. The queue survives, so the button goes back to offering
- * to continue rather than to start again — the plan's "Stop caching clears the
- * running flag, leaves the queue".
+ * to continue rather than to start again: stopping clears the running flag and
+ * leaves the queue alone.
  */
 export function stopJob(): void {
   controller?.abort()
@@ -321,7 +321,7 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
     warn(`${result.fetchedPages - result.loadedPages} of ${result.fetchedPages} list pages could not be fetched, so the list may be incomplete.`)
 
   // Read off the listing itself rather than the AO3 homepage, which Cloudflare
-  // serves from cache and can hand a logged-out copy to a signed-in reader (§7).
+  // serves from cache and can hand a logged-out copy to a signed-in reader.
   if (!result.loggedIn) {
     if (job.steps.length > 1) {
       throw new Error(
@@ -419,14 +419,14 @@ async function runCaching(job: ExportJob, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Write the zip and hand it to the browser — the plan's §8 payload, from what is
+ * Write the zip and hand it to the browser — the site payload, from what is
  * already on disk.
  *
  * Nothing here talks to AO3, which is why this step can be run on its own
  * ("Download without refreshing") and why the composite job puts a refresh and a
  * caching pass in front of it by default: an accurate "has this work changed?"
- * needs a fresh list (§5), and a work that was never fetched can only be linked
- * back to AO3.
+ * needs a fresh list, and a work that was never fetched can only be linked back
+ * to AO3.
  *
  * It keeps no queue of its own: `done`/`total` count works *written*, and a
  * caching pass's leftovers are cleared on the way in so the bar starts from

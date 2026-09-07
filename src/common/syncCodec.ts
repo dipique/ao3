@@ -7,7 +7,7 @@ import type { Options } from './options.ts'
  * plain function over plain data so the whole thing is unit-testable headlessly
  * (`node --test`) — `CompressionStream`/`btoa` are globals in Node 18+.
  *
- * Pipeline (see plans/sync-storage-optimization.md):
+ * Pipeline:
  *   prune defaults  ->  canonical JSON  ->  deflate-raw  ->  base64  ->  chunks
  * plus a self-validating manifest (chunk count + generation + content hash +
  * writer token) so a reader can detect a half-propagated or stale chunk set.

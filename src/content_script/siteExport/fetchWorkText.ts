@@ -7,7 +7,7 @@ import { recordWorkTextFailure, writeWorkText } from './workTextCache.ts'
 
 /**
  * Fetch one work's text, sanitize it, and store it — the unit of work the
- * caching job ({@link file://../../../../plans/site-export.md}, §6) is made of.
+ * caching job ({@link file://./job.ts}) is made of.
  *
  * One request per work: `/works/:id?view_full_work=true&view_adult=true` returns
  * every chapter and the meta block in a single response. The tidier

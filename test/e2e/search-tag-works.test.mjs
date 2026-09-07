@@ -238,7 +238,7 @@ describe('search an uncommon tag\'s works', { skip }, () => {
 
   test('the snapshot records how to re-fetch this listing later', async () => {
     // The options page has no `location` and no AO3 document, so everything a
-    // refresh needs has to have been written down here (plans/site-export.md §3).
+    // refresh needs has to have been written down here.
     const stored = await tab.evaluate(() => {
       const writes = window.__writes ?? []
       let snapshots = null

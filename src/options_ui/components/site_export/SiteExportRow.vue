@@ -2,8 +2,7 @@
 import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 
 /**
- * One stored works list, as a row in Advanced → Site export (the plan's §1,
- * {@link file://../../../../../plans/site-export.md}).
+ * One stored works list, as a row in Advanced → Site export.
  *
  * The buttons are state-dependent rather than always-available, because the job
  * runner is a singleton: while any list is being fetched, every other row's

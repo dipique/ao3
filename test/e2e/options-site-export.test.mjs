@@ -16,8 +16,7 @@ const LABEL = 'Marked for Later — tester'
 /**
  * The site export's Advanced section, driven end to end: a stored list, the
  * caching job that fetches its works from a stubbed AO3, and the refresh that
- * re-scrapes the list itself (the plan's §1 and §6,
- * {@link file://../../../plans/site-export.md}).
+ * re-scrapes the list itself.
  *
  * This is the only place the job runner is exercised at all — it needs a DOM,
  * `browser.storage` and a network, so it can't be reached from a `node --test`
@@ -88,7 +87,7 @@ const SEED = {
     },
   },
   // The export bakes the reader's find/replace rules into every work on the way
-  // out (the plan's §4), so there has to be one to bake.
+  // out, so there has to be one to bake.
   'option.textReplacements': {
     enabled: true,
     tools: false,
@@ -157,10 +156,10 @@ describe('options UI — site export', { skip }, () => {
         status: 200,
         contentType: 'text/html; charset=utf-8',
         // The real options page needs no CORS header — a host in
-        // `host_permissions` is privileged rather than cross-site (the plan's
-        // §7) — but this page is served from plain localhost with no extension
-        // behind it, so the stub has to grant what the browser would otherwise
-        // have skipped asking for.
+        // `host_permissions` is privileged rather than cross-site — but this
+        // page is served from plain localhost with no extension behind it, so
+        // the stub has to grant what the browser would otherwise have skipped
+        // asking for.
         headers: { 'access-control-allow-origin': '*' },
         // The refresh adds a third work, so the second run has something to fetch.
         body: workId ? workPage(workId) : listingPage([11, 12, 13]),

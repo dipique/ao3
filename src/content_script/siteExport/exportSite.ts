@@ -7,8 +7,8 @@ import type { SiteManifest, SiteManifestWork, SiteOptionsPayload } from './paylo
 import type { ZipEntry } from './zip.ts'
 
 // Bundled as a string: the exporter runs in the options page and has no
-// filesystem, so the one file the reader actually runs travels inside the build
-// (the plan's §8). Vite's `?raw`; nothing else in `src/` imports a `.py`.
+// filesystem, so the one file the reader actually runs travels inside the
+// build. Vite's `?raw`; nothing else in `src/` imports a `.py`.
 import serveScript from '../../site/serve.py?raw'
 import { bakeTextReplacements } from './bake.ts'
 import {
@@ -27,7 +27,7 @@ import { createZip } from './zip.ts'
 
 /**
  * Turn a stored list and its cached work text into the zip the reader unpacks —
- * the plan's §8 payload, assembled ({@link file://../../../../plans/site-export.md}).
+ * the site payload assembled ({@link file://./payload.ts} says what goes in it).
  *
  * The job runner's third step ({@link file://./job.ts}). It reads only what is
  * already on disk: no request goes to AO3 from here, which is why "Download
@@ -194,7 +194,7 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
  * The reader's settings, travelling with their library.
  *
  * Storage-shaped so the site build's `browser` shim can seed itself from it
- * directly (§8). The exclusions are the sync codec's: `user` is the AO3 account
+ * directly. The exclusions are the sync codec's: `user` is the AO3 account
  * this device happens to be signed in as and `verbose` is a local debug toggle,
  * neither of which means anything on the iPad — and `theme.current` is derived
  * from the device that *exported*, so only the reader's actual choice travels.

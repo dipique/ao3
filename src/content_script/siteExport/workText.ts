@@ -7,8 +7,6 @@
  * is the only way the proxy ladder below gets exercised at every rung. The I/O
  * halves live next door: {@link file://./workTextCache.ts} stores entries,
  * {@link file://./fetchWorkText.ts} fetches and sanitizes them.
- *
- * See the plan's §4 and §5 ({@link file://../../../../plans/site-export.md}).
  */
 
 /**
@@ -125,10 +123,10 @@ export function failureBackoffMs(attempts: number | undefined): number {
 }
 
 /**
- * Should this work's text be (re)fetched, and why — the proxy ladder of §5,
- * cheapest first, `null` when the cached copy still stands.
+ * Should this work's text be (re)fetched, and why — the ladder of proxies for
+ * "has this changed?", cheapest first, `null` when the cached copy still stands.
  *
- * Two departures from the plan's sketch, both deliberate:
+ * Two choices in the ladder depart from the obvious reading, both deliberate:
  *
  * - **The chapter and word checks are unconditional**, not just a fallback for
  *   `updated_at=0`. Both sides of the comparison come from a blurb, so they're

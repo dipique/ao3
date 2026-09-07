@@ -13,8 +13,7 @@
  * Callers outside an AO3 tab (the options page, driving the site export) get the
  * reader's session anyway: both browsers treat a request to a host in
  * `host_permissions` as privileged rather than cross-site, so the `SameSite=Lax`
- * cookie rides along even from an extension origin (measured — see the plan's
- * §7, {@link file://../../../plans/site-export.md}).
+ * cookie rides along even from an extension origin (measured).
  */
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))

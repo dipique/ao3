@@ -5,7 +5,7 @@
  * {@link file://../option_rows/OptionRowImportExport.vue}.
  *
  * Work text dwarfs everything else the extension stores, so this is part of
- * shipping the feature rather than polish (the plan's §11). Deleting it costs
+ * shipping the feature rather than polish. Deleting it costs
  * nothing but the hours of AO3 requests it would take to fetch again, which is
  * why the button asks a second time rather than opening a dialog.
  */

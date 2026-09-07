@@ -22,8 +22,8 @@ const SEED = {
 
 /**
  * A blurb's stats line plus the Sort & Filter sidebar's Word Count fields, in
- * AO3's own markup (see html/fandom-samples/sample-fandom.html). The form is
- * `action="#"` so a submit can be observed without navigating away.
+ * AO3's own markup. The form is `action="#"` so a submit can be observed
+ * without navigating away.
  */
 const PAGE = `
 <div id="main">

@@ -2,8 +2,9 @@
 // lookup used by the FandomToolbar content-script unit to resolve a displayed
 // fandom name to its AO3 tag id without a network request.
 //
-// Source of truth is the master crossreference produced by the get-fandom-ids
-// tooling. Re-run this after merging newly-scraped ids:
+// Source of truth is the master fandom→tag-id crossreference, which is built
+// and maintained by id-scraping tooling that lives outside this repo. Re-run
+// this after newly-scraped ids have been merged into it:
 //
 //   node scripts/generate-fandom-index.mjs
 //

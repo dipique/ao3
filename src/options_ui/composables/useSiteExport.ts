@@ -9,9 +9,8 @@ import { summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
 
 /**
- * The options page's view of the site export (the plan's §1,
- * {@link file://../../../../plans/site-export.md}): one row per stored list, the
- * job runner's live status, and the cache read-out underneath.
+ * The options page's view of the site export: one row per stored list, the job
+ * runner's live status, and the cache read-out underneath.
  *
  * Module-level state, like {@link file://./useSync.ts}, because the runner it
  * mirrors is itself a singleton — there is one job for the whole extension, so
@@ -23,7 +22,7 @@ export interface SiteExportListRow {
   /** Snapshot key — also what a job names the list by. */
   key: string
   label: string
-  /** Absent on a v1 snapshot, which is why such a row can't be refreshed (§3). */
+  /** Absent on a v1 snapshot, which is why such a row can't be refreshed. */
   descriptor?: SnapshotDescriptor
   scrapedAt: number
   /** Works in the list. */
@@ -144,7 +143,7 @@ export function useSiteExport() {
 
     /**
      * Fetch the work text this list is missing, judged against the stored list
-     * as it stands. An accurate answer wants a fresh list first (§5) — which is
+     * as it stands. An accurate answer wants a fresh list first — which is
      * why the row says how old this one is, and why "Download site" will refresh
      * before it caches.
      */

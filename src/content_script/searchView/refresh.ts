@@ -8,7 +8,7 @@ import { detectPageCount, fetchPageDoc, scrapeListing } from './scrape.ts'
 
 /**
  * Re-scrape a stored listing from outside the page it came from — the options
- * page, driving the site export ({@link file://../../../../plans/site-export.md}).
+ * page, driving the site export.
  *
  * Everything the live path gets from its document, this gets from the snapshot's
  * {@link SnapshotDescriptor} instead: the URL from `listUrl`, the page count
@@ -22,8 +22,7 @@ import { detectPageCount, fetchPageDoc, scrapeListing } from './scrape.ts'
  * The fetches carry the reader's AO3 session even though the options page is an
  * extension origin: both browsers treat a request to a host in
  * `host_permissions` as privileged rather than cross-site, so `SameSite=Lax`
- * cookies ride along (measured — see the plan's §7). Nothing here needs an AO3
- * tab open.
+ * cookies ride along (measured). Nothing here needs an AO3 tab open.
  */
 
 /** Works per listing page, as {@link file://./host.tsx}'s budget assumes. */

@@ -139,7 +139,7 @@ describe('sanitizeWorkPage', { skip: skipWithoutChrome }, () => {
     assert.equal(await sanitize(login), null)
   })
 
-  test('handles the real AO3 work page it was written against', { skip: existsSync(SAMPLE) ? false : 'html/work-sample not present (standalone clone)' }, async () => {
+  test('handles the real AO3 work page it was written against', { skip: existsSync(SAMPLE) ? false : 'the saved AO3 work page is not available here' }, async () => {
     const html = await sanitize(await readFile(SAMPLE, 'utf8'), '79362971')
     assert.match(html, /<div id="workskin">/)
     assert.match(html, /Take A Bite/)

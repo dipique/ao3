@@ -1,7 +1,6 @@
 /**
  * What goes *in* the zip: the manifest, the data script, and the pages the
- * export ships (the plan's §8 layout,
- * {@link file://../../../../plans/site-export.md}).
+ * export ships.
  *
  * Pure — plain functions over plain data, no `#common`, no `browser`, no DOM —
  * so the shapes below can be checked headlessly. {@link file://./exportSite.ts}
@@ -12,7 +11,7 @@
  * manifest.json      # this file's SiteManifest, for a human or a script to read
  * blurbs.js          # the same manifest, the reader's options, and the blurbs
  * options.json       # the reader's settings, again readably
- * works/<id>.html    # one cached work, text replacements already baked in (§4)
+ * works/<id>.html    # one cached work, text replacements already baked in
  * assets/site.css
  * index.html
  * serve.py
@@ -27,9 +26,9 @@
  */
 
 /**
- * Export schema version. One of the plan's three separate numbers (§11) —
- * distinct from `SNAPSHOT_VERSION` and `WORK_TEXT_VERSION`, and bumped when the
- * shape of what lands in the zip changes.
+ * Export schema version. One of three separate numbers — distinct from
+ * `SNAPSHOT_VERSION` and `WORK_TEXT_VERSION`, and bumped when the shape of what
+ * lands in the zip changes.
  */
 export const SITE_SCHEMA_VERSION = 1
 
@@ -141,7 +140,7 @@ export function buildManifest(input: ManifestInput): SiteManifest {
 export interface SiteData {
   manifest: SiteManifest
   options: SiteOptionsPayload
-  /** Each work's blurb `outerHTML`, in list order — what the view mounts (§8). */
+  /** Each work's blurb `outerHTML`, in list order — what the view mounts. */
   blurbsHtml: string[]
 }
 
@@ -152,7 +151,7 @@ export interface SiteData {
  * Blurb HTML is shipped as HTML rather than as structured data because
  * `Work.el` is a live `<li>` the view mounts directly and `worksFromHtml()`
  * already rehydrates it — a structured payload would mean writing a blurb
- * renderer that does not exist (§11's `Work.el` coupling).
+ * renderer that does not exist.
  */
 export function siteDataScript(data: SiteData): string {
   return `/* AO3 Enhancements — site export v${SITE_SCHEMA_VERSION}. Generated data; do not edit. */\n`
@@ -277,12 +276,11 @@ const INDEX_SCRIPT = `(function () {
 /**
  * `index.html`.
  *
- * Deliberately small: this is the metadata-only site the plan promises at the
- * end of milestone 4, and milestone 5 replaces it wholesale with the real search
- * view behind a `browser` shim (§8). Until then it renders the stored blurbs
- * exactly as they came off AO3, points the cached ones at their local copies,
- * and offers a substring filter — because a thousand works with no filter is not
- * a thing anyone can use on an iPad.
+ * Deliberately small: this is the metadata-only site, to be replaced wholesale
+ * by the real search view behind a `browser` shim. Until then it renders the
+ * stored blurbs exactly as they came off AO3, points the cached ones at their
+ * local copies, and offers a substring filter — because a thousand works with
+ * no filter is not a thing anyone can use on an iPad.
  *
  * The rendering script is inline rather than an `assets/app.js`: that name
  * belongs to the real bundle, and inlining is one fewer file to keep in step.
@@ -317,7 +315,7 @@ ${INDEX_SCRIPT}
 /**
  * `assets/site.css`.
  *
- * Not AO3's skin — that is §8's open question, and it belongs with the real
+ * Not AO3's skin — that is still an open question, and it belongs with the real
  * view. This is only enough for the fallback pages to be readable on a phone: a
  * measure, a legible size, and light/dark from the device.
  */

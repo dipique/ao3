@@ -1,7 +1,6 @@
 /**
  * A minimal ZIP writer — the last thing the site export needs that the platform
- * doesn't already provide (the plan's §2 and §8,
- * {@link file://../../../../plans/site-export.md}).
+ * doesn't already provide.
  *
  * No dependency, because there is nothing worth depending on: a store-or-deflate
  * ZIP is a CRC32, a local header per entry, a central directory and an
