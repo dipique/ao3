@@ -24,11 +24,14 @@
  * written and read back on the way in; where that round trip fails the store
  * degrades to memory for the session and says so, because a page that offers to
  * remember something and silently doesn't is worse than one that never offered.
+ *
+ * **The open itself is defensive**, for the same reason the origin is shared:
+ * this page cannot assume it is the only thing that ever used the name, or the
+ * newest thing to have used it. See {@link openDatabase}.
  */
 
 /** One database for every export the reader opens; the name is the namespace. */
 const DB_NAME = 'ao3e-site'
-const DB_VERSION = 1
 
 /** Mirrors `browser.storage.local`: one row per storage key. */
 const STORAGE_STORE = 'storage'
@@ -36,7 +39,8 @@ const STORAGE_STORE = 'storage'
 /**
  * The append-only record of what the reader did here, for the change ops an
  * export hands back to the extension. Created with the database rather than
- * added later, so the store that will hold it never costs a version upgrade.
+ * waiting for the feature that fills it, so the store is already there for an
+ * export built before it and one built after.
  */
 const JOURNAL_STORE = 'journal'
 
@@ -148,12 +152,62 @@ async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<
 
 // --- The database ----------------------------------------------------------
 
-function openDatabase(): Promise<IDBDatabase> {
+/** What an export has to find before it can call the origin usable. */
+const STORES = [STORAGE_STORE, JOURNAL_STORE]
+
+function hasStores(database: IDBDatabase): boolean {
+  return STORES.every(name => database.objectStoreNames.contains(name))
+}
+
+/**
+ * Open `ao3e-site`, adding the stores if whatever is already on that name
+ * doesn't have them.
+ *
+ * **No fixed version number, deliberately.** An export is immutable and lands on
+ * an origin shared by every other local file — exports made months earlier or
+ * later, and (measured, on a real device) unrelated pages that happened to pick
+ * the same database name. Asking for a *specific* version turns both into
+ * permanent failures: a database already on a higher version rejects the open
+ * outright with `VersionError`, and one sitting on the same version without our
+ * stores never upgrades again, so every open succeeds and every transaction then
+ * fails with `NotFoundError`. Neither heals on its own, and the reader is told
+ * this browser keeps nothing — on a device where it keeps things perfectly well.
+ *
+ * So: open at whatever version is there, look for the stores, and only if they
+ * are missing reopen one version higher to create them. Any bundle of any
+ * vintage then reaches what it needs, wherever the origin has drifted to. The
+ * one rule this asks of future changes is that stores are only ever **added** —
+ * never renumbered, never renamed out from under an older export.
+ *
+ * What it will not do is delete anything. A database it cannot fix is left
+ * exactly as found and the store degrades to memory for the session: what is in
+ * there may be the reader's only copy of an afternoon's marking.
+ */
+async function openDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined')
     throw new TypeError('this browser has no storage for a local file')
 
+  let database = await openAt()
+  if (hasStores(database))
+    return database
+
+  const next = database.version + 1
+  database.close()
+  database = await openAt(next)
+  if (hasStores(database))
+    return database
+
+  database.close()
+  throw new Error('storage here could not be given the stores this page needs')
+}
+
+/**
+ * One open. With no version an absent database is created at 1 (running the
+ * upgrade below), and an existing one opens wherever it already is.
+ */
+function openAt(version?: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
+    const request = version === undefined ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version)
     request.onupgradeneeded = () => {
       const database = request.result
       if (!database.objectStoreNames.contains(STORAGE_STORE))

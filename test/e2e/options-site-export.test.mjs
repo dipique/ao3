@@ -519,6 +519,79 @@ describe('options UI — site export', { skip }, () => {
   })
 
   /**
+   * An export that lands on an origin where the name it wants is already taken.
+   *
+   * Measured on a real device: a `file://` origin is shared by every local file,
+   * and an unrelated page had left an `ao3e-site`-shaped database sitting on the
+   * name with none of the stores an export needs. A fixed `DB_VERSION` makes that
+   * permanent — the open succeeds, no upgrade ever runs again, and every
+   * transaction fails — so the page would tell the reader this browser keeps
+   * nothing, forever, on a device where it keeps things perfectly well.
+   */
+  test('an export adds its stores to a database that arrived without them', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+    writeFileSync(join(dir, 'blank.html'), '<!doctype html><meta charset="utf-8"><title>blank</title>')
+
+    const reader = await browser.newPage()
+    try {
+      // Somebody else's database, on our name, at version 1. Set up from a page
+      // that isn't the export, so nothing is holding a connection open.
+      await reader.goto(fileUrl(dir, 'blank.html'), { waitUntil: 'load' })
+      await reader.evaluate(async () => {
+        await new Promise((resolve) => {
+          const del = indexedDB.deleteDatabase('ao3e-site')
+          del.onsuccess = del.onerror = del.onblocked = resolve
+        })
+        await new Promise((resolve) => {
+          const req = indexedDB.open('ao3e-site', 1)
+          req.onupgradeneeded = () => req.result.createObjectStore('visits')
+          req.onsuccess = () => {
+            req.result.close()
+            resolve()
+          }
+          req.onerror = resolve
+        })
+      })
+
+      await reader.goto(fileUrl(dir, 'library.html'), { waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.equal(
+        await reader.$eval('.AO3E--site--status', el => el.dataset.ao3eWritable),
+        'true',
+        'the origin is writable, and saying otherwise would be the bug',
+      )
+
+      // Upgraded, not replaced: what was already there is still there.
+      const found = await reader.evaluate(() => new Promise((resolve) => {
+        const req = indexedDB.open('ao3e-site')
+        req.onsuccess = () => {
+          const db = req.result
+          const seen = { version: db.version, stores: [...db.objectStoreNames].sort() }
+          db.close()
+          resolve(seen)
+        }
+      }))
+      assert.deepEqual(found.stores, ['journal', 'storage', 'visits'])
+      assert.ok(found.version >= 2, `expected an upgrade, got version ${found.version}`)
+
+      // And the thing all of that is for: a write that survives the file closing.
+      await reader.evaluate(() => browser.storage.local.set({ 'ao3e.site.repaired': 'kept' }))
+      await reader.goto(fileUrl(dir, 'blank.html'), { waitUntil: 'load' })
+      await reader.goto(fileUrl(dir, 'library.html'), { waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.equal(
+        await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.repaired'))['ao3e.site.repaired']),
+        'kept',
+      )
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
    * The same file over http — the path for a reader whose browser won't open a
    * local one at all, and the one no specification can take away.
    *
