@@ -62,6 +62,14 @@ export interface MenuItem {
    * grouped under one heading; see {@link MenuScope}.
    */
   scope?: MenuScope
+  /**
+   * Heading for this row's group, in place of the scope's own. A change of
+   * heading starts a new group even within one scope, which is how a menu splits
+   * same-scope rows into sections of its own (e.g. the word-count menu's whole
+   * ranges, then its single bounds). Ignored on a row with no {@link scope},
+   * since those aren't grouped at all.
+   */
+  heading?: string
   /** Show a check/accent indicating this action is the current state. */
   active?: boolean
   /** Render in a "destructive" accent (e.g. hide). */
@@ -161,18 +169,20 @@ export function openMenu(items: MenuItem[], at: { x: number, y: number }): void 
     <div class={`${ADDON_CLASS}  ${MENU_CLASS}`} role="menu" />
   ) as HTMLElement
 
-  // Each run of same-scope rows becomes a labelled group — an ARIA one, so the
-  // heading is announced rather than just seen. Unscoped rows (copy, open) go
-  // straight into the menu.
+  // Each run of rows sharing a scope *and* a heading override becomes a labelled
+  // group — an ARIA one, so the heading is announced rather than just seen.
+  // Unscoped rows (copy, open) go straight into the menu.
   let scope: MenuScope | undefined
+  let heading: string | undefined
   let container: HTMLElement = menu
   for (const item of items) {
-    const opensGroup = item.scope !== scope
+    const opensGroup = item.scope !== scope || item.heading !== heading
     if (opensGroup) {
       scope = item.scope
+      heading = item.heading
       container = menu
       if (scope) {
-        const label = SCOPE_HEADINGS[scope]
+        const label = heading ?? SCOPE_HEADINGS[scope]
         const group = (<div class={GROUP_CLASS} role="group" aria-label={label} />) as HTMLElement
         // Visual only: the group's own aria-label already says this to a reader.
         group.append(<div class={HEADING_CLASS} aria-hidden="true">{label}</div>)

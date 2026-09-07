@@ -116,6 +116,27 @@ describe('word-count range menu in the search view', { skip }, () => {
         .map(el => el.querySelector('.AO3E--menu--label').textContent))
   }
 
+  /** The rows of one labelled section of the open menu, in order. */
+  const sectionLabels = section => page.evaluate((s) => {
+    const group = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--group')]
+      .find(g => g.getAttribute('aria-label') === s)
+    return group
+      ? [...group.querySelectorAll('.AO3E--menu--label')].map(el => el.textContent)
+      : null
+  }, section)
+
+  /** Click the row labelled exactly `label` inside the section headed `section`. */
+  const pickInSection = async (section, label) => {
+    await page.evaluate((s, l) => {
+      const group = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--group')]
+        .find(g => g.getAttribute('aria-label') === s)
+      const row = [...group.querySelectorAll('.AO3E--menu--item')]
+        .find(el => el.querySelector('.AO3E--menu--label').textContent === l)
+      row.click()
+    }, section, label)
+    await sleep(400)
+  }
+
   const pick = async (prefix) => {
     await page.evaluate((p) => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
@@ -148,5 +169,35 @@ describe('word-count range menu in the search view', { skip }, () => {
     await pick('Clear')
     assert.deepEqual(await wordBounds(), { min: '', max: '' })
     assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'])
+  })
+
+  test('the bound sections offer each configured bound', async () => {
+    await openMenuOnFirstWordCount()
+    assert.deepEqual(await sectionLabels('Set lower bound'), ['1,000', '5,000'])
+    assert.deepEqual(await sectionLabels('Set upper bound'), ['3,000', '100,000'])
+  })
+
+  test('picking a lower bound filters the view and leaves the upper one unset', async () => {
+    await pickInSection('Set lower bound', '5,000')
+    assert.deepEqual(await wordBounds(), { min: '5000', max: '' })
+    assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one'])
+    assert.equal(page.url(), READINGS_URL)
+  })
+
+  test('picking an upper bound leaves the lower one alone', async () => {
+    await openMenuOnFirstWordCount()
+    await pickInSection('Set upper bound', '100,000')
+    assert.deepEqual(await wordBounds(), { min: '5000', max: '100000' })
+    assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one'])
+  })
+
+  test('a bound that would invert the range drops the other one', async () => {
+    await openMenuOnFirstWordCount()
+    // 3,000 is below the standing lower bound of 5,000, so that one goes — and
+    // the row is labelled with the range that results, not the bare bound.
+    assert.deepEqual(await sectionLabels('Set upper bound'), ['0 – 3,000 words', '100,000'])
+    await pickInSection('Set upper bound', '0 – 3,000 words')
+    assert.deepEqual(await wordBounds(), { min: '', max: '3000' })
+    assert.deepEqual((await visibleTitles()).sort(), ['A short one'])
   })
 })

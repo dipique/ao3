@@ -7,14 +7,18 @@ import { describe, test } from 'node:test'
 import {
   DEFAULT_WORD_COUNT_RANGES,
   duplicateOf,
+  formatBoundPick,
   formatWordCountRange,
   isValidRange,
+  keepsOtherBound,
   normalizeBound,
   parseBoundInput,
   parseWordCountQuery,
   rangeError,
   sameRange,
   serializeWordCountQuery,
+  uniqueBounds,
+  withBound,
 } from '../../src/common/wordCount.ts'
 
 describe('rangeError', () => {
@@ -166,5 +170,121 @@ describe('the advanced-search word_count field', () => {
     assert.equal(parseWordCountQuery(''), null)
     assert.equal(parseWordCountQuery('   '), null)
     assert.equal(parseWordCountQuery('a lot'), null)
+  })
+})
+
+describe('uniqueBounds', () => {
+  const ranges = [
+    { from: 1000, to: 3000 },
+    { from: 5000, to: 100000 },
+    { from: 1000, to: 100000 },
+    { from: 50000, to: null },
+    { from: null, to: 2000 },
+  ]
+
+  test('collects each side, de-duplicated and ascending', () => {
+    assert.deepEqual(uniqueBounds(ranges, 'from'), [1000, 5000, 50000])
+    assert.deepEqual(uniqueBounds(ranges, 'to'), [2000, 3000, 100000])
+  })
+
+  test('an unbounded side contributes nothing', () => {
+    assert.deepEqual(uniqueBounds([{ from: 5000, to: null }], 'to'), [])
+    assert.deepEqual(uniqueBounds([{ from: null, to: 5000 }], 'from'), [])
+  })
+
+  test('skips ranges the menu would not offer either', () => {
+    assert.deepEqual(uniqueBounds([{ from: 3000, to: 1000 }], 'from'), [])
+    assert.deepEqual(uniqueBounds([{ from: null, to: null }], 'to'), [])
+  })
+
+  test('no ranges, no bounds', () => {
+    assert.deepEqual(uniqueBounds([], 'from'), [])
+  })
+})
+
+describe('withBound', () => {
+  test('sets one bound and keeps the other', () => {
+    assert.deepEqual(withBound({ from: 1000, to: 3000 }, 'from', 2000), { from: 2000, to: 3000 })
+    assert.deepEqual(withBound({ from: 1000, to: 3000 }, 'to', 9000), { from: 1000, to: 9000 })
+  })
+
+  test('equal bounds are kept — a single length is a valid range', () => {
+    assert.deepEqual(withBound({ from: 1000, to: 3000 }, 'from', 3000), { from: 3000, to: 3000 })
+    assert.deepEqual(withBound({ from: 1000, to: 3000 }, 'to', 1000), { from: 1000, to: 1000 })
+  })
+
+  test('drops the other bound rather than inverting the range', () => {
+    assert.deepEqual(withBound({ from: 1000, to: 3000 }, 'from', 5000), { from: 5000, to: null })
+    assert.deepEqual(withBound({ from: 5000, to: 100000 }, 'to', 3000), { from: null, to: 3000 })
+  })
+
+  test('with nothing filtered yet, sets that bound alone', () => {
+    assert.deepEqual(withBound(null, 'from', 5000), { from: 5000, to: null })
+    assert.deepEqual(withBound(null, 'to', 5000), { from: null, to: 5000 })
+  })
+
+  test('the other bound being unset is left unset', () => {
+    assert.deepEqual(withBound({ from: null, to: 3000 }, 'to', 9000), { from: null, to: 9000 })
+    assert.deepEqual(withBound({ from: 5000, to: null }, 'from', 1000), { from: 1000, to: null })
+  })
+
+  test('every result is a range the filter will accept', () => {
+    const currents = [null, { from: 1000, to: 3000 }, { from: null, to: 3000 }, { from: 1000, to: null }]
+    for (const current of currents) {
+      for (const side of ['from', 'to']) {
+        for (const value of [0, 500, 3000, 50000])
+          assert.equal(isValidRange(withBound(current, side, value)), true, `${JSON.stringify({ current, side, value })}`)
+      }
+    }
+  })
+})
+
+describe('formatBoundPick', () => {
+  test('is just the value when the other bound stays put', () => {
+    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'from', 2000), '2,000')
+    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'to', 9000), '9,000')
+    assert.equal(formatBoundPick(null, 'to', 500), '500')
+    assert.equal(formatBoundPick({ from: null, to: 3000 }, 'to', 500), '500')
+  })
+
+  test('shows the whole resulting range when both bounds have to move', () => {
+    // The lower bound has to go, and 0 is what it becomes — not left implicit.
+    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'to', 500), '0 – 500 words')
+    // Nothing to write above, so the upper bound going reads as open-ended.
+    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'from', 5000), '5,000+ words')
+  })
+
+  test('agrees with what picking the bound actually does', () => {
+    const currents = [null, { from: 1000, to: 3000 }, { from: null, to: 3000 }, { from: 1000, to: null }]
+    for (const current of currents) {
+      for (const side of ['from', 'to']) {
+        for (const value of [0, 500, 3000, 50000]) {
+          const next = withBound(current, side, value)
+          const moved = next.from !== (current?.from ?? null) && next.to !== (current?.to ?? null)
+          assert.equal(
+            formatBoundPick(current, side, value).includes('words'),
+            moved,
+            `${JSON.stringify({ current, side, value })}`,
+          )
+        }
+      }
+    }
+  })
+})
+
+describe('keepsOtherBound', () => {
+  test('an unset other bound is always kept (there is nothing to cross)', () => {
+    assert.equal(keepsOtherBound(null, 'from', 5000), true)
+    assert.equal(keepsOtherBound({ from: 1000, to: null }, 'from', 5000), true)
+  })
+
+  test('a value that crosses the other bound cannot keep it', () => {
+    assert.equal(keepsOtherBound({ from: 1000, to: 3000 }, 'from', 5000), false)
+    assert.equal(keepsOtherBound({ from: 1000, to: 3000 }, 'to', 500), false)
+  })
+
+  test('meeting the other bound exactly still keeps it', () => {
+    assert.equal(keepsOtherBound({ from: 1000, to: 3000 }, 'from', 3000), true)
+    assert.equal(keepsOtherBound({ from: 1000, to: 3000 }, 'to', 1000), true)
   })
 })

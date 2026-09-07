@@ -155,3 +155,81 @@ export function parseWordCountQuery(text: string): WordCountRange | null {
 
   return null
 }
+
+// ---------------------------------------------------------------------------
+// Single bounds. Besides the whole ranges, the word-count menu offers each
+// configured bound on its own, so the reader can move one edge of the window
+// without disturbing the other — the ranges are quick picks, these are nudges.
+// ---------------------------------------------------------------------------
+
+/** One end of a range: the lower (`from`) or upper (`to`) bound. */
+export type WordCountBound = 'from' | 'to'
+
+/**
+ * The distinct `side` bounds across `ranges`, ascending. An unbounded side
+ * contributes nothing — "no bound" is a value you clear, not one you set — and
+ * invalid ranges are skipped, for the same reason the menu leaves them out.
+ */
+export function uniqueBounds(ranges: readonly WordCountRange[], side: WordCountBound): number[] {
+  const values = new Set<number>()
+  for (const range of ranges) {
+    if (!isValidRange(range))
+      continue
+    const bound = range[side]
+    if (bound !== null)
+      values.add(bound)
+  }
+  return [...values].sort((a, b) => a - b)
+}
+
+/** The bound `side` doesn't name, as it stands in `current`. */
+function otherBound(current: WordCountRange | null, side: WordCountBound): number | null {
+  return (side === 'from' ? current?.to : current?.from) ?? null
+}
+
+/**
+ * Whether setting `side` to `value` can leave the other bound alone. It can't
+ * when the value crosses it — a lower bound above the standing upper one, or an
+ * upper bound below the standing lower one — since that range would filter to
+ * nothing.
+ */
+export function keepsOtherBound(current: WordCountRange | null, side: WordCountBound, value: number): boolean {
+  const other = otherBound(current, side)
+  return other === null || (side === 'from' ? other >= value : other <= value)
+}
+
+/**
+ * `current` with one bound replaced and the other left as it stands — what
+ * picking a single bound from the menu does, as against a whole range, which
+ * replaces both.
+ *
+ * The exception is a value {@link keepsOtherBound} rejects: there the other
+ * bound is dropped and the range goes open-ended that way instead.
+ */
+export function withBound(current: WordCountRange | null, side: WordCountBound, value: number): WordCountRange {
+  const keep = keepsOtherBound(current, side, value) ? otherBound(current, side) : null
+  return side === 'from' ? { from: value, to: keep } : { from: keep, to: value }
+}
+
+/** A single bound as the menu spells it: "5,000". */
+export function formatWordCount(value: number): string {
+  return NUMBER_FORMAT.format(value)
+}
+
+/**
+ * The menu label for one single-bound row. Normally just the value, since that
+ * is all the pick changes — but when it can't leave the other bound alone
+ * ({@link keepsOtherBound}), the whole resulting range instead, so both numbers
+ * that move are on the row rather than one of them arriving as a surprise.
+ *
+ * A lower bound the pick has to give up is spelled `0` rather than left
+ * implicit: it's a real word count, and "up to 500" would hide the very change
+ * this label exists to show. There is no number to write on the other side, so
+ * an upper bound that goes keeps the open-ended "5,000+" form.
+ */
+export function formatBoundPick(current: WordCountRange | null, side: WordCountBound, value: number): string {
+  if (keepsOtherBound(current, side, value))
+    return formatWordCount(value)
+  const next = withBound(current, side, value)
+  return `${formatWordCountRange(next.from === null ? { ...next, from: 0 } : next)} words`
+}

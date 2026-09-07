@@ -1,10 +1,12 @@
+import MdiArrowCollapseLeft from '~icons/mdi/arrow-collapse-left.jsx'
+import MdiArrowCollapseRight from '~icons/mdi/arrow-collapse-right.jsx'
 import MdiArrowExpandHorizontal from '~icons/mdi/arrow-expand-horizontal.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 
-import type { WordCountRange } from '#common'
+import type { WordCountBound, WordCountRange } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { ADDON_CLASS, formatWordCountRange, isValidRange, sameRange } from '#common'
+import { ADDON_CLASS, formatBoundPick, formatWordCountRange, isValidRange, sameRange, uniqueBounds, withBound } from '#common'
 import { attachMenuTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import { findFacetBridge } from '#content_script/searchView/facetBridge.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -14,7 +16,8 @@ import React from '#dom'
 /**
  * Turns the word count in a work's stats line into a length filter: click (or
  * right-click / long-press) it for a menu of the quick ranges from the options,
- * plus a row clearing whatever range is currently applied.
+ * plus a row clearing whatever range is currently applied and a section per
+ * bound, for moving one edge of the current range without touching the other.
  *
  * Where the pick lands depends on where the blurb is. Inside one of our
  * in-memory search views it drives that view's own word-count filter (via
@@ -58,6 +61,41 @@ function targetFor(el: Element): WordCountTarget | null {
   return null
 }
 
+/** The heading and icon each single-bound section is drawn under. */
+const BOUND_SECTIONS: Record<WordCountBound, { heading: string, icon: () => Node }> = {
+  from: { heading: 'Set lower bound', icon: () => <MdiArrowCollapseLeft /> },
+  to: { heading: 'Set upper bound', icon: () => <MdiArrowCollapseRight /> },
+}
+
+/**
+ * The rows of one bound section: every distinct `side` bound the configured
+ * ranges use, ascending. Each sets that bound alone — see {@link withBound} for
+ * what happens to the other one, and {@link formatBoundPick} for why a row that
+ * can't leave it alone is labelled with the whole range it would produce.
+ */
+function boundItems(
+  target: WordCountTarget,
+  current: WordCountRange | null,
+  ranges: WordCountRange[],
+  side: WordCountBound,
+): MenuItem[] {
+  const { heading, icon } = BOUND_SECTIONS[side]
+  return uniqueBounds(ranges, side).map((value) => {
+    const active = current?.[side] === value
+    return {
+      icon,
+      label: formatBoundPick(current, side, value),
+      scope: 'search',
+      heading,
+      active,
+      // As with the whole ranges: the bound already on would re-run the same
+      // search, so its row is inert.
+      disabled: active,
+      onSelect: () => target.apply(withBound(current, side, value)),
+    }
+  })
+}
+
 /** Build the menu fresh at open time, so the "current range" rows are accurate. */
 function buildWordCountMenu(target: WordCountTarget, ranges: WordCountRange[]): MenuItem[] {
   const items: MenuItem[] = []
@@ -89,6 +127,11 @@ function buildWordCountMenu(target: WordCountTarget, ranges: WordCountRange[]): 
       onSelect: () => target.apply(range),
     })
   }
+
+  items.push(
+    ...boundItems(target, current, ranges, 'from'),
+    ...boundItems(target, current, ranges, 'to'),
+  )
 
   return items
 }

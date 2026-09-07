@@ -99,13 +99,30 @@ describe('word-count range menu', { skip }, () => {
 
   /** Open the menu on the word count and read back its rows. */
   const openMenu = async () => {
+    // The menu is drawn at the click point, so it can cover the word count that
+    // opened it — dismiss whatever is up before aiming at it again.
+    await page.keyboard.press('Escape')
+    await sleep(100)
     await page.click('#words')
     await sleep(150)
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
         label: el.querySelector('.AO3E--menu--label').textContent,
         disabled: el.disabled,
+        section: el.closest('.AO3E--menu--group')?.getAttribute('aria-label') ?? null,
       })))
+  }
+
+  /** Click the row labelled exactly `label` inside the section headed `section`. */
+  const pickInSection = async (section, label) => {
+    await page.evaluate((s, l) => {
+      const group = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--group')]
+        .find(g => g.getAttribute('aria-label') === s)
+      const row = [...group.querySelectorAll('.AO3E--menu--item')]
+        .find(el => el.querySelector('.AO3E--menu--label').textContent === l)
+      row.click()
+    }, section, label)
+    await sleep(200)
   }
 
   const bounds = () => page.evaluate(() => ({
@@ -124,7 +141,7 @@ describe('word-count range menu', { skip }, () => {
 
   test('offers every configured range, and no clear row while none is set', async () => {
     const items = await openMenu()
-    const labels = items.map(i => i.label)
+    const labels = items.filter(i => i.section === 'Search').map(i => i.label)
     assert.equal(labels.length, 3, labels.join(' | '))
     assert.ok(labels[0].startsWith('1,000'), labels[0])
     assert.ok(labels[1].startsWith('5,000'), labels[1])
@@ -199,6 +216,43 @@ describe('word-count range menu', { skip }, () => {
     })
     await sleep(200)
     assert.deepEqual(await bounds(), { from: '50000', to: '', submits: 3 })
+  })
+
+  test('lists each distinct bound of the configured ranges in its own section', async () => {
+    const items = await openMenu()
+    const inSection = name => items.filter(i => i.section === name).map(i => i.label)
+    // Ascending, de-duplicated, and an unbounded side (50,000+) contributes no
+    // upper bound of its own.
+    assert.deepEqual(inSection('Set lower bound'), ['1,000', '5,000', '50,000'])
+    // 3,000 is below the standing lower bound of 50,000, so picking it can't
+    // leave that one alone — the row says what the range would become instead.
+    assert.deepEqual(inSection('Set upper bound'), ['0 – 3,000 words', '100,000'])
+    // 50,000+ is the range currently applied, so its lower bound is the one on.
+    const applied = items.find(i => i.section === 'Set lower bound' && i.label === '50,000')
+    assert.equal(applied.disabled, true, 'the bound already on should not be selectable again')
+  })
+
+  test('picking an upper bound leaves the lower one alone', async () => {
+    await openMenu()
+    await pickInSection('Set upper bound', '100,000')
+    assert.deepEqual(await bounds(), { from: '50000', to: '100000', submits: 4 })
+  })
+
+  test('picking a lower bound leaves the upper one alone', async () => {
+    await openMenu()
+    await pickInSection('Set lower bound', '5,000')
+    assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 5 })
+  })
+
+  test('a bound that would invert the range drops the other one', async () => {
+    const items = await openMenu()
+    // 3,000 is below the standing lower bound of 5,000; keeping it would filter
+    // to nothing, so the range goes open-ended downwards instead — and the row
+    // is labelled with that whole range rather than the bare bound.
+    const row = items.find(i => i.section === 'Set upper bound' && i.label.startsWith('0'))
+    assert.equal(row.label, '0 – 3,000 words')
+    await pickInSection('Set upper bound', row.label)
+    assert.deepEqual(await bounds(), { from: '', to: '3000', submits: 6 })
   })
 })
 
