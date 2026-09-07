@@ -2,12 +2,8 @@ import MdiAccountCancelOutline from '~icons/mdi/account-cancel-outline.jsx'
 import MdiAccountCancel from '~icons/mdi/account-cancel.jsx'
 import MdiAccountMinus from '~icons/mdi/account-minus.jsx'
 import MdiAccountOff from '~icons/mdi/account-off.jsx'
-import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiBellOutline from '~icons/mdi/bell-outline.jsx'
 import MdiBell from '~icons/mdi/bell.jsx'
-import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
-import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
-import MdiStar from '~icons/mdi/star.jsx'
 
 import type { MenuItem } from '#content_script/contextMenu.js'
 
@@ -21,7 +17,8 @@ import {
   type IndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
-import { authorKey, clearRule, ruleBehavior, ruleIndicatorBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { authorKey, ruleBehavior, ruleIndicatorBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -118,50 +115,11 @@ export class HideAuthorToolbar extends Unit {
       const { filters } = await options.get('rules')
       const key = authorKey(author.userId)
       const behavior = ruleBehavior(filters, key)
-      // The active behaviour is shown disabled (current state); "Clear" removes it.
-      items.push(
-        {
-          icon: () => <MdiAccountOff />,
-          label: 'Hide author',
-          scope: 'settings',
-          danger: true,
-          active: behavior === 'hide',
-          disabled: behavior === 'hide',
-          onSelect: () => toggleRuleBehavior(key, 'hide'),
-        },
-        {
-          icon: () => <MdiArrowCollapseVertical />,
-          label: 'Collapse author',
-          scope: 'settings',
-          active: behavior === 'collapse',
-          disabled: behavior === 'collapse',
-          onSelect: () => toggleRuleBehavior(key, 'collapse'),
-        },
-        {
-          icon: () => <MdiEyeCheck />,
-          label: 'Always show',
-          scope: 'settings',
-          active: behavior === 'invert',
-          disabled: behavior === 'invert',
-          onSelect: () => toggleRuleBehavior(key, 'invert'),
-        },
-        {
-          icon: () => <MdiStar />,
-          label: 'Highlight',
-          scope: 'settings',
-          active: behavior === 'highlight',
-          disabled: behavior === 'highlight',
-          onSelect: () => toggleRuleBehavior(key, 'highlight'),
-        },
-      )
-      if (behavior) {
-        items.push({
-          icon: () => <MdiCloseCircleOutline />,
-          label: 'Clear',
-          scope: 'settings',
-          onSelect: () => clearRule(key),
-        })
-      }
+      // An author byline hides behind a person rather than the generic eye.
+      items.push(...ruleBehaviorItems(key, behavior, {
+        noun: 'author',
+        icons: { hide: () => <MdiAccountOff /> },
+      }))
       if (author.pseud !== undefined) {
         items.push({
           icon: () => <MdiAccountMinus />,

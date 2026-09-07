@@ -1,13 +1,8 @@
-import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiBookOpenPageVariant from '~icons/mdi/book-open-page-variant.jsx'
 import MdiCalendarClock from '~icons/mdi/calendar-clock.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiClockPlusOutline from '~icons/mdi/clock-plus-outline.jsx'
-import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
-import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
-import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiFastForward from '~icons/mdi/fast-forward.jsx'
-import MdiStar from '~icons/mdi/star.jsx'
 
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
@@ -25,8 +20,9 @@ import {
 } from '#content_script/contextTrigger.js'
 import { loadMarkedForLaterIndex, noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
 import { markIcon } from '#content_script/markIcons.js'
-import { clearRule, entityKey, ruleBehavior, ruleIndicatorBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { entityKey, ruleBehavior, ruleIndicatorBehavior } from '#content_script/persistentFilters.js'
 import { openProgressEditor } from '#content_script/progressEditor.js'
+import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
 import { applyMark, applyMarkGroup, applyMarkProgress } from '#content_script/workMarks.js'
 import React from '#dom'
@@ -341,50 +337,7 @@ abstract class FilterEntityToolbar extends Unit {
     const key = entityKey(this.noun, id)
     const behavior = ruleBehavior(filters, key)
 
-    // The active behaviour is shown disabled (current state); "Clear" removes it.
-    const items: MenuItem[] = [
-      {
-        icon: () => <MdiEyeOff />,
-        label: `Hide ${this.noun}`,
-        scope: 'settings',
-        danger: true,
-        active: behavior === 'hide',
-        disabled: behavior === 'hide',
-        onSelect: () => toggleRuleBehavior(key, 'hide'),
-      },
-      {
-        icon: () => <MdiArrowCollapseVertical />,
-        label: `Collapse ${this.noun}`,
-        scope: 'settings',
-        active: behavior === 'collapse',
-        disabled: behavior === 'collapse',
-        onSelect: () => toggleRuleBehavior(key, 'collapse'),
-      },
-      {
-        icon: () => <MdiEyeCheck />,
-        label: 'Always show',
-        scope: 'settings',
-        active: behavior === 'invert',
-        disabled: behavior === 'invert',
-        onSelect: () => toggleRuleBehavior(key, 'invert'),
-      },
-      {
-        icon: () => <MdiStar />,
-        label: 'Highlight',
-        scope: 'settings',
-        active: behavior === 'highlight',
-        disabled: behavior === 'highlight',
-        onSelect: () => toggleRuleBehavior(key, 'highlight'),
-      },
-    ]
-    if (behavior) {
-      items.push({
-        icon: () => <MdiCloseCircleOutline />,
-        label: 'Clear',
-        scope: 'settings',
-        onSelect: () => clearRule(key),
-      })
-    }
+    const items: MenuItem[] = ruleBehaviorItems(key, behavior, { noun: this.noun })
 
     if (this.marksEnabled())
       items.push(...this.markSetItems(id, link))
