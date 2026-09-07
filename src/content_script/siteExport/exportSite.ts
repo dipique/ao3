@@ -3,51 +3,43 @@ import type { Options, SnapshotDescriptor, ThemeOption } from '#common'
 import { LOCAL_ONLY, options, textReplacementActive } from '#common'
 import { readSnapshot } from '#content_script/searchView/cache.js'
 
+import type { CompressedWork } from './compress.ts'
 import type { SiteManifest, SiteManifestWork, SiteOptionsPayload } from './payload.ts'
-import type { ZipEntry } from './zip.ts'
 
-// Bundled as a string: the exporter runs in the options page and has no
-// filesystem, so the one file the reader actually runs travels inside the
-// build. Vite's `?raw`; nothing else in `src/` imports a `.py`.
-import serveScript from '../../site/serve.py?raw'
 import { bakeTextReplacements } from './bake.ts'
+import { compressEntry } from './compress.ts'
 import {
   buildManifest,
   rewriteWorkLinks,
+  scriptJson,
   SITE_SCHEMA_VERSION,
-  SITE_STYLESHEET,
-  siteDataScript,
-  siteIndexHtml,
+  siteShellHead,
+  siteShellTail,
   statusFor,
-  workFilePath,
-  workPageHtml,
 } from './payload.ts'
 import { readWorkTextIndex, readWorkTexts } from './workTextCache.ts'
-import { createZip } from './zip.ts'
 
 /**
- * Turn a stored list and its cached work text into the zip the reader unpacks —
- * the site payload assembled ({@link file://./payload.ts} says what goes in it).
+ * Turn a stored list and its cached work text into the one HTML file a reader
+ * carries away ({@link file://./payload.ts} says what goes in it).
  *
  * The job runner's third step ({@link file://./job.ts}). It reads only what is
  * already on disk: no request goes to AO3 from here, which is why "Download
- * without refreshing" can be offered at all and why the composite job puts a
- * refresh and a cache pass in front of this one by default.
+ * without refreshing" can be offered at all, and why the composite job puts a
+ * refresh and a caching pass in front of this one by default.
  *
  * **Text replacements are baked in here, on the way out** — never at fetch time.
- * The cache holds AO3's words; a rule change costs one re-export rather than a
- * re-fetch of the whole library ({@link file://./bake.ts}). Whatever renders
- * these pages must therefore not apply the rules a second time; the manifest
- * says as much in `textReplacementsBaked`.
+ * The cache holds AO3's words; a rule change then costs one re-export rather
+ * than a re-fetch of the whole library ({@link file://./bake.ts}). Whatever
+ * renders these works must therefore not apply the rules a second time; the
+ * manifest says as much in `textReplacementsBaked`.
  */
-
-const ARCHIVE_BASE = 'https://archiveofourown.org'
 
 /**
  * Works whose text is read from storage at once. Big enough that a thousand-work
  * export isn't a thousand round trips, small enough that only a few megabytes of
- * HTML are in hand at any moment — which is the whole reason
- * {@link file://./zip.ts} takes an async iterable.
+ * uncompressed HTML are in hand at any moment — each batch is compressed and
+ * released before the next is read.
  */
 const READ_BATCH = 20
 
@@ -56,7 +48,7 @@ export interface BuildSiteExportOptions {
   cacheKey: string
   descriptor: SnapshotDescriptor
   signal?: AbortSignal
-  /** Called as each work is written into the archive. */
+  /** Called as each work is compressed into the file. */
   onProgress?: (done: number, total: number) => void
 }
 
@@ -73,20 +65,18 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
   if (!snapshot)
     throw new Error(`There is no stored list for "${opts.descriptor.label}" any more. Refresh the list and try again.`)
 
-  // Read out here rather than through `snapshot` below: the generator that needs
-  // them is a closure, and narrowing doesn't cross into one.
   const { scrapedAt } = snapshot
   const listCount = snapshot.works.length
 
   // One entry per work, in list order. A work listed twice — a series that
   // appears under two fandoms, say — travels once.
-  const works: { workId: string, title: string, blurbHtml: string }[] = []
+  const works: { workId: string, blurbHtml: string }[] = []
   const seen = new Set<string>()
   for (const work of snapshot.works) {
     if (!work.workId || seen.has(work.workId))
       continue
     seen.add(work.workId)
-    works.push({ workId: work.workId, title: work.title, blurbHtml: work.el.outerHTML })
+    works.push({ workId: work.workId, blurbHtml: work.el.outerHTML })
   }
 
   const [index, textSettings, optionsPayload] = await Promise.all([
@@ -96,9 +86,9 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
   ])
 
   /**
-   * Which works this export carries a page for, decided from the index before a
-   * single page is written — a link can only be pointed at a local file if we
-   * already know the file will be there.
+   * Which works this export carries text for, decided from the index before a
+   * single one is compressed — a link can only be pointed at a local work if we
+   * already know it will be there.
    *
    * The index is the same thing the options row totals, so it is as right as the
    * row is. A key lost to an interrupted write would leave one dangling link
@@ -111,91 +101,84 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
   const manifestWorks: SiteManifestWork[] = []
   const baked = textSettings.enabled && textSettings.rules.some(textReplacementActive)
 
-  // Assigned by the generator below, before `createZip` resolves.
-  let manifest: SiteManifest | null = null
+  // The compressed works, as the JSON fragments they will be written out as.
+  // Kept in pieces rather than one array of objects so the finished document is
+  // assembled by `Blob` from many medium strings, never a single vast one.
+  const workJson: string[] = []
+  let done = 0
+  opts.onProgress?.(0, works.length)
 
-  async function* entries(): AsyncGenerator<ZipEntry> {
-    let done = 0
-    opts.onProgress?.(0, works.length)
+  for (let start = 0; start < works.length; start += READ_BATCH) {
+    opts.signal?.throwIfAborted()
+    const batch = works.slice(start, start + READ_BATCH)
+    const texts = await readWorkTexts(batch.map(work => work.workId))
 
-    for (let start = 0; start < works.length; start += READ_BATCH) {
-      opts.signal?.throwIfAborted()
-      const batch = works.slice(start, start + READ_BATCH)
-      const texts = await readWorkTexts(batch.map(work => work.workId))
+    for (const work of batch) {
+      const entry = index[work.workId]
+      const html = texts[work.workId]
+      done++
 
-      for (const work of batch) {
-        const entry = index[work.workId]
-        const html = texts[work.workId]
-        done++
-
-        if (!html) {
-          manifestWorks.push({ id: work.workId, status: statusFor(entry, false) })
-          continue
-        }
-
-        manifestWorks.push({
-          id: work.workId,
-          status: 'cached',
-          file: workFilePath(work.workId),
-          size: entry?.size,
-          fetchedAt: entry?.fetchedAt,
-        })
-
-        // Relative to `works/`, which is where this page is about to live.
-        const body = rewriteWorkLinks(bakeTextReplacements(html, textSettings), localIds, '')
-        yield {
-          path: workFilePath(work.workId),
-          data: workPageHtml({
-            workId: work.workId,
-            title: work.title,
-            label: opts.descriptor.label,
-            body,
-            archiveUrl: `${ARCHIVE_BASE}/works/${work.workId}`,
-          }),
-        }
+      if (!html) {
+        manifestWorks.push({ id: work.workId, status: statusFor(entry, false) })
+        continue
       }
 
-      opts.onProgress?.(done, works.length)
+      manifestWorks.push({
+        id: work.workId,
+        status: 'cached',
+        size: entry?.size,
+        fetchedAt: entry?.fetchedAt,
+      })
+
+      const body = rewriteWorkLinks(bakeTextReplacements(html, textSettings), localIds)
+      const compressed: CompressedWork = { id: work.workId, ...await compressEntry(body) }
+      workJson.push(scriptJson(compressed))
     }
 
-    manifest = buildManifest({
-      generatedAt,
-      source: {
-        id: opts.descriptor.sourceId,
-        label: opts.descriptor.label,
-        listUrl: opts.descriptor.listUrl,
-      },
-      scrapedAt,
-      listCount,
-      works: manifestWorks,
-      textReplacementsBaked: baked,
-    })
-
-    yield {
-      path: 'blurbs.js',
-      data: siteDataScript({
-        manifest,
-        options: optionsPayload,
-        blurbsHtml: works.map(work => work.blurbHtml),
-      }),
-    }
-    yield { path: 'manifest.json', data: JSON.stringify(manifest, null, 2) }
-    yield { path: 'options.json', data: JSON.stringify(optionsPayload, null, 2) }
-    yield { path: 'index.html', data: siteIndexHtml(manifest) }
-    yield { path: 'assets/site.css', data: SITE_STYLESHEET }
-    yield { path: 'serve.py', data: serveScript }
+    opts.onProgress?.(done, works.length)
   }
 
-  const blob = await createZip(entries(), { date: new Date(generatedAt) })
-  return { blob, fileName: exportFileName(opts.descriptor.label, new Date(generatedAt)), manifest: manifest! }
+  const manifest = buildManifest({
+    generatedAt,
+    source: {
+      id: opts.descriptor.sourceId,
+      label: opts.descriptor.label,
+      listUrl: opts.descriptor.listUrl,
+    },
+    scrapedAt,
+    listCount,
+    works: manifestWorks,
+    textReplacementsBaked: baked,
+  })
+
+  // Blurbs travel as one entry: every facet and the filter want all of them at
+  // once, and being near-identical markup they compress far better together than
+  // one at a time.
+  const blurbs = await compressEntry(JSON.stringify(works.map(work => work.blurbHtml)))
+
+  const blob = new Blob([
+    siteShellHead(manifest),
+    `{"v":${SITE_SCHEMA_VERSION},"manifest":`,
+    scriptJson(manifest),
+    ',"options":',
+    scriptJson(optionsPayload),
+    ',"blurbs":',
+    scriptJson(blurbs),
+    ',"works":[',
+    workJson.join(','),
+    ']}',
+    siteShellTail(),
+  ], { type: 'text/html;charset=utf-8' })
+
+  return { blob, fileName: exportFileName(opts.descriptor.label, new Date(generatedAt)), manifest }
 }
 
 /**
  * The reader's settings, travelling with their library.
  *
- * Storage-shaped so the site build's `browser` shim can seed itself from it
- * directly. The exclusions are the sync codec's: `user` is the AO3 account
- * this device happens to be signed in as and `verbose` is a local debug toggle,
+ * Storage-shaped so the exported page's `browser` shim can seed itself from it
+ * directly. The exclusions are the sync codec's: `user` is the AO3 account this
+ * device happens to be signed in as and `verbose` is a local debug toggle,
  * neither of which means anything on the iPad — and `theme.current` is derived
  * from the device that *exported*, so only the reader's actual choice travels.
  */
@@ -211,14 +194,18 @@ async function siteOptionsPayload(): Promise<SiteOptionsPayload> {
 }
 
 /**
- * `AO3-Enhancements-site_marked-for-later-dipique_2026-09-07_14-51-02.zip` —
+ * `AO3-Enhancements-site_marked-for-later-dipique_2026-09-07_14-51-02.html` —
  * the shape "Import & export your settings" already uses, plus the list's name,
  * since a reader with three lists ends up with three of these in one folder.
+ *
+ * The timestamp is safe to keep even though a later export lands under a new
+ * name: every local file shares one storage origin, so a re-export finds
+ * whatever the last one left rather than starting over.
  */
 export function exportFileName(label: string, when: Date): string {
   const iso = when.toISOString()
   const time = `${iso.slice(0, 10)}_${iso.slice(11, 19).replace(/:/g, '-')}`
-  return `AO3-Enhancements-site_${slugify(label)}_${time}.zip`
+  return `AO3-Enhancements-site_${slugify(label)}_${time}.html`
 }
 
 function slugify(label: string): string {

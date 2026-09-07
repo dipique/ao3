@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { readZip } from '../siteExport/zipReader.mjs'
 import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
 
 const chromePath = findChrome()
@@ -277,90 +279,106 @@ describe('options UI — site export', { skip }, () => {
     assert.match(summary, /1 not cached/)
   })
 
-  /** The archive behind the last download `saveAs` asked for. */
+  /** The exported page behind the last download `saveAs` asked for. */
   const lastDownload = async () => {
     const record = await page.evaluate(() => window.__downloads.at(-1) ?? null)
     assert.ok(record, 'nothing was handed to the browser to save')
     const base64 = await page.evaluate(url => window.__downloadBytes(url), record.url)
-    return { name: record.name, entries: await readZip(Buffer.from(base64, 'base64')) }
+    const html = Buffer.from(base64, 'base64').toString('utf-8')
+    // The same block the exported page reads itself out of.
+    const open = html.indexOf('<script type="application/json" id="ao3e-data">')
+    const start = html.indexOf('>', open) + 1
+    const data = JSON.parse(html.slice(start, html.indexOf('</script>', start)))
+    return { name: record.name, html, data }
   }
 
-  test('"Download site" refreshes, caches and writes the zip', async () => {
+  /** Unpack one compressed entry the way the exported page unpacks it. */
+  const unpack = entry => page.evaluate(async (e) => {
+    const binary = atob(e.b64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    const stream = new Response(bytes).body.pipeThrough(new DecompressionStream('deflate-raw'))
+    return new TextDecoder().decode(await new Response(stream).arrayBuffer())
+  }, entry)
+
+  test('"Download site" refreshes, caches and writes one HTML file', async () => {
     await clickIn(LABEL, 'Download site')
     await until('the download to be handed over', () => page.evaluate(() => window.__downloads.length > 0), 40000)
 
-    const { name, entries } = await lastDownload()
-    assert.match(name, /^AO3-Enhancements-site_marked-for-later-tester_\d{4}-\d{2}-\d{2}_[\d-]{8}\.zip$/)
-    assert.deepEqual(
-      [...entries.keys()].sort(),
-      ['assets/site.css', 'blurbs.js', 'index.html', 'manifest.json', 'options.json', 'serve.py', 'works/11.html', 'works/12.html', 'works/13.html'],
-    )
+    const { name, html, data } = await lastDownload()
+    assert.match(name, /^AO3-Enhancements-site_marked-for-later-tester_\d{4}-\d{2}-\d{2}_[\d-]{8}\.html$/)
+    assert.match(html, /^<!doctype html>/)
+    assert.equal(data.v, 2)
+    assert.equal(data.works.length, 3)
+    // Everything the page needs is inside it — no fetch, no second file.
+    assert.doesNotMatch(html, /<script src=|<link rel="stylesheet"/)
+  })
+
+  test('a page whose scripts never run says so', async () => {
+    const { html } = await lastDownload()
+    // The shell is static, so this is what a reader sees when the browser
+    // refuses to run it — which is what Safari does with a local file.
+    assert.match(html, /This page needs JavaScript, and none is running/)
+    assert.match(html, /Microsoft Edge/)
   })
 
   test('the manifest accounts for every work in the list', async () => {
-    const { entries } = await lastDownload()
-    const manifest = JSON.parse(entries.get('manifest.json').text)
-    assert.equal(manifest.v, 1)
+    const { data } = await lastDownload()
+    const { manifest } = data
+    assert.equal(manifest.v, 2)
     assert.equal(manifest.source.id, 'marked-for-later')
     assert.equal(manifest.source.label, LABEL)
     assert.equal(manifest.list.count, 3)
     // The full path refreshes first, so work 13 — added by the refresh — is
-    // cached by the time the zip is written.
+    // cached by the time the file is written.
     assert.deepEqual(manifest.counts, { total: 3, cached: 3, restricted: 0, notfound: 0, error: 0, uncached: 0 })
     assert.equal(manifest.textReplacementsBaked, true)
     assert.deepEqual(manifest.works.map(w => w.id), ['11', '12', '13'])
-    assert.equal(manifest.works[0].file, 'works/11.html')
+    assert.ok(manifest.works[0].size > 0)
   })
 
-  test('each work page carries the text, with replacements baked in', async () => {
-    const { entries } = await lastDownload()
-    const page11 = entries.get('works/11.html').text
+  test('each work is compressed on its own, with replacements baked in', async () => {
+    const { data } = await lastDownload()
+    // One entry per work is what lets the page unpack only the one being read.
+    assert.deepEqual(data.works.map(w => w.id), ['11', '12', '13'])
+    for (const work of data.works) {
+      assert.ok(work.size > 0 && work.crc > 0, 'each entry records what it should come back as')
+      assert.ok(!work.b64.includes('<'), 'base64 needs no script escaping')
+    }
 
-    assert.match(page11, /^<!doctype html>/)
-    assert.match(page11, /The rewritten text of work 11\./)
-    assert.doesNotMatch(page11, /The text of work 11\./)
+    const text = await unpack(data.works.find(w => w.id === '11'))
+    assert.match(text, /^<div class="ao3e-work"/)
+    assert.match(text, /The rewritten text of work 11\./)
+    assert.doesNotMatch(text, /The text of work 11\./)
     // The title is the work's identity, not its prose — the second rule is
     // written to fire there and must not.
-    assert.match(page11, /<h2 class="title heading">Work number 11<\/h2>/)
-    assert.doesNotMatch(page11, /Story number/)
+    assert.match(text, /<h2 class="title heading">Work number 11<\/h2>/)
+    assert.doesNotMatch(text, /Story number/)
     // Same sanitizing the cache holds: no chrome, no controls, no scripts.
-    assert.doesNotMatch(page11, /new_kudo|primary navigation|window\.evil/)
-    assert.match(page11, /href="\.\.\/index\.html"/)
-    assert.match(page11, /href="\.\.\/assets\/site\.css"/)
+    assert.doesNotMatch(text, /new_kudo|primary navigation|window\.evil/)
   })
 
-  test('the site can read its own data without fetching it', async () => {
-    const { entries } = await lastDownload()
-    const blurbs = entries.get('blurbs.js').text
+  test('the blurbs travel together, keeping AO3\'s words', async () => {
+    const { html, data } = await lastDownload()
+    const blurbs = JSON.parse(await unpack(data.blurbs))
 
-    assert.match(blurbs, /^\/\* AO3 Enhancements/)
-    assert.match(blurbs, /window\.__AO3E = \{/)
-    // A literal `</script>` anywhere in here would end the tag it sits in.
-    assert.ok(!blurbs.includes('</script'), 'markup must be escaped out of the data script')
-    // Blurb HTML travels as HTML, so the view can mount it as-is.
-    assert.ok(blurbs.includes('work_11'), 'the blurbs should be in there')
-    // The blurb keeps AO3's words: replacements are for the work text alone.
-    assert.ok(blurbs.includes('Work number 11'))
+    assert.equal(blurbs.length, 3)
+    assert.ok(blurbs[0].includes('work_11'), 'blurb HTML travels as HTML, to be mounted as-is')
+    // Replacements are for the work text alone.
+    assert.ok(blurbs[0].includes('Work number 11'))
+    // A literal `</script>` inside the data block would end the tag it sits in,
+    // so the only one in that region must be the block's own closing tag.
+    const open = html.indexOf('id="ao3e-data"')
+    const close = html.indexOf('</script>', open)
+    assert.ok(html.slice(open, close).endsWith('}'), 'the data block must run to its own closing tag')
+  })
 
-    const data = JSON.parse(blurbs.slice(blurbs.indexOf('{'), blurbs.lastIndexOf('}') + 1))
-    assert.equal(data.blurbsHtml.length, 3)
-    assert.equal(data.manifest.counts.cached, 3)
+  test('the reader\'s settings travel, minus what belongs to this device', async () => {
+    const { data } = await lastDownload()
     assert.equal(data.options.items['option.textReplacements'].enabled, true)
-    // Device-local settings stay on the device.
     assert.ok(!('option.user' in data.options.items))
+    assert.ok(!('option.verbose' in data.options.items))
     assert.deepEqual(Object.keys(data.options.items['option.theme']), ['chosen'])
-
-    const index = entries.get('index.html').text
-    assert.match(index, /<script src="blurbs\.js"><\/script>/)
-    assert.match(index, /href="assets\/site\.css"/)
-    assert.ok(index.includes(LABEL), 'the index should be titled after the list')
-  })
-
-  test('the reader gets a server they can run', async () => {
-    const { entries } = await lastDownload()
-    const serve = entries.get('serve.py').text
-    assert.match(serve, /^#!\/usr\/bin\/env python3/)
-    assert.match(serve, /Serve this exported AO3 Enhancements site/)
   })
 
   test('"Download without refreshing" packages what is already saved', async () => {
@@ -385,9 +403,66 @@ describe('options UI — site export', { skip }, () => {
     await until('the second download', () => page.evaluate(n => window.__downloads.length > n, before))
     page.off('request', watch)
 
-    const { entries } = await lastDownload()
-    assert.equal(JSON.parse(entries.get('manifest.json').text).counts.cached, 3)
+    const { data } = await lastDownload()
+    assert.equal(data.manifest.counts.cached, 3)
     assert.deepEqual(requests, [], 'nothing should have been asked of AO3')
+  })
+
+  /**
+   * The export, opened the way a reader opens it: one file, straight off disk,
+   * with no server and nothing else beside it. This is the whole promise of the
+   * single-file format, and a `file://` load is the only thing that proves it —
+   * everything above only ever inspected the bytes.
+   */
+  test('the exported file works on its own, from file://', async () => {
+    const { html } = await lastDownload()
+    const dir = mkdtempSync(join(tmpdir(), 'ao3e-site-'))
+    const path = join(dir, 'library.html')
+    writeFileSync(path, html)
+
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('console', m => m.type() === 'error' && errors.push(m.text()))
+    reader.on('pageerror', e => errors.push(e.message))
+    try {
+      await reader.goto(`file://${path.replace(/\\/g, '/')}`, { waitUntil: 'load' })
+      await reader.waitForSelector('#ao3e-works li', { timeout: 15000 })
+
+      // The inert shell was replaced, so the scripts ran.
+      assert.doesNotMatch(await reader.content(), /This page needs JavaScript, and none is running/)
+      assert.equal(await reader.$$eval('#ao3e-works > li', els => els.length), 3)
+      assert.match(await reader.$eval('#ao3e-shown', el => el.textContent), /^3 works/)
+
+      // A work this file carries opens in the page; the tag beside it still
+      // points at the archive.
+      assert.equal(
+        await reader.$eval('#ao3e-works > li h4 a', el => el.getAttribute('href')),
+        '#work/11',
+      )
+      assert.match(
+        await reader.$eval('#ao3e-works > li .tags a', el => el.getAttribute('href')),
+        /^https:\/\/archiveofourown\.org\//,
+      )
+
+      // Hash routing, and the work unpacked on demand.
+      await reader.click('#ao3e-works > li h4 a')
+      await reader.waitForFunction(() => document.querySelector('#ao3e-body .ao3e-work') !== null, { timeout: 10000 })
+      const text = await reader.$eval('#ao3e-body', el => el.textContent)
+      assert.match(text, /The rewritten text of work 11\./)
+      assert.equal(await reader.$eval('#ao3e-list', el => el.hidden), true)
+
+      // Back to the list, and the filter narrows it.
+      await reader.click('#ao3e-reader .ao3e-site-nav a')
+      await reader.waitForFunction(() => !document.getElementById('ao3e-list').hidden)
+      await reader.type('#ao3e-filter', 'Work number 12')
+      await reader.waitForFunction(() => document.querySelectorAll('#ao3e-works > li').length === 1)
+
+      assert.deepEqual(errors, [], 'the exported page should not need anything it does not carry')
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('nothing threw along the way', () => {
