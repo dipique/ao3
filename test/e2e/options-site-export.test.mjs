@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
+import { readZip } from '../siteExport/zipReader.mjs'
 import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
 
 const chromePath = findChrome()
@@ -85,6 +87,48 @@ const SEED = {
       },
     },
   },
+  // The export bakes the reader's find/replace rules into every work on the way
+  // out (the plan's §4), so there has to be one to bake.
+  'option.textReplacements': {
+    enabled: true,
+    tools: false,
+    rules: [
+      { find: 'The text of', replace: 'The rewritten text of' },
+      // Never fires: the title is the work's identity, not its prose, and the
+      // export rewrites exactly the scope the on-page unit does.
+      { find: 'Work number', replace: 'Story number' },
+    ],
+  },
+}
+
+/**
+ * Catch what `saveAs` hands the browser, instead of letting it hand it to the
+ * browser. A detached `<a download>` still starts a real download in headless
+ * Chrome, which this test has nowhere to put and nothing to say about; what it
+ * wants is the Blob itself.
+ */
+function captureDownloads() {
+  window.__downloads = []
+  const blobs = new Map()
+  const createObjectURL = URL.createObjectURL.bind(URL)
+  URL.createObjectURL = (object) => {
+    const url = createObjectURL(object)
+    blobs.set(url, object)
+    return url
+  }
+  const click = HTMLAnchorElement.prototype.click
+  HTMLAnchorElement.prototype.click = function () {
+    if (!this.hasAttribute('download'))
+      return click.call(this)
+    window.__downloads.push({ name: this.download, url: this.href })
+  }
+  window.__downloadBytes = async (url) => {
+    const bytes = new Uint8Array(await blobs.get(url).arrayBuffer())
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += 0x8000)
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+    return btoa(binary)
+  }
 }
 
 describe('options UI — site export', { skip }, () => {
@@ -125,6 +169,7 @@ describe('options UI — site export', { skip }, () => {
     page.on('console', m => m.type() === 'error' && problems.push(m.text()))
     page.on('pageerror', e => problems.push(e.message))
     await page.evaluateOnNewDocument(installMock, SEED)
+    await page.evaluateOnNewDocument(captureDownloads)
     await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
     await sleep(1500)
   }, { timeout: 180000 })
@@ -231,6 +276,119 @@ describe('options UI — site export', { skip }, () => {
     const summary = await row.evaluate(el => el.querySelector('label span + span')?.textContent?.trim() ?? '')
     assert.match(summary, /^3 works/)
     assert.match(summary, /1 not cached/)
+  })
+
+  /** The archive behind the last download `saveAs` asked for. */
+  const lastDownload = async () => {
+    const record = await page.evaluate(() => window.__downloads.at(-1) ?? null)
+    assert.ok(record, 'nothing was handed to the browser to save')
+    const base64 = await page.evaluate(url => window.__downloadBytes(url), record.url)
+    return { name: record.name, entries: await readZip(Buffer.from(base64, 'base64')) }
+  }
+
+  test('"Download site" refreshes, caches and writes the zip', async () => {
+    await clickIn(LABEL, 'Download site')
+    await until('the download to be handed over', () => page.evaluate(() => window.__downloads.length > 0), 40000)
+
+    const { name, entries } = await lastDownload()
+    assert.match(name, /^AO3-Enhancements-site_marked-for-later-tester_\d{4}-\d{2}-\d{2}_[\d-]{8}\.zip$/)
+    assert.deepEqual(
+      [...entries.keys()].sort(),
+      ['assets/site.css', 'blurbs.js', 'index.html', 'manifest.json', 'options.json', 'serve.py', 'works/11.html', 'works/12.html', 'works/13.html'],
+    )
+  })
+
+  test('the manifest accounts for every work in the list', async () => {
+    const { entries } = await lastDownload()
+    const manifest = JSON.parse(entries.get('manifest.json').text)
+    assert.equal(manifest.v, 1)
+    assert.equal(manifest.source.id, 'marked-for-later')
+    assert.equal(manifest.source.label, LABEL)
+    assert.equal(manifest.list.count, 3)
+    // The full path refreshes first, so work 13 — added by the refresh — is
+    // cached by the time the zip is written.
+    assert.deepEqual(manifest.counts, { total: 3, cached: 3, restricted: 0, notfound: 0, error: 0, uncached: 0 })
+    assert.equal(manifest.textReplacementsBaked, true)
+    assert.deepEqual(manifest.works.map(w => w.id), ['11', '12', '13'])
+    assert.equal(manifest.works[0].file, 'works/11.html')
+  })
+
+  test('each work page carries the text, with replacements baked in', async () => {
+    const { entries } = await lastDownload()
+    const page11 = entries.get('works/11.html').text
+
+    assert.match(page11, /^<!doctype html>/)
+    assert.match(page11, /The rewritten text of work 11\./)
+    assert.doesNotMatch(page11, /The text of work 11\./)
+    // The title is the work's identity, not its prose — the second rule is
+    // written to fire there and must not.
+    assert.match(page11, /<h2 class="title heading">Work number 11<\/h2>/)
+    assert.doesNotMatch(page11, /Story number/)
+    // Same sanitizing the cache holds: no chrome, no controls, no scripts.
+    assert.doesNotMatch(page11, /new_kudo|primary navigation|window\.evil/)
+    assert.match(page11, /href="\.\.\/index\.html"/)
+    assert.match(page11, /href="\.\.\/assets\/site\.css"/)
+  })
+
+  test('the site can read its own data without fetching it', async () => {
+    const { entries } = await lastDownload()
+    const blurbs = entries.get('blurbs.js').text
+
+    assert.match(blurbs, /^\/\* AO3 Enhancements/)
+    assert.match(blurbs, /window\.__AO3E = \{/)
+    // A literal `</script>` anywhere in here would end the tag it sits in.
+    assert.ok(!blurbs.includes('</script'), 'markup must be escaped out of the data script')
+    // Blurb HTML travels as HTML, so the view can mount it as-is.
+    assert.ok(blurbs.includes('work_11'), 'the blurbs should be in there')
+    // The blurb keeps AO3's words: replacements are for the work text alone.
+    assert.ok(blurbs.includes('Work number 11'))
+
+    const data = JSON.parse(blurbs.slice(blurbs.indexOf('{'), blurbs.lastIndexOf('}') + 1))
+    assert.equal(data.blurbsHtml.length, 3)
+    assert.equal(data.manifest.counts.cached, 3)
+    assert.equal(data.options.items['option.textReplacements'].enabled, true)
+    // Device-local settings stay on the device.
+    assert.ok(!('option.user' in data.options.items))
+    assert.deepEqual(Object.keys(data.options.items['option.theme']), ['chosen'])
+
+    const index = entries.get('index.html').text
+    assert.match(index, /<script src="blurbs\.js"><\/script>/)
+    assert.match(index, /href="assets\/site\.css"/)
+    assert.ok(index.includes(LABEL), 'the index should be titled after the list')
+  })
+
+  test('the reader gets a server they can run', async () => {
+    const { entries } = await lastDownload()
+    const serve = entries.get('serve.py').text
+    assert.match(serve, /^#!\/usr\/bin\/env python3/)
+    assert.match(serve, /Serve this exported AO3 Enhancements site/)
+  })
+
+  test('"Download without refreshing" packages what is already saved', async () => {
+    const before = await page.evaluate(() => window.__downloads.length)
+    const requests = []
+    const watch = req => req.url().startsWith(ARCHIVE) && requests.push(req.url())
+    page.on('request', watch)
+
+    // The split button: the label of an `Icon` renders as screen-reader text
+    // inside its button, which is what makes it findable by name at all.
+    await clickIn(LABEL, 'More download options')
+    await until('the menu to open', () => page.evaluate(
+      () => [...document.querySelectorAll('[role="menuitem"]')]
+        .some(el => el.textContent.includes('Download without refreshing')),
+    ))
+    const item = (await page.evaluateHandle(
+      () => [...document.querySelectorAll('[role="menuitem"]')]
+        .find(el => el.textContent.includes('Download without refreshing')) ?? null,
+    )).asElement()
+    await item.click()
+
+    await until('the second download', () => page.evaluate(n => window.__downloads.length > n, before))
+    page.off('request', watch)
+
+    const { entries } = await lastDownload()
+    assert.equal(JSON.parse(entries.get('manifest.json').text).counts.cached, 3)
+    assert.deepEqual(requests, [], 'nothing should have been asked of AO3')
   })
 
   test('nothing threw along the way', () => {

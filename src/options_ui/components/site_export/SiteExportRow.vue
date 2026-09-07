@@ -12,7 +12,18 @@ import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
  */
 const props = defineProps<{ row: SiteExportListRow }>()
 
-const { status, resumable, refreshList, cacheWorks, refreshAndCache, stop, resume, discard } = useSiteExport()
+const {
+  status,
+  resumable,
+  refreshList,
+  cacheWorks,
+  refreshAndCache,
+  downloadSite,
+  downloadCached,
+  stop,
+  resume,
+  discard,
+} = useSiteExport()
 
 /** The job belongs to this list. Another list's job only greys this row out. */
 const mine = computed(() => status.value.job?.cacheKey === props.row.key)
@@ -90,6 +101,42 @@ const cacheLabel = computed(() => (props.row.cached ? 'Update cache' : 'Cache wo
               <span line-clamp-2 text-sm text-muted-fg leading-snug>
                 Don't wait out the retry delay on the {{ row.failed.toLocaleString() }}
                 {{ row.failed === 1 ? 'work' : 'works' }} that failed &mdash; for after signing back in to AO3.
+              </span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button
+          class="disabled:cursor-default disabled:op-50"
+          :disabled="!row.descriptor || busy"
+          @click.prevent="downloadSite(row)"
+        >
+          Download site
+        </Button>
+        <!--
+          A split button only once there is a cache to download: with nothing
+          saved yet, "without refreshing" would hand over an empty site.
+        -->
+        <DropdownMenu v-if="row.cached" :modal="false">
+          <DropdownMenuTrigger>
+            <Button
+              class="disabled:cursor-default disabled:op-50"
+              size="icon"
+              :disabled="!row.descriptor || busy"
+            >
+              <Icon i-mdi-chevron-down label="More download options" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem
+              flex="~ col items-start gap-1" px-4 py-3
+              @click="downloadCached(row)"
+            >
+              <span text-sm font-medium leading-none>Download without refreshing</span>
+              <span line-clamp-2 text-sm text-muted-fg leading-snug>
+                Package exactly what is saved here now, without asking AO3 for anything.
+                Quick, and as up to date as the {{ row.cached.toLocaleString() }} saved
+                {{ row.cached === 1 ? 'work' : 'works' }} are.
               </span>
             </DropdownMenuItem>
           </DropdownMenuContent>

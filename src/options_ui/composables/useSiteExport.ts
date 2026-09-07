@@ -157,6 +157,23 @@ export function useSiteExport() {
       return startFor(row, ['refreshing', 'caching'])
     },
 
+    /**
+     * The one-button path: refresh the list, fetch whatever the cache is
+     * missing, then write the zip. Long, and the progress bar says so.
+     */
+    downloadSite(row: SiteExportListRow) {
+      return startFor(row, ['refreshing', 'caching', 'exporting'])
+    },
+
+    /**
+     * Export exactly what is on disk — no request to AO3 at all. Offered from a
+     * menu rather than as a checkbox, so the item itself says which of the two
+     * things is about to happen.
+     */
+    downloadCached(row: SiteExportListRow) {
+      return startFor(row, ['exporting'])
+    },
+
     resume() {
       return run('resume the job', resumeJob)
     },

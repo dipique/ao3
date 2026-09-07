@@ -1,13 +1,14 @@
 import type { SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
-import { createLogger, options } from '#common'
+import { createLogger, options, saveAs } from '#common'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { readSnapshot } from '#content_script/searchView/cache.js'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
 
 import type { WorkFreshness } from './workText.ts'
 
+import { buildSiteExport } from './exportSite.ts'
 import { cacheWorkText } from './fetchWorkText.ts'
 import { freshnessFromWork, planWorkCache } from './workText.ts'
 import { readWorkTextIndex } from './workTextCache.ts'
@@ -57,10 +58,10 @@ const CONCURRENCY = 3
 /**
  * A step the job can be in the middle of.
  *
- * The plan's §6 names a third, `exporting`; it arrives with the zip writer
- * (milestone 4) rather than sitting here as a case nothing can produce.
+ * Refresh list is `['refreshing']`, Cache works `['caching']`, and Download site
+ * the three together — refresh the list, cache against it, then write the zip.
  */
-export type ExportJobPhase = 'refreshing' | 'caching'
+export type ExportJobPhase = 'refreshing' | 'caching' | 'exporting'
 
 export interface ExportJobError {
   workId: string
@@ -259,8 +260,10 @@ async function drive(job: ExportJob): Promise<void> {
     while (job.steps.length) {
       if (job.steps[0] === 'refreshing')
         await runRefresh(job, signal)
-      else
+      else if (job.steps[0] === 'caching')
         await runCaching(job, signal)
+      else
+        await runExport(job, signal)
 
       // A stop or a 429 leaves the step in place, so resuming picks it up again.
       if (signal.aborted || job.blocked)
@@ -413,6 +416,57 @@ async function runCaching(job: ExportJob, signal: AbortSignal): Promise<void> {
   const workers = Math.min(CONCURRENCY, Math.max(1, job.queue.length))
   await Promise.all(Array.from({ length: workers }, worker))
   await persist(job)
+}
+
+/**
+ * Write the zip and hand it to the browser — the plan's §8 payload, from what is
+ * already on disk.
+ *
+ * Nothing here talks to AO3, which is why this step can be run on its own
+ * ("Download without refreshing") and why the composite job puts a refresh and a
+ * caching pass in front of it by default: an accurate "has this work changed?"
+ * needs a fresh list (§5), and a work that was never fetched can only be linked
+ * back to AO3.
+ *
+ * It keeps no queue of its own: `done`/`total` count works *written*, and a
+ * caching pass's leftovers are cleared on the way in so the bar starts from
+ * zero rather than resuming somebody else's count. A resumed export therefore
+ * just writes the zip again, which is cheap and asks AO3 for nothing.
+ */
+async function runExport(job: ExportJob, signal: AbortSignal): Promise<void> {
+  message = 'Building the site…'
+  job.queue = []
+  job.done = 0
+  job.total = 0
+  publish()
+
+  const result = await buildSiteExport({
+    cacheKey: job.cacheKey,
+    descriptor: job.descriptor,
+    signal,
+    onProgress: (done, total) => {
+      job.done = done
+      job.total = total
+      message = `Writing work ${done.toLocaleString()} of ${total.toLocaleString()}…`
+      publish()
+    },
+  })
+
+  // A reader who pressed Stop mid-build does not want the half a library that
+  // got written handed to them as if it were the export they asked for.
+  if (signal.aborted)
+    return
+
+  const { counts } = result.manifest
+  const missing = counts.total - counts.cached
+  if (missing > 0) {
+    warn(
+      `${missing.toLocaleString()} of ${counts.total.toLocaleString()} works have no saved text, so the site links those to AO3 instead of opening them. `
+      + 'Run "Update cache" to fetch them.',
+    )
+  }
+
+  saveAs(result.blob, result.fileName)
 }
 
 /**
