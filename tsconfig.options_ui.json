@@ -1,8 +1,12 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "jsx": "preserve",
-    "jsxImportSource": "vue",
+    // The options UI is all .vue SFCs with template blocks — it has no .tsx of
+    // its own — so the only JSX this project ever sees is in the src/common
+    // files it imports, which are written against our own hyperscript (#dom),
+    // not Vue's. Pointing jsxImportSource at Vue typed those files' elements as
+    // VNodes and broke every one of them; these match tsconfig.common.json.
+    "jsx": "react",
     "lib": [
       "ESNext",
       "DOM",
@@ -13,10 +17,13 @@
     "module": "preserve",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    // typed-query-selector is here for src/common, which this project pulls in
+    // and which is written against the element types it infers.
     "types": [
       "node",
       "firefox-webext-browser",
-      "vite/client"
+      "vite/client",
+      "typed-query-selector"
     ],
     "allowImportingTsExtensions": true,
     "allowJs": true,
@@ -41,7 +48,8 @@
     "src/types/components.d.ts",
     "src/types/vue-global.d.ts",
     "src/types/vue-unocss-attributify.d.ts",
-    "src/types/env.d.ts"
+    "src/types/env.d.ts",
+    "src/types/icons.d.ts"
   ],
   "vueCompilerOptions": {
     "strictTemplates": true

@@ -332,7 +332,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       role="separator"
       aria-orientation="vertical"
       aria-label="Filter column width"
-      tabindex="0"
+      tabindex={0}
       title="Drag to resize the filters — double-click to reset"
     />
   ) as HTMLElement

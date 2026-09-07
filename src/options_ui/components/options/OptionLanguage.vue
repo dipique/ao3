@@ -47,12 +47,18 @@ const filteredOptions = computed(() => options.value.filter(option => option.lab
         border="b-1"
         z-99 h-full w-full of-hidden rounded-md shadow-md
       >
+        <!--
+          Not v-model: reka types the combobox as emitting a single `T` even in
+          `multiple` mode, where it really hands back the whole `T[]` — so a
+          plain v-model reads as writing one Language into a Language[].
+        -->
         <RekaComboboxRoot
-          v-model="show"
+          :model-value="show"
           :ignore-filter="true"
           flex="~ col"
           default-open
           multiple
+          @update:model-value="value => show = value as unknown as Language[]"
         >
           <div class="flex items-center px-2" border="1 input">
             <Icon i-mdi-search mr-2 w-4 op-50 />

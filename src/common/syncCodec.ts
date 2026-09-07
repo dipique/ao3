@@ -107,18 +107,21 @@ export function buildLocalUpdate(
 ): Options {
   const known = writerKeys ? new Set(writerKeys) : null
   const out = { ...existing } as Options
+  // Options is a closed interface with no index signature, so the key-by-key
+  // copying below writes through a loose view of the very same object.
+  const write = out as unknown as Record<string, unknown>
   for (const key of Object.keys(defaults) as (keyof Options)[]) {
     // theme is rebuilt below; the local-only keys always come from this device.
     if (LOCAL_ONLY.has(key) || key === 'theme')
       continue
     if (key in pruned)
-      (out as Record<string, unknown>)[key] = pruned[key]
+      write[key] = pruned[key]
     else if (known?.has(key))
-      (out as Record<string, unknown>)[key] = defaults[key]
+      write[key] = defaults[key]
   }
   out.theme = { ...defaults.theme, ...(pruned.theme ?? {}), current: existing.theme.current }
   for (const key of LOCAL_ONLY)
-    (out as Record<string, unknown>)[key] = existing[key]
+    write[key] = existing[key]
   return out
 }
 
@@ -164,7 +167,11 @@ export function hash(str: string, seed = 0): string {
 // Compression + base64 (portable — no Uint8Array.toBase64; not in Chrome 120 / FF 117)
 // ---------------------------------------------------------------------------
 
-async function transform(bytes: Uint8Array, stream: TransformStream<Uint8Array, Uint8Array>): Promise<Uint8Array> {
+// Not `TransformStream<Uint8Array, Uint8Array>`: the compression streams take the
+// wider `BufferSource` on the writable side, so that signature doesn't fit them.
+// `BufferSource` also excludes a shared-memory-backed view, hence the explicit
+// `Uint8Array<ArrayBuffer>` all the way down this chain.
+async function transform(bytes: Uint8Array<ArrayBuffer>, stream: CompressionStream | DecompressionStream): Promise<Uint8Array<ArrayBuffer>> {
   const writer = stream.writable.getWriter()
   // On a decompression error the writable side rejects too; swallow it here so it
   // doesn't surface as an unhandled rejection — the read side's error (below) is
@@ -175,8 +182,8 @@ async function transform(bytes: Uint8Array, stream: TransformStream<Uint8Array, 
   return new Uint8Array(buf)
 }
 
-const deflateRaw = (bytes: Uint8Array) => transform(bytes, new CompressionStream('deflate-raw'))
-const inflateRaw = (bytes: Uint8Array) => transform(bytes, new DecompressionStream('deflate-raw'))
+const deflateRaw = (bytes: Uint8Array<ArrayBuffer>) => transform(bytes, new CompressionStream('deflate-raw'))
+const inflateRaw = (bytes: Uint8Array<ArrayBuffer>) => transform(bytes, new DecompressionStream('deflate-raw'))
 
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = ''
@@ -186,7 +193,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin)
 }
 
-function base64ToBytes(b64: string): Uint8Array {
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64)
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++)

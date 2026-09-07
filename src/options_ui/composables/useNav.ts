@@ -48,8 +48,11 @@ export function useAddNav(name: string) {
 
       stop = useIntersectionObserver(
         el,
-        ([{ isIntersecting }]) => {
-          intersectionMap.value.set(name, isIntersecting)
+        ([entry]) => {
+          // The observer always reports at least one entry, but the array is
+          // typed as an ordinary list, so the first one reads as optional.
+          if (entry)
+            intersectionMap.value.set(name, entry.isIntersecting)
         },
         {
           rootMargin: `-${headerHeightInPx.value} 0px 0px 0px`,

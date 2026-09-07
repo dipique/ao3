@@ -1,3 +1,4 @@
+import { fetchWithRetry } from '#content_script/archiveFetch.js'
 import { parseWork, type Work } from '#content_script/blurb.js'
 
 /**
@@ -5,10 +6,9 @@ import { parseWork, type Work } from '#content_script/blurb.js'
  * a fandom page, a user's Marked for Later, etc.). It fetches every page,
  * collects the real `li.blurb` nodes and parses them into `Work[]`. AO3 runs on
  * donated infrastructure and rate-limits aggressively, so requests run through a
- * small concurrency pool and back off on HTTP 429.
+ * small concurrency pool and back off on HTTP 429 (see
+ * {@link file://../archiveFetch.ts}).
  */
-
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
 /** Highest page number from a `pagy`/AO3 pagination block in a listing document. */
 export function detectPageCount(doc: Document | Element): number {
@@ -29,20 +29,12 @@ export function detectPageCount(doc: Document | Element): number {
  * are, and wants exactly these retry manners while it does.
  */
 export async function fetchPageDoc(url: string, signal?: AbortSignal, retries = 3): Promise<Document> {
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { credentials: 'same-origin', signal })
-    if (res.status === 200) {
-      // A private DOMParser, not the shared parseDocument(), so we don't clobber
-      // the module-level CSRF token cache other features rely on.
-      return new DOMParser().parseFromString(await res.text(), 'text/html')
-    }
-    if (res.status === 429 && attempt < retries) {
-      const retryAfter = Number(res.headers.get('Retry-After'))
-      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : Math.min(30_000, 1000 * 2 ** attempt))
-      continue
-    }
+  const res = await fetchWithRetry(url, signal, retries)
+  if (res.status !== 200)
     throw new Error(`Failed to fetch ${url} (status ${res.status})`)
-  }
+  // A private DOMParser, not the shared parseDocument(), so we don't clobber
+  // the module-level CSRF token cache other features rely on.
+  return new DOMParser().parseFromString(await res.text(), 'text/html')
 }
 
 /**

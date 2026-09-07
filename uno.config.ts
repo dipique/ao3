@@ -1,4 +1,5 @@
 import { objectKeys, objectPick } from '@antfu/utils'
+import type { CustomIconLoader } from '@iconify/utils'
 import { parseCssColor, variantGetParameter } from '@unocss/rule-utils'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -56,13 +57,21 @@ export const COLORS = {
   },
 } as const
 
-// Load installed @iconify-json/* collections explicitly. autoInstall/FS auto-discovery
-// is unreliable here (pnpm's nested store + Windows), so we provide them directly.
+// Load the installed @iconify-json/* collections explicitly, by require rather
+// than by letting a preset go looking for them. This began as a workaround for
+// pnpm's symlinked store on Windows, which the FS scan couldn't walk; that reason
+// is gone (pnpm-workspace.yaml pins `nodeLinker: hoisted`, so node_modules is
+// flat), but the explicit map is worth keeping on its own: it's the same list
+// both builders already hand unplugin-icons, and it keeps a build from reaching
+// the network to install a collection mid-compile.
 const iconifyRequire = createRequire(import.meta.url)
 const iconifyCollection = (name: string) => () => iconifyRequire(`@iconify-json/${name}/icons.json`)
 
 export const ICONS_CUSTOM_COLLECTIONS = {
-  'ao3e': FileSystemIconLoader(fileURLToPath(new URL('./src/icons', import.meta.url))),
+  // unplugin-icons types a loader's result as `PromiseLike`, @iconify/utils
+  // (whose CustomIconLoader is what presetIcons accepts) as `Promise` — the same
+  // loader, incompatible on paper only. It really does return a Promise.
+  'ao3e': FileSystemIconLoader(fileURLToPath(new URL('./src/icons', import.meta.url))) as CustomIconLoader,
   'codicon': iconifyCollection('codicon'),
   'mdi': iconifyCollection('mdi'),
   'tabler': iconifyCollection('tabler'),
@@ -206,7 +215,10 @@ export default {
     presetAttributify({ strict: false }),
     presetAnimations(),
     presetIcons({
-      autoInstall: true,
+      // No autoInstall: every collection the codebase uses is in the map below,
+      // so it could only ever fire for a typo'd prefix — and fetching a package
+      // mid-build is a worse answer to that than failing. Matches how both
+      // builders configure unplugin-icons.
       prefix: 'i-',
       collections: ICONS_CUSTOM_COLLECTIONS,
       customizations: { transform: ICONS_TRANSFORM },

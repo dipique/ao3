@@ -40,7 +40,9 @@ const update = debounce(100, () => {
 const sliderValue = computed({
   get: () => [Number(inputValue.value) || min],
   set: (v) => {
-    inputValue.value = v[0]
+    // The slider is single-thumb, so there is always a v[0] — but it arrives as
+    // an ordinary array, which reads as possibly-empty.
+    inputValue.value = v[0] ?? min
     update()
   },
 })

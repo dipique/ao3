@@ -82,10 +82,16 @@ const BLOCK_TAGS = new Set([
   'ul',
 ])
 
-/** The work text on this page, or null if there is none. */
-export function findWorkText(): Element | null {
+/**
+ * The work text in `scope`, or null if there is none. Defaults to the live page,
+ * which is what the unit and the tools want; the site export passes a parsed
+ * document instead, so a cached work is rewritten against exactly the same
+ * definition of "the work's own text" as the page it was cached from
+ * ({@link file://./siteExport/bake.ts}).
+ */
+export function findWorkText(scope: ParentNode = document): Element | null {
   return WORK_TEXT_SELECTORS.reduce<Element | null>(
-    (found, selector) => found ?? document.querySelector(selector),
+    (found, selector) => found ?? scope.querySelector(selector),
     null,
   )
 }

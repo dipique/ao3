@@ -12,9 +12,14 @@
     "module": "preserve",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    // This project pulls in src/common, so it needs the same ambient types that
+    // tsconfig.common.json gives those files: typed-query-selector for the
+    // element types querySelector infers, vite/client for the `?inline` imports.
     "types": [
       "node",
-      "firefox-webext-browser"
+      "firefox-webext-browser",
+      "typed-query-selector",
+      "vite/client"
     ],
     "allowImportingTsExtensions": true,
     "allowJs": true,
@@ -34,6 +39,8 @@
   },
   "include": [
     "src/manifest.ts",
-    "src/background/**/*.ts"
+    "src/background/**/*.ts",
+    "src/types/env.d.ts",
+    "src/types/icons.d.ts"
   ]
 }
