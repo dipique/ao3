@@ -112,7 +112,7 @@ async function buildTagMenu(tag: Tag, link: HTMLAnchorElement, filter: FilterTar
       // Hides the tag itself wherever it's listed, leaving the work alone. Once
       // applied the tag is gone from the page, so undoing it is a settings job.
       icon: () => <MdiTagOff />,
-      label: 'Hide this filter',
+      label: 'Remove tag from results',
       scope: 'settings',
       active: behavior === 'hideFilter',
       disabled: behavior === 'hideFilter',

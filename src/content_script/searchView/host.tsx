@@ -1,4 +1,4 @@
-import type { Options } from '#common'
+import type { Options, SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS, logger, toast } from '#common'
@@ -42,6 +42,12 @@ export interface SearchSource {
   id: string
   /** Snapshot cache key: the id plus whatever varies inside it (user, tag, …). */
   cacheKey: string
+  /**
+   * The serializable half of this source — enough to re-fetch the listing from
+   * the options page, which has none of these closures and no AO3 document to
+   * read. Stored with every snapshot; see {@link SnapshotDescriptor}.
+   */
+  descriptor: () => SnapshotDescriptor
   /** Builds the URL of a 1-based page of the source listing. */
   pageUrl: (page: number) => string
   /** How many pages that listing has. Read from the live page, at load time. */
@@ -192,7 +198,7 @@ function prepare(source: SearchSource, works: Work[], options: Options): void {
 
 /** Write the blurb snapshot, plus whatever else the source keeps in step with it. */
 async function persist(source: SearchSource, works: Work[]): Promise<void> {
-  await writeSnapshot(source.cacheKey, works)
+  await writeSnapshot(source.cacheKey, works, source.descriptor())
   await source.onPersist?.(works)
 }
 

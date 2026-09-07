@@ -86,6 +86,11 @@ export class SearchMarkedForLater extends Unit {
     return {
       id: SOURCE_ID,
       cacheKey: snapshotKey(userId),
+      descriptor: () => ({
+        sourceId: SOURCE_ID,
+        label: `Marked for Later — ${userId}`,
+        listUrl: getArchiveLink(`/users/${userId}/readings?show=to-read`),
+      }),
       pageUrl: page => getArchiveLink(`/users/${userId}/readings?show=to-read&page=${page}`),
       pageCount: () => detectPageCount(document),
       nativeElements: () => document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),

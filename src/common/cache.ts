@@ -1,5 +1,27 @@
 import { createStorage } from './storage.ts'
 
+/**
+ * Everything needed to re-fetch a listing from somewhere that isn't the AO3 page
+ * it came from — the options page, which has no `location`, no live document to
+ * read a page count off, and none of the closures a `SearchSource` is built from.
+ *
+ * Stored with the snapshot rather than derived, because by the time anything
+ * wants to refresh a list, the page that knew how to build its URL is long gone.
+ */
+export interface SnapshotDescriptor {
+  /** The `SearchSource` id this came from, e.g. `marked-for-later`. */
+  sourceId: string
+  /** Human label for the options list, e.g. `Marked for Later — someuser`. */
+  label: string
+  /**
+   * Absolute URL of the listing, page unspecified. Callers set the page with
+   * `withPage` ({@link file://./listUrl.ts}) rather than appending to it.
+   */
+  listUrl: string
+  /** Where the blurbs sit, when the source needs something other than the default. */
+  blurbSelector?: string
+}
+
 export interface SearchSnapshot {
   /** Schema version, so stale-shaped snapshots are ignored after upgrades. */
   version: number
@@ -7,6 +29,12 @@ export interface SearchSnapshot {
   scrapedAt: number
   /** Each work's blurb `outerHTML`, in list order — re-mounted to rebuild the view instantly. */
   blurbsHtml: string[]
+  /**
+   * How to re-fetch this listing. Absent on a v1 snapshot, written before
+   * descriptors existed — such a snapshot still renders, it just can't be
+   * refreshed until the reader visits its page once more.
+   */
+  descriptor?: SnapshotDescriptor
 }
 
 /**

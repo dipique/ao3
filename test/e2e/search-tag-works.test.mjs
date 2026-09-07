@@ -236,6 +236,27 @@ describe('search an uncommon tag\'s works', { skip }, () => {
     assert.equal(stored[key].blurbsHtml.length, PAGES * PER_PAGE)
   })
 
+  test('the snapshot records how to re-fetch this listing later', async () => {
+    // The options page has no `location` and no AO3 document, so everything a
+    // refresh needs has to have been written down here (plans/site-export.md §3).
+    const stored = await tab.evaluate(() => {
+      const writes = window.__writes ?? []
+      let snapshots = null
+      for (let i = writes.length - 1; i >= 0 && !snapshots; i--)
+        snapshots = writes[i]['cache.searchSnapshots'] ?? null
+      return snapshots
+    })
+    const entry = stored['tag-works:marriage%20problems']
+    assert.equal(entry.version, 2, 'snapshots carrying a descriptor are v2')
+    assert.deepEqual(entry.descriptor, {
+      sourceId: 'tag-works',
+      label: 'Tag: marriage problems',
+      listUrl: TAG_URL,
+      // A tag page also lists bookmarks; a refresh must scope blurbs as we do.
+      blurbSelector: 'div.work.listbox ul.index.group > li.blurb',
+    })
+  })
+
   test('"Back to list" puts the native page back', async () => {
     await tab.click('.AO3E--search-view--back')
     await sleep(400)

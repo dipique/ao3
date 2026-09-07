@@ -113,6 +113,14 @@ export class SearchTagWorks extends Unit {
     return {
       id: SOURCE_ID,
       cacheKey: snapshotKey(),
+      descriptor: () => ({
+        sourceId: SOURCE_ID,
+        label: `Tag: ${tagName()}`,
+        listUrl: getArchiveLink(location.pathname),
+        // A tag page lists bookmarks below the works in a second `ul.index.group`,
+        // so a refresh has to be scoped the same way this scrape is.
+        blurbSelector: BLURB_SELECTOR,
+      }),
       // The path already carries the tag, percent-encoded the way AO3 wants it;
       // built from the path alone so opening from page 3 still starts at page 1.
       pageUrl: page => getArchiveLink(`${location.pathname}?page=${page}`),
@@ -146,4 +154,17 @@ export class SearchTagWorks extends Unit {
  */
 function snapshotKey(): string {
   return `${SOURCE_ID}:${location.pathname.replace(/^\/tags\/|\/$/g, '')}`
+}
+
+/** The tag as a reader would write it, for the snapshot's label. */
+function tagName(): string {
+  const raw = location.pathname.replace(/^\/tags\/|\/$/g, '')
+  try {
+    // AO3 percent-encodes `/` as `*s*` and friends in tag paths; decoding only
+    // undoes the URL layer, which is the part that looks like noise in a list.
+    return decodeURIComponent(raw)
+  }
+  catch {
+    return raw
+  }
 }

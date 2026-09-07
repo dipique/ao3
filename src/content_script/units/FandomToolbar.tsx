@@ -109,7 +109,7 @@ async function buildFandomMenu(tag: Tag, link: HTMLAnchorElement, filter: Filter
       // Hides the fandom tag itself wherever it's listed, leaving the work
       // alone. Undoing it is a settings job — the tag is gone from the page.
       icon: () => <MdiTagOff />,
-      label: 'Hide this filter',
+      label: 'Remove tag from results',
       scope: 'settings',
       active: behavior === 'hideFilter',
       disabled: behavior === 'hideFilter',

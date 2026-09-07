@@ -103,6 +103,13 @@ export class SearchTextResults extends Unit {
     return {
       id: SOURCE_ID,
       cacheKey: snapshotKey(),
+      descriptor: () => ({
+        sourceId: SOURCE_ID,
+        label: searchLabel(),
+        // `pageQuery` carries the whole search and drops `edit_search`; which
+        // page it names doesn't matter, since a refresh sets its own.
+        listUrl: getArchiveLink(`${location.pathname}?${pageQuery(1)}`),
+      }),
       pageUrl: page => getArchiveLink(`${location.pathname}?${pageQuery(page)}`),
       pageCount: () => detectPageCount(document),
       resultCount: foundCount,
@@ -139,6 +146,16 @@ export class SearchTextResults extends Unit {
  * — every `work_search[…]` field, the sort — is carried through untouched, so
  * the scrape walks exactly the list the reader is looking at.
  */
+/**
+ * What this search was, for the snapshot's label. AO3 puts the words in
+ * `work_search[query]`; a search made entirely of dropdowns has none, and gets
+ * named after the thing it is instead.
+ */
+function searchLabel(): string {
+  const query = new URLSearchParams(location.search).get('work_search[query]')?.trim()
+  return query ? `Works search: ${query}` : 'Works search'
+}
+
 function pageQuery(page: number): string {
   const params = new URLSearchParams(location.search)
   params.set('page', String(page))
