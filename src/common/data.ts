@@ -493,6 +493,22 @@ export interface TextReplacement {
   /** Match only whole words — `find` must not be flanked by word characters. */
   wholeWord?: boolean
   /**
+   * Match through a change of formatting. A work's text is broken into a fresh
+   * text node wherever its markup changes, and by default a rule matches within
+   * one of those — so `, Love...` never fires against
+   * `…I can,<em> Love….</em>`, where the comma and the word are in different
+   * nodes. With this set, the rule is matched against the sentence as it reads.
+   *
+   * Off by default, and per-rule rather than global, because of what a match
+   * across a seam has to do on the way out: the replacement is written wholly
+   * into the node the match *started* in, taking that node's formatting, and the
+   * rest of the match is deleted from the nodes after it. The example above
+   * comes out as `…I can, honey<em>.</em>` — the replacement no longer italic,
+   * and an orphaned italic full stop left behind. A fair trade for the rule you
+   * are deliberately fixing; not something to spring on rules written months ago.
+   */
+  acrossFormatting?: boolean
+  /**
    * Kept in the list but inert. Somewhere to park a rule the reader wants back
    * later — or one of several variants of the same replacement — instead of
    * deleting it, which is otherwise the only way to stop it applying and takes
@@ -550,62 +566,115 @@ export function applyTextReplacement(text: string, rule: TextReplacement): strin
 }
 
 /**
- * One run of the rewritten text: either a stretch of the original, or what a
- * rule put in its place. {@link TextPart.rule} indexes the array handed to
- * {@link replaceTextParts} — which is why the whole list is passed even though
- * the inert entries are skipped, so the index still names the rule as the
- * reader's own settings hold it.
+ * One run of the rewritten text: either a stretch of the source, or what a rule
+ * put in its place.
+ *
+ * {@link TextSpan.rule} indexes the rules array handed to
+ * {@link replaceTextSegments} — which is why the whole list is passed even
+ * though the inert entries are skipped, so the index still names the rule as the
+ * reader's own settings hold it. {@link TextSpan.segment} indexes the segments,
+ * and says where the run has to be written back to.
  */
-export interface TextPart {
+export interface TextSpan {
   text: string
+  /**
+   * The source segment this run belongs to. For a replacement, the segment its
+   * match *started* in — a match that ran on into the next segment leaves that
+   * one with only the text after it. The replacement has to go somewhere, and
+   * where the match started is the one place the reader pointed at.
+   */
+  segment: number
   /** Index of the rule that produced this run, or `null` for untouched source text. */
   rule: number | null
 }
 
 /**
- * Apply every rule, in order, and report the result as the runs it is made of.
- * The work page uses those runs to underline what it changed and to lead each
- * one back to the rule behind it; {@link applyTextReplacements} is the same
- * thing with the runs joined back up.
+ * Apply every rule, in order, to text that arrives in pieces — and report the
+ * result as the runs it is made of, each knowing which piece it belongs to.
  *
- * Later rules see earlier results, as they always have, but they see them one
- * run at a time — so a match that would have straddled the seam between an
- * earlier replacement and the text beside it isn't found. That is the price of
- * knowing which rule wrote which words, and it buys the same output whether or
- * not the underlining is switched on.
+ * The pieces are the work's text nodes, in reading order, and the seams between
+ * them are where its formatting changes: `…I can,` `‑ Love….` `‑ Alright?` is one
+ * sentence in three segments because two of the words are italic. The rules are
+ * matched against the whole of it rather than against each piece, so a rule can
+ * be written the way the sentence reads — but a match that spans a seam is only
+ * kept* for a rule that asked for it, with {@link TextReplacement.acrossFormatting}.
+ * Everything else behaves as though each segment stood alone, which is what the
+ * rules a reader already has were written against.
+ *
+ * Seams *inside* one segment — left by an earlier rule's replacement — are not
+ * formatting, and are never in the way: later rules read straight through them,
+ * exactly as they would have if the earlier rule had rewritten a plain string.
  */
-export function replaceTextParts(text: string, rules: TextReplacement[]): TextPart[] {
-  let parts: TextPart[] = [{ text, rule: null }]
+export function replaceTextSegments(segments: string[], rules: TextReplacement[]): TextSpan[] {
+  let spans: TextSpan[] = segments
+    .map((text, segment) => ({ text, segment, rule: null }))
+    .filter(span => span.text !== '')
 
   for (const [index, rule] of rules.entries()) {
-    if (!textReplacementActive(rule))
-      continue
-
-    const matcher = matcherFor(rule)
-    const next: TextPart[] = []
-    for (const part of parts) {
-      let at = 0
-      // The matcher is global and reused across runs, so its lastIndex has to be
-      // put back before each one.
-      matcher.lastIndex = 0
-      for (const match of part.text.matchAll(matcher)) {
-        if (match.index > at)
-          next.push({ text: part.text.slice(at, match.index), rule: part.rule })
-        next.push({ text: replacementFor(rule, match[0]), rule: index })
-        at = match.index + match[0].length
-      }
-      if (at === 0)
-        next.push(part)
-      else if (at < part.text.length)
-        next.push({ text: part.text.slice(at), rule: part.rule })
-    }
-    parts = next
+    if (textReplacementActive(rule))
+      spans = applyRuleToSpans(spans, rule, index)
   }
 
-  return parts
+  return spans
+}
+
+/** One rule's pass over the runs so far. Returns `spans` untouched if nothing matched. */
+function applyRuleToSpans(spans: TextSpan[], rule: TextReplacement, index: number): TextSpan[] {
+  const flat = spans.map(span => span.text).join('')
+  if (!flat)
+    return spans
+
+  // Which run each character of `flat` came from — how a match is traced back to
+  // the segment (and so the text node) it started and ended in.
+  const owner: number[] = []
+  spans.forEach((span, at) => {
+    for (let i = 0; i < span.text.length; i++)
+      owner.push(at)
+  })
+  const segmentAt = (offset: number): number => spans[owner[offset]!]!.segment
+
+  const out: TextSpan[] = []
+  let at = 0
+  let matched = false
+
+  for (const match of flat.matchAll(matcherFor(rule))) {
+    const start = match.index
+    const end = start + match[0].length
+    if (!rule.acrossFormatting && segmentAt(start) !== segmentAt(end - 1))
+      continue
+
+    keepSource(out, spans, flat, owner, at, start)
+    out.push({ text: replacementFor(rule, match[0]), segment: segmentAt(start), rule: index })
+    at = end
+    matched = true
+  }
+
+  if (!matched)
+    return spans
+
+  keepSource(out, spans, flat, owner, at, flat.length)
+  return out.filter(span => span.text !== '')
+}
+
+/**
+ * Copy `flat[from, to)` into `out` as runs, cut wherever it crosses from one
+ * existing run into the next so each piece keeps the segment and rule it already
+ * had.
+ */
+function keepSource(out: TextSpan[], spans: TextSpan[], flat: string, owner: number[], from: number, to: number): void {
+  let cut = from
+  while (cut < to) {
+    const which = owner[cut]!
+    let next = cut + 1
+    while (next < to && owner[next] === which)
+      next++
+    const source = spans[which]!
+    out.push({ text: flat.slice(cut, next), segment: source.segment, rule: source.rule })
+    cut = next
+  }
 }
 
 /** Apply every rule, in order, to a string (later rules see earlier results). */
 export function applyTextReplacements(text: string, rules: TextReplacement[]): string {
-  return replaceTextParts(text, rules).map(part => part.text).join('')
+  return replaceTextSegments([text], rules).map(span => span.text).join('')
 }

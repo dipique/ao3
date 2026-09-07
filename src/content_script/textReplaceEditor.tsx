@@ -87,6 +87,11 @@ export function openTextReplaceEditor(opts: TextReplaceEditorOptions): void {
   const caseSensitive = checkbox('Case sensitive', !!rule.caseSensitive, 'Match only where the capitalisation matches exactly.')
   const matchCasing = checkbox('Match casing', !!rule.matchCasing, 'Match any capitalisation, and capitalise the replacement when the match starts with a capital.')
   const wholeWord = checkbox('Whole word', !!rule.wholeWord, 'Match only whole words.')
+  const acrossFormatting = checkbox(
+    'Across formatting',
+    !!rule.acrossFormatting,
+    'Match even where the text is broken up by italics, a link or the like. The replacement takes the formatting of wherever the match started.',
+  )
   const disabled = checkbox('Disabled', !!rule.disabled, 'Keep the rule but stop it applying.')
 
   // "Match casing" is what to do about capitalisation when the match ignores it,
@@ -115,6 +120,7 @@ export function openTextReplaceEditor(opts: TextReplaceEditorOptions): void {
       caseSensitive: caseSensitive.input.checked,
       matchCasing: matchCasing.input.checked,
       wholeWord: wholeWord.input.checked,
+      acrossFormatting: acrossFormatting.input.checked,
       disabled: disabled.input.checked,
     }
 
@@ -157,6 +163,7 @@ export function openTextReplaceEditor(opts: TextReplaceEditorOptions): void {
         {caseSensitive.row}
         {matchCasing.row}
         {wholeWord.row}
+        {acrossFormatting.row}
         {disabled.row}
       </div>
       {error}

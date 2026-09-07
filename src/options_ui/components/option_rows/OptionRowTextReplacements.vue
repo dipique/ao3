@@ -2,7 +2,15 @@
 const { enabled, tools, rules } = useOption('textReplacements')
 
 function add() {
-  rules.value.push({ find: '', replace: '', caseSensitive: false, matchCasing: false, wholeWord: false, disabled: false })
+  rules.value.push({
+    find: '',
+    replace: '',
+    caseSensitive: false,
+    matchCasing: false,
+    wholeWord: false,
+    acrossFormatting: false,
+    disabled: false,
+  })
 }
 
 function remove(index: number) {
@@ -87,7 +95,14 @@ function remove(index: number) {
             <input v-model="rule.wholeWord" type="checkbox">
             <span>Whole word</span>
           </label>
-          <!-- Apart from the three that shape the match, because it is the only
+          <label
+            flex="~ gap-1.5 items-center"
+            title="Match even where the text is broken up by italics, a link or the like."
+          >
+            <input v-model="rule.acrossFormatting" type="checkbox">
+            <span>Across formatting</span>
+          </label>
+          <!-- Apart from the ones that shape the match, because it is the only
                one that decides whether the rule runs at all. -->
           <label flex="~ gap-1.5 items-center" ml-auto title="Keep the rule but stop it applying.">
             <input v-model="rule.disabled" type="checkbox">
@@ -98,8 +113,10 @@ function remove(index: number) {
 
       <p text="xs muted-fg" pl-1>
         "Match casing" matches any casing and, when a match starts with a capital letter, capitalises the
-        replacement to match — so one rule covers both lowercase and capitalised forms. "Disabled" keeps a rule
-        in the list without applying it, for a replacement you want back later or one of several variants.
+        replacement to match — so one rule covers both lowercase and capitalised forms. "Across formatting" lets a
+        rule match through italics, a link and the like, where the words are split across the markup; the
+        replacement then takes the formatting of wherever the match started. "Disabled" keeps a rule in the list
+        without applying it, for a replacement you want back later or one of several variants.
       </p>
 
       <div>

@@ -128,8 +128,11 @@ export class TextReplaceTools extends Unit {
       </button>
     ) as HTMLElement as HTMLButtonElement
 
-    /** The selection the button is currently offering, and where it was. */
-    let selected: { text: string, at: { x: number, y: number } } | null = null
+    /**
+     * The selection the button is currently offering, where it was, and whether
+     * it spanned more than one text node — see `crosses` below.
+     */
+    let selected: { text: string, at: { x: number, y: number }, crosses: boolean } | null = null
     /** A pointer is on the button — a selection lost to that press isn't a dismissal. */
     let hovering = false
 
@@ -176,7 +179,13 @@ export class TextReplaceTools extends Unit {
       if (rect.width === 0 && rect.height === 0)
         return hide()
 
-      selected = { text, at: place(rect) }
+      // A selection that started in one text node and ended in another has
+      // picked up text either side of a change of formatting, and a rule made
+      // from it can only ever match with `acrossFormatting` set. Nobody finds a
+      // flag that explains why their rule quietly does nothing, so the one
+      // moment we can tell them is this one — the rule opens with it ticked.
+      const crosses = range.startContainer !== range.endContainer
+      selected = { text, at: place(rect), crosses }
     }
 
     // Coalesced to one pass per frame: `selectionchange` fires continuously
@@ -211,7 +220,14 @@ export class TextReplaceTools extends Unit {
       hovering = false
       hide()
       openTextReplaceEditor({
-        rule: { find: current.text, replace: '', caseSensitive: false, matchCasing: false, wholeWord: false },
+        rule: {
+          find: current.text,
+          replace: '',
+          caseSensitive: false,
+          matchCasing: false,
+          wholeWord: false,
+          acrossFormatting: current.crosses,
+        },
         index: null,
         at: current.at,
       })
