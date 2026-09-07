@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -37,10 +37,63 @@ export function findChrome() {
   return candidates.find(p => p && existsSync(p))
 }
 
-/** Build dist/chrome (production, cross-platform) if it's missing. */
-export function ensureBuilt() {
-  if (existsSync(join(DIST, 'manifest.json')))
-    return
+/**
+ * What the build reads, relative to the repo root. A change to any of it makes
+ * `dist/chrome` stale — the e2e tests drive the *built* bundle, so testing
+ * against a stale one silently reports on code that is no longer there.
+ */
+const BUILD_INPUTS = ['src', 'scripts/builder', 'uno.config.ts', 'package.json']
+
+/**
+ * Touched after a successful build; its mtime is what staleness is measured
+ * against. A stamp of our own rather than one of the build's outputs, because
+ * the builder neither cleans `dist/` nor writes its files in a fixed order —
+ * and because it generates into `src/` (the auto-import `.d.ts` files), so any
+ * mark made *during* the build would already look older than its own inputs.
+ *
+ * Kept beside `dist/chrome` rather than inside it: `web-ext build` packages that
+ * directory wholesale, and a stray file there would ship.
+ */
+const BUILD_STAMP = join(REPO_ROOT, 'dist', '.e2e-build-stamp')
+
+/** Held while one process builds, so parallel test files queue instead of racing. */
+const BUILD_LOCK = join(REPO_ROOT, 'dist', '.e2e-build-lock')
+
+/** How long to wait for another process's build before giving up. */
+const BUILD_TIMEOUT = 10 * 60 * 1000
+
+/**
+ * Newest mtime at or under `path`, or 0 if it isn't there. Directories count
+ * too: deleting a file leaves no mtime of its own, but bumps its parent's.
+ */
+function newestMtime(path) {
+  const stats = statSync(path, { throwIfNoEntry: false })
+  if (!stats)
+    return 0
+  if (!stats.isDirectory())
+    return stats.mtimeMs
+  let newest = stats.mtimeMs
+  for (const entry of readdirSync(path))
+    newest = Math.max(newest, newestMtime(join(path, entry)))
+  return newest
+}
+
+function isStale() {
+  if (!existsSync(join(DIST, 'manifest.json')))
+    return true
+  const builtAt = statSync(BUILD_STAMP, { throwIfNoEntry: false })?.mtimeMs ?? 0
+  return BUILD_INPUTS.some(input => newestMtime(join(REPO_ROOT, input)) > builtAt)
+}
+
+/**
+ * A synchronous pause, matching `ensureBuilt`'s synchronous callers — they all
+ * run before any test in the file does, so waiting here holds up nothing else.
+ */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+function build() {
   const res = spawnSync(process.execPath, ['scripts/builder/build.ts', 'build'], {
     cwd: REPO_ROOT,
     env: { ...process.env, BROWSER: 'chrome', NODE_ENV: 'production' },
@@ -48,6 +101,50 @@ export function ensureBuilt() {
   })
   if (res.status !== 0)
     throw new Error('Failed to build dist/chrome for e2e test')
+  writeFileSync(BUILD_STAMP, `${new Date().toISOString()}\n`)
+}
+
+/**
+ * Build `dist/chrome` (production, cross-platform) if it's missing or older than
+ * the sources it was built from.
+ *
+ * `node --test a.mjs b.mjs` runs each file in its own process, concurrently, and
+ * every one of them calls this — so the build is taken under a lock and the
+ * losers wait for it rather than all writing over each other's output.
+ */
+export function ensureBuilt() {
+  const deadline = Date.now() + BUILD_TIMEOUT
+  mkdirSync(dirname(BUILD_LOCK), { recursive: true })
+
+  for (;;) {
+    if (!isStale())
+      return
+
+    try {
+      // Directory creation is atomic across processes: whoever doesn't get
+      // EEXIST owns the build.
+      mkdirSync(BUILD_LOCK)
+    }
+    catch (err) {
+      if (err.code !== 'EEXIST')
+        throw err
+      if (Date.now() > deadline)
+        throw new Error(`Timed out waiting for another test process to build dist/chrome. If no build is running, remove ${BUILD_LOCK}.`)
+      sleepSync(200)
+      continue
+    }
+
+    try {
+      // Re-checked under the lock: the process we queued behind may have just
+      // built exactly what we need.
+      if (isStale())
+        build()
+    }
+    finally {
+      rmSync(BUILD_LOCK, { recursive: true, force: true })
+    }
+    return
+  }
 }
 
 /** Serve dist/chrome over HTTP. Returns { url, close }. */
