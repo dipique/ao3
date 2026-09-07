@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome, installMock, serveDir, serveDist, sleep } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -408,6 +408,17 @@ describe('options UI — site export', { skip }, () => {
     assert.deepEqual(requests, [], 'nothing should have been asked of AO3')
   })
 
+  /** A throwaway directory holding the export under each of `names`. */
+  const writeExport = (html, ...names) => {
+    const dir = mkdtempSync(join(tmpdir(), 'ao3e-site-'))
+    for (const name of names)
+      writeFileSync(join(dir, name), html)
+    return dir
+  }
+
+  /** How a local file is addressed, once Windows' separators are out of the way. */
+  const fileUrl = (dir, name) => `file://${join(dir, name).replace(/\\/g, '/')}`
+
   /**
    * The export, opened the way a reader opens it: one file, straight off disk,
    * with no server and nothing else beside it. This is the whole promise of the
@@ -420,16 +431,14 @@ describe('options UI — site export', { skip }, () => {
    */
   test('the exported file works on its own, from file://', async () => {
     const { html } = await lastDownload()
-    const dir = mkdtempSync(join(tmpdir(), 'ao3e-site-'))
-    const path = join(dir, 'library.html')
-    writeFileSync(path, html)
+    const dir = writeExport(html, 'library.html')
 
     const reader = await browser.newPage()
     const errors = []
     reader.on('console', m => m.type() === 'error' && errors.push(m.text()))
     reader.on('pageerror', e => errors.push(e.message))
     try {
-      await reader.goto(`file://${path.replace(/\\/g, '/')}`, { waitUntil: 'load' })
+      await reader.goto(fileUrl(dir, 'library.html'), { waitUntil: 'load' })
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
 
       // The inert shell was replaced, so the scripts ran.
@@ -482,18 +491,16 @@ describe('options UI — site export', { skip }, () => {
    */
   test('a second export finds what the first one stored', async () => {
     const { html } = await lastDownload()
-    const dir = mkdtempSync(join(tmpdir(), 'ao3e-site-'))
-    writeFileSync(join(dir, 'first.html'), html)
-    writeFileSync(join(dir, 'second.html'), html)
+    const dir = writeExport(html, 'first.html', 'second.html')
 
     const reader = await browser.newPage()
     try {
-      await reader.goto(`file://${join(dir, 'first.html').replace(/\\/g, '/')}`, { waitUntil: 'load' })
+      await reader.goto(fileUrl(dir, 'first.html'), { waitUntil: 'load' })
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
       await reader.evaluate(() => browser.storage.local.set({ 'ao3e.site.witness': 'left here' }))
       const first = await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.meta'))['ao3e.site.meta'])
 
-      await reader.goto(`file://${join(dir, 'second.html').replace(/\\/g, '/')}`, { waitUntil: 'load' })
+      await reader.goto(fileUrl(dir, 'second.html'), { waitUntil: 'load' })
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
       const seen = await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.witness'))['ao3e.site.witness'] ?? null)
       assert.equal(seen, 'left here')
@@ -507,6 +514,88 @@ describe('options UI — site export', { skip }, () => {
     }
     finally {
       await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * The same file over http — the path for a reader whose browser won't open a
+   * local one at all, and the one no specification can take away.
+   *
+   * Two things only this half can show. That the page fetches **nothing**: over
+   * `file:` a request would be blocked whether the app made one or not, while
+   * here it would succeed, so an empty request log is the first real evidence
+   * that everything travelled inside the document. And that what the reader
+   * changes is kept on an origin that isn't the one every local file shares —
+   * measured the only way a reader would notice, by reloading and looking.
+   */
+  test('the same file works served over http, on an origin of its own', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+    const site = await serveDir(dir)
+    const url = `${site.url}/library.html`
+
+    const reader = await browser.newPage()
+    const errors = []
+    const fetched = []
+    reader.on('console', m => m.type() === 'error' && errors.push(m.text()))
+    reader.on('pageerror', e => errors.push(e.message))
+    // `data:` is the shim's answer for a packaged resource, and a favicon is the
+    // browser asking for something the page never mentioned. Neither is the
+    // page reaching for a file it should have carried.
+    reader.on('request', req => /^https?:/.test(req.url()) && !req.url().endsWith('/favicon.ico') && fetched.push(req.url()))
+
+    const groups = () => reader.$$eval('.AO3E--search-view--group', els => els.map(el => ({
+      name: el.querySelector('.AO3E--search-view--group-label').textContent.trim(),
+      open: el.open,
+    })))
+
+    try {
+      await reader.goto(url, { waitUntil: 'networkidle2' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.equal(await reader.$$eval('.AO3E--search-view--results > li', els => els.length), 3)
+
+      // Its own origin: the witness the `file://` copy left is not here, and
+      // this copy seeded its settings itself rather than finding them waiting.
+      assert.equal(await reader.$eval('.AO3E--site--status', el => el.dataset.ao3eWritable), 'true')
+      const witness = await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.witness'))['ao3e.site.witness'] ?? null)
+      assert.equal(witness, null)
+      const meta = await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.meta'))['ao3e.site.meta'])
+      assert.equal(meta.opens, 1)
+      assert.ok(meta.seededGeneration > 0)
+
+      // A work still opens from the copy inside the page, by hash.
+      await reader.click('.AO3E--search-view--results > li h4 a')
+      await reader.waitForFunction(() => document.querySelector('.AO3E--site--work .userstuff') !== null, { timeout: 10000 })
+      assert.match(await reader.$eval('.AO3E--site--work', el => el.textContent), /The rewritten text of work 11\./)
+      await reader.click('.AO3E--site--nav a')
+      await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)
+
+      // Collapse a facet group, which is the smallest thing the view persists.
+      const before = await groups()
+      assert.ok(before.length > 0 && before.every(g => g.open), 'groups open on a first visit')
+      await reader.click('.AO3E--search-view--group-title .AO3E--search-view--group-label')
+      await until('the layout to be saved', () => reader.evaluate(async () => {
+        const prefs = (await browser.storage.local.get('cache.searchViewPrefs'))['cache.searchViewPrefs']
+        return (prefs?.['marked-for-later']?.collapsed?.length ?? 0) > 0
+      }))
+
+      // Reload — a fresh document, a fresh shim, the same store — and it is as
+      // the reader left it.
+      await reader.reload({ waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.deepEqual(
+        (await groups()).filter(g => !g.open).map(g => g.name),
+        [before[0].name],
+      )
+
+      // Two loads, one address: everything the app needs was in the document.
+      assert.deepEqual([...new Set(fetched)], [url], 'nothing was asked of the server but the file itself')
+      assert.deepEqual(errors, [], 'a served export should ask for nothing it does not carry')
+    }
+    finally {
+      await reader.close()
+      await site.close()
       rmSync(dir, { recursive: true, force: true })
     }
   })

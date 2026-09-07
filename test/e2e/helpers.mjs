@@ -147,11 +147,20 @@ export function ensureBuilt() {
   }
 }
 
-/** Serve dist/chrome over HTTP. Returns { url, close }. */
-export async function serveDist() {
+/** Serve one directory over HTTP. Returns { url, close }. */
+export async function serveDir(root) {
   const server = http.createServer(async (req, res) => {
+    const path = decodeURIComponent(req.url.split('?')[0])
+    // Chrome asks for this whether or not the page mentions it, and a 404 for it
+    // lands in the console as an error — which would be the only thing standing
+    // between a test and "this page logged nothing".
+    if (path === '/favicon.ico') {
+      res.writeHead(204)
+      res.end()
+      return
+    }
     try {
-      const file = join(DIST, decodeURIComponent(req.url.split('?')[0]))
+      const file = join(root, path)
       const body = await readFile(file)
       res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' })
       res.end(body)
@@ -163,8 +172,19 @@ export async function serveDist() {
   })
   await new Promise(r => server.listen(0, r))
   const { port } = server.address()
-  return { url: `http://localhost:${port}`, close: () => new Promise(r => server.close(r)) }
+  return {
+    url: `http://localhost:${port}`,
+    // `close` alone waits for every keep-alive socket to time out, and Chrome
+    // holds its idle ones for minutes — so the sockets go first.
+    close: () => new Promise((r) => {
+      server.closeAllConnections()
+      server.close(r)
+    }),
+  }
 }
+
+/** Serve dist/chrome over HTTP. Returns { url, close }. */
+export const serveDist = () => serveDir(DIST)
 
 /**
  * Injected into the page before any extension script runs. Provides an in-memory
