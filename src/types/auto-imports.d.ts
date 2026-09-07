@@ -8,6 +8,7 @@ export {}
 declare global {
   const Binding: typeof import('../options_ui/directives/vLayoutVar').Binding
   const EffectScope: typeof import('vue').EffectScope
+  const NO_DESCRIPTOR_NOTE: typeof import('../options_ui/composables/useSiteExport').NO_DESCRIPTOR_NOTE
   const OptionCategoryName: typeof import('../options_ui/composables/context').OptionCategoryName
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext

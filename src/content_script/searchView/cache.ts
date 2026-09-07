@@ -91,6 +91,22 @@ export async function writeSnapshot(key: string, works: Work[], descriptor: Snap
   await cache.set({ searchSnapshots: snapshots })
 }
 
+/**
+ * Forget a stored list.
+ *
+ * The blurbs go; the work text does not. That cache is keyed by work rather
+ * than by list ({@link file://../siteExport/workTextCache.ts}), so a work this
+ * list held may well be in another one — and the text is hours of requests to
+ * AO3, where the blurbs are one scrape. Deleting it is its own action.
+ */
+export async function deleteSnapshot(key: string): Promise<void> {
+  const snapshots = await cache.get('searchSnapshots')
+  if (!(key in snapshots))
+    return
+  delete snapshots[key]
+  await cache.set({ searchSnapshots: snapshots })
+}
+
 /** Rebuild `Work[]` from cached blurb HTML, mounting fresh nodes in the document. */
 export function worksFromHtml(blurbsHtml: string[]): Work[] {
   const template = document.createElement('template')

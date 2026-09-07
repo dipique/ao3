@@ -3,7 +3,7 @@ import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.j
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
 import { toast } from '#common'
-import { listSnapshots } from '#content_script/searchView/cache.js'
+import { deleteSnapshot, listSnapshots } from '#content_script/searchView/cache.js'
 import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
 import { summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
@@ -103,10 +103,25 @@ function summarize(row: SiteExportListRow): string {
     parts.push(`${row.uncached.toLocaleString()} not cached`)
   if (row.failed)
     parts.push(`${row.failed.toLocaleString()} failed`)
-  if (!row.descriptor)
-    parts.push('open this list on AO3 once to enable refreshing it from here')
   return parts.join(' · ')
 }
+
+/**
+ * What to do about a list stored before descriptors existed, in the reader's
+ * words — shown under the row's buttons, since it is about the buttons being
+ * off rather than about the list's contents.
+ *
+ * It has to name the *view*, not the page. Opening the listing on AO3 does
+ * nothing at all: the descriptor is written when the search view scrapes, which
+ * is a button the reader has to press. The old wording ("open this list on AO3
+ * once") sent people to the page, where they could follow it exactly and see
+ * nothing change.
+ */
+export const NO_DESCRIPTOR_NOTE
+  = 'Stored before this list knew how to re-fetch itself. Open it on AO3 and press the search button '
+    + '(Search Marked for Later, or the search button on a tag or search-results page) — that scrape teaches '
+    + 'the extension where the list lives, and these buttons come back. If it stays like this, the list is '
+    + 'from an account or address that no longer resolves; delete it.'
 
 /**
  * Run one job and report it. The runner keeps the interesting failures in its
@@ -183,6 +198,17 @@ export function useSiteExport() {
 
     discard() {
       return run('discard the job', discardJob)
+    },
+
+    /**
+     * Forget one list. The work text it held stays — it is keyed by work, may
+     * belong to another list, and is the expensive half; the row underneath is
+     * where all of it is deleted at once.
+     */
+    async deleteList(row: SiteExportListRow) {
+      await deleteSnapshot(row.key)
+      await reload()
+      toast(`Removed “${row.label}”. The cached work text is still here.`, { type: 'success' })
     },
 
     async purge() {

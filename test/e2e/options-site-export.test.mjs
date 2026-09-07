@@ -222,15 +222,15 @@ describe('options UI — site export', { skip }, () => {
 
   test('a stored list gets a row, read out from the snapshot and the cache', async () => {
     const row = await rowHandle(LABEL)
-    const summary = await row.evaluate(el => el.querySelector('label span + span')?.textContent?.trim() ?? '')
+    const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
     assert.match(summary, /^2 works/)
     assert.match(summary, /list refreshed 3 hours ago/)
     assert.match(summary, /nothing cached yet/)
     assert.match(summary, /2 not cached/)
   })
 
-  test('"Cache works" fetches and stores each work\'s sanitized text', async () => {
-    await clickIn(LABEL, 'Cache works')
+  test('"Works" fetches and stores each work\'s sanitized text', async () => {
+    await clickIn(LABEL, 'Works')
     await until('the work-text index to be written', async () => {
       const index = await lastWrite('workTextIndex')
       return index && Object.keys(index).length === 2
@@ -257,13 +257,13 @@ describe('options UI — site export', { skip }, () => {
       return job === null
     })
     const row = await rowHandle(LABEL)
-    const summary = await row.evaluate(el => el.querySelector('label span + span')?.textContent?.trim() ?? '')
+    const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
     assert.match(summary, /2 cached \(/)
     assert.doesNotMatch(summary, /not cached/)
   })
 
-  test('"Refresh list" re-scrapes the listing and its saved-work index', async () => {
-    await clickIn(LABEL, 'Refresh list')
+  test('"List" re-scrapes the listing and its saved-work index', async () => {
+    await clickIn(LABEL, 'List')
     await until('the snapshot to be rewritten', async () => {
       const snapshots = await lastWrite('cache.searchSnapshots')
       return snapshots?.[CACHE_KEY]?.blurbsHtml?.length === 3
@@ -274,7 +274,7 @@ describe('options UI — site export', { skip }, () => {
     assert.ok(marked.ids.length > 0)
 
     const row = await rowHandle(LABEL)
-    const summary = await row.evaluate(el => el.querySelector('label span + span')?.textContent?.trim() ?? '')
+    const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
     assert.match(summary, /^3 works/)
     assert.match(summary, /1 not cached/)
   })
@@ -301,8 +301,8 @@ describe('options UI — site export', { skip }, () => {
     return new TextDecoder().decode(await new Response(stream).arrayBuffer())
   }, entry)
 
-  test('"Download site" refreshes, caches and writes one HTML file', async () => {
-    await clickIn(LABEL, 'Download site')
+  test('"Download" refreshes, caches and writes one HTML file', async () => {
+    await clickIn(LABEL, 'Download')
     await until('the download to be handed over', () => page.evaluate(() => window.__downloads.length > 0), 40000)
 
     const { name, html, data } = await lastDownload()
@@ -598,6 +598,69 @@ describe('options UI — site export', { skip }, () => {
       await site.close()
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  /**
+   * Removing a list asks first, and takes only the list.
+   *
+   * The work text is the expensive half — hours of requests against AO3, and
+   * keyed by work rather than by list, so another list may be reading the same
+   * copies. Deleting a row must leave every one of them alone.
+   */
+  test('the trash asks before it removes the list, and keeps the work text', async () => {
+    /** The row's last button is the trash; its name is the only one that varies. */
+    const trash = async () => {
+      const row = await rowHandle(LABEL)
+      const handle = (await row.evaluateHandle(
+        el => [...el.querySelectorAll('button')].find(b => b.textContent.includes('Remove ')) ?? null,
+      )).asElement()
+      assert.ok(handle, 'the row should offer to remove itself')
+      return handle
+    }
+
+    const dialogText = () => page.evaluate(
+      () => document.querySelector('[role="dialog"]')?.textContent ?? '',
+    )
+    const clickDialog = label => page.evaluate((text) => {
+      const button = [...document.querySelectorAll('[role="dialog"] button')]
+        .find(b => b.textContent.trim() === text)
+      button?.click()
+      return !!button
+    }, label)
+
+    // Cancelling leaves it exactly as it was.
+    await (await trash()).click()
+    await until('the confirmation', async () => (await dialogText()).includes('Remove this list?'))
+    assert.match(await dialogText(), /Marked for Later — tester/)
+    // It says what it will not touch, which is the part that costs.
+    assert.match(await dialogText(), /cached work|Work text is held per work/i)
+    assert.ok(await clickDialog('Cancel'))
+    await until('the dialog to close', async () => !(await dialogText()))
+    assert.ok(await page.evaluate(async () => {
+      const snapshots = (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots']
+      return 'marked-for-later:tester' in snapshots
+    }), 'cancelling must not remove anything')
+
+    // Confirming removes the list, and only the list.
+    const textBefore = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
+    await (await trash()).click()
+    await until('the confirmation again', async () => (await dialogText()).includes('Remove this list?'))
+    assert.ok(await clickDialog('Remove list'))
+
+    await until('the row to go', async () => {
+      const titles = await page.evaluate(
+        () => [...document.querySelectorAll('label span')].map(el => el.textContent.trim()),
+      )
+      return !titles.includes(LABEL)
+    })
+    const snapshots = await page.evaluate(
+      async () => (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots'],
+    )
+    assert.deepEqual(Object.keys(snapshots), [])
+
+    const textAfter = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
+    assert.deepEqual(Object.keys(textAfter).sort(), Object.keys(textBefore).sort())
+    assert.equal(Object.keys(textAfter).length, 3)
   })
 
   test('nothing threw along the way', () => {

@@ -7,3 +7,5 @@ dist/
 
 # ignore a local copy of the upstream branch
 ao3-enhancements/
+
+*.tmp.mjs
