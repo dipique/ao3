@@ -28,6 +28,12 @@
  * **The open itself is defensive**, for the same reason the origin is shared:
  * this page cannot assume it is the only thing that ever used the name, or the
  * newest thing to have used it. See {@link openDatabase}.
+ *
+ * Beside the settings sits the second store, `journal`, which is not part of
+ * `browser` at all — it is the record of what the reader did here, kept so it
+ * can be handed back to the extension ({@link file://./journal.ts}). The two
+ * share a database because they share a lifetime: whatever evicts one takes the
+ * other with it.
  */
 
 /** One database for every export the reader opens; the name is the namespace. */
@@ -42,7 +48,7 @@ const STORAGE_STORE = 'storage'
  * waiting for the feature that fills it, so the store is already there for an
  * export built before it and one built after.
  */
-const JOURNAL_STORE = 'journal'
+export const JOURNAL_STORE = 'journal'
 
 /** Where {@link SiteStorageMeta} lives, inside the storage store. */
 const META_KEY = 'ao3e.site.meta'
@@ -69,6 +75,19 @@ export interface SiteStorageMeta {
    * older than the export doing the seeding.
    */
   seededGeneration: number
+  /**
+   * Epoch ms the journal was last written out as a file, or null while none of
+   * it has been. What the unexported count is measured from — see
+   * {@link file://./journal.ts}.
+   */
+  lastExportedAt: number | null
+  /**
+   * `navigator.storage.persisted()` as of this open, or null where the browser
+   * has no answer. Measured on a real device: a `file:` origin says false and
+   * goes on saying it however the question is asked, so this is only ever good
+   * news on a served copy, and the page reports it only when it is.
+   */
+  persisted: boolean | null
 }
 
 /** What {@link installBrowserShim} reports back about the origin it found. */
@@ -78,6 +97,16 @@ export interface SiteStorage {
   /** Why it doesn't, when it doesn't — for the line the page shows. */
   reason: string | null
   meta: SiteStorageMeta
+  /**
+   * When this origin was last opened *before* now, or null on a first visit.
+   *
+   * Derived rather than stored, because {@link SiteStorageMeta.lastOpened} is
+   * already this open by the time anyone reads it. It is the heartbeat the
+   * status line reports: "last opened six days ago" is the only input to the one
+   * rule of thumb anybody can state about when a browser clears an origin it has
+   * been left alone with.
+   */
+  previousOpen: number | null
 }
 
 type Items = Record<string, unknown>
@@ -119,8 +148,21 @@ export async function installBrowserShim(seed: { generatedAt: number, items: Ite
     writable = false
   }
 
-  const meta = await openOrigin(seed)
-  return { writable, reason, meta }
+  const { meta, previousOpen } = await openOrigin(seed)
+  return { writable, reason, meta, previousOpen }
+}
+
+/**
+ * The open database, for the journal store beside the storage one.
+ *
+ * Null wherever the storage layer is running from memory — a failed open, or a
+ * write that stopped landing part-way through the session. The journal takes
+ * that as its own gate rather than probing a second time: there is exactly one
+ * question here ("does a write survive?"), it has one answer, and the page
+ * already says what that answer is.
+ */
+export function siteDatabase(): IDBDatabase | null {
+  return writable ? db : null
 }
 
 // --- The origin ------------------------------------------------------------
@@ -129,7 +171,7 @@ export async function installBrowserShim(seed: { generatedAt: number, items: Ite
  * Note this open, and seed the reader's settings if this export is the newest
  * one this origin has seen.
  */
-async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<SiteStorageMeta> {
+async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<{ meta: SiteStorageMeta, previousOpen: number | null }> {
   const now = Date.now()
   const stored = memory.get(META_KEY) as Partial<SiteStorageMeta> | undefined
   const meta: SiteStorageMeta = {
@@ -137,6 +179,8 @@ async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<
     lastOpened: now,
     opens: (stored?.opens ?? 0) + 1,
     seededGeneration: stored?.seededGeneration ?? 0,
+    lastExportedAt: stored?.lastExportedAt ?? null,
+    persisted: writable ? await askToPersist() : null,
   }
 
   const items: Items = {}
@@ -147,7 +191,34 @@ async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<
   items[META_KEY] = meta
 
   await setItems(items)
-  return meta
+  return { meta, previousOpen: stored?.lastOpened ?? null }
+}
+
+/**
+ * Ask the browser to keep this origin, and report what it says.
+ *
+ * Measured on the device it was written for, and the answer is no: WebKit
+ * refuses `persist()` on a `file:` origin with a user gesture and without, since
+ * it decides from engagement signals a local file has none of. The call stays
+ * because it is one line and free, and because a *served* export is a different
+ * origin with a real hostname where a grant is at least possible. Nothing is
+ * built on it — the count of unexported changes is the whole of the answer to
+ * eviction ({@link file://./journal.ts}).
+ */
+async function askToPersist(): Promise<boolean | null> {
+  const store = navigator.storage
+  if (!store?.persisted)
+    return null
+  try {
+    if (await store.persisted())
+      return true
+    return store.persist ? await store.persist() : false
+  }
+  catch {
+    // Asking is optional; a browser that refuses to be asked is a `false` the
+    // page already knows how to say nothing about.
+    return null
+  }
 }
 
 // --- The database ----------------------------------------------------------

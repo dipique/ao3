@@ -112,10 +112,17 @@ body.ao3e-site {
   font-size: 0.95rem;
 }
 
+/* What this file keeps, and what is riding on it keeping it. The count of
+   unexported changes leads, because it is the only mitigation there is for an
+   origin that can be cleared without warning or trace. */
 .AO3E--site--status {
   color: var(--ao3e-site-muted);
   font-size: 0.8rem;
   margin: 0 0 1rem;
+}
+
+.AO3E--site--status p {
+  margin: 0;
 }
 
 .AO3E--site--status[data-ao3e-writable='false'] {
@@ -123,6 +130,21 @@ body.ao3e-site {
   color: var(--ao3e-site-warn-fg);
   border-radius: 0.3rem;
   padding: 0.5rem 0.7rem;
+}
+
+.AO3E--site--status .AO3E--site--status-pending {
+  background: var(--ao3e-site-warn-bg);
+  color: var(--ao3e-site-warn-fg);
+  border-radius: 0.3rem;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+}
+
+/* Already inside the warning box; a second one nested in it says it twice. */
+.AO3E--site--status[data-ao3e-writable='false'] .AO3E--site--status-pending {
+  padding: 0;
+  background: none;
 }
 
 /* --- One work, read in the page ------------------------------------------ */

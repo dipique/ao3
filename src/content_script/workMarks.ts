@@ -33,7 +33,43 @@ import { extensionAlive } from './extensionAlive.ts'
  * `marks` is mutated in place, so it stays true for later callers in the same
  * run — including the capture unit, which then sees a mark our menu already made
  * and skips a redundant write.
+ *
+ * Being the only three doors is also what makes them the one place to *watch*.
+ * A site export runs this same code with no extension under it, and everything
+ * the reader marks there has to be recorded to be replayed later — so each door
+ * reports what it wrote to {@link observeMarkWrites}. On a live page nobody is
+ * listening and the report costs a null check.
  */
+
+/** One accepted mark write, as reported to {@link observeMarkWrites}. */
+export interface MarkWrite {
+  workId: string
+  markId: MarkId
+  /** Whether the mark was set or cleared. Always true for a progress write. */
+  on: boolean
+  /** Which door it came through — an explicit mark, a disposition, or progress. */
+  via: 'mark' | 'group' | 'progress'
+  /** Only on a progress write. */
+  progress?: WorkProgress
+}
+
+let observer: ((write: MarkWrite) => void) | null = null
+
+/**
+ * Watch every mark write this module accepts, or pass null to stop.
+ *
+ * One observer, not a list: the only caller is an exported site standing up its
+ * journal, and a second listener would mean a second recording of the same act.
+ * Called after the write has been committed, so nothing is reported that the
+ * table didn't take.
+ */
+export function observeMarkWrites(fn: ((write: MarkWrite) => void) | null): void {
+  observer = fn
+}
+
+function report(write: MarkWrite): void {
+  observer?.(write)
+}
 
 /** Commit a new mark table, in place and to storage. Returns whether anything changed. */
 function commit(marks: WorkMarks, next: WorkMarks['marks']): boolean {
@@ -56,7 +92,10 @@ function commit(marks: WorkMarks, next: WorkMarks['marks']): boolean {
  * (see {@link setMark}).
  */
 export function applyMark(marks: WorkMarks, workId: string, markId: MarkId, on: boolean): boolean {
-  return commit(marks, setMark(marks.marks, workId, markId, on))
+  const wrote = commit(marks, setMark(marks.marks, workId, markId, on))
+  if (wrote)
+    report({ workId, markId, on, via: 'mark' })
+  return wrote
 }
 
 /**
@@ -66,7 +105,10 @@ export function applyMark(marks: WorkMarks, workId: string, markId: MarkId, on: 
  * with something more specific keeps it (see {@link setMarkGroup}).
  */
 export function applyMarkGroup(marks: WorkMarks, workId: string, on: boolean, groupId: MarkId = READ_MARK): boolean {
-  return commit(marks, setMarkGroup(marks.marks, workId, groupId, on))
+  const wrote = commit(marks, setMarkGroup(marks.marks, workId, groupId, on))
+  if (wrote)
+    report({ workId, markId: groupId, on, via: 'group' })
+  return wrote
 }
 
 /**
@@ -76,5 +118,8 @@ export function applyMarkGroup(marks: WorkMarks, workId: string, on: boolean, gr
  * simply does nothing rather than writing a payload nothing can read.
  */
 export function applyMarkProgress(marks: WorkMarks, workId: string, markId: MarkId, entry: WorkProgress): boolean {
-  return commit(marks, setMarkProgress(marks.marks, workId, markId, entry))
+  const wrote = commit(marks, setMarkProgress(marks.marks, workId, markId, entry))
+  if (wrote)
+    report({ workId, markId, on: true, via: 'progress', progress: entry })
+  return wrote
 }

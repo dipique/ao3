@@ -95,6 +95,17 @@ const SEED = {
       },
     },
   },
+  // Marks travel with the library, and are the whole of what an exported page
+  // records: `boring` aliases `read`, so choosing it means "done with this" —
+  // which on a Marked for Later list is also something AO3 has to be told.
+  'option.workMarks': {
+    enabled: true,
+    marks: {
+      read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
+      boring: { icon: 'boring', label: 'Boring', color: '#8a6d3b', triggerAlias: 'read', hideSearchResult: false, items: '' },
+      continue: { icon: 'continue', label: 'Ongoing', color: '#0369a1', triggerAlias: 'read', tracksProgress: true, hideSearchResult: false, items: '' },
+    },
+  },
   // The export bakes the reader's find/replace rules into every work on the way
   // out, so there has to be one to bake.
   'option.textReplacements': {
@@ -689,6 +700,113 @@ describe('options UI — site export', { skip }, () => {
         await reader.evaluate(async () => (await browser.storage.local.get('ao3e.site.repaired'))['ao3e.site.repaired']),
         'kept',
       )
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * What the reader does in the file, kept so it can be given back.
+   *
+   * This is the whole of phase 2's first half: an export is read where the
+   * extension isn't, so a mark made here has to survive as *something* — an
+   * append-only op in the same `ao3e-site` database the settings live in. And
+   * because a `file:` origin will not promise to keep that (`persist()` is
+   * refused there, measured), the page has to say how much is riding on it,
+   * which is the count this asserts as well.
+   *
+   * The store is cleared first: every local file shares one origin, so the ops
+   * of an earlier test in this same browser would otherwise be counted here.
+   */
+  test('a mark made in the file is journalled, and counted where it can be seen', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'journal.html')
+
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('console', m => m.type() === 'error' && errors.push(m.text()))
+    reader.on('pageerror', e => errors.push(e.message))
+
+    /** Every op in the journal store, oldest first. */
+    const ops = () => reader.evaluate(() => new Promise((resolve, reject) => {
+      const open = indexedDB.open('ao3e-site')
+      open.onerror = () => reject(open.error)
+      open.onsuccess = () => {
+        const db = open.result
+        const request = db.transaction('journal', 'readonly').objectStore('journal').index('at').getAll()
+        request.onsuccess = () => {
+          db.close()
+          resolve(request.result)
+        }
+        request.onerror = () => reject(request.error)
+      }
+    }))
+
+    const pending = () => reader.$eval('.AO3E--site--status', el => ({
+      count: el.dataset.ao3ePending,
+      text: el.textContent,
+    }))
+
+    try {
+      await reader.goto(fileUrl(dir, 'journal.html'), { waitUntil: 'load' })
+      await reader.evaluate(() => new Promise((resolve) => {
+        const del = indexedDB.deleteDatabase('ao3e-site')
+        del.onsuccess = del.onerror = del.onblocked = () => resolve()
+      }))
+      await reader.reload({ waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+
+      // Nothing done yet, so nothing is claimed — but the page still says what
+      // it can and can't promise about the browser it is sitting in.
+      const before = await pending()
+      assert.equal(before.count, '0')
+      assert.doesNotMatch(before.text, /not yet exported/)
+      assert.match(before.text, /saved in this browser/)
+      assert.match(before.text, /rule of thumb/, 'the page should not imply an expiry it cannot know')
+
+      // Right-click a work and mark it — the extension's own work menu, running
+      // in a file with no extension under it.
+      await reader.evaluate(() => {
+        const link = document.querySelector('.AO3E--search-view--results > li h4.heading a[href*="/works/"]')
+        link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
+      })
+      await reader.waitForSelector('.AO3E--menu .AO3E--menu--item', { timeout: 5000 })
+      assert.ok(await reader.evaluate(() => {
+        const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
+          .find(el => el.textContent.startsWith('Mark as boring'))
+        row?.click()
+        return !!row
+      }), 'the work menu should offer the marks that travelled with the export')
+
+      await until('the change to be counted', async () => (await pending()).count === '1')
+      assert.match((await pending()).text, /1 change not yet exported/)
+
+      // `boring` aliases `read`, and this list is one AO3 itself holds — so the
+      // op is the one with a second half only the archive can do.
+      const recorded = await ops()
+      assert.equal(recorded.length, 1)
+      assert.equal(recorded[0].workId, '11')
+      assert.equal(recorded[0].op, 'markAsRead')
+      assert.deepEqual(recorded[0].payload, { markId: 'boring', on: true })
+      assert.ok(recorded[0].at > 0 && typeof recorded[0].id === 'string')
+
+      // The mark itself landed in storage too — the journal records the write,
+      // it doesn't replace it.
+      const marked = await reader.evaluate(async () => {
+        const stored = (await browser.storage.local.get('option.workMarks'))['option.workMarks']
+        return stored.marks.boring.items
+      })
+      assert.notEqual(marked, '', 'the mark should be in the table as well as the journal')
+
+      // Closed and reopened, the count is still what the reader left: it is read
+      // back from the store rather than kept in the page.
+      await reader.reload({ waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.equal((await pending()).count, '1')
+
+      assert.deepEqual(errors, [], 'journalling should not need anything the file does not carry')
     }
     finally {
       await reader.close()

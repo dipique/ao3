@@ -18,7 +18,10 @@ import { applySurfaceTheme } from '#content_script/theme.js'
 import { seedMarkedForLater } from '#content_script/units/FilterEntityToolbars.js'
 import React from '#dom'
 
+import type { Journal } from './journal.ts'
 import type { SiteStorage } from './shim.ts'
+
+import { start as startJournal } from './journal.ts'
 
 /**
  * The exported page's app: the extension's own search view, running with no
@@ -36,6 +39,12 @@ import type { SiteStorage } from './shim.ts'
  * in this file, and the toolbars that reach for the archive (a tag's id, a
  * "Mark for Later") fail the way they fail on a page with no connection: they
  * lose their answers, not their menus.
+ *
+ * What the reader marks, though, has to reach the extension eventually — so
+ * every mark made here is also written to a journal ({@link file://./journal.ts})
+ * for a later export to carry back. That is why the panel above the list leads
+ * with a count of what hasn't left this browser yet, and why a page that cannot
+ * keep a journal doesn't offer marks at all.
  */
 
 /** The reader's route: the list, or one work by id. */
@@ -70,13 +79,39 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   const texts = new Map(data.works.map(work => [work.id, work]))
   const listed = new Map(data.manifest.works.map(work => [work.id, work]))
 
-  let opts = await options.get()
+  const loaded = await options.get()
+  const status = statusPanel(storage)
+
+  /**
+   * The record of what the reader does here, and the gate on whether they are
+   * invited to do it at all ({@link file://./journal.ts}).
+   *
+   * Started before the view, because {@link settings} reads its absence as the
+   * answer to "can this page keep a mark?" — and a view built while that was
+   * still being decided would draw mark controls it then had to take away.
+   *
+   * It is handed the mark table as loaded, not a live view of it: all it reads
+   * is the *configuration* — which marks alias `read`, which one tracks progress
+   * — and an export has no way to change that, since the mark editor is a page
+   * of the extension's options and no export carries one.
+   */
+  const journal = storage.writable
+    ? await startJournal({
+        sourceId,
+        lastExportedAt: storage.meta.lastExportedAt,
+        marks: loaded.workMarks,
+        onError: status.fail,
+      })
+    : null
+  status.watch(journal)
+
+  let opts = settings(loaded)
   applyChrome(opts)
 
   const listEl = (<div class={cx('list')} />) as HTMLElement
   const readerEl = (<div class={cx('reader')} hidden />) as HTMLElement
   shell.className = ROOT
-  shell.replaceChildren(statusLine(storage), listEl, readerEl)
+  shell.replaceChildren(status.el, listEl, readerEl)
 
   let view = mount(await build(opts))
 
@@ -93,7 +128,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
    */
   const rerun = debounce(500, () => {
     void (async () => {
-      opts = await options.get()
+      opts = settings(await options.get())
       applyChrome(opts)
       view = mount(await build(opts, view.getState()))
       route()
@@ -107,6 +142,23 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   function applyChrome(current: Options): void {
     applySurfaceTheme(current.theme?.chosen)
     setMenusEnabled(current.contextMenusEnabled)
+  }
+
+  /**
+   * The reader's settings as this page may act on them — which is all of them,
+   * unless nothing here can be kept.
+   *
+   * Where there is no journal — the origin failed its probe, or its own store
+   * would not answer — per-work marks are switched **off** rather than drawn and
+   * lost: a mark that silently fails to save is worse than one that was never
+   * offered. The switch is thrown in exactly one place rather than sprinkled
+   * through the view as a read-only flag every menu has to remember to check,
+   * and the status line says so in words beside it.
+   */
+  function settings(current: Options): Options {
+    if (journal)
+      return current
+    return { ...current, workMarks: { ...current.workMarks, enabled: false } }
   }
 
   async function build(current: Options, initialState?: ViewState): Promise<SearchView> {
@@ -212,19 +264,112 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   }
 }
 
+interface StatusPanel {
+  el: HTMLElement
+  /** Follow a journal's unexported count, or say there is no journal to follow. */
+  watch: (journal: Journal | null) => void
+  /** Report that the journal stopped taking what the reader does. */
+  fail: (error: unknown) => void
+}
+
 /**
- * One line saying whether what the reader does here is kept.
+ * What this file can and cannot keep, said above the list.
  *
- * Measured, not assumed ({@link file://./shim.ts}): storage on a local file was
- * found to work, but a page can always be opened somewhere it doesn't, and a
- * mark that silently fails to save is worse than one that was never offered.
+ * Three things, in the order they matter. **What is riding on this browser** —
+ * the count of changes that exist nowhere else — because nothing can be asked
+ * about when browser storage is cleared, and a `file:` origin will not promise
+ * to keep it, so the honest mitigation is to say how much would go. **Whether
+ * anything is kept at all**, measured rather than assumed ({@link
+ * file://./shim.ts}): storage on a local file was found to work, but a page can
+ * always be opened somewhere it doesn't. And **how long this has been left
+ * alone**, which is the only input to the one rule of thumb anybody can state
+ * about eviction — say it as a rule of thumb, not as a countdown the page has no
+ * way to honour.
  */
-function statusLine(storage: SiteStorage): HTMLElement {
-  return (
-    <p class={cx('status')} data-ao3e-writable={String(storage.writable)}>
-      {storage.writable
-        ? 'Marks, filters and layout you change here are saved in this browser.'
-        : 'This browser will not keep anything you change here — marks and layout are gone when the page closes.'}
-    </p>
+function statusPanel(storage: SiteStorage): StatusPanel {
+  const pending = (<p class={cx('status-pending')} hidden />) as HTMLElement
+  const keeping = (<p class={cx('status-keep')} />) as HTMLElement
+  const el = (
+    <div class={cx('status')} data-ao3e-writable={String(storage.writable)}>
+      {pending}
+      {keeping}
+    </div>
   ) as HTMLElement
+
+  keeping.textContent = storage.writable
+    ? `Marks, filters and layout you change here are saved in this browser. ${lifespan(storage)}`
+    : 'This browser will not keep anything you change here, so marks are switched off — filters and layout are gone when the page closes.'
+
+  const show = (journal: Journal | null): void => {
+    const count = journal?.pending.count ?? 0
+    el.dataset.ao3ePending = String(count)
+    pending.hidden = count === 0
+    if (count === 0)
+      return
+    const oldest = journal?.pending.oldestAt
+    pending.replaceChildren(
+      <strong>{count === 1 ? '1 change' : `${count.toLocaleString('en-US')} changes`}</strong>,
+      ` not yet exported${oldest ? `, ${count === 1 ? 'made' : 'the oldest'} ${ago(oldest)}` : ''}.`,
+    )
+  }
+
+  return {
+    el,
+    watch: (journal) => {
+      // Writable when the shim looked, and no journal by the time one was asked
+      // for: the origin stopped keeping things between the two. The marks are
+      // already off — say why rather than leaving the line above promising them.
+      if (!journal && el.dataset.ao3eWritable === 'true') {
+        el.dataset.ao3eWritable = 'false'
+        keeping.textContent = 'This browser stopped keeping what you change here, so marks are switched off.'
+      }
+      show(journal)
+      journal?.onChange(() => show(journal))
+    },
+    fail: (error) => {
+      el.dataset.ao3eWritable = 'false'
+      keeping.textContent = `This browser stopped recording what you change here — ${error instanceof Error ? error.message : String(error)}. Anything marked from now on may not be kept.`
+      console.error('[AO3E] the change journal failed', error)
+    },
+  }
+}
+
+/**
+ * How long this origin has been kept, and what that is worth.
+ *
+ * `persisted` is only ever good news on a served copy: a `file:` origin answers
+ * false to `persist()` however it is asked (measured), so the line says nothing
+ * about persistence there rather than implying something it cannot back up.
+ */
+function lifespan(storage: SiteStorage): string {
+  const opened = storage.previousOpen === null
+    ? 'Opened here for the first time.'
+    : `Opened ${storage.meta.opens.toLocaleString('en-US')} times, last ${ago(storage.previousOpen)}.`
+  return storage.meta.persisted === true
+    ? `${opened} This browser has marked them to survive.`
+    : `${opened} A browser can clear what a page saved — about a week of leaving it alone is the usual rule of thumb.`
+}
+
+const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+
+/** Largest unit first would read "0 years ago"; smallest first stops at the right one. */
+const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['second', 60],
+  ['minute', 60],
+  ['hour', 24],
+  ['day', 7],
+  ['week', 4.345],
+  ['month', 12],
+  ['year', Number.POSITIVE_INFINITY],
+]
+
+/** "3 days ago", from an epoch. */
+function ago(timestamp: number): string {
+  let value = (timestamp - Date.now()) / 1000
+  for (const [unit, span] of RELATIVE_STEPS) {
+    if (Math.abs(value) < span)
+      return RELATIVE.format(Math.round(value), unit)
+    value /= span
+  }
+  return RELATIVE.format(Math.round(value), 'year')
 }
