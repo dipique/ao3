@@ -1,4 +1,4 @@
-import { fetchWithRetry } from '#content_script/archiveFetch.js'
+import { fetchWithRetry, PATIENCE } from '#content_script/archiveFetch.js'
 import { parseWork, type Work } from '#content_script/blurb.js'
 
 /**
@@ -28,8 +28,8 @@ export function detectPageCount(doc: Document | Element): number {
  * stored snapshot — has to fetch page 1 before it can know how many pages there
  * are, and wants exactly these retry manners while it does.
  */
-export async function fetchPageDoc(url: string, signal?: AbortSignal, retries = 3): Promise<Document> {
-  const res = await fetchWithRetry(url, signal, retries)
+export async function fetchPageDoc(url: string, signal?: AbortSignal, patience: number = PATIENCE.interactive): Promise<Document> {
+  const res = await fetchWithRetry(url, signal, patience)
   if (res.status !== 200)
     throw new Error(`Failed to fetch ${url} (status ${res.status})`)
   // A private DOMParser, not the shared parseDocument(), so we don't clobber
@@ -56,6 +56,12 @@ export interface ScrapeOptions {
   signal?: AbortSignal
   /** Max simultaneous requests. Default 3 — polite for AO3. */
   concurrency?: number
+  /**
+   * How long to sit out a rate limit before giving up on a page — see
+   * {@link file://../archiveFetch.ts}'s `PATIENCE`. Defaults to the impatient
+   * one, since most scrapes happen with a reader watching the progress bar.
+   */
+  patience?: number
   /**
    * Page 1, when the caller has already fetched it (to read the page count off
    * a listing it can't see live). Saves AO3 a duplicate request per refresh.
@@ -98,7 +104,7 @@ export function collectWorks(docs: Document[], blurbSelector: string = DEFAULT_B
  * gets `loadedPages < totalPages` and can warn about the partial result.
  */
 export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> {
-  const { pageCount, pageUrl, blurbSelector, onProgress, signal, concurrency = 3, firstPageDoc } = opts
+  const { pageCount, pageUrl, blurbSelector, onProgress, signal, concurrency = 3, firstPageDoc, patience } = opts
   // Sparse by page index; failed pages stay holes and are filtered out below.
   const docs: (Document | undefined)[] = []
   let done = 0
@@ -117,7 +123,7 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
         return
       const index = next++
       try {
-        docs[index] = await fetchPageDoc(pageUrl(index + 1), signal)
+        docs[index] = await fetchPageDoc(pageUrl(index + 1), signal, patience)
       }
       catch (err) {
         if (signal?.aborted)

@@ -1,9 +1,10 @@
 import type { TextReplacement } from '#common'
 
-import { ADDON_CLASS, options, toast } from '#common'
+import { ADDON_CLASS, isExtensionContextValid, options, toast } from '#common'
 import React from '#dom'
 
 import { closeFloating, openPopover } from './contextMenu.tsx'
+import { EXTENSION_RELOADED } from './extensionAlive.ts'
 
 /**
  * The find/replace rule editor, as it appears on the work page itself.
@@ -105,7 +106,25 @@ export function openTextReplaceEditor(opts: TextReplaceEditorOptions): void {
 
   const error = (<div class={cx('error')} role="alert" hidden />) as HTMLElement
 
+  /**
+   * Refuse to write, and say why, when the extension went away while the editor
+   * was open — the one thing the reader can do about it is a page reload, and
+   * this form's error row is a better place to say so than a toast behind it.
+   * The openers check too ({@link file://./units/TextReplaceTools.tsx}); this is
+   * the case they can't catch, where the reload landed mid-edit.
+   */
+  const orphaned = (): boolean => {
+    if (isExtensionContextValid())
+      return false
+    error.textContent = EXTENSION_RELOADED
+    error.hidden = false
+    return true
+  }
+
   const save = (): void => {
+    if (orphaned())
+      return
+
     const find = findInput.value
     if (!find) {
       error.textContent = 'Enter some text to find.'
@@ -132,6 +151,8 @@ export function openTextReplaceEditor(opts: TextReplaceEditorOptions): void {
 
   const remove = (): void => {
     if (index === null)
+      return
+    if (orphaned())
       return
     closeFloating()
     void deleteRule(index).then(() => {

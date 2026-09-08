@@ -2,6 +2,8 @@ import type { MarkId, WorkMarks, WorkProgress } from '#common'
 
 import { options, READ_MARK, setMark, setMarkGroup, setMarkProgress } from '#common'
 
+import { extensionAlive } from './extensionAlive.ts'
+
 /**
  * Write the per-work marks from the content script.
  *
@@ -36,6 +38,12 @@ import { options, READ_MARK, setMark, setMarkGroup, setMarkProgress } from '#com
 /** Commit a new mark table, in place and to storage. Returns whether anything changed. */
 function commit(marks: WorkMarks, next: WorkMarks['marks']): boolean {
   if (next === marks.marks)
+    return false
+  // An orphaned page can't write the table, and it must not update the copy in
+  // memory either: every caller takes `false` as "nothing changed" and leaves
+  // its indicator alone, which is the truth (see
+  // {@link file://./extensionAlive.ts}).
+  if (!extensionAlive())
     return false
   marks.marks = next
   void options.set({ workMarks: { ...marks, marks: next } })

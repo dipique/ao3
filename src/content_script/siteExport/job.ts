@@ -2,6 +2,7 @@ import type { SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import { createLogger, options, saveAs } from '#common'
+import { onArchiveWait } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { readSnapshot } from '#content_script/searchView/cache.js'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
@@ -108,6 +109,14 @@ export interface JobStatus {
   error: string | null
   /** Things worth saying that didn't stop the run (a partial or signed-out scrape). */
   warnings: string[]
+  /**
+   * Epoch ms this run may next ask AO3 for something, while it is sitting out a
+   * rate limit; null when nothing is waiting.
+   *
+   * A deadline rather than a formatted countdown, because a message composed
+   * here would be a minute stale a minute later. The view holds the clock.
+   */
+  waitingUntil: number | null
 }
 
 type Listener = (status: JobStatus) => void
@@ -120,15 +129,16 @@ let running = false
 let message = ''
 let error: string | null = null
 let warnings: string[] = []
+let waitingUntil: number | null = null
 let controller: AbortController | null = null
 
-let status: JobStatus = { job: null, running: false, message: '', error: null, warnings: [] }
+let status: JobStatus = { job: null, running: false, message: '', error: null, warnings: [], waitingUntil: null }
 
 function publish(): void {
   // A fresh outer object each time, so a `shallowRef` on the Vue side sees the
   // change; `queue` and `errors` stay shared, since a run mutates them per work
   // and copying a thousand-id queue that often would be the expensive part.
-  status = { job: current ? { ...current } : null, running, message, error, warnings }
+  status = { job: current ? { ...current } : null, running, message, error, warnings, waitingUntil }
   for (const listener of listeners)
     listener(status)
 }
@@ -174,6 +184,7 @@ export async function loadJob(): Promise<ExportJob | null> {
   message = ''
   error = null
   warnings = []
+  waitingUntil = null
   publish()
   return current
 }
@@ -243,6 +254,7 @@ export async function discardJob(): Promise<void> {
   message = ''
   error = null
   warnings = []
+  waitingUntil = null
   await forget()
   publish()
 }
@@ -254,7 +266,18 @@ async function drive(job: ExportJob): Promise<void> {
   message = ''
   error = null
   warnings = []
+  waitingUntil = null
   publish()
+
+  // A pause can run to minutes, and every worker is inside it, so without this
+  // the run looks like it has hung. Nothing else publishes while it holds, which
+  // is what lets this stand until a fetch actually resumes.
+  const unwatch = onArchiveWait((until) => {
+    waitingUntil = until || null
+    if (until)
+      message = 'AO3 asked us to slow down'
+    publish()
+  })
 
   try {
     while (job.steps.length) {
@@ -278,11 +301,15 @@ async function drive(job: ExportJob): Promise<void> {
     log.error('Site export job stopped', err)
   }
   finally {
+    unwatch()
     controller = null
     running = false
     message = ''
-    if (job.blocked === 'rate-limited' && !error)
-      error = 'AO3 asked us to slow down, so the run stopped. Everything fetched so far is saved — try again in a little while.'
+    waitingUntil = null
+    if (job.blocked === 'rate-limited' && !error) {
+      error = 'AO3 kept asking us to wait, so the run stopped after waiting it out for as long as is sensible. '
+        + 'Everything fetched so far is saved, and nothing is held against the works that were still queued — press Continue when you like.'
+    }
     if (!job.steps.length && !job.blocked)
       await forget()
     else
@@ -398,12 +425,25 @@ async function runCaching(job: ExportJob, signal: AbortSignal): Promise<void> {
         continue
       }
 
+      // Being asked to slow down says nothing about this work — the fetch layer
+      // has already waited as long as is reasonable, so put it back untouched
+      // and stop the run rather than marching the rest of the queue into the
+      // same wall.
+      if (result.rateLimited) {
+        job.queue.unshift(workId)
+        job.blocked = 'rate-limited'
+        // The other workers are inside their own waits and would sit there for
+        // minutes before noticing; aborting stops them now, and each puts its
+        // work back exactly as this one did.
+        controller?.abort()
+        await persist(job)
+        publish()
+        return
+      }
+
       job.done++
       if (result.failure)
         addError(job, { workId, title: entry.title, reason: result.message ?? result.failure })
-      // Being asked to slow down is not a per-work problem: stop the whole run.
-      if (result.rateLimited)
-        job.blocked = 'rate-limited'
 
       if (++sincePersist >= PERSIST_EVERY) {
         sincePersist = 0

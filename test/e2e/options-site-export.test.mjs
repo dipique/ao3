@@ -76,6 +76,13 @@ function workPage(id) {
 
 const SEED = {
   'cache.searchSnapshots': {
+    // Written before descriptors existed: no address, no way to refresh it. Kept
+    // here because it is the row the rebuilt-from-the-key link exists for.
+    'marked-for-later:olduser': {
+      version: 1,
+      scrapedAt: Date.now() - 40 * 24 * 60 * 60 * 1000,
+      blurbsHtml: [blurb(21, 'Work number 21')],
+    },
     [CACHE_KEY]: {
       version: 2,
       // Old enough that "list refreshed …" reads as hours, not seconds.
@@ -101,6 +108,15 @@ const SEED = {
     ],
   },
 }
+
+/**
+ * Works AO3 will refuse once with a 429 before serving them.
+ *
+ * Being asked to slow down says nothing about the work it interrupted — any
+ * work asked for at that moment would have got the same answer — so the run has
+ * to wait it out and carry on, with nothing recorded against this one.
+ */
+const rateLimitOnce = new Set(['12'])
 
 /**
  * Catch what `saveAs` hands the browser, instead of letting it hand it to the
@@ -136,6 +152,8 @@ describe('options UI — site export', { skip }, () => {
   let server
   let browser
   let page
+  /** What the row was showing while it sat out the stub's 429. */
+  let waitLine = ''
   const problems = []
 
   before(async () => {
@@ -154,6 +172,25 @@ describe('options UI — site export', { skip }, () => {
         return void req.continue()
       const path = new URL(url).pathname
       const workId = /^\/works\/(\d+)$/.exec(path)?.[1]
+      if (workId && rateLimitOnce.delete(workId)) {
+        return void req.respond({
+          status: 429,
+          contentType: 'text/plain; charset=utf-8',
+          // `Retry-After` is not a CORS-safelisted response header, so a page
+          // reading a cross-origin response cannot see it without this. The real
+          // options page never needs it — a host in `host_permissions` is
+          // privileged rather than cross-site, and gets every header — but this
+          // stub is plain localhost, and without the exposure the extension
+          // would silently fall back to its own backoff and the test would be
+          // measuring the wrong thing.
+          headers: {
+            'access-control-allow-origin': '*',
+            'access-control-expose-headers': 'Retry-After',
+            'retry-after': '3',
+          },
+          body: 'slow down',
+        })
+      }
       void req.respond({
         status: 200,
         contentType: 'text/html; charset=utf-8',
@@ -167,7 +204,10 @@ describe('options UI — site export', { skip }, () => {
         body: workId ? workPage(workId) : listingPage([11, 12, 13]),
       })
     })
-    page.on('console', m => m.type() === 'error' && problems.push(m.text()))
+    // Chrome logs every non-2xx response as a console error of its own. The one
+    // 429 the stub serves on purpose is the subject of a test, not a fault.
+    const expected = /status of 429/
+    page.on('console', m => m.type() === 'error' && !expected.test(m.text()) && problems.push(m.text()))
     page.on('pageerror', e => problems.push(e.message))
     await page.evaluateOnNewDocument(installMock, SEED)
     await page.evaluateOnNewDocument(captureDownloads)
@@ -229,8 +269,46 @@ describe('options UI — site export', { skip }, () => {
     assert.match(summary, /2 not cached/)
   })
 
+  /**
+   * Every row says where its list actually is, because "go and open it on AO3"
+   * is a real instruction here — it is the only thing that makes a list
+   * refreshable from this page.
+   */
+  test('each list links to itself on AO3, descriptor or not', async () => {
+    const link = async (title) => {
+      const row = await rowHandle(title)
+      return row.evaluate(el => ({
+        href: el.querySelector('label > span a')?.getAttribute('href') ?? null,
+        text: el.querySelector('label > span a')?.textContent?.trim() ?? null,
+        target: el.querySelector('label > span a')?.getAttribute('target') ?? null,
+      }))
+    }
+
+    const stored = await link(LABEL)
+    assert.equal(stored.href, `${ARCHIVE}/users/tester/readings?show=to-read`)
+    assert.equal(stored.text, '(link)')
+    // A new tab: the point is to come back here and press Refresh afterwards.
+    assert.equal(stored.target, '_blank')
+
+    // The v1 row has no descriptor to read an address out of, so it is rebuilt
+    // from the cache key — and this is the row that most needs it, since opening
+    // the list is the only way to make its buttons work again.
+    const old = await link('marked-for-later:olduser')
+    assert.equal(old.href, `${ARCHIVE}/users/olduser/readings?show=to-read`)
+  })
+
   test('"Works" fetches and stores each work\'s sanitized text', async () => {
     await clickIn(LABEL, 'Works')
+
+    // Work 12 is refused once with `Retry-After: 3` (see `rateLimitOnce`), so
+    // there is a window in which the row has to be counting down rather than
+    // sitting mute. Caught here because it only exists while the run is in it.
+    await until('the row to say what it is waiting for', async () => {
+      const row = await rowHandle(LABEL)
+      waitLine = await row.evaluate(el => el.textContent ?? '')
+      return /trying again in/.test(waitLine)
+    })
+
     await until('the work-text index to be written', async () => {
       const index = await lastWrite('workTextIndex')
       return index && Object.keys(index).length === 2
@@ -249,6 +327,33 @@ describe('options UI — site export', { skip }, () => {
     assert.match(stored.html, /class="work meta group"/)
     // The sanitizer's job, checked through the runner: no chrome, no controls.
     assert.doesNotMatch(stored.html, /new_kudo|primary navigation|window\.evil/)
+  })
+
+  /**
+   * Work 12 was refused once with a 429 and `Retry-After: 1` before it was
+   * served (see {@link rateLimitOnce}). The run has to wait that out by itself —
+   * a reader should not have to sit with the page and press Continue every time
+   * AO3 paces us — and, crucially, must record nothing against the work. Any
+   * work asked for at that moment would have been refused just the same, so it
+   * is a fact about the minute, not about the story.
+   */
+  test('a 429 is waited out, and lands on nothing', async () => {
+    assert.equal(rateLimitOnce.size, 0, 'the stub should have refused work 12 once')
+
+    // A pause of minutes with every worker inside it is indistinguishable from
+    // a hang, so the row says why it is quiet and how long for.
+    assert.match(waitLine, /AO3 asked us to slow down — trying again in [0-9:]+/)
+
+    const index = await lastWrite('workTextIndex')
+    assert.ok(index['12'].size > 0, 'the work was fetched after the wait')
+    assert.equal(index['12'].failure, undefined, 'and nothing was held against it')
+    // No failure recorded means no backoff earned: the next run treats it as an
+    // ordinary cached work rather than one to be retried.
+    assert.equal(index['12'].failedAt, undefined)
+
+    const job = await page.evaluate(async () => (await browser.storage.local.get('siteExportJob')).siteExportJob ?? null)
+    assert.equal(job?.errorCount ?? 0, 0, 'a rate limit is not a work that could not be fetched')
+    assert.equal(job?.blocked, undefined, 'and the run was not stopped by it')
   })
 
   test('the run finishes, clearing the job and updating the row', async () => {
@@ -729,7 +834,7 @@ describe('options UI — site export', { skip }, () => {
     const snapshots = await page.evaluate(
       async () => (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots'],
     )
-    assert.deepEqual(Object.keys(snapshots), [])
+    assert.deepEqual(Object.keys(snapshots), ['marked-for-later:olduser'], 'only the row asked for goes')
 
     const textAfter = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
     assert.deepEqual(Object.keys(textAfter).sort(), Object.keys(textBefore).sort())

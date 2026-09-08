@@ -2,6 +2,7 @@ import type { SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import { withPage } from '#common'
+import { PATIENCE } from '#content_script/archiveFetch.js'
 
 import { writeSnapshot } from './cache.ts'
 import { detectPageCount, fetchPageDoc, scrapeListing } from './scrape.ts'
@@ -79,7 +80,10 @@ export interface RefreshResult {
 export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResult> {
   const { cacheKey, descriptor, limit, onProgress, signal, onPersist } = opts
 
-  const firstPageDoc = await fetchPageDoc(withPage(descriptor.listUrl, 1), signal)
+  // This is the job's refresh, run from the options page with nobody watching —
+  // so it waits a rate limit out rather than failing back to a reader who isn't
+  // there. The same scrape from a live AO3 page keeps the impatient default.
+  const firstPageDoc = await fetchPageDoc(withPage(descriptor.listUrl, 1), signal, PATIENCE.bulk)
   const loggedIn = firstPageDoc.body?.classList.contains('logged-in') ?? false
   const totalPages = Math.max(1, detectPageCount(firstPageDoc))
 
@@ -94,6 +98,7 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     firstPageDoc,
     onProgress,
     signal,
+    patience: PATIENCE.bulk,
   })
 
   // The pages fetched can hold more than the ceiling; the hard trim keeps it exact.

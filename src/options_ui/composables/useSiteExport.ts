@@ -2,7 +2,7 @@ import type { SnapshotDescriptor } from '#common'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { toast } from '#common'
+import { getArchiveLink, toast } from '#common'
 import { deleteSnapshot, listSnapshots } from '#content_script/searchView/cache.js'
 import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
 import { summarizeWorkText } from '#content_script/siteExport/workText.js'
@@ -24,6 +24,8 @@ export interface SiteExportListRow {
   label: string
   /** Absent on a v1 snapshot, which is why such a row can't be refreshed. */
   descriptor?: SnapshotDescriptor
+  /** Where the list lives on AO3, for the link beside its name. */
+  listUrl?: string
   scrapedAt: number
   /** Works in the list. */
   count: number
@@ -77,6 +79,7 @@ async function reload(): Promise<void> {
       key: snapshot.key,
       label: snapshot.descriptor?.label ?? snapshot.key,
       descriptor: snapshot.descriptor,
+      listUrl: listUrlFor(snapshot.key, snapshot.descriptor),
       scrapedAt: snapshot.scrapedAt,
       count: snapshot.count,
       cached,
@@ -89,6 +92,42 @@ async function reload(): Promise<void> {
     return row
   })
   loading.value = false
+}
+
+/**
+ * Where a stored list lives on AO3 — the descriptor's own address, or, failing
+ * that, one rebuilt from the cache key.
+ *
+ * The fallback is the point rather than a nicety. A snapshot written before
+ * descriptors existed has no address, and it is exactly the row that needs one:
+ * the only way to make it refreshable again is to open the list on AO3 and press
+ * its search button. What makes rebuilding honest is that every `SearchSource`
+ * keys its snapshot on precisely the part of the address that identifies the
+ * list — a username, a tag's path segment, a search's own query — so the three
+ * shapes invert cleanly and a key that fits none of them simply gets no link.
+ */
+function listUrlFor(key: string, descriptor?: SnapshotDescriptor): string | undefined {
+  if (descriptor?.listUrl)
+    return descriptor.listUrl
+
+  const split = key.indexOf(':')
+  const rest = split < 0 ? '' : key.slice(split + 1)
+  if (!rest)
+    return undefined
+
+  switch (key.slice(0, split)) {
+    case 'marked-for-later':
+      return getArchiveLink(`/users/${rest}/readings?show=to-read`)
+    // Already escaped the way AO3 escapes a tag in a path, which is why the key
+    // holds the raw segment rather than the tag's name.
+    case 'tag-works':
+      return getArchiveLink(`/tags/${rest}`)
+    // The search's own query string, minus the page it was read from.
+    case 'text-search':
+      return getArchiveLink(`/works/search?${rest}`)
+    default:
+      return undefined
+  }
 }
 
 function summarize(row: SiteExportListRow): string {
@@ -118,7 +157,7 @@ function summarize(row: SiteExportListRow): string {
  * nothing change.
  */
 export const NO_DESCRIPTOR_NOTE
-  = 'Stored before this list knew how to re-fetch itself. Open it on AO3 and press the search button '
+  = 'Stored before this list knew how to re-fetch itself. Open it on AO3 — the link beside its name — and press the search button '
     + '(Search Marked for Later, or the search button on a tag or search-results page) — that scrape teaches '
     + 'the extension where the list lives, and these buttons come back. If it stays like this, the list is '
     + 'from an account or address that no longer resolves; delete it.'

@@ -3,6 +3,7 @@ import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS, logger, toast } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
+import { extensionAlive } from '#content_script/extensionAlive.js'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
@@ -330,6 +331,14 @@ export interface OpenOptions {
  */
 export async function openSearchView(source: SearchSource, options: Options, opts: OpenOptions = {}): Promise<void> {
   if (busy || isSearchViewOpen())
+    return
+  // An orphaned page could still scrape the listing — the fetches are the
+  // reader's own session, not ours — but nothing it learned would survive:
+  // there is no snapshot to read, none to write, and no mark it could record.
+  // A whole listing's worth of requests to AO3 for a view that forgets
+  // everything is worse than saying so (see
+  // {@link file://./../extensionAlive.ts}).
+  if (!extensionAlive())
     return
   busy = true
   try {

@@ -1,6 +1,7 @@
 import { ADDON_CLASS } from '#common'
 import React from '#dom'
 
+import { extensionAlive } from './extensionAlive.ts'
 import { ensureSurfaceTheme } from './theme.ts'
 
 /**
@@ -156,6 +157,14 @@ function makeRow(): { el: HTMLButtonElement, set: (item: MenuItem) => void } {
       if (item.disabled)
         return
       closeFloating()
+      // A `settings` row's whole effect is a write to our own storage, which an
+      // orphaned page cannot make — so it is refused here, once, for every menu
+      // rather than in each row's handler. The other scopes are left alone:
+      // `account` reaches AO3 over the network and `builtin` never leaves the
+      // page, and both still work with the extension gone. See
+      // {@link file://./extensionAlive.ts}.
+      if (item.scope === 'settings' && !extensionAlive())
+        return
       void item.onSelect?.()
     }
   }

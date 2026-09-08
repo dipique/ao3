@@ -4,11 +4,15 @@ import { getArchiveLink } from '#common'
 const props = defineProps<{
   userPath?: string
   path?: string
+  /** An address that is already whole — a stored one, say, rather than a path to build. */
+  href?: string
 }>()
 
 const { userId } = useOption('user')
 
-const href = computed(() => {
+const resolved = computed(() => {
+  if (props.href)
+    return props.href
   if (props.userPath)
     return userId?.value ? getArchiveLink(`/users/${userId.value}${props.userPath}`) : undefined
   if (props.path)
@@ -19,10 +23,10 @@ const href = computed(() => {
 
 <template>
   <a
-    :href="href"
+    :href="resolved"
     target="_blank"
     rel="noopener noreferrer"
-    :class="{ link: !!href }"
+    :class="{ link: !!resolved }"
   >
     <slot />
   </a>

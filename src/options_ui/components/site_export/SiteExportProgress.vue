@@ -26,6 +26,43 @@ const state = computed(() => {
   return job.value && !job.value.steps.length && !job.value.blocked ? 'Finished' : 'Stopped'
 })
 
+/**
+ * A clock, ticking only while there is something to count down to.
+ *
+ * The runner reports *when* it may next ask AO3 for something rather than how
+ * long that is, so this is the half that turns a deadline into a number a reader
+ * can watch go down. A permanent interval on the options page would be a poor
+ * trade for a line that is usually absent, hence the watch.
+ */
+const now = ref(Date.now())
+watchEffect((onCleanup) => {
+  if (!status.value.waitingUntil)
+    return
+  now.value = Date.now()
+  const timer = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+  onCleanup(() => clearInterval(timer))
+})
+
+const waitLeft = computed(() => Math.max(0, (status.value.waitingUntil ?? 0) - now.value))
+
+/** `2:05`, or `9s` under a minute — a wait too short to need the colon. */
+function countdown(ms: number): string {
+  const total = Math.ceil(ms / 1000)
+  const seconds = total % 60
+  return total >= 60 ? `${Math.floor(total / 60)}:${String(seconds).padStart(2, '0')}` : `${seconds}s`
+}
+
+/**
+ * The one line the progress panel shows: what the run is doing, plus how long
+ * until it does anything, when it is being made to wait.
+ */
+const line = computed(() => {
+  const base = status.value.message || state.value
+  return waitLeft.value > 0 ? `${base} — trying again in ${countdown(waitLeft.value)}` : base
+})
+
 const showErrors = ref(false)
 </script>
 
@@ -33,7 +70,7 @@ const showErrors = ref(false)
   <div v-if="job" flex="~ col gap-2" pb-2 pt-1>
     <div v-if="job.total" flex="~ col gap-1">
       <div flex="~ row items-center justify-between gap-3" text="sm muted-fg">
-        <span truncate>{{ status.message || state }}</span>
+        <span truncate>{{ line }}</span>
         <span ws-nowrap>{{ job.done.toLocaleString() }} / {{ job.total.toLocaleString() }}</span>
       </div>
       <div h-2 w-full overflow-hidden rounded-full bg-input>
@@ -41,7 +78,7 @@ const showErrors = ref(false)
       </div>
     </div>
     <p v-else-if="status.message" text="sm muted-fg">
-      {{ status.message }}
+      {{ line }}
     </p>
 
     <p v-if="status.error" text="sm" :style="{ color: '#dc2626' }">

@@ -2,6 +2,8 @@ import type { FilterBehavior, Rule, RuleTarget, Tag, TagType } from '#common'
 
 import { options } from '#common'
 
+import { extensionAlive } from './extensionAlive.ts'
+
 /**
  * Toggle and read the *persistent* extension rules — the saved `rules` list (as
  * opposed to the ephemeral AO3 sidebar filters handled by `filterSidebar.tsx`).
@@ -72,6 +74,12 @@ export function ruleIndicatorBehavior(behavior: FilterBehavior | null): Exclude<
 
 /** Toggle `behavior` for an exact key in the rules list (re-selecting clears it). */
 export async function toggleRuleBehavior(key: RuleTargetKey, behavior: FilterBehavior): Promise<void> {
+  // Every one of these is the reader choosing something from a menu, so an
+  // orphaned page says so rather than reading defaults and dropping the write
+  // (see {@link file://./extensionAlive.ts}).
+  if (!extensionAlive())
+    return
+
   const rules = await options.get('rules')
   const filters = rules.filters
   const index = filters.findIndex(r => matches(r, key))
@@ -93,6 +101,9 @@ export async function toggleRuleBehavior(key: RuleTargetKey, behavior: FilterBeh
 
 /** Remove any exact rule on this key (back to no rule at all). */
 export async function clearRule(key: RuleTargetKey): Promise<void> {
+  if (!extensionAlive())
+    return
+
   const rules = await options.get('rules')
   const filters = rules.filters.filter(r => !matches(r, key))
   await options.set({ rules: { ...rules, filters } })

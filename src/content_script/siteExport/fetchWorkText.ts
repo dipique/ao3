@@ -1,4 +1,4 @@
-import { fetchWithRetry } from '#content_script/archiveFetch.js'
+import { fetchWithRetry, PATIENCE } from '#content_script/archiveFetch.js'
 
 import type { WorkFreshness, WorkTextFailure, WorkTextMeta } from './workText.ts'
 
@@ -17,9 +17,14 @@ import { recordWorkTextFailure, writeWorkText } from './workTextCache.ts'
  * Nothing here throws for a work that can't be had. A restricted, deleted or
  * broken work records *why* against its entry and lets the run continue; that
  * record is what the export manifest turns into *"not cached — restricted"*
- * instead of a link that 404s. The one exception is abort: a reader who pressed
- * Stop hasn't discovered anything about the work, so the attempt is not counted
- * against it.
+ * instead of a link that 404s.
+ *
+ * **Two answers are not about the work, and neither is recorded against it.** A
+ * reader who pressed Stop hasn't discovered anything about it; neither has an
+ * archive that asked us to slow down, since any work requested at that moment
+ * would have got the same 429. Both leave the entry exactly as it was — no
+ * failure, no backoff earned, nothing for the run to list as unfetchable — and
+ * the work simply has not been tried yet.
  */
 
 /** Everything and every chapter, in one response, adult gate pre-cleared. */
@@ -32,15 +37,20 @@ const MAX_MESSAGE_LENGTH = 200
 
 export interface CacheWorkTextResult {
   workId: string
-  /** The entry as stored, whether it holds fresh text or a recorded failure. */
-  meta: WorkTextMeta
+  /**
+   * The entry as stored, whether it holds fresh text or a recorded failure.
+   * Absent when nothing was written — see {@link rateLimited}.
+   */
+  meta?: WorkTextMeta
   /** null when the text was fetched and stored. */
   failure: WorkTextFailure | null
   /** Human-readable detail for the job's error list. */
   message?: string
   /**
-   * AO3 answered 429 even after the backoff. The caller should stop the run
-   * rather than grind — being asked to slow down is not a per-work problem.
+   * AO3 was still asking us to wait after {@link file://../archiveFetch.ts} had
+   * waited as long as is reasonable. Nothing was recorded against the work,
+   * which has simply not been tried yet — the caller should put it back and stop
+   * the run rather than grind.
    */
   rateLimited?: boolean
 }
@@ -63,7 +73,9 @@ export async function cacheWorkText(work: WorkFreshness, signal?: AbortSignal): 
 
   let res: Response
   try {
-    res = await fetchWithRetry(workPageUrl(workId), signal)
+    // Nobody is watching a caching run, so it waits out a rate limit rather
+    // than coming back to ask the reader for permission to carry on.
+    res = await fetchWithRetry(workPageUrl(workId), signal, PATIENCE.bulk)
   }
   catch (err) {
     // An aborted run leaves the entry exactly as it was: the reader stopped us,
@@ -74,8 +86,12 @@ export async function cacheWorkText(work: WorkFreshness, signal?: AbortSignal): 
     return fail(workId, 'error', err instanceof Error ? err.message : String(err))
   }
 
+  // Not a fact about this work: every work asked for at that moment got the
+  // same answer. Recording it would blame the work, put it into a failure
+  // backoff it hasn't earned, and list it as unfetchable in a run that simply
+  // ran out of patience.
   if (res.status === 429)
-    return { ...await fail(workId, 'error', 'AO3 is rate-limiting us'), rateLimited: true }
+    return { workId, failure: null, rateLimited: true }
   if (res.status === 404)
     return fail(workId, 'notfound', 'No such work (deleted, or never existed)')
   if (res.status === 403)

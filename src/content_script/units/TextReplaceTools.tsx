@@ -1,6 +1,7 @@
 import MdiFindReplace from '~icons/mdi/find-replace.jsx'
 
 import { ADDON_CLASS } from '#common'
+import { extensionAlive } from '#content_script/extensionAlive.js'
 import { openTextReplaceEditor } from '#content_script/textReplaceEditor.js'
 import { REPLACED_CLASS, REPLACED_RULE_ATTR } from '#content_script/textReplaceMarks.ts'
 import { findWorkText, isInWorkText } from '#content_script/textReplaceScope.ts'
@@ -101,6 +102,11 @@ export class TextReplaceTools extends Unit {
       // The run may sit inside a link, and this is not a click on the link.
       event.preventDefault()
       event.stopPropagation()
+
+      // Nothing the editor could do from here would stick, and the rule it
+      // would show was read from settings this page can no longer see.
+      if (!extensionAlive())
+        return
 
       const rect = span.getBoundingClientRect()
       openTextReplaceEditor({
@@ -219,6 +225,11 @@ export class TextReplaceTools extends Unit {
         return
       hovering = false
       hide()
+      // Checked before the editor opens rather than at Save: a rule typed into
+      // a form that cannot write it is a minute of the reader's time thrown
+      // away, and they'd have no way of knowing why.
+      if (!extensionAlive())
+        return
       openTextReplaceEditor({
         rule: {
           find: current.text,

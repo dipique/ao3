@@ -72,6 +72,22 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
 
 <template>
   <OptionRow :title="row.label" :subtitle="row.summary" stacked control-width="24rem">
+    <!--
+      Where the list actually is. A row can be refreshed from here only after the
+      view has scraped it once, so "go and open it" is a real instruction — and
+      one worth making a click rather than a search.
+    -->
+    <template #title-suffix>
+      <ArchiveLink
+        v-if="row.listUrl"
+        :href="row.listUrl"
+        :aria-label="`Open ${row.label} on AO3`"
+        text-sm
+      >
+        (link)
+      </ArchiveLink>
+    </template>
+
     <div flex="~ row items-center gap-2">
       <Button v-if="running" variant="outline" :class="OFF" @click.prevent="stop()">
         Stop

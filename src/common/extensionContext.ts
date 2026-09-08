@@ -14,6 +14,12 @@
  * messaging layers treat it as an expected end state — they stop working quietly
  * rather than throwing — and the content script tears its own UI out of the page
  * the next time it's touched.
+ *
+ * Quietly is right for the decorating passes, which have nobody waiting on them.
+ * It is wrong for anything the reader pressed, so the content script checks
+ * these before it starts one and tells them the page needs reloading — see its
+ * own `extensionAlive` module, which is where {@link isExtensionContextValid} is
+ * used for that.
  */
 
 /**

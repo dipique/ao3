@@ -8,6 +8,7 @@ import MdiGestureTapHold from '~icons/mdi/gesture-tap-hold.jsx'
 
 import { ADDON_CLASS, api, marksHideAnything, options } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
+import { extensionAlive } from '#content_script/extensionAlive.js'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { findWorkText } from '#content_script/textReplaceScope.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -306,6 +307,11 @@ export class FilterToolbar extends Unit {
     }
 
     button.addEventListener('click', () => {
+      // Each of these pills flips a local copy of a setting and writes the real
+      // one behind it, so an orphaned page would show the new state and keep the
+      // old — checked here rather than after the flip.
+      if (!extensionAlive())
+        return
       const next = !getMenusEnabled()
       setMenusEnabled(next)
       void options.set({ contextMenusEnabled: next })
@@ -341,6 +347,8 @@ export class FilterToolbar extends Unit {
     }
 
     button.addEventListener('click', () => {
+      if (!extensionAlive())
+        return
       on = !on
       void options.set({ readerMode: on })
       sync()
@@ -374,6 +382,8 @@ export class FilterToolbar extends Unit {
     }
 
     button.addEventListener('click', () => {
+      if (!extensionAlive())
+        return
       on = !on
       void options.set({ textReplacements: { ...this.options.textReplacements, tools: on } })
       sync()
@@ -393,6 +403,8 @@ export class FilterToolbar extends Unit {
     ) as HTMLElement as HTMLButtonElement
 
     button.addEventListener('click', () => {
+      if (!extensionAlive())
+        return
       void api.openOptionsPage.sendToBackground()
     })
 

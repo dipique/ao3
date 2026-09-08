@@ -53,9 +53,14 @@ OptionLabelId.provide(controlId)
       :for="controlId"
       flex="~ col gap-1"
     >
-      <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
-      <!-- eslint-disable-next-line vue/no-v-html -->
-      <span font="leading-none 400" text="base" v-html="titleHtml" />
+      <span font="leading-none 400" text="base">
+        <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
+        <!-- eslint-disable-next-line vue/no-v-html -->
+        <span v-html="titleHtml" />{{ ' ' }}<!--
+          Inline rather than a flex child, so a title long enough to wrap takes
+          this with it instead of stranding it on a line of its own.
+        --><slot name="title-suffix" />
+      </span>
       <div
         :style="{ gridTemplateColumns: `minmax(0, 1fr) ${controlWidth ?? 'auto'}` }"
         grid="~ items-center gap-4"

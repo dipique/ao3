@@ -2,6 +2,7 @@ import Icon from '~icons/ao3e/icon.jsx'
 import MdiOpenInNew from '~icons/mdi/openInNew.jsx'
 
 import { ADDON_CLASS, api } from '#common'
+import { extensionAlive } from '#content_script/extensionAlive.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -43,6 +44,10 @@ export class Tools extends Unit {
         href="#"
         onClick={(e) => {
           e.preventDefault()
+          // There is no background left to ask on an orphaned page, and the
+          // message would go unanswered without a word.
+          if (!extensionAlive())
+            return
           void api.openOptionsPage.sendToBackground()
         }}
       >
