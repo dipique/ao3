@@ -1,5 +1,5 @@
 import { cache, options, packIds, unpackIds } from '#common'
-import { submitMark } from '#content_script/markForLater.js'
+import { MarkRequestError, submitMark, submitMarkViaTab } from '#content_script/markForLater.js'
 
 import type { ArchiveAct, ReplaySkip } from './replay.ts'
 
@@ -26,6 +26,15 @@ import { replayChanges } from './replay.ts'
  * applied, already applied, unreadable, skipped, or refused by the archive — and
  * the report carries the last two per work, because those are the ones a reader
  * may want to do something about.
+ *
+ * **The archive half has a second way to happen.** A POST from this page carries
+ * no `Origin` and no `Referer`, which AO3 was measured to accept but is under no
+ * obligation to go on accepting. Where it is turned down, one of the reader's
+ * open AO3 tabs is asked to make the request instead
+ * ({@link file://./../markForLater.ts}), and the run stays with the tab once one
+ * has worked. It is a fallback and not the path: a tab is something the reader
+ * has to have open, and asking for one when nothing needs it would make an
+ * import fussier than it is.
  */
 
 /**
@@ -59,6 +68,14 @@ export interface ChangeImportReport {
   skipped: ReplaySkip[]
   /** Works taken off Marked for Later on AO3. */
   toldArchive: number
+  /**
+   * How many of those AO3 would only take from one of its own pages.
+   *
+   * Zero on a healthy import, and worth saying when it isn't: it is the only
+   * sign the reader gets that this round trip now depends on their having an AO3
+   * tab open, and so on why the next import might refuse without one.
+   */
+  viaTab: number
   /** Works AO3 could not be told about; their ops stay owed. */
   archiveFailed: ReplaySkip[]
   /** Works AO3 was deliberately not told about, at the reader's choice. */
@@ -99,7 +116,7 @@ export async function importChanges(text: string, opts: ImportChangesOptions): P
 
   const archive = opts.tellArchive
     ? await tellArchive(result.archive)
-    : { sent: [], failed: [], held: result.archive } satisfies ArchiveOutcome
+    : { sent: [], failed: [], held: result.archive, viaTab: 0 } satisfies ArchiveOutcome
 
   // The table first: it is what the reader will look at, and it is the half that
   // is true whatever the archive said.
@@ -133,6 +150,7 @@ export async function importChanges(text: string, opts: ImportChangesOptions): P
     unreadable,
     skipped: result.skipped,
     toldArchive: archive.sent.length,
+    viaTab: archive.viaTab,
     archiveFailed: archive.failed.map(entry => ({ workId: entry.act.workId, reason: entry.reason })),
     archiveHeld: archive.held.length,
   }
@@ -143,6 +161,8 @@ interface ArchiveOutcome {
   failed: { act: ArchiveAct, reason: string }[]
   /** Acts never attempted — held back by the reader, or after a run of failures. */
   held: ArchiveAct[]
+  /** How many of {@link sent} an AO3 tab had to make the request for. */
+  viaTab: number
 }
 
 /**
@@ -151,24 +171,76 @@ interface ArchiveOutcome {
  * Sequential rather than pooled: this is a handful of requests at the end of an
  * import, not a bulk fetch, and a queue of one is the politest shape there is.
  * A run of failures stops it — see {@link ARCHIVE_GIVE_UP}.
+ *
+ * The run *learns*: once an AO3 tab has done what this page could not, every
+ * work after it goes the same way. The direct request having been refused once
+ * is enough to know it will be refused again, and re-proving that per work would
+ * double the requests AO3 sees for no benefit to anyone.
  */
 async function tellArchive(acts: ArchiveAct[]): Promise<ArchiveOutcome> {
   const sent: ArchiveAct[] = []
   const failed: ArchiveOutcome['failed'] = []
   let consecutive = 0
+  let viaTab = 0
+  /** Set once a tab has succeeded where this page was refused. */
+  let delegating = false
 
   for (const [position, act] of acts.entries()) {
     try {
-      await submitMark(act.workId, false)
+      if (await takeOffList(act.workId, delegating)) {
+        delegating = true
+        viaTab++
+      }
       sent.push(act)
       consecutive = 0
     }
     catch (error) {
       failed.push({ act, reason: error instanceof Error ? error.message : String(error) })
       if (++consecutive >= ARCHIVE_GIVE_UP)
-        return { sent, failed, held: acts.slice(position + 1) }
+        return { sent, failed, held: acts.slice(position + 1), viaTab }
     }
   }
 
-  return { sent, failed, held: [] }
+  return { sent, failed, held: [], viaTab }
+}
+
+/**
+ * One work off the list, and whether an AO3 tab is what did it.
+ *
+ * Throws what the reader is told, so the message on the way out has to be one
+ * they can act on — which is why {@link file://./../markForLater.ts} words its
+ * "no tab" cases as instructions rather than as diagnoses.
+ */
+async function takeOffList(workId: string, delegating: boolean): Promise<boolean> {
+  if (delegating) {
+    await submitMarkViaTab(workId, false)
+    return true
+  }
+  try {
+    await submitMark(workId, false)
+    return false
+  }
+  catch (error) {
+    if (!worthDelegating(error))
+      throw error
+    await submitMarkViaTab(workId, false)
+    return true
+  }
+}
+
+/**
+ * Whether a failed request is the kind a different origin could get past.
+ *
+ * Two answers are the archive talking about the *request rate* or about itself
+ * rather than about who asked — a 429 and a 5xx — and re-asking through a tab
+ * would only be the same request again from a machine AO3 has already told to
+ * wait. Everything else is worth one more try from a page that is genuinely on
+ * AO3: a refusal it can explain (403, 422) because the POST arrived without an
+ * `Origin`, and a request that never got an answer at all, which is what an
+ * extension origin losing its privilege would look like from in here.
+ */
+function worthDelegating(error: unknown): boolean {
+  if (error instanceof MarkRequestError)
+    return error.status !== 429 && error.status < 500
+  return true
 }

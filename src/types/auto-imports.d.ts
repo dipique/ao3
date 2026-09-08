@@ -344,6 +344,6 @@ declare global {
   export type { OptionRowEntry } from '../options_ui/composables/useOptionSearch'
   import('../options_ui/composables/useOptionSearch')
   // @ts-ignore
-  export type { SiteExportListRow } from '../options_ui/composables/useSiteExport'
+  export type { SiteExportListRow, OrphanSummary } from '../options_ui/composables/useSiteExport'
   import('../options_ui/composables/useSiteExport')
 }

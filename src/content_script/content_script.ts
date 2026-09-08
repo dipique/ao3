@@ -3,6 +3,7 @@ import { debounce } from '@antfu/utils'
 import { ADDON_CLASS, api, isExtensionContextValid, logBanner, logger, options, toast } from '#common'
 
 import { setMenusEnabled } from './contextTrigger.tsx'
+import { serveMarkRequests } from './markForLater.ts'
 import { applySurfaceTheme } from './theme.ts'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
@@ -87,6 +88,13 @@ api.getTag.addListener(async (linkUrl) => {
 api.toast.addListener(async (...args) => {
   toast(...args)
 })
+
+// Make a Marked for Later request on behalf of a page that is not on AO3. The
+// archive-side half of replaying a site export's changes normally runs straight
+// from the options page; this is where it goes if AO3 ever stops accepting a
+// POST that arrives with no `Origin` and no `Referer`. See
+// {@link file://./markForLater.ts} for who asks and when.
+serveMarkRequests()
 
 run().catch((err) => {
   logger.error(err)

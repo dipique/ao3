@@ -77,6 +77,30 @@ export async function listSnapshots(): Promise<SnapshotSummary[]> {
 }
 
 /**
+ * Every work id any stored snapshot holds, readable or not.
+ *
+ * The version gate {@link listSnapshots} applies is deliberately *not* applied
+ * here, because the question is different. Listing asks "can this build render
+ * it"; this asks "does any stored list still hold this work", which is what
+ * decides whether its cached text is an orphan
+ * ({@link file://../siteExport/workText.ts}). A snapshot written by a newer
+ * build is one the reader kept, and discarding the work text under it because
+ * this build cannot draw it would be the worst kind of tidying.
+ */
+export async function snapshotWorkIds(): Promise<Set<string>> {
+  const snapshots = await cache.get('searchSnapshots')
+  const ids = new Set<string>()
+  for (const entry of Object.values(snapshots)) {
+    for (const html of entry.blurbsHtml) {
+      const id = BLURB_ID_RE.exec(html)?.[1]
+      if (id)
+        ids.add(id)
+    }
+  }
+  return ids
+}
+
+/**
  * Persist a snapshot of the given works (their blurb HTML, in order), plus how
  * to re-fetch the listing later ({@link SnapshotDescriptor}).
  */
@@ -97,7 +121,9 @@ export async function writeSnapshot(key: string, works: Work[], descriptor: Snap
  * The blurbs go; the work text does not. That cache is keyed by work rather
  * than by list ({@link file://../siteExport/workTextCache.ts}), so a work this
  * list held may well be in another one — and the text is hours of requests to
- * AO3, where the blurbs are one scrape. Deleting it is its own action.
+ * AO3, where the blurbs are one scrape. Deleting it is its own action, and the
+ * narrow version of that action — the works this leaves behind that nothing else
+ * holds — reads its answer from {@link snapshotWorkIds}.
  */
 export async function deleteSnapshot(key: string): Promise<void> {
   const snapshots = await cache.get('searchSnapshots')

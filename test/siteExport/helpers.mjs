@@ -5,12 +5,17 @@ import puppeteer from 'puppeteer-core'
 import { findChrome, REPO_ROOT } from '../e2e/helpers.mjs'
 
 /**
- * Shared rig for the site-export modules that need a DOM but not an extension.
+ * Shared rig for the modules that need a DOM but not an extension.
  *
  * Unlike `test/e2e/`, nothing here builds the extension: one module is bundled
  * with esbuild and dropped into a blank page as a global, which costs a Chrome
  * launch and about a second. That's enough for the sanitizer and the text-
- * replacement bake, both of which are one pure-ish function over a document.
+ * replacement bake, both of which are one pure-ish function over a document, and
+ * — with `prepare` below — for a module whose only impurity is a `browser` API a
+ * test can stand in for.
+ *
+ * It lives here because the site export is what needed it first; anything else
+ * with the same shape is welcome to it.
  */
 
 export const chromePath = findChrome()
@@ -35,8 +40,13 @@ const stubAssets = {
  * as it loads — the manifest read its logger banner does, and the
  * `storage.onChanged` reference `createStorage` holds. A module that imports the
  * barrel needs it; one that imports nothing does not.
+ *
+ * `prepare` is for a module that needs more than that stub can be: it is handed
+ * the blank page after it loads and before the bundle is evaluated, which is the
+ * only window in which an extension API can still be replaced — `createStorage`
+ * captures `storage.onChanged` as the barrel imports.
  */
-export async function loadModuleInPage(entry, globalName, { stubBrowser = false } = {}) {
+export async function loadModuleInPage(entry, globalName, { stubBrowser = false, prepare } = {}) {
   const built = await build({
     entryPoints: [join(REPO_ROOT, entry)],
     bundle: true,
@@ -60,6 +70,8 @@ export async function loadModuleInPage(entry, globalName, { stubBrowser = false 
   await page.goto('about:blank')
   if (stubBrowser)
     await page.evaluate(installBrowserStub)
+  if (prepare)
+    await prepare(page)
   await page.evaluate(built.outputFiles[0].text)
   return { page, close: () => browser.close() }
 }

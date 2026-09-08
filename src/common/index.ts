@@ -1,5 +1,5 @@
 export { api } from './api.ts'
-export type { BackupKind, BackupSummary, SyncStatus, SyncUsage } from './api.ts'
+export type { BackupKind, BackupSummary, MarkDelegation, SyncStatus, SyncUsage } from './api.ts'
 
 export { cache } from './cache.ts'
 

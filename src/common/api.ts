@@ -89,6 +89,19 @@ function createAPI<const API extends { [k: string]: (...args: any) => Promise<an
   }
 }
 
+/**
+ * What an AO3 tab made of a Marked for Later request it was asked to run.
+ *
+ * The archive's own list is changed by a request AO3 has to accept, and the
+ * extension normally makes that request itself. Where it won't be accepted from
+ * an extension origin, a page already *on* AO3 can make it instead — see
+ * {@link file://./../content_script/markForLater.ts}. The answer comes back as a
+ * value rather than as a rejection, because a message that crosses contexts
+ * loses everything about an error except its text anyway, and the caller has to
+ * tell "no tab heard this" from "a tab tried and AO3 said no".
+ */
+export type MarkDelegation = { ok: true } | { ok: false, error: string }
+
 /** Lightweight backup descriptor for the options UI (no heavy options blob). */
 export type BackupKind = 'daily' | 'pre-restore' | 'pre-sync'
 export interface BackupSummary {
@@ -118,6 +131,12 @@ export const api = /* @__PURE__ */ createAPI<{
   toast: (...args: Parameters<typeof toast>) => Promise<void>
   openOptionsPage: () => Promise<void>
   runMigrations: () => Promise<void>
+
+  /**
+   * Take a work on or off Marked for Later from a tab that is already on AO3.
+   * Sent to a tab, never to the background; `undefined` where nothing answered.
+   */
+  submitMark: (workId: string, save: boolean) => Promise<MarkDelegation | undefined>
 
   // Sync + backups (all handled in the background context).
   // Void-ish actions return `true` so the message channel always sends a response.

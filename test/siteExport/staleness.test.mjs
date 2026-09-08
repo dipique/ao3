@@ -9,6 +9,7 @@ import {
   failureBackoffMs,
   freshnessFromWork,
   needsFetch,
+  planOrphanDiscard,
   planWorkCache,
   summarizeWorkText,
   WORK_TEXT_TTL_MS,
@@ -219,6 +220,50 @@ describe('summarizeWorkText', () => {
 
   test('an empty index totals nothing', () => {
     assert.deepEqual(summarizeWorkText({}), { cached: 0, failed: 0, bytes: 0 })
+  })
+})
+
+/**
+ * The only tidying the work-text cache has, and the reason it needs one: text is
+ * keyed by work and lists are keyed by list, so a forgotten list leaves its
+ * works behind with nothing pointing at them.
+ */
+describe('planOrphanDiscard', () => {
+  const index = {
+    11: meta({ size: 1000 }),
+    12: meta({ size: 2000 }),
+    13: meta({ size: 0, failure: 'notfound', attempts: 3 }),
+  }
+
+  test('a work no list holds is an orphan, and is totalled', () => {
+    const plan = planOrphanDiscard(index, new Set(['11']))
+    assert.deepEqual(plan.workIds, ['12', '13'])
+    assert.deepEqual(plan.usage, { cached: 1, failed: 1, bytes: 2000 })
+  })
+
+  test('an entry holding no text is still an orphan worth clearing', () => {
+    const plan = planOrphanDiscard(index, new Set(['11', '12']))
+    assert.deepEqual(plan.workIds, ['13'])
+    assert.equal(plan.usage.cached, 0, 'there was nothing to reclaim, only a record to drop')
+  })
+
+  test('a cache every list accounts for has no orphans', () => {
+    const plan = planOrphanDiscard(index, new Set(['11', '12', '13']))
+    assert.deepEqual(plan.workIds, [])
+    assert.deepEqual(plan.usage, { cached: 0, failed: 0, bytes: 0 })
+  })
+
+  test('a work a list holds but the cache never had is not an orphan', () => {
+    const plan = planOrphanDiscard({ 11: meta() }, new Set(['11', '99']))
+    assert.deepEqual(plan.workIds, [])
+  })
+
+  // Not a special case, and deliberately so: with nothing stored to hold them,
+  // every cached work really is an orphan, and the row says the number first.
+  test('with no lists at all, everything cached is an orphan', () => {
+    const plan = planOrphanDiscard(index, new Set())
+    assert.deepEqual(plan.workIds, ['11', '12', '13'])
+    assert.deepEqual(plan.usage, summarizeWorkText(index))
   })
 })
 

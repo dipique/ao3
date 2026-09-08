@@ -16,6 +16,7 @@ const CACHE_KEY = 'marked-for-later:tester'
 const LABEL = 'Marked for Later — tester'
 /** The one row that isn't about a list: the way changes made in a file get back. */
 const CHANGES_ROW = 'Changes made in an export'
+const CACHE_ROW = 'Cached work text'
 
 /**
  * The site export's Advanced section, driven end to end: a stored list, the
@@ -1108,6 +1109,59 @@ describe('options UI — site export', { skip }, () => {
     const textAfter = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
     assert.deepEqual(Object.keys(textAfter).sort(), Object.keys(textBefore).sort())
     assert.equal(Object.keys(textAfter).length, 3)
+  })
+
+  /**
+   * The other half of that promise, and the only way back from it.
+   *
+   * Keeping a list's work text when the list goes is right — it is hours of
+   * requests, and another list may want it — but it means a deleted list leaves
+   * works behind that nothing points at, and until this row there was no way to
+   * reclaim them short of deleting every cached work. The test that runs before
+   * this one is what strands them: the list that held 11, 12 and 13 is gone, and
+   * the only snapshot left holds work 21, which was never cached.
+   */
+  test('what the deleted list stranded can be discarded on its own', async () => {
+    const cacheRow = () => rowHandle(CACHE_ROW).then(el => el.evaluate(node => node.textContent ?? ''))
+
+    // The offer names the number before it is taken up — which is the whole
+    // reason this button does not need to ask what it is about to remove.
+    await until('the row to count the orphans', async () => /belong to no stored list/.test(await cacheRow()))
+    assert.match(await cacheRow(), /3 works cached/)
+    assert.match(await cacheRow(), /3 of them \(about [\d.]+ ?[kKM]B\) belong to no stored list/)
+
+    /**
+     * Pressed from inside the page, for the reason the change import is: the
+     * toast the list removal raised sits over this row, and a real click lands
+     * on the toast instead of the button.
+     */
+    const press = async (label) => {
+      const row = await rowHandle(CACHE_ROW)
+      const pressed = await row.evaluate((el, text) => {
+        const button = [...el.querySelectorAll('button')].find(b => b.textContent.trim() === text)
+        button?.click()
+        return !!button
+      }, label)
+      assert.ok(pressed, `button "${label}" not found in the cache row`)
+    }
+
+    // Twice, like its neighbour: the first press turns the label into the count.
+    await press('Discard orphans')
+    await until('the confirmation', async () => /Discard 3\?/.test(await cacheRow()))
+    await press('Discard 3?')
+
+    await until('the cache to empty', async () => /No work text is cached yet/.test(await cacheRow()))
+    const left = await page.evaluate(async () => {
+      const store = await browser.storage.local.get(null)
+      return {
+        index: store.workTextIndex,
+        texts: Object.keys(store).filter(key => key.startsWith('workText.')),
+        lists: Object.keys(store['cache.searchSnapshots']),
+      }
+    })
+    assert.deepEqual(left.index, {})
+    assert.deepEqual(left.texts, [], 'the text goes with the index entry')
+    assert.deepEqual(left.lists, ['marked-for-later:olduser'], 'the list that is left is untouched')
   })
 
   test('nothing threw along the way', () => {

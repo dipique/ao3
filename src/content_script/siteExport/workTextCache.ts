@@ -1,6 +1,6 @@
-import type { CachedWork, WorkTextFailure, WorkTextIndex, WorkTextMeta, WorkTextUsage } from './workText.ts'
+import type { CachedWork, OrphanPlan, WorkTextFailure, WorkTextIndex, WorkTextMeta, WorkTextUsage } from './workText.ts'
 
-import { summarizeWorkText, WORK_TEXT_VERSION } from './workText.ts'
+import { planOrphanDiscard, summarizeWorkText, WORK_TEXT_VERSION } from './workText.ts'
 
 /**
  * Where cached work text lives: `browser.storage.local`, one key per work, plus
@@ -196,6 +196,42 @@ export async function purgeWorkText(): Promise<WorkTextUsage> {
     const keys = (await allStorageKeys()).filter(key => key.startsWith(TEXT_PREFIX))
     await browser.storage.local.remove([...keys, INDEX_KEY])
     return usage
+  })
+}
+
+/**
+ * Drop the cached text of every work no stored list holds — "Discard orphans".
+ *
+ * The narrow half of the purge above, and the only tidying this cache has: a
+ * work's text outlives the list it was fetched for on purpose ({@link
+ * file://./workText.ts} says why), so until now the only way to reclaim what a
+ * deleted list left behind was to delete every cached work and fetch them all
+ * again. `listed` is every work id any stored list still holds, and the caller
+ * reads it fresh rather than passing the count a row was drawn with.
+ *
+ * Sweeps by key as well as by index, the same reasoning the purge sweeps by:
+ * an interrupted write can leave a `workText.` key the index never learned
+ * about, and a work nothing at all knows about is the most orphaned thing in
+ * here. Those keys are removed but not counted — sizing them would mean reading
+ * the megabytes this layout exists to leave alone — so what comes back is the
+ * plan over the index, which is also what the row offered.
+ */
+export async function discardOrphanedWorkText(listed: ReadonlySet<string>): Promise<OrphanPlan> {
+  return serialized(async () => {
+    const index = await readWorkTextIndex()
+    const plan = planOrphanDiscard(index, listed)
+
+    const stray = (await allStorageKeys()).filter(
+      key => key.startsWith(TEXT_PREFIX) && !listed.has(key.slice(TEXT_PREFIX.length)),
+    )
+    if (!plan.workIds.length && !stray.length)
+      return plan
+
+    for (const workId of plan.workIds)
+      delete index[workId]
+    await browser.storage.local.remove([...new Set([...stray, ...plan.workIds.map(textKey)])])
+    await browser.storage.local.set({ [INDEX_KEY]: index })
+    return plan
   })
 }
 

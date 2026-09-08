@@ -270,3 +270,34 @@ export function summarizeWorkText(index: WorkTextIndex): WorkTextUsage {
   }
   return usage
 }
+
+/** What discarding orphans would take: which works, and what they come to. */
+export interface OrphanPlan {
+  /** Index entries no stored list accounts for. Includes ones holding no text. */
+  workIds: string[]
+  /** Those entries totalled, the same way the whole cache is. */
+  usage: WorkTextUsage
+}
+
+/**
+ * Which cached works no stored list holds any more.
+ *
+ * The cache is keyed by work and the lists are keyed by list, deliberately — one
+ * work can sit in several lists, and its text is hours of requests where the
+ * blurbs are one scrape. What that costs is this: forgetting a list leaves its
+ * work text behind with nothing pointing at it, and nothing ever tidies up,
+ * because the only other way out is deleting every cached work at once. So this
+ * is the difference between the two sets, and it is the whole of the decision.
+ *
+ * `listed` is every work id any stored list holds. An entry with no text is an
+ * orphan too: a record of a work that failed to fetch, for a list nobody kept,
+ * is dead weight in a value that is read on every options load.
+ */
+export function planOrphanDiscard(index: WorkTextIndex, listed: ReadonlySet<string>): OrphanPlan {
+  const orphaned: WorkTextIndex = {}
+  for (const [workId, meta] of Object.entries(index)) {
+    if (!listed.has(workId))
+      orphaned[workId] = meta
+  }
+  return { workIds: Object.keys(orphaned), usage: summarizeWorkText(orphaned) }
+}
