@@ -100,6 +100,12 @@ export interface Options {
    */
   searchTagWorks: boolean
   /**
+   * On a series' page — a plain paged list of the series' works, with no sort or
+   * filter of AO3's own — add a button that loads every page of it into the same
+   * filterable view.
+   */
+  searchSeriesWorks: boolean
+  /**
    * On a works text-search results page (`/works/search?…`), add a button that
    * loads the results into the same filterable view. Bounded by
    * {@link Options.searchMaxResults} — a bare word matches hundreds of thousands
@@ -221,6 +227,7 @@ export const options = createStorage<Options>({
     openMenuOnClick: false,
     searchMarkedForLater: true,
     searchTagWorks: true,
+    searchSeriesWorks: true,
     searchTextResults: true,
     searchPerPage: 50,
     searchMaxResults: 1000,

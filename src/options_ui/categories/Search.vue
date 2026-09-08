@@ -29,6 +29,13 @@
       </OptionRow>
       <OptionDivider />
       <OptionRow
+        title="Search a series' works"
+        subtitle="A series page is a plain paged list of its works — AO3 gives you no way to sort or filter it, however long the series runs. Adds a “Search these works” button next to Bookmark Series."
+      >
+        <OptionSwitch option-id="searchSeriesWorks" />
+      </OptionRow>
+      <OptionDivider />
+      <OptionRow
         title="Search text-search results"
         subtitle="Adds a “Search these results” button to the results of a works search, so you can narrow them by things AO3's own results page gives you no way to filter on."
       >

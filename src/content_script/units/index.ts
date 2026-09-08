@@ -18,6 +18,7 @@ import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { ReaderMode } from './ReaderMode.ts'
 import { RequiredTagsToolbar } from './RequiredTagsToolbar.tsx'
 import { SearchMarkedForLater } from './SearchMarkedForLater.tsx'
+import { SearchSeriesWorks } from './SearchSeriesWorks.tsx'
 import { SearchTagWorks } from './SearchTagWorks.tsx'
 import { SearchTextResults } from './SearchTextResults.tsx'
 import { Stats } from './Stats/Stats.ts'
@@ -61,6 +62,7 @@ export const UNITS = [
   FilterSeriesToolbar,
   WordCountToolbar,
   SearchMarkedForLater,
+  SearchSeriesWorks,
   SearchTagWorks,
   SearchTextResults,
   Tools,

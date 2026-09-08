@@ -122,6 +122,8 @@ function listUrlFor(key: string, descriptor?: SnapshotDescriptor): string | unde
     // holds the raw segment rather than the tag's name.
     case 'tag-works':
       return getArchiveLink(`/tags/${rest}`)
+    case 'series-works':
+      return getArchiveLink(`/series/${rest}`)
     // The search's own query string, minus the page it was read from.
     case 'text-search':
       return getArchiveLink(`/works/search?${rest}`)
