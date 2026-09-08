@@ -42,9 +42,10 @@ import { start as startJournal } from './journal.ts'
  *
  * What the reader marks, though, has to reach the extension eventually — so
  * every mark made here is also written to a journal ({@link file://./journal.ts})
- * for a later export to carry back. That is why the panel above the list leads
- * with a count of what hasn't left this browser yet, and why a page that cannot
- * keep a journal doesn't offer marks at all.
+ * and handed back as a file the extension replays. That is why the panel above
+ * the list leads with a count of what hasn't left this browser yet, offers to
+ * write it out beside that count, and why a page that cannot keep a journal
+ * doesn't offer marks at all.
  */
 
 /** The reader's route: the list, or one work by id. */
@@ -273,26 +274,31 @@ interface StatusPanel {
 }
 
 /**
- * What this file can and cannot keep, said above the list.
+ * What this file can and cannot keep, said above the list — and the one thing
+ * the reader can do about it.
  *
- * Three things, in the order they matter. **What is riding on this browser** —
+ * Four things, in the order they matter. **What is riding on this browser** —
  * the count of changes that exist nowhere else — because nothing can be asked
  * about when browser storage is cleared, and a `file:` origin will not promise
- * to keep it, so the honest mitigation is to say how much would go. **Whether
- * anything is kept at all**, measured rather than assumed ({@link
- * file://./shim.ts}): storage on a local file was found to work, but a page can
- * always be opened somewhere it doesn't. And **how long this has been left
- * alone**, which is the only input to the one rule of thumb anybody can state
- * about eviction — say it as a rule of thumb, not as a countdown the page has no
- * way to honour.
+ * to keep it, so the honest mitigation is to say how much would go. **The way
+ * out**, next to that count: one button that writes every change recorded here
+ * to a file for the extension to replay, which is the only thing that turns the
+ * count from a warning into an errand. **Whether anything is kept at all**,
+ * measured rather than assumed ({@link file://./shim.ts}): storage on a local
+ * file was found to work, but a page can always be opened somewhere it doesn't.
+ * And **how long this has been left alone**, which is the only input to the one
+ * rule of thumb anybody can state about eviction — say it as a rule of thumb,
+ * not as a countdown the page has no way to honour.
  */
 function statusPanel(storage: SiteStorage): StatusPanel {
   const pending = (<p class={cx('status-pending')} hidden />) as HTMLElement
   const keeping = (<p class={cx('status-keep')} />) as HTMLElement
+  const actions = (<p class={cx('status-actions')} hidden />) as HTMLElement
   const el = (
     <div class={cx('status')} data-ao3e-writable={String(storage.writable)}>
       {pending}
       {keeping}
+      {actions}
     </div>
   ) as HTMLElement
 
@@ -313,6 +319,40 @@ function statusPanel(storage: SiteStorage): StatusPanel {
     )
   }
 
+  /**
+   * The button, and whatever it has to say for itself afterwards.
+   *
+   * Offered whenever there is a journal, not only when something is waiting in
+   * it: the file carries everything ever recorded here ({@link
+   * file://./journal.ts}), so re-exporting is also how a reader recovers a
+   * download they lost. What it says afterwards names the file, because on the
+   * device this was built for the next step is finding it in Files and getting
+   * it back to the computer the extension is on.
+   */
+  function offerExport(journal: Journal): void {
+    const button = (<button type="button" class={cx('status-export')}>Export changes</button>) as HTMLElement as HTMLButtonElement
+    const said = (<span class={cx('status-said')} />) as HTMLElement
+    actions.replaceChildren(button, said)
+    actions.hidden = false
+
+    button.addEventListener('click', () => {
+      button.disabled = true
+      said.textContent = 'Saving…'
+      journal.save().then(
+        (written) => {
+          said.textContent = written.ops
+            ? `Saved ${written.ops.toLocaleString('en-US')} ${written.ops === 1 ? 'change' : 'changes'} as ${written.fileName} — open it from the extension's options, under Site export.`
+            : 'Nothing has been changed here yet.'
+        },
+        (error: unknown) => {
+          said.textContent = `Those changes could not be written to a file — ${error instanceof Error ? error.message : String(error)}.`
+        },
+      ).finally(() => {
+        button.disabled = false
+      })
+    })
+  }
+
   return {
     el,
     watch: (journal) => {
@@ -325,6 +365,8 @@ function statusPanel(storage: SiteStorage): StatusPanel {
       }
       show(journal)
       journal?.onChange(() => show(journal))
+      if (journal)
+        offerExport(journal)
     },
     fail: (error) => {
       el.dataset.ao3eWritable = 'false'

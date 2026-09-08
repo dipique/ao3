@@ -81,6 +81,15 @@ export interface Cache {
   searchViewPrefs: { [appId: string]: SearchViewPrefs }
   /** Which works are on your Marked for Later list (see {@link MarkedForLaterIndex}). */
   markedForLater: MarkedForLaterIndex
+  /**
+   * Op ids from change files imported out of a site export, oldest first.
+   *
+   * The idempotency ledger for that round trip: an op named here has been
+   * honoured, so importing the same file twice does nothing, and a later file
+   * that still carries an old op can't undo a change made by hand since. Ids
+   * only — an op's contents are in the file the reader keeps.
+   */
+  appliedChangeOps: string[]
 }
 
 export const cache = createStorage<Cache>({
@@ -92,6 +101,7 @@ export const cache = createStorage<Cache>({
     searchSnapshots: {},
     searchViewPrefs: {},
     markedForLater: { userId: '', updatedAt: 0, ids: '' },
+    appliedChangeOps: [],
   },
 })
 

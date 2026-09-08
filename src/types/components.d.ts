@@ -118,6 +118,7 @@ declare module 'vue' {
     Select: typeof import('./../options_ui/components/basic/Select/Select.vue')['default']
     SelectItem: typeof import('./../options_ui/components/basic/Select/SelectItem.vue')['default']
     SiteExportCache: typeof import('./../options_ui/components/site_export/SiteExportCache.vue')['default']
+    SiteExportChanges: typeof import('./../options_ui/components/site_export/SiteExportChanges.vue')['default']
     SiteExportLists: typeof import('./../options_ui/components/site_export/SiteExportLists.vue')['default']
     SiteExportProgress: typeof import('./../options_ui/components/site_export/SiteExportProgress.vue')['default']
     SiteExportRow: typeof import('./../options_ui/components/site_export/SiteExportRow.vue')['default']

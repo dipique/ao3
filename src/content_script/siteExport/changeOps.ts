@@ -125,3 +125,89 @@ export function newOpId(): string {
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}-${Math.random().toString(36).slice(2, 10)}`
 }
+
+/**
+ * `ao3e-changes-marked-for-later-2026-09-07_14-51-02.json` — the list it came
+ * from, then when it was written.
+ *
+ * The list is in the name for the reader's sake rather than the merge's: ops are
+ * keyed by work, and one journal serves every export a reader opens, so two
+ * files from two libraries are still one pile of changes to the ingest. What the
+ * name has to do is let a reader with several of these in a folder tell which
+ * afternoon is which.
+ */
+export function changeFileName(sourceId: string, when: Date): string {
+  const iso = when.toISOString()
+  const time = `${iso.slice(0, 10)}_${iso.slice(11, 19).replace(/:/g, '-')}`
+  const slug = sourceId.replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).toLowerCase()
+  return `ao3e-changes-${slug || 'export'}-${time}.json`
+}
+
+/**
+ * Read a change file, keeping the ops that are still legible.
+ *
+ * The envelope is checked strictly — a file that isn't one of ours, or is from a
+ * schema this build doesn't know, is refused whole, because guessing at it would
+ * be worse than saying so. The ops inside are checked one at a time and the
+ * unreadable ones are counted rather than thrown, since one corrupt op is no
+ * reason to drop an afternoon's marking on the floor; the count is reported
+ * beside the rest of the run.
+ */
+export function parseChangeExport(text: string): { file: ChangeExport, unreadable: number } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  }
+  catch {
+    throw new SyntaxError('That file isn\'t readable as JSON.')
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.ops) || typeof parsed.sourceId !== 'string')
+    throw new TypeError('That doesn\'t look like a file of changes from an exported site.')
+  if (typeof parsed.v !== 'number' || parsed.v > CHANGE_SCHEMA_VERSION)
+    throw new TypeError(`That file was written by a newer version of the extension (format ${String(parsed.v)}). Update, then import it again.`)
+
+  const ops = parsed.ops.filter(isChangeOp)
+  return {
+    file: {
+      v: parsed.v,
+      sourceId: parsed.sourceId,
+      exportedAt: typeof parsed.exportedAt === 'number' ? parsed.exportedAt : 0,
+      ops,
+    },
+    unreadable: parsed.ops.length - ops.length,
+  }
+}
+
+const OP_KINDS: ReadonlySet<string> = new Set<ChangeOpKind>(['setMark', 'setProgress', 'markAsRead'])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Whether one entry of a change file is an op at all.
+ *
+ * Only the fields the replay reads, and only that they are the right kind of
+ * thing: an op from a future schema with extra fields on it is still an op this
+ * one can apply, and refusing it would make every added field a breaking change.
+ */
+function isChangeOp(value: unknown): value is ChangeOp {
+  if (!isRecord(value))
+    return false
+  const { id, at, workId, op, payload } = value
+  if (typeof id !== 'string' || !id || typeof workId !== 'string' || !workId)
+    return false
+  if (typeof at !== 'number' || !Number.isFinite(at) || typeof op !== 'string' || !OP_KINDS.has(op))
+    return false
+  if (!isRecord(payload) || typeof payload.markId !== 'string' || !payload.markId || typeof payload.on !== 'boolean')
+    return false
+  if (payload.progress !== undefined) {
+    const progress = payload.progress
+    if (!isRecord(progress) || typeof progress.chapter !== 'number' || !Number.isFinite(progress.chapter))
+      return false
+    if (progress.waitUntil !== undefined && typeof progress.waitUntil !== 'number')
+      return false
+  }
+  return true
+}

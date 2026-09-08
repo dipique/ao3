@@ -1,16 +1,19 @@
 import type { SnapshotDescriptor } from '#common'
+import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
 import { getArchiveLink, toast } from '#common'
 import { deleteSnapshot, listSnapshots } from '#content_script/searchView/cache.js'
+import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
 import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
 import { summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
 
 /**
  * The options page's view of the site export: one row per stored list, the job
- * runner's live status, and the cache read-out underneath.
+ * runner's live status, the cache read-out underneath, and the way back in for
+ * the changes a reader made inside an exported file.
  *
  * Module-level state, like {@link file://./useSync.ts}, because the runner it
  * mirrors is itself a singleton — there is one job for the whole extension, so
@@ -45,6 +48,17 @@ const rows = ref<SiteExportListRow[]>([])
 const usage = ref<WorkTextUsage>({ cached: 0, failed: 0, bytes: 0 })
 const loading = ref(true)
 const status = shallowRef<JobStatus>(jobStatus())
+
+/**
+ * The last change file this page took in, and whether one is being taken in now.
+ *
+ * Kept beside the rest of the feature's state rather than in the component,
+ * because a report is the answer to an action that reached AO3 and the reader's
+ * whole mark table — it should survive them scrolling the section shut and open
+ * again, the way the job runner's progress does.
+ */
+const changeReport = shallowRef<ChangeImportReport | null>(null)
+const importingChanges = ref(false)
 
 subscribeJob((next) => {
   status.value = next
@@ -191,6 +205,8 @@ export function useSiteExport() {
     status,
     resumable,
     reload,
+    changeReport,
+    importingChanges,
 
     /** Re-scrape a list, without touching the work text. */
     refreshList(row: SiteExportListRow) {
@@ -252,6 +268,34 @@ export function useSiteExport() {
       toast(`Removed “${row.label}”. The cached work text is still here.`, { type: 'success' })
     },
 
+    /**
+     * Replay a file of changes made inside an export
+     * ({@link file://../../content_script/siteExport/importChanges.ts}).
+     *
+     * `tellArchive` is the reader's, because it is the half that reaches outside
+     * this device: marking a work read here also takes it off their Marked for
+     * Later list on AO3. Held ops stay owed, so importing the same file later
+     * with the archive included picks up exactly those.
+     */
+    async importChanges(file: File, opts: { tellArchive?: boolean } = {}) {
+      if (importingChanges.value)
+        return
+      importingChanges.value = true
+      changeReport.value = null
+      try {
+        const report = await replayChangeFile(await file.text(), { tellArchive: opts.tellArchive !== false })
+        changeReport.value = report
+        toast(describeChangeReport(report), { type: report.archiveFailed.length ? 'error' : 'success' })
+      }
+      catch (err) {
+        toast(err instanceof Error ? err.message : 'That file of changes could not be read.', { type: 'error' })
+      }
+      finally {
+        importingChanges.value = false
+      }
+      await reload()
+    },
+
     async purge() {
       const purged = await purgeWorkText()
       await reload()
@@ -270,6 +314,31 @@ export function useSiteExport() {
     const descriptor = row.descriptor
     return run('start the job', () => startJob({ cacheKey: row.key, descriptor, steps, retryNow }))
   }
+}
+
+/**
+ * What an import came to, in one line: *"applied 34 · 3 already applied · 1
+ * skipped"*.
+ *
+ * Every bucket that has anything in it is named, and none that is empty — a
+ * clean run should read as one word rather than as a row of zeros to check. The
+ * per-work detail behind the last two lives in the row, not here.
+ */
+export function describeChangeReport(report: ChangeImportReport): string {
+  const parts = [`applied ${report.applied.toLocaleString()}`]
+  if (report.duplicates)
+    parts.push(`${report.duplicates.toLocaleString()} already applied`)
+  if (report.toldArchive)
+    parts.push(`${report.toldArchive.toLocaleString()} marked read on AO3`)
+  if (report.archiveHeld)
+    parts.push(`${report.archiveHeld.toLocaleString()} not sent to AO3`)
+  if (report.archiveFailed.length)
+    parts.push(`${report.archiveFailed.length.toLocaleString()} AO3 would not take`)
+  if (report.skipped.length)
+    parts.push(`${report.skipped.length.toLocaleString()} skipped`)
+  if (report.unreadable)
+    parts.push(`${report.unreadable.toLocaleString()} unreadable`)
+  return report.total ? parts.join(' · ') : 'That file had no changes in it.'
 }
 
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })

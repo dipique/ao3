@@ -4,11 +4,12 @@ import type { ViewState } from '#content_script/searchView/view.tsx'
 
 import { ADDON_CLASS, getArchiveLink, parseUser, toast } from '#common'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
+import { submitMark } from '#content_script/markForLater.js'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
-import { seedMarkedForLater, submitMark } from '#content_script/units/FilterEntityToolbars.tsx'
+import { seedMarkedForLater } from '#content_script/units/FilterEntityToolbars.tsx'
 import { applyMarkGroup } from '#content_script/workMarks.js'
 import React from '#dom'
 

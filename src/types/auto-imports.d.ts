@@ -41,6 +41,7 @@ declare global {
   const debouncedWatch: typeof import('@vueuse/core').debouncedWatch
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
+  const describeChangeReport: typeof import('../options_ui/composables/useSiteExport').describeChangeReport
   const eagerComputed: typeof import('@vueuse/core').eagerComputed
   const effectScope: typeof import('vue').effectScope
   const expandCategory: typeof import('../options_ui/composables/useCategoryCollapse').expandCategory

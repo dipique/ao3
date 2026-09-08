@@ -26,6 +26,8 @@
     >
       <SiteExportLists />
       <OptionDivider />
+      <SiteExportChanges />
+      <OptionDivider />
       <SiteExportCache />
     </OptionSubsection>
 

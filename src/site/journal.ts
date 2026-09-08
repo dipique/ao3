@@ -1,12 +1,12 @@
 import type { MarkConfig, MarkId, WorkMarks } from '#common'
-import type { ChangeOp } from '#content_script/siteExport/changeOps.js'
+import type { ChangeExport, ChangeOp } from '#content_script/siteExport/changeOps.js'
 import type { MarkWrite } from '#content_script/workMarks.js'
 
-import { markRoot, markTracksProgress, READ_MARK } from '#common'
-import { changeOpFor, newOpId } from '#content_script/siteExport/changeOps.js'
+import { markRoot, markTracksProgress, READ_MARK, saveAs } from '#common'
+import { CHANGE_SCHEMA_VERSION, changeFileName, changeOpFor, newOpId } from '#content_script/siteExport/changeOps.js'
 import { observeMarkWrites } from '#content_script/workMarks.js'
 
-import { JOURNAL_STORE, siteDatabase } from './shim.ts'
+import { JOURNAL_STORE, recordExport, siteDatabase } from './shim.ts'
 
 /**
  * What the reader did in this file, kept so it can be given back.
@@ -43,11 +43,20 @@ export interface Pending {
   oldestAt: number | null
 }
 
+/** What one press of "Export changes" turned out to be. */
+export interface Written {
+  ops: number
+  /** What the file was saved as, or '' when there was nothing to save. */
+  fileName: string
+}
+
 export interface Journal {
   /** Ops made since the last export. Recomputed as each one is appended. */
   readonly pending: Pending
   /** Called after each append, so the count on screen follows the marking. */
   onChange: (fn: () => void) => void
+  /** Hand everything recorded here to the reader as a file. See {@link save}. */
+  save: () => Promise<Written>
 }
 
 export interface JournalContext {
@@ -105,12 +114,54 @@ export async function start(ctx: JournalContext): Promise<Journal | null> {
     writes = writes.then(() => append(db, op), () => append(db, op)).catch(ctx.onError)
   })
 
+  /**
+   * Write the journal out as the file the extension takes back.
+   *
+   * **Everything in it, not only what is new.** The alternative — sending the
+   * ops made since the last export — would make each file the only copy of the
+   * afternoon it covers, on a device where a download is as easy to lose as a
+   * browser is to clear. Ops are tiny, the ingest skips by id any it has already
+   * applied, and re-exporting is the reader's whole recovery from a file they
+   * mislaid. So the count resets and the store does not.
+   *
+   * Outstanding appends are waited for first, so a mark made a second ago is in
+   * this file rather than in the next one.
+   */
+  const save = async (): Promise<Written> => {
+    await writes.catch(() => {})
+    const ops = await readOps(db)
+    if (!ops.length)
+      return { ops: 0, fileName: '' }
+
+    const exportedAt = Date.now()
+    const file: ChangeExport = { v: CHANGE_SCHEMA_VERSION, sourceId: ctx.sourceId, exportedAt, ops }
+    const fileName = changeFileName(ctx.sourceId, new Date(exportedAt))
+    saveAs(new Blob([JSON.stringify(file)], { type: 'application/json' }), fileName)
+
+    await recordExport(exportedAt)
+    pending = { count: 0, oldestAt: null }
+    for (const listener of listeners)
+      listener()
+    return { ops: ops.length, fileName }
+  }
+
   return {
     get pending() {
       return pending
     },
     onChange: fn => void listeners.add(fn),
+    save,
   }
+}
+
+/** Every op ever recorded here, oldest first — the order an ingest replays in. */
+function readOps(db: IDBDatabase): Promise<ChangeOp[]> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(JOURNAL_STORE, 'readonly')
+    const request = tx.objectStore(JOURNAL_STORE).index('at').getAll()
+    tx.oncomplete = () => resolve(request.result as ChangeOp[])
+    tx.onerror = () => reject(tx.error ?? new Error('the record of your changes could not be read'))
+  })
 }
 
 /**

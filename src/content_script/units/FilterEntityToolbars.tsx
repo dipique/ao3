@@ -7,7 +7,7 @@ import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, fetchAndParseDocument, fetchToken, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, fetchAndParseDocument, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -19,6 +19,7 @@ import {
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
 import { loadMarkedForLaterIndex, noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
+import { submitMark } from '#content_script/markForLater.js'
 import { markIcon } from '#content_script/markIcons.js'
 import { entityKey, ruleBehavior, ruleIndicatorBehavior } from '#content_script/persistentFilters.js'
 import { openProgressEditor } from '#content_script/progressEditor.js'
@@ -127,11 +128,6 @@ async function fetchWorkMarkState(workId: string): Promise<boolean | null> {
   return parseMarkedForLater(doc)
 }
 
-/** The page's own CSRF token, present in the head of any AO3 page. */
-function pageToken(): string | null {
-  return document.querySelector('meta[name="csrf-token"]')?.content ?? null
-}
-
 /**
  * AO3's own mark button for a work — the `li.mark` form in a work page's header.
  * It renders exactly one of `mark_for_later` / `mark_as_read`, so asking for the
@@ -150,27 +146,6 @@ function nativeMarkButton(workId: string, save: boolean): HTMLButtonElement | nu
   const action = save ? 'mark_for_later' : 'mark_as_read'
   const form = document.querySelector<HTMLFormElement>(`form.button_to[action*="/works/${workId}/${action}"]`)
   return form?.querySelector<HTMLButtonElement>('button') ?? null
-}
-
-/**
- * Toggle a work's Marked for Later state with the same request AO3's own
- * "Mark for Later" / "Mark as Read" buttons make: a PATCH (tunnelled through
- * POST + `_method`) to `/works/:id/mark_for_later` or `/works/:id/mark_as_read`.
- */
-export async function submitMark(workId: string, save: boolean): Promise<void> {
-  const action = save ? 'mark_for_later' : 'mark_as_read'
-  const token = pageToken() ?? await fetchToken()
-  const res = await fetch(getArchiveLink(`/works/${workId}/${action}`), {
-    method: 'POST',
-    credentials: 'same-origin',
-    // The action finishes by redirecting back to the listing. Keep the redirect
-    // opaque (we don't want that page) and read it as success.
-    redirect: 'manual',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-    body: new URLSearchParams({ _method: 'patch', authenticity_token: token }).toString(),
-  })
-  if (res.type !== 'opaqueredirect' && !res.ok)
-    throw new Error(`Mark request failed (${res.status})`)
 }
 
 // ---------------------------------------------------------------------------

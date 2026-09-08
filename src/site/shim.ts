@@ -153,6 +153,22 @@ export async function installBrowserShim(seed: { generatedAt: number, items: Ite
 }
 
 /**
+ * Note that the journal has been written out to a file, so what counts as
+ * unexported is measured from here.
+ *
+ * Lives with the rest of the origin's meta rather than beside the ops, because
+ * it is a fact about this browser rather than about any one export — the reader
+ * who takes a file away has taken away everything recorded on this origin, under
+ * whichever bundle they happened to have open.
+ */
+export async function recordExport(at: number): Promise<void> {
+  const stored = memory.get(META_KEY) as SiteStorageMeta | undefined
+  if (!stored)
+    return
+  await setItems({ [META_KEY]: { ...stored, lastExportedAt: at } })
+}
+
+/**
  * The open database, for the journal store beside the storage one.
  *
  * Null wherever the storage layer is running from memory — a failed open, or a

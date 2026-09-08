@@ -14,6 +14,8 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
 const ARCHIVE = 'https://archiveofourown.org'
 const CACHE_KEY = 'marked-for-later:tester'
 const LABEL = 'Marked for Later — tester'
+/** The one row that isn't about a list: the way changes made in a file get back. */
+const CHANGES_ROW = 'Changes made in an export'
 
 /**
  * The site export's Advanced section, driven end to end: a stored list, the
@@ -166,6 +168,10 @@ describe('options UI — site export', { skip }, () => {
   /** What the row was showing while it sat out the stub's 429. */
   let waitLine = ''
   const problems = []
+  /** Works the stub was asked to take off Marked for Later, and what was posted. */
+  const marked = []
+  /** The change file the exported page handed back, once it has handed one back. */
+  let changeFile = null
 
   before(async () => {
     ensureBuilt()
@@ -182,6 +188,30 @@ describe('options UI — site export', { skip }, () => {
       if (!url.startsWith(ARCHIVE))
         return void req.continue()
       const path = new URL(url).pathname
+
+      // The two endpoints a change file's ingest uses: a CSRF token from AO3's
+      // dispenser, and the PATCH-through-POST that takes a work off Marked for
+      // Later. Both are reached from the options page, which — unlike a content
+      // script — has no AO3 document to read a token out of.
+      if (path === '/token_dispenser.json') {
+        return void req.respond({
+          status: 200,
+          contentType: 'application/json',
+          headers: { 'access-control-allow-origin': '*' },
+          body: JSON.stringify({ token: 'a-token' }),
+        })
+      }
+      const markedRead = /^\/works\/(\d+)\/mark_as_read$/.exec(path)?.[1]
+      if (markedRead) {
+        marked.push({ workId: markedRead, method: req.method(), body: req.postData() ?? '' })
+        return void req.respond({
+          status: 200,
+          contentType: 'text/html; charset=utf-8',
+          headers: { 'access-control-allow-origin': '*' },
+          body: '<!doctype html><html><head><meta charset="utf-8"><title>Marked</title></head><body></body></html>',
+        })
+      }
+
       const workId = /^\/works\/(\d+)$/.exec(path)?.[1]
       if (workId && rateLimitOnce.delete(workId)) {
         return void req.respond({
@@ -728,6 +758,9 @@ describe('options UI — site export', { skip }, () => {
     const errors = []
     reader.on('console', m => m.type() === 'error' && errors.push(m.text()))
     reader.on('pageerror', e => errors.push(e.message))
+    // The page hands the change file over the same way the options page hands
+    // over an export, so it is caught the same way.
+    await reader.evaluateOnNewDocument(captureDownloads)
 
     /** Every op in the journal store, oldest first. */
     const ops = () => reader.evaluate(() => new Promise((resolve, reject) => {
@@ -805,6 +838,33 @@ describe('options UI — site export', { skip }, () => {
       await reader.reload({ waitUntil: 'load' })
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
       assert.equal((await pending()).count, '1')
+
+      // And the way out of that count: the page writes what it recorded to a
+      // file, names it, and stops claiming anything is riding on this browser.
+      await reader.click('.AO3E--site--status-export')
+      await until('the change file to be handed over', () => reader.evaluate(() => window.__downloads.length > 0))
+      const handed = await reader.evaluate(() => window.__downloads.at(-1))
+      assert.match(handed.name, /^ao3e-changes-marked-for-later-\d{4}-\d{2}-\d{2}_[\d-]{8}\.json$/)
+      const text = Buffer.from(
+        await reader.evaluate(url => window.__downloadBytes(url), handed.url),
+        'base64',
+      ).toString('utf-8')
+      changeFile = { name: handed.name, text }
+
+      const written = JSON.parse(text)
+      assert.equal(written.v, 1)
+      assert.equal(written.sourceId, 'marked-for-later')
+      assert.ok(written.exportedAt > 0)
+      assert.deepEqual(written.ops, recorded, 'the file is the journal, verbatim')
+
+      await until('the count to be cleared', async () => (await pending()).count === '0')
+      assert.match(await reader.$eval('.AO3E--site--status', el => el.textContent), /Saved 1 change as ao3e-changes-/)
+
+      // Exported is exported: the mark left, so the next open has nothing to
+      // warn about — which is only true if the file's own record of it survived.
+      await reader.reload({ waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.equal((await pending()).count, '0')
 
       assert.deepEqual(errors, [], 'journalling should not need anything the file does not carry')
     }
@@ -894,6 +954,97 @@ describe('options UI — site export', { skip }, () => {
       await site.close()
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  /**
+   * The other end of the round trip: the file the exported page wrote, read
+   * back into the extension.
+   *
+   * This is the whole of phase 2 in one test, and only an end-to-end one can be
+   * it — the mark was made in another origin's storage, by a page with no
+   * extension under it, and what has to happen here is that the reader's own
+   * table and their Marked for Later list on AO3 both catch up with it.
+   *
+   * The second import is the point of the ledger: the same file, twice, must
+   * cost nothing and must not ask AO3 for anything a second time.
+   */
+  test('the changes made inside the file come back into the extension', async () => {
+    assert.ok(changeFile, 'the exported page should have handed a file over')
+
+    /**
+     * Hand the page the file, without the browser's own dialog.
+     *
+     * The third harness wrinkle, and the same trade as the download one above:
+     * an `<input type="file">` opens a chooser that belongs to the browser
+     * rather than to the page, so what is stubbed is the dialog — the click
+     * fills the input with the file instead of asking for one. Everything under
+     * test is on this side of it: what the page does with what it was handed.
+     */
+    const handOver = () => page.evaluate((name, text) => {
+      const click = HTMLInputElement.prototype.click
+      HTMLInputElement.prototype.click = function () {
+        if (this.type !== 'file')
+          return click.call(this)
+        const data = new DataTransfer()
+        data.items.add(new File([text], name, { type: 'application/json' }))
+        this.files = data.files
+        this.dispatchEvent(new Event('change'))
+      }
+    }, changeFile.name, changeFile.text)
+
+    /**
+     * Pressed from inside the page rather than with the mouse: the toast the
+     * first import raises sits over this row, and with the dialog stubbed there
+     * is nothing left here that a real click buys.
+     */
+    const importFile = async (label = 'Import changes') => {
+      await handOver()
+      const row = await rowHandle(CHANGES_ROW)
+      const pressed = await row.evaluate((el, text) => {
+        const button = [...el.querySelectorAll('button')].find(b => b.textContent.trim() === text)
+        button?.click()
+        return !!button
+      }, label)
+      assert.ok(pressed, `button "${label}" not found in the changes row`)
+    }
+
+    const marks = () => page.evaluate(
+      async () => (await browser.storage.local.get('option.workMarks'))['option.workMarks'],
+    )
+    const reportLine = async () => (await rowHandle(CHANGES_ROW)).evaluate(el => el.textContent ?? '')
+
+    // Nothing here knows about work 11 yet: the mark was made in a file, on
+    // another origin, with no extension under it.
+    assert.equal((await marks()).marks.boring.items, '')
+
+    await importFile()
+    await until('the mark to arrive', async () => (await marks()).marks.boring.items !== '')
+
+    // Both halves. The mark is in this device's table…
+    const table = await marks()
+    assert.notEqual(table.marks.boring.items, '')
+    assert.equal(table.marks.read.items, '', 'a specific verdict is not also plain read')
+
+    // …and AO3 has been asked to take the work off Marked for Later, with the
+    // token this page had to go and fetch, having no AO3 document to read one
+    // out of.
+    assert.deepEqual(marked.map(entry => entry.workId), ['11'])
+    assert.equal(marked[0].method, 'POST')
+    assert.match(marked[0].body, /_method=patch/)
+    assert.match(marked[0].body, /authenticity_token=a-token/)
+
+    assert.match(await reportLine(), /applied 1 · 1 marked read on AO3/)
+
+    // What the second import reads, and the only thing that makes it free.
+    const ledger = await page.evaluate(
+      async () => (await browser.storage.local.get('cache.appliedChangeOps'))['cache.appliedChangeOps'],
+    )
+    assert.equal(ledger.length, 1)
+
+    await importFile()
+    await until('the second import to report', async () => /already applied/.test(await reportLine()))
+    assert.match(await reportLine(), /applied 0 · 1 already applied/)
+    assert.deepEqual(marked.map(entry => entry.workId), ['11'], 'AO3 is not asked twice')
   })
 
   /**
