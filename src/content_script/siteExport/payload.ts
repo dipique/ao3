@@ -211,12 +211,11 @@ ${bundle.css}
 <body class="ao3e-site">
 <header class="ao3e-site-header">
 <h1>${escapeHtml(label)}</h1>
-<p class="ao3e-site-meta">${total} works &#183; ${cached} readable offline</p>
-<p class="ao3e-site-note">Your own copy, for reading. It holds other people&#8217;s work &#8212; keep it to yourself.</p>
+<p class="ao3e-site-meta">${total} works &#183; ${cached} readable offline &#183; other people&#8217;s work, so no sharesies</p>
 </header>
 <div id="${SITE_SHELL_ID}" class="ao3e-site-inert">
 <p><strong>This page needs JavaScript, and none is running.</strong></p>
-<p>Safari will not run scripts in a file opened from disk. Open this in Microsoft Edge instead, or put it on a web server and open the address.</p>
+<p>Safari and Chrome will not run scripts in a local html file. Open in Microsoft Edge instead (download and "share" to Edge), or put it on a web server and open the address.</p>
 </div>
 <script type="application/json" id="${SITE_DATA_ID}">`
 }

@@ -88,7 +88,7 @@ const SEED = {
     },
     [CACHE_KEY]: {
       version: 2,
-      // Old enough that "list refreshed …" reads as hours, not seconds.
+      // Old enough that "as of …" reads as hours, not seconds.
       scrapedAt: Date.now() - 3 * 60 * 60 * 1000,
       blurbsHtml: [blurb(11, 'Work number 11'), blurb(12, 'Work number 12')],
       descriptor: {
@@ -306,9 +306,9 @@ describe('options UI — site export', { skip }, () => {
     const row = await rowHandle(LABEL)
     const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
     assert.match(summary, /^2 works/)
-    assert.match(summary, /list refreshed 3 hours ago/)
-    assert.match(summary, /nothing cached yet/)
-    assert.match(summary, /2 not cached/)
+    assert.match(summary, /as of 3 hours ago/)
+    assert.match(summary, /0 cached/)
+    assert.match(summary, /2 uncached/)
   })
 
   /**
@@ -406,7 +406,7 @@ describe('options UI — site export', { skip }, () => {
     const row = await rowHandle(LABEL)
     const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
     assert.match(summary, /2 cached \(/)
-    assert.doesNotMatch(summary, /not cached/)
+    assert.doesNotMatch(summary, /uncached/)
   })
 
   test('"List" re-scrapes the listing and its saved-work index', async () => {
@@ -423,7 +423,7 @@ describe('options UI — site export', { skip }, () => {
     const row = await rowHandle(LABEL)
     const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
     assert.match(summary, /^3 works/)
-    assert.match(summary, /1 not cached/)
+    assert.match(summary, /1 uncached/)
   })
 
   /** The exported page behind the last download `saveAs` asked for. */
@@ -780,6 +780,7 @@ describe('options UI — site export', { skip }, () => {
 
     const pending = () => reader.$eval('.AO3E--site--status', el => ({
       count: el.dataset.ao3ePending,
+      writable: el.dataset.ao3eWritable,
       text: el.textContent,
     }))
 
@@ -793,12 +794,14 @@ describe('options UI — site export', { skip }, () => {
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
 
       // Nothing done yet, so nothing is claimed — but the page still says what
-      // it can and can't promise about the browser it is sitting in.
+      // it can and can't promise about the browser it is sitting in, and points
+      // at the way out of it. Asserted on the panel's own state and its one
+      // action rather than on its prose, which is copy and gets rewritten.
       const before = await pending()
       assert.equal(before.count, '0')
+      assert.equal(before.writable, 'true', 'a `file:` origin keeps what is written to it')
       assert.doesNotMatch(before.text, /not yet exported/)
-      assert.match(before.text, /saved in this browser/)
-      assert.match(before.text, /rule of thumb/, 'the page should not imply an expiry it cannot know')
+      assert.match(before.text, /export changes/i, 'the panel should name the way out')
 
       // Right-click a work and mark it — the extension's own work menu, running
       // in a file with no extension under it.
@@ -1124,33 +1127,47 @@ describe('options UI — site export', { skip }, () => {
   test('what the deleted list stranded can be discarded on its own', async () => {
     const cacheRow = () => rowHandle(CACHE_ROW).then(el => el.evaluate(node => node.textContent ?? ''))
 
-    // The offer names the number before it is taken up — which is the whole
-    // reason this button does not need to ask what it is about to remove.
-    await until('the row to count the orphans', async () => /belong to no stored list/.test(await cacheRow()))
-    assert.match(await cacheRow(), /3 works cached/)
-    assert.match(await cacheRow(), /3 of them \(about [\d.]+ ?[kKM]B\) belong to no stored list/)
-
     /**
-     * Pressed from inside the page, for the reason the change import is: the
-     * toast the list removal raised sits over this row, and a real click lands
-     * on the toast instead of the button.
+     * The row's first button is the discard, and everything about it that this
+     * test needs is on the button itself: whether it is offered at all, and what
+     * pressing it does to storage. The wording around it — how the subtitle
+     * counts the orphans, what the confirmation says — is copy, and pinning a
+     * test to copy makes every rewrite a failing build.
      */
-    const press = async (label) => {
+    const discard = async () => {
       const row = await rowHandle(CACHE_ROW)
-      const pressed = await row.evaluate((el, text) => {
-        const button = [...el.querySelectorAll('button')].find(b => b.textContent.trim() === text)
-        button?.click()
-        return !!button
-      }, label)
-      assert.ok(pressed, `button "${label}" not found in the cache row`)
+      const label = await row.evaluate((el) => {
+        const button = el.querySelector('button')
+        if (!button || button.disabled)
+          return null
+        button.click()
+        return button.textContent.trim()
+      })
+      assert.ok(label, 'the cache row should be offering an enabled discard button')
+      return label
     }
 
-    // Twice, like its neighbour: the first press turns the label into the count.
-    await press('Discard orphans')
-    await until('the confirmation', async () => /Discard 3\?/.test(await cacheRow()))
-    await press('Discard 3?')
+    const offered = () => rowHandle(CACHE_ROW).then(el => el.evaluate(node => !node.querySelector('button')?.disabled))
 
-    await until('the cache to empty', async () => /No work text is cached yet/.test(await cacheRow()))
+    // Enabled only once the row has counted what the deleted list stranded.
+    await until('the row to offer the discard', offered)
+    assert.match(await cacheRow(), /orphan/i, 'and to say what it is offering to remove')
+
+    /**
+     * Twice, like its neighbour — the first press turns the label into a
+     * confirmation. Pressed from inside the page for the reason the change
+     * import is: the toast the list removal raised sits over this row, and a
+     * real click lands on the toast instead of the button.
+     */
+    const asked = await discard()
+    await until('the confirmation', async () => (await cacheRow()).includes('3'))
+    const confirmed = await discard()
+    assert.notEqual(confirmed, asked, 'the second press should be a different offer from the first')
+
+    await until('the cache to empty', async () => {
+      const store = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
+      return !store || !Object.keys(store).length
+    })
     const left = await page.evaluate(async () => {
       const store = await browser.storage.local.get(null)
       return {
@@ -1162,6 +1179,9 @@ describe('options UI — site export', { skip }, () => {
     assert.deepEqual(left.index, {})
     assert.deepEqual(left.texts, [], 'the text goes with the index entry')
     assert.deepEqual(left.lists, ['marked-for-later:olduser'], 'the list that is left is untouched')
+
+    // Nothing to offer any more, which is the other half of the button's state.
+    await until('the discard to switch itself off', async () => !(await offered()))
   })
 
   test('nothing threw along the way', () => {

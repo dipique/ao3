@@ -14,7 +14,7 @@ function formatLastSync(ts: number) {
 <template>
   <OptionCategory
     title="Sync & Backups"
-    subtitle="Sync your settings across browsers, and keep local backups"
+    subtitle="Carry your settings between browsers, and keep local snapshots you can roll back to."
   >
     <template #icon>
       <Icon i-mdi-cloud-sync-outline />
@@ -22,7 +22,7 @@ function formatLastSync(ts: number) {
 
     <OptionRow
       title="Sync settings across devices"
-      subtitle="Store your options in the browser's synced storage so they follow you to other browsers signed into the same account. Cache is never synced."
+      subtitle="Store your options in the browser's synced storage so they follow you to other browsers signed in to the same account. Cache is never synced."
     >
       <template #default="{ id }">
         <Switch :id="id" :model-value="state.enabled" @update:model-value="setEnabled" />
@@ -40,7 +40,7 @@ function formatLastSync(ts: number) {
 
     <OptionRow
       title="Keep daily backups"
-      subtitle="Save a local snapshot of your settings the first time you change them each day. Backups stay on this device only."
+      subtitle="Save a snapshot the first time you change a setting each day. Backups stay on this device."
     >
       <template #default="{ id }">
         <Switch :id="id" :model-value="state.backupsEnabled" @update:model-value="setBackupsEnabled" />
@@ -59,7 +59,7 @@ function formatLastSync(ts: number) {
 
     <OptionRow
       title="Restore a backup"
-      subtitle="Roll back to an earlier snapshot. Your current settings are backed up first."
+      subtitle="Roll back to an earlier snapshot. Your current settings are backed up first, so a restore can itself be undone."
     >
       <SyncBackupsDialog />
     </OptionRow>

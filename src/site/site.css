@@ -28,6 +28,20 @@
   --ao3e-site-panel: #f6f6f4;
   --ao3e-site-warn-bg: #fdf3d8;
   --ao3e-site-warn-fg: #6b4d00;
+  /*
+     The required-tags tiles, mildest to strongest: the rating climbs all four,
+     warnings borrow the top two, and every category takes the first. These are
+     the one part of the palette that does not change with the theme — a filled
+     tile carries its own background, so it reads the same on either page, and
+     each is dark enough for white lettering. Only the tick, which is drawn as
+     ink rather than as a tile, has to follow the theme.
+  */
+  --ao3e-site-sym-ok: #237a3f;
+  --ao3e-site-sym-mid: #8a6100;
+  --ao3e-site-sym-warm: #a3490f;
+  --ao3e-site-sym-hot: #99201a;
+  --ao3e-site-sym-on: #fff;
+  --ao3e-site-sym-tick: #237a3f;
   color-scheme: light;
 }
 
@@ -42,6 +56,7 @@
     --ao3e-site-panel: #1e2126;
     --ao3e-site-warn-bg: #3a2f10;
     --ao3e-site-warn-fg: #f3d78a;
+    --ao3e-site-sym-tick: #6fce8f;
     color-scheme: dark;
   }
 }
@@ -56,6 +71,7 @@
   --ao3e-site-panel: #1e2126;
   --ao3e-site-warn-bg: #3a2f10;
   --ao3e-site-warn-fg: #f3d78a;
+  --ao3e-site-sym-tick: #6fce8f;
   color-scheme: dark;
 }
 
@@ -116,6 +132,11 @@ body.ao3e-site {
    unexported changes leads, because it is the only mitigation there is for an
    origin that can be cleared without warning or trace. */
 .AO3E--site--status {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.4rem;
   color: var(--ao3e-site-muted);
   font-size: 0.8rem;
   margin: 0 0 1rem;
@@ -133,11 +154,11 @@ body.ao3e-site {
 }
 
 .AO3E--site--status .AO3E--site--status-pending {
+  grid-column: 1 / -1;
   background: var(--ao3e-site-warn-bg);
   color: var(--ao3e-site-warn-fg);
   border-radius: 0.3rem;
   padding: 0.5rem 0.7rem;
-  margin-bottom: 0.4rem;
   font-size: 0.85rem;
 }
 
@@ -149,15 +170,20 @@ body.ao3e-site {
 
 /* The way out of that warning: write everything recorded here to a file. Sized
    for a thumb, because the device this is read on has no pointer. */
+.AO3E--site--status .AO3E--site--status-keep {
+  grid-column: 2;
+}
+
 .AO3E--site--status .AO3E--site--status-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-  margin-top: 0.4rem;
+  display: contents;
+}
+
+.AO3E--site--status .AO3E--site--status-actions[hidden] {
+  display: none;
 }
 
 .AO3E--site--status-export {
+  grid-column: 1;
   font: inherit;
   color: inherit;
   background: var(--ao3e-site-panel);
@@ -174,7 +200,7 @@ body.ao3e-site {
 }
 
 .AO3E--site--status-said {
-  flex: 1 1 14rem;
+  grid-column: 1 / -1;
 }
 
 /* --- One work, read in the page ------------------------------------------ */
@@ -203,8 +229,48 @@ body.ao3e-site {
 
 /* --- AO3's structures, as much of them as the view renders ---------------- */
 
+/*
+   Two things AO3's own skin does globally that a blurb quietly leans on, and an
+   export had neither until here.
+
+   Every list marker is off. Blurbs are `<li>`s in an `<ol class="index">` and
+   their tags, series and symbols are lists too, so without this the results
+   number themselves down the margin and every inner list grows bullets.
+
+   And `landmark` headings are out of the picture. The "Tags", "Summary" and
+   "Series" captions are in AO3's markup for screen readers and were never meant
+   to be seen; AO3 hides them with `font-size: 0`, and this uses the clipping
+   pattern instead so they survive a reader zooming text.
+*/
+.ao3e-site ol.index,
+.ao3e-site ul.index,
+.ao3e-site .blurb ul,
+.ao3e-site .blurb ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ao3e-site .blurb ul li {
+  display: inline;
+}
+
+.ao3e-site .landmark,
+.ao3e-site .required-tags .text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .ao3e-site .blurb,
 .ao3e-site .work.meta.group {
+  position: relative;
   border: 1px solid var(--ao3e-site-line);
   border-radius: 0.25rem;
   margin: 0 0 0.643rem;
@@ -212,9 +278,24 @@ body.ao3e-site {
   font-size: 0.875rem;
 }
 
+/*
+   The header's geometry is AO3's, and it is what makes the rest of it read: the
+   four symbols hold a column on the left and the date holds the corner on the
+   right, both taken out of flow, and everything else in the header is inset past
+   the pair. Floating the date instead — which is what this did first — leaves it
+   with no line box to catch when the symbols above it are a block, and it lands
+   halfway down the card.
+*/
+.ao3e-site .blurb .header {
+  min-height: 3.5rem;
+  margin-bottom: 0.375rem;
+}
+
+.ao3e-site .blurb .header .heading,
 .ao3e-site .blurb .header h4,
 .ao3e-site .blurb .header h5 {
-  margin: 0;
+  display: block;
+  margin: 0.25rem 5.5rem 0 3.75rem;
   font-size: 1rem;
   font-weight: 400;
   line-height: 1.4;
@@ -226,44 +307,235 @@ body.ao3e-site {
 }
 
 .ao3e-site .blurb .header .datetime {
-  float: right;
+  position: absolute;
+  top: 0.429rem;
+  right: 0.75rem;
+  margin: 0;
   color: var(--ao3e-site-muted);
   font-size: 0.8rem;
-  margin: 0;
 }
 
-/* The rating / warning / category / completion symbols, as their text. AO3
-   draws these from a sprite the export has no copy of, so the alt text a screen
-   reader would have read is what everyone gets. */
+/*
+   The rating / warning / category / completion square.
+
+   AO3 draws these from a sprite at a fixed URL, which an export has no copy of
+   and no business carrying, so they are redrawn here as letters on a tile — one
+   cell per symbol, in AO3's own 2x2 block in its own left-hand column, keyed off
+   the classes AO3 already puts on them. Letters rather than a redrawn icon set
+   because at this size a "G" and an "E" tell two ratings apart at a glance where
+   two 24px pictograms do not, and because an export has to earn every byte it
+   carries. The full name is still on the element's `title` and in the `.text`
+   span a screen reader reads, and the extension's own symbol menu — which
+   travels with the view — names it in full on a tap.
+
+   **The order is down, then across**, which is AO3's and is not what a grid does
+   left to right: the archive stacks the rating over the warnings on the left and
+   the category over the completion on the right (it puts the third and fourth
+   symbols in a second column by hand, at `left: 28px`). A reader who knows where
+   the red square means "warnings" is reading position as much as colour, so
+   filling this row-first would move it out from under them.
+*/
 .ao3e-site .blurb ul.required-tags {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin: 0.3rem 0;
+  position: absolute;
+  top: 0.429rem;
+  left: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(2, 1.625rem);
+  grid-template-rows: repeat(2, 1.625rem);
+  grid-auto-flow: column;
+  gap: 0.125rem;
+  margin: 0;
   padding: 0;
-  font-size: 0.7rem;
 }
 
-.ao3e-site .blurb ul.required-tags li a {
-  display: inline-block;
-  border: 1px solid var(--ao3e-site-line);
-  border-radius: 0.2rem;
-  padding: 0 0.3rem;
-  color: var(--ao3e-site-muted);
+.ao3e-site .blurb ul.required-tags li {
+  display: block;
+}
+
+/* Filling the cell rather than the text: without the height an `<a>` is as tall
+   as one line of 11px type, and the box below it comes out a pill. */
+.ao3e-site .required-tags li a {
+  display: block;
+  height: 100%;
   text-decoration: none;
+}
+
+/* The symbol itself is the span AO3 hangs its class on; the `<a>` around it only
+   exists to point at the symbols key. `border-box` because the 100% is the cell,
+   and a border outside it would push each square two pixels into its neighbour.
+   The default is the quiet tile — a symbol that is not telling you anything
+   ("no warnings", "not rated") should not be the loudest thing in the card. */
+.ao3e-site .required-tags li a > span {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--ao3e-site-line);
+  border-radius: 0.125rem;
+  background: var(--ao3e-site-panel);
+  color: var(--ao3e-site-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* A symbol this build has no letter for still gets a cell, so the square keeps
+   its shape and nothing silently disappears. */
+.ao3e-site .required-tags li a > span::after {
+  content: '\00B7';
+}
+
+.ao3e-site .required-tags .rating-notrated::after {
+  content: '?';
+}
+
+.ao3e-site .required-tags .rating-general-audience::after {
+  content: 'G';
+}
+
+.ao3e-site .required-tags .rating-teen::after {
+  content: 'T';
+}
+
+.ao3e-site .required-tags .rating-mature::after {
+  content: 'M';
+}
+
+.ao3e-site .required-tags .rating-explicit::after {
+  content: 'E';
+}
+
+.ao3e-site .required-tags .warning-no::after {
+  content: '\2013';
+}
+
+.ao3e-site .required-tags .warning-choosenotto::after {
+  content: '?';
+}
+
+.ao3e-site .required-tags .warning-yes::after {
+  content: '!';
+}
+
+.ao3e-site .required-tags .category-none::after {
+  content: '\2013';
+}
+
+.ao3e-site .required-tags .category-gen::after {
+  content: 'Gen';
+}
+
+.ao3e-site .required-tags .category-het::after {
+  content: 'F/M';
+}
+
+.ao3e-site .required-tags .category-slash::after {
+  content: 'M/M';
+}
+
+.ao3e-site .required-tags .category-femslash::after {
+  content: 'F/F';
+}
+
+.ao3e-site .required-tags .category-multi::after {
+  content: 'Multi';
+}
+
+.ao3e-site .required-tags .category-other::after {
+  content: 'Other';
+}
+
+.ao3e-site .required-tags .complete-yes::after {
+  content: '\2713';
+}
+
+.ao3e-site .required-tags .complete-no::after {
+  content: 'WIP';
+}
+
+/* The three that will not fit a cell at the common size. */
+.ao3e-site .required-tags .category-multi,
+.ao3e-site .required-tags .category-other,
+.ao3e-site .required-tags .complete-no {
+  font-size: 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+/*
+   Filled, white-lettered, and coloured the way AO3 colours them: the rating
+   climbs the ramp, warnings go red only when there are some to go red about, and
+   every category is the one green — which is AO3's choice and worth keeping,
+   because a reader glancing at a library is matching a colour they already know
+   rather than reading a legend.
+
+   "Complete" stays a quiet tile with a green tick rather than a green block: it
+   is the one symbol in the square that is good news, and a finished work is not
+   an alert.
+*/
+.ao3e-site .required-tags .rating-general-audience,
+.ao3e-site .required-tags .category-gen,
+.ao3e-site .required-tags .category-het,
+.ao3e-site .required-tags .category-slash,
+.ao3e-site .required-tags .category-femslash,
+.ao3e-site .required-tags .category-multi,
+.ao3e-site .required-tags .category-other {
+  border-color: var(--ao3e-site-sym-ok);
+  background: var(--ao3e-site-sym-ok);
+  color: var(--ao3e-site-sym-on);
+}
+
+.ao3e-site .required-tags .rating-teen,
+.ao3e-site .required-tags .warning-choosenotto {
+  border-color: var(--ao3e-site-sym-mid);
+  background: var(--ao3e-site-sym-mid);
+  color: var(--ao3e-site-sym-on);
+}
+
+.ao3e-site .required-tags .rating-mature {
+  border-color: var(--ao3e-site-sym-warm);
+  background: var(--ao3e-site-sym-warm);
+  color: var(--ao3e-site-sym-on);
+}
+
+.ao3e-site .required-tags .rating-explicit,
+.ao3e-site .required-tags .warning-yes {
+  border-color: var(--ao3e-site-sym-hot);
+  background: var(--ao3e-site-sym-hot);
+  color: var(--ao3e-site-sym-on);
+}
+
+.ao3e-site .required-tags .complete-yes {
+  color: var(--ao3e-site-sym-tick);
+}
+
+/*
+   Narrow enough that the date has nowhere to sit: it goes back into the flow
+   under the title, keeping only the inset past the square. The square itself
+   stays where it is — it is the one part of the header a thumb aims at.
+*/
+@media (max-width: 34rem) {
+  .ao3e-site .blurb .header .heading,
+  .ao3e-site .blurb .header h4,
+  .ao3e-site .blurb .header h5 {
+    margin-right: 0;
+  }
+
+  .ao3e-site .blurb .header .datetime {
+    position: static;
+    margin: 0.25rem 0 0 3.75rem;
+  }
 }
 
 .ao3e-site .blurb .summary {
   margin: 0.5rem 0;
-  border-top: 1px solid var(--ao3e-site-rule);
-  padding-top: 0.4rem;
 }
 
 .ao3e-site ul.tags {
-  list-style: none;
   margin: 0.4rem 0;
   padding: 0;
+  list-style: none;
 }
 
 .ao3e-site ul.tags li {
@@ -279,16 +551,16 @@ body.ao3e-site {
   font-weight: 600;
 }
 
+/*
+   Only the colour and the size. The layout is `content_script.css`'s, which
+   makes this a right-aligned flex row rather than AO3's float — it has to be,
+   because the Stats unit adds reading time and a kudos ratio to it and both have
+   to be able to wrap.
+*/
 .ao3e-site dl.stats {
   margin: 0.4rem 0 0;
   color: var(--ao3e-site-muted);
   font-size: 0.8rem;
-}
-
-.ao3e-site dl.stats dt,
-.ao3e-site dl.stats dd {
-  display: inline;
-  margin: 0 0.25rem 0 0;
 }
 
 /* --- A work's own page --------------------------------------------------- */

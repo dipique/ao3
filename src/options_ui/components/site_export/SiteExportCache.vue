@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * The cache read-out and its two deletions, under the list of lists — in the
- * shape of the "Approximately X kB in use" line in
+ * shape of the "~X kB in use" line in
  * {@link file://../option_rows/OptionRowImportExport.vue}.
  *
  * Work text dwarfs everything else the extension stores, so this is part of
@@ -26,22 +26,22 @@ const { usage, orphans, status, purge, discardOrphans } = useSiteExport()
  */
 const stranded = computed(() => {
   if (orphans.value.cached) {
-    return ` ${orphans.value.cached.toLocaleString()} of them (about ${formatBytes(orphans.value.bytes)})`
-      + ' belong to no stored list and can be discarded.'
+    return ` ${orphans.value.cached.toLocaleString()} (~${formatBytes(orphans.value.bytes)}) orphan(s).`
   }
   if (orphans.value.works)
-    return ` ${orphans.value.works.toLocaleString()} failed entries belong to no stored list.`
+    return ` ${orphans.value.works.toLocaleString()} orphan(s).`
   return ''
 })
 
 const subtitle = computed(() => {
   if (!usage.value.cached)
-    return 'No work text is cached yet. Caching a list stores each work on this device so the exported site can be read offline.'
+    return 'No work text cached yet for offline reading.'
   const failed = usage.value.failed
     ? ` ${usage.value.failed.toLocaleString()} could not be fetched and will be retried.`
     : ''
-  return `${usage.value.cached.toLocaleString()} works cached, using about ${formatBytes(usage.value.bytes)}.${failed}${stranded.value}`
-    + ' Stored on this device only, and never synced or included in a settings export.'
+  // The two conditional halves are sentences of their own, after the parenthesis
+  // rather than inside it — nested, the orphan line reads as part of the size.
+  return `${usage.value.cached.toLocaleString()} works (${formatBytes(usage.value.bytes)}) cached.${failed}${stranded.value}`
 })
 
 /**

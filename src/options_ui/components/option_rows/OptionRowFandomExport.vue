@@ -47,7 +47,7 @@ async function clearCache(): Promise<void> {
 <template>
   <OptionRow
     title="Learned fandom ids"
-    :subtitle="`${total} ids collected while browsing (${counts.fandoms} fandoms, ${counts.characters} characters, ${counts.relationships} relationships). Export to contribute them to the shared crossreference.`"
+    :subtitle="`${total} ids collected while browsing (${counts.fandoms} fandoms, ${counts.characters} characters, ${counts.relationships} relationships). Export them to contribute to the shared cross-reference.`"
   >
     <div flex="~ row items-center gap-3">
       <Button variant="outline" :disabled="total === 0" @click.prevent="startExport">

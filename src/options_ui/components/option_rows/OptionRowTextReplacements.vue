@@ -22,7 +22,7 @@ function remove(index: number) {
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Text replacement"
-    subtitle="Find and replace text in a work’s summary, notes and chapters as you read — for renaming a character or fixing a tic. Only what is displayed changes. Includes optional tools on the works page for adding and editing replacements as you read."
+    subtitle="Find and replace text in a work’s summary, notes and chapters as you read — for renaming a character or fixing a tic. Only what is displayed changes; the work itself is untouched."
   >
     <div flex="~ col gap-3" pt-2>
       <!-- Laid out the way `OptionRow` lays a setting out — label left, control
@@ -37,11 +37,10 @@ function remove(index: number) {
         cursor-pointer py-1
       >
         <div flex="~ col" mr-4>
-          <span font="leading-none 400" text="base">Works page Text Replacement tools</span>
+          <span font="leading-none 400" text="base">Editing tools on the work page</span>
           <span text="sm muted-fg">
-            On a work, underline the text your rules replaced — click one to edit, disable or delete that rule —
-            and offer a button beside any text you select to make a new rule out of it. Can also be switched on and
-            off from the extension’s floating toolbar while you read.
+            Underline the text your rules replaced — click one to edit, disable or delete its rule — and offer a
+            button beside any text you select to make a new rule out of it. Also on the floating toolbar.
           </span>
         </div>
         <Switch id="ao3e-text-replacement-tools" v-model="tools" />
@@ -112,11 +111,10 @@ function remove(index: number) {
       </div>
 
       <p text="xs muted-fg" pl-1>
-        "Match casing" matches any casing and, when a match starts with a capital letter, capitalises the
-        replacement to match — so one rule covers both lowercase and capitalised forms. "Across formatting" lets a
-        rule match through italics, a link and the like, where the words are split across the markup; the
-        replacement then takes the formatting of wherever the match started. "Disabled" keeps a rule in the list
-        without applying it, for a replacement you want back later or one of several variants.
+        "Match casing" matches any casing and capitalises the replacement when the match was capitalised, so one rule
+        covers both forms. "Across formatting" matches through italics, links and the like, where the words are split
+        across markup; the replacement takes the formatting of wherever the match started. "Disabled" keeps a rule
+        without applying it.
       </p>
 
       <div>

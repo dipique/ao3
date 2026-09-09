@@ -130,25 +130,24 @@ function clear(id: MarkId) {
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Work marks"
-    subtitle="Mark a work read — or with a finer verdict, anything from Favorite to Abandoned — from its right-click (or long-press) menu. Works are also marked read automatically whenever you press AO3's own “Mark as Read” button, so your read list fills itself in as you browse."
+    subtitle="Mark a work read — or with a finer verdict, anything from Favorite to Abandoned — from its right-click menu. Pressing AO3's own “Mark as Read” marks it here too, so the list fills itself in as you browse."
   >
     <div flex="~ col gap-3" mt-2>
       <p text="sm muted-fg">
-        A work carries one mark at a time: the finer dispositions all mean "read", so choosing one replaces whatever it
-        had. Those take the work off your Marked for Later list, and — where "hide in listings" is on — collapse it out
-        of results the same way your other rules do. An "always show" rule still wins over that.
+        A work carries one mark at a time: the finer verdicts all mean "read", so choosing one replaces whatever the
+        work had. They take it off your Marked for Later list and — where "hide in listings" is on — collapse it out of
+        results. An "always show" rule still wins.
       </p>
 
       <p text="sm muted-fg">
         "Ongoing" is the exception: it means you're waiting on more chapters, not that you're done. It keeps the work on
-        your Marked for Later list (adding it if it isn't there) and records the last chapter you finished, plus an
-        optional date to wait until. With "hide until ready" on, the work is collapsed only while there's nothing new to
-        read or that date hasn't come round.
+        Marked for Later and records the last chapter you finished, plus an optional date to wait until. With "hide
+        until ready" on, the work is collapsed only while there's nothing new to read.
       </p>
 
       <p text="sm muted-fg">
-        The arrows set the order the marks appear in — in a work's right-click menu, and wherever its marks are shown.
-        "Ongoing" stays last, since it isn't one of the verdicts and shouldn't sit among them.
+        The arrows set the order marks appear in, here and in a work's menu. "Ongoing" stays last — it isn't one of the
+        verdicts.
       </p>
 
       <div flex="~ col gap-2" text="sm" border-t pt-3>

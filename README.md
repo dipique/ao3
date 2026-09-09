@@ -63,13 +63,29 @@ npm run build:prod
 
 ### Testing
 
-End-to-end tests live in `test/e2e/` and run the real built options UI in headless Chrome, with `browser.storage` mocked in-memory so the actual save path is exercised:
+Tests run on Node's built-in runner — there is no test framework to install.
 
 ```
-pnpm test:e2e
+pnpm run tests          # everything (alias for tests:all)
+pnpm run tests:unit     # the fast half: no build, no browser
+pnpm run tests:e2e      # the slow half: real Chrome, real built extension
+pnpm run verify         # typecheck, then all tests
 ```
 
-The test auto-builds `dist/chrome` (production) if it's missing, then drives the options page (e.g. creating/editing tag filters) and asserts what gets written to storage. It uses your installed Chrome — set `CHROME_PATH` if it isn't found automatically. Requires `puppeteer-core` (installed as a dev dependency).
+**Unit tests** (everything in `test/` outside `test/e2e/`) import the module under test straight from `src/`. Node strips the TypeScript types on the way in rather than compiling it, so these only work on modules that are pure — no `#common`, no `browser` APIs — which is why so much of the codebase is written that way. A handful need a DOM but still no build: they esbuild-bundle one module into a blank page in headless Chrome.
+
+**End-to-end tests** live in `test/e2e/` and run the real built options UI in headless Chrome, with `browser.storage` mocked in-memory so the actual save path is exercised. They auto-build `dist/chrome` (production) if it's missing or stale — under a lock, so the files Node runs in parallel don't build over each other — then drive the options page and assert what gets written to storage.
+
+Both halves use your installed Chrome via `puppeteer-core` (a dev dependency); set `CHROME_PATH` if it isn't found automatically, and tests that need it skip rather than fail when it's missing.
+
+To run one file, or a few:
+
+```
+node --test test/searchView/engine.test.mjs
+node --test "test/siteExport/*.test.mjs"
+```
+
+Quote the globs — otherwise your shell expands them before Node sees them, and `**` won't recurse.
 
 ### Releasing
 

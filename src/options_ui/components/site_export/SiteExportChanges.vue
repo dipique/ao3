@@ -63,7 +63,7 @@ const showProblems = ref(false)
 <template>
   <OptionRow
     title="Changes made in an export"
-    subtitle="Marks and reading progress from a site export come back as an ao3e-changes-….json file, saved from the page itself. Import it here to apply them, and to take the works you finished off your Marked for Later list on AO3. Importing the same file twice changes nothing."
+    subtitle="Load an ao3e-changes-….json file saved from an exported site to replay the marks you made while reading it. Importing the same file twice changes nothing."
   >
     <div flex="~ row items-center">
       <Button

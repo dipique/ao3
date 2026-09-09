@@ -169,14 +169,11 @@ function listUrlFor(key: string, descriptor?: SnapshotDescriptor): string | unde
 
 function summarize(row: SiteExportListRow): string {
   const parts = [
-    `${row.count.toLocaleString()} ${row.count === 1 ? 'work' : 'works'}`,
-    `list refreshed ${ago(row.scrapedAt)}`,
-    row.cached
-      ? `${row.cached.toLocaleString()} cached (${formatBytes(row.bytes)})`
-      : 'nothing cached yet',
+    `${row.count.toLocaleString()} ${row.count === 1 ? 'work' : 'works'} as of ${ago(row.scrapedAt)}`,
+    `${(row.cached || 0).toLocaleString()} cached (${formatBytes(row.bytes)})`
   ]
   if (row.uncached)
-    parts.push(`${row.uncached.toLocaleString()} not cached`)
+    parts.push(`${row.uncached.toLocaleString()} uncached`)
   if (row.failed)
     parts.push(`${row.failed.toLocaleString()} failed`)
   return parts.join(' · ')
@@ -194,10 +191,8 @@ function summarize(row: SiteExportListRow): string {
  * nothing change.
  */
 export const NO_DESCRIPTOR_NOTE
-  = 'Stored before this list knew how to re-fetch itself. Open it on AO3 — the link beside its name — and press the search button '
-    + '(Search Marked for Later, or the search button on a tag or search-results page) — that scrape teaches '
-    + 'the extension where the list lives, and these buttons come back. If it stays like this, the list is '
-    + 'from an account or address that no longer resolves; delete it.'
+  = 'Needs user help. Open on AO3 using the link beside its name and press the search button. From then'
+  + 'on, future refreshes can be done from here.'
 
 /**
  * Run one job and report it. The runner keeps the interesting failures in its

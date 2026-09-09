@@ -12,18 +12,18 @@
 
     <OptionSubsection
       title="Marks &amp; status"
-      subtitle="Remember what you have read and what you thought of it. Marks are the extension's own — they live in your settings, not on AO3 — and can hide marked works from listings."
+      subtitle="Remember what you've read and what you thought of it. Marks live in your settings rather than on AO3, and can hide marked works from listings."
     >
       <OptionRowWorkMarks />
     </OptionSubsection>
 
     <OptionSubsection
       title="Work statistics"
-      subtitle="Extra numbers on a whole work's stats line — wherever it appears: in a listing, on a series page, or at the top of the work itself."
+      subtitle="Extra numbers on a work's stats line, wherever it appears — a listing, a series page, or the top of the work itself."
     >
       <OptionRowNumberSlider
         title="Reading speed"
-        subtitle="In words per minute. Every reading-time and finish-time estimate on this page is calculated from it."
+        subtitle="Words per minute. Every reading-time and finish-time estimate below is calculated from it."
         option-id="wordsPerMinute"
         unit="&nbsp;WPM"
         :min="0"
@@ -55,7 +55,7 @@
 
     <OptionSubsection
       title="Chapter statistics"
-      subtitle="A stats block on each chapter as you read a work. Shown only if at least one of these is on."
+      subtitle="A stats block on each chapter as you read. Shown only if at least one of these is on."
     >
       <OptionRow
         title="Word count"
@@ -92,14 +92,14 @@
     >
       <OptionRow
         title="Reader mode"
-        subtitle="Zoom (Ctrl+scroll, or pinch on a trackpad) over the work text to resize its font and reflow it instead of zooming the page, and drag the handles on its left and right edges to set the reading width. Saved on this device only."
+        subtitle="Zoom over the work text (Ctrl+scroll, or pinch on a trackpad) to resize and reflow it instead of zooming the page, and drag the handles at its left and right edges to set the reading width. This device only."
       >
         <OptionSwitch option-id="readerMode" />
       </OptionRow>
       <OptionDivider />
       <OptionRowNumberSlider
         title="Narrow the work text"
-        subtitle="Shrinks the reading column by this much, which makes long lines easier to follow on a wide screen. 0 to leave the width alone."
+        subtitle="Shrinks the reading column, which makes long lines easier to follow on a wide screen. 0 leaves the width alone."
         option-enabled-id="styleWidthEnabled"
         option-id="styleWidth"
         unit="%"
@@ -109,7 +109,7 @@
       <OptionDivider />
       <OptionRow
         title="Force text alignment"
-        subtitle="Override the alignment an author set on their work — useful when a work is centred or justified in a way you find hard to read."
+        subtitle="Override the alignment an author set — for a work centred or justified in a way you find hard to read."
       >
         <OptionForceAlignment />
       </OptionRow>

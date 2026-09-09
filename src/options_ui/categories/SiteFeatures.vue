@@ -4,47 +4,53 @@
 <template>
   <OptionCategory
     title="Site features &amp; appearance"
-    subtitle="What the extension adds to AO3 everywhere, and how it looks."
+    subtitle="What the extension adds to every AO3 page, and how it looks."
   >
     <template #icon>
       <Icon i-mdi-tune-variant />
     </template>
 
+    <!--
+      "Link menus" rather than "Right-click menus": the group's own master switch
+      is called that, and a sub-section whose first row repeats its heading reads
+      as a mistake. It is also the more accurate of the two — with
+      `openMenuOnClick` on, these are not right-click menus at all.
+    -->
     <OptionSubsection
-      title="Right-click menus"
-      subtitle="Right-click — or long-press on a touchscreen — a tag, fandom, author or work to act on it without leaving the page. Turn on the ones you want."
+      title="Link menus"
+      subtitle="Right-click — or long-press — a tag, fandom, author or work to act on it without leaving the page."
     >
       <OptionRow
         title="Right-click menus"
-        subtitle="The master switch for everything in this group. With it off, links keep the browser's own right-click menu. You can also flip it from the floating toolbar's “Disable menus” button on any page, or hold Shift to skip the extension for a single click."
+        subtitle="Master switch for this group. With it off, links keep the browser's own menu. Also on the floating toolbar, and holding Shift skips the extension for one click."
       >
         <OptionSwitch option-id="contextMenusEnabled" />
       </OptionRow>
       <OptionDivider />
       <OptionRow
         title="Open menus with a left-click"
-        subtitle="Makes a plain click or tap on a tag, fandom or author open its menu instead of following the link. The menu's “Open” item still follows it, so nothing is lost. Holding Shift stands the extension down for one gesture — Shift+click follows the link, so Ctrl+Shift+click still opens it in a new tab."
+        subtitle="A plain click or tap on a tag, fandom or author opens its menu instead of following the link; the menu's “Open” item still follows it. Shift+click follows the link, so Ctrl+Shift+click still opens it in a new tab."
       >
         <OptionSwitch option-id="openMenuOnClick" />
       </OptionRow>
       <OptionDivider />
       <OptionRow
         title="Menu on tags"
-        subtitle="Include or exclude a tag in the Sort &amp; Filter sidebar, or hide, always-show or highlight it everywhere. A small indicator marks tags that already have a rule."
+        subtitle="Include or exclude a tag in the Sort &amp; Filter sidebar, or hide, always-show or highlight it everywhere. Tags that already have a rule get a small indicator."
       >
         <OptionSwitch option-id="tagToolbar" />
       </OptionRow>
       <OptionDivider />
       <OptionRow
         title="Menu on fandoms"
-        subtitle="The same include/exclude and hide/always-show/highlight actions on fandoms. Fandoms are filtered by id from a bundled list, so any fandom works — not just the ten the sidebar offers."
+        subtitle="The same actions on fandoms. Fandoms are filtered by id from a bundled list, so any fandom works — not just the ten the sidebar offers."
       >
         <OptionSwitch option-id="fandomToolbar" />
       </OptionRow>
       <OptionDivider />
       <OptionRow
         title="Hide or highlight an author"
-        subtitle="Adds hide, collapse, always-show and highlight actions to an author's menu, so you can manage your author rules from any byline. An indicator shows next to the name when one is active."
+        subtitle="Adds hide, collapse, always-show and highlight to an author's menu, so you can manage author rules from any byline. An indicator shows next to the name when one is active."
       >
         <OptionSwitch option-id="hideAuthorToolbar" />
       </OptionRow>
@@ -58,7 +64,7 @@
       <OptionDivider />
       <OptionRow
         title="Mute an author"
-        subtitle="Adds mute / unmute to an author's menu. Muting hides all of that author's works, series, bookmarks and comments from you across AO3. Requires being logged in to AO3."
+        subtitle="Adds mute / unmute to an author's menu. Muting hides that author's works, series, bookmarks and comments from you across AO3. Requires being logged in to AO3."
       >
         <OptionSwitch option-id="muteAuthorToolbar" />
       </OptionRow>
@@ -73,18 +79,18 @@
 
     <OptionSubsection
       title="Page controls"
-      subtitle="Buttons the extension adds to the page itself, for things you want one tap away."
+      subtitle="Controls the extension adds to the page itself, for things you want one tap away."
     >
       <OptionRow
         title="Floating toolbar"
-        subtitle="A small button in the bottom-right corner of AO3 pages. It can reveal works your filters hid (without changing the filters), switch the right-click menus off, and toggle reader mode on a work page. It appears only when one of those applies to the page you are on."
+        subtitle="A small button in the bottom-right corner of AO3 pages. It can reveal works your filters hid without changing the filters, switch the right-click menus off, and toggle reader mode on a work page. It appears only when one of those applies."
       >
         <OptionSwitch option-id="filterToolbar" />
       </OptionRow>
       <OptionDivider />
       <OptionRow
         title="Collapsible dashboard sidebar"
-        subtitle="On your own user pages, click the red band at the top of the sidebar to fold it away and give the page its full width; a thin red rail on the left edge brings it back. Remembered on this device only."
+        subtitle="On your own user pages, click the red band at the top of the sidebar to fold it away and give the page its full width; a thin red rail on the left edge brings it back. This device only."
       >
         <OptionSwitch option-id="collapsibleDashboard" />
       </OptionRow>
@@ -96,14 +102,14 @@
     >
       <OptionRow
         title="Extension theme"
-        subtitle="Light or dark for the extension's own pages, menus and popups. AO3's own colours come from the site skin you have chosen there."
+        subtitle="Light or dark for the extension's own pages, menus and popups. AO3's own colours come from the site skin you chose there."
       >
         <OptionTheme />
       </OptionRow>
       <OptionDivider />
       <OptionRow
         title="Show statistics in columns"
-        subtitle="Lays each statistic out as a label above its value instead of a run-on line. Applies to both the work stats and the chapter stats below."
+        subtitle="Lays each statistic out as a label above its value instead of a run-on line. Applies to work and chapter statistics alike."
       >
         <OptionSwitch option-id="showStatsColumns" />
       </OptionRow>

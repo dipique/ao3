@@ -303,8 +303,8 @@ function statusPanel(storage: SiteStorage): StatusPanel {
   ) as HTMLElement
 
   keeping.textContent = storage.writable
-    ? `Marks, filters and layout you change here are saved in this browser. ${lifespan(storage)}`
-    : 'This browser will not keep anything you change here, so marks are switched off — filters and layout are gone when the page closes.'
+    ? `Local updates enabled, BUT save/export often if you're on Android/iOS; browsers will discard your data without warning! ${lifespan(storage)}`
+    : 'Browser preventing saving updates; updating is switched off.'
 
   const show = (journal: Journal | null): void => {
     const count = journal?.pending.count ?? 0
@@ -345,7 +345,7 @@ function statusPanel(storage: SiteStorage): StatusPanel {
             : 'Nothing has been changed here yet.'
         },
         (error: unknown) => {
-          said.textContent = `Those changes could not be written to a file — ${error instanceof Error ? error.message : String(error)}.`
+          said.textContent = `Changes could not be written to a file — ${error instanceof Error ? error.message : String(error)}.`
         },
       ).finally(() => {
         button.disabled = false
@@ -385,11 +385,11 @@ function statusPanel(storage: SiteStorage): StatusPanel {
  */
 function lifespan(storage: SiteStorage): string {
   const opened = storage.previousOpen === null
-    ? 'Opened here for the first time.'
-    : `Opened ${storage.meta.opens.toLocaleString('en-US')} times, last ${ago(storage.previousOpen)}.`
+    ? 'Archive currently open for the first time.'
+    : `Archive opened ${storage.meta.opens.toLocaleString('en-US')}x as of ${ago(storage.previousOpen)}.`
   return storage.meta.persisted === true
     ? `${opened} This browser has marked them to survive.`
-    : `${opened} A browser can clear what a page saved — about a week of leaving it alone is the usual rule of thumb.`
+    : `${opened} Saved marks can be suddenly discarded so export changes frequently.`
 }
 
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })

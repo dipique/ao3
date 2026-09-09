@@ -17,7 +17,7 @@ const oneLanguage = computed(() => show.value.length === 1)
     subtitle="Hide works that are not in a language you read."
   >
     <label for="hideWorks-languages" py-1 flex="~ row items-center gap-1">
-      <span font="leading-none" text="sm muted-fg">Hide works that written in languages other than</span>
+      <span font="leading-none" text="sm muted-fg">Hide works written in languages other than</span>
       <OptionLanguage />
     </label>
 
@@ -27,9 +27,8 @@ const oneLanguage = computed(() => show.value.length === 1)
       <span flex="~ col gap-0.5">
         <span>Also set AO3's own language filter</span>
         <span text="xs muted-fg">
-          Pre-selects the language in the Sort &amp; Filter sidebar, so the archive filters by it
-          server-side instead of loading works we then hide. You still press “Sort and Filter” as usual, and a
-          language already chosen on the page is left alone.
+          Pre-selects the language in the Sort &amp; Filter sidebar, so the archive filters server-side instead of
+          sending works we then hide. A language already chosen on the page is left alone.
           <template v-if="!oneLanguage">
             <br>
             Needs exactly one language above — AO3's dropdown only takes one.

@@ -254,7 +254,6 @@ describe('siteExport/payload — the shell', () => {
     const head = siteShellHead(manifest, BUNDLE)
     assert.match(head, /1,191 works/)
     assert.match(head, /1,190 readable offline/)
-    assert.match(head, /keep it to yourself/)
   })
 
   test('escapes the one thing in it that came from AO3', () => {

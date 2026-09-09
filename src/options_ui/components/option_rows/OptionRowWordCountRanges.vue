@@ -92,9 +92,9 @@ function remove(index: number) {
   >
     <div flex="~ col gap-3" pt-2>
       <p text="sm muted-fg">
-        Clicking (or right-clicking) the word count in a work's stats opens a menu of these ranges, plus a row
-        clearing the range currently applied. On a normal listing the pick fills AO3's own Word Count filter and
-        re-runs the search; inside “Search Marked for Later” it filters the loaded list instead.
+        The menu offers these ranges plus a row clearing the one currently applied. On a normal listing your pick
+        fills AO3's own Word Count filter and re-runs the search; inside an instant search view it filters the loaded
+        list instead.
       </p>
 
       <p v-if="drafts.length === 0" text="sm muted-fg">

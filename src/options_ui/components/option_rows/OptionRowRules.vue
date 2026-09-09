@@ -19,7 +19,7 @@ OptionRowRulesContext.provide({
       <Dialog>
         <DialogTrigger as-child>
           <Button variant="link">
-            Open notes/help on rules.
+            How rules work
           </Button>
         </DialogTrigger>
         <DialogContent>

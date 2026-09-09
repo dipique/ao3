@@ -77,9 +77,8 @@ watch([from, to], ([nextFrom, nextTo]) => {
         {{ error }}
       </p>
       <p v-else text="xs muted-fg" pl-1>
-        Filters to {{ formatWordCountRange(parsed!) }} words. Applied at the same point as the default search
-        language, and only when no word count is set yet — so a range already chosen, or one carried in the page
-        URL, is left alone. Leave a box empty for an open-ended range.
+        Filters to {{ formatWordCountRange(parsed!) }} words. Applied only when no word count is set yet, so a range
+        already chosen — or one carried in the page URL — is left alone.
       </p>
     </div>
   </OptionRowCollapsable>
