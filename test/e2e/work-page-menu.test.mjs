@@ -256,6 +256,35 @@ describe('the work menu on a work page', { skip }, () => {
     assert.deepEqual(dispositions, ['favorite', 'read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'abandoned', 'ongoing'])
   })
 
+  test('a mark switched off leaves the menu — unless the work carries it', async () => {
+    // The pseudo-delete: `boring` stops being one of the answers, but a work
+    // already called boring has to keep the row that takes it back off.
+    const marks = createDefaultMarks()
+    marks.boring.disabled = true
+    marks.bad.disabled = true
+
+    const clean = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
+    await clean.click('#workskin > .preface.group > h2.title.heading')
+    await sleep(250)
+    const offered = await clean.evaluate(() =>
+      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
+    await clean.close()
+    assert.ok(!offered.includes('Mark as boring'), offered.join(' | '))
+    assert.ok(!offered.includes('Mark as bad'), offered.join(' | '))
+    assert.ok(offered.includes('Mark as gross'), 'the marks still offered are untouched')
+
+    const carried = createDefaultMarks()
+    carried.boring.disabled = true
+    carried.boring.items = packIds([WORK_ID])
+    const marked = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks: carried } })
+    await marked.click('#workskin > .preface.group > h2.title.heading')
+    await sleep(250)
+    const withMark = await marked.evaluate(() =>
+      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
+    await marked.close()
+    assert.ok(withMark.includes('Unmark as boring'), withMark.join(' | '))
+  })
+
   test('an ongoing work drops the Marked-for-Later clock from its indicators', async () => {
     // The two always travel together — an ongoing work is kept on the list on
     // purpose — so showing both says nothing the calendar didn't already.

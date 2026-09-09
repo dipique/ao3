@@ -4,7 +4,7 @@ import type { WorkMarks } from './workMarks.ts'
 
 import { createStorage } from './storage.ts'
 import { DEFAULT_WORD_COUNT_RANGES } from './wordCount.ts'
-import { createDefaultMarks } from './workMarks.ts'
+import { createDefaultMarks, MARKS_VERSION } from './workMarks.ts'
 
 export interface ThemeOption {
   chosen: 'inherit' | 'dark' | 'light'
@@ -213,7 +213,7 @@ export const options = createStorage<Options>({
     hideCrossovers: { enabled: true, maxFandoms: 7 },
     hideLanguages: { enabled: false, show: [], applyToSearch: false },
     rules: { enabled: false, filters: [], colors: {} },
-    workMarks: { enabled: false, marks: createDefaultMarks() },
+    workMarks: { enabled: false, marks: createDefaultMarks(), version: MARKS_VERSION },
 
     compressSearchUrls: false,
     tagToolbar: false,

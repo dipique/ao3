@@ -9,6 +9,8 @@ import { presetAttributify, presetIcons, presetWind3, transformerDirectives } fr
 import unocssPresetAnimations from 'unocss-preset-animations'
 import { FileSystemIconLoader } from 'unplugin-icons/loaders'
 
+import { MARK_ICON_NAMES, markIconClassName } from './src/common/markIcons.ts'
+
 export const SVGO_CONFIG = {
   plugins: [{
     name: 'preset-default',
@@ -185,30 +187,17 @@ export default {
     ...ANIMATION_SHORTCUTS,
     OTHER_SHORTCUTS,
   ],
-  // The mark icons are picked by data (a mark's `icon` field), so no template
-  // ever spells their class out for the extractor to find — see
-  // src/options_ui/markIcons.ts, which must list the same set.
+  // The mark icons are picked by data (a mark's `icon` field) and offered as a
+  // palette the reader chooses from, so no template ever spells their class out
+  // for the extractor to find. Built from the shared name list rather than
+  // written out, so adding an icon there is the only edit an icon needs here.
   safelist: [
     'keyframes-una-in',
     'keyframes-una-out',
     'keyframes-collapsible-down',
     'keyframes-collapsible-up',
     'sr-only',
-    'i-mdi-book-check',
-    'i-mdi-heart',
-    'i-mdi-book-off',
-    'i-mdi-thumb-up',
-    'i-mdi-chili-hot',
-    'i-mdi-skull',
-    'i-mdi-sleep',
-    'i-mdi-thumb-down',
-    'i-mdi-emoticon-sick',
-    'i-mdi-emoticon-cry',
-    'i-mdi-cloud',
-    'i-mdi-close-circle',
-    'i-mdi-calendar-clock',
-    'i-mdi-clock-check',
-    'i-mdi-bookmark-check',
+    ...MARK_ICON_NAMES.map(markIconClassName),
   ],
   presets: [
     presetWind3(),

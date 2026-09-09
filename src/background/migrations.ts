@@ -1,6 +1,6 @@
 import type { cache, Language, Rule, RuleColors, RuleTarget, TagType as TagTypeT } from '#common'
 
-import { createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, normalizeMarkOrder, packIds, RULE_TARGETS, TagType, unpackIds } from '#common'
+import { createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, legacyMarkIcon, MARKS_VERSION, normalizeMarkOrder, packIds, RULE_TARGETS, TagType, unpackIds } from '#common'
 
 /** The pre-merge `hideAuthors` filter shape. */
 interface LegacyAuthorFilter { userId: string, pseud?: string, behavior?: Rule['behavior'], color?: string }
@@ -246,22 +246,34 @@ function clean(rule: Rule): Rule {
  * A favourite was always a work you'd read, and plain `read` is what you mark a
  * work you have no finer opinion about, so the favourites come out of `read`
  * rather than sitting in both.
- * Also tops up an already-migrated table with any mark added since, so a new
- * default mark reaches an existing install.
+ *
+ * Runs at most once per install, and `version` is how it knows: a table
+ * carrying {@link MARKS_VERSION} is the reader's — they can add marks, rename
+ * them, repaint them and switch them off — so nothing here may touch it again.
+ * The last pass a pre-version table gets is the one below: the shipped marks it
+ * predates merged in, its icon keys rewritten as icon file names, and the stamp
+ * that closes the door.
  */
 async function migrateWorkMarks(): Promise<void> {
   const key = 'option.workMarks'
   const stored = (await browser.storage.local.get(key))[key] as Record<string, any> | undefined
   if (!stored || typeof stored !== 'object')
     return
+  // Any version at all means the table has already been handed over. A later
+  // revision adds its own branch here rather than letting a stamped table fall
+  // through to the merge below, which is only ever right for one that predates
+  // the field.
+  if (typeof stored.version === 'number')
+    return
 
   if (stored.marks && typeof stored.marks === 'object') {
-    // Already migrated — only fill in marks that didn't exist when it was
-    // written. A stored mark wins whole, which is what keeps the order the
-    // reader chose (it rides along in each mark's `order`); normalizing after
-    // the merge settles the slots a newly shipped mark lands on top of.
-    const marks = normalizeMarkOrder({ ...createDefaultMarks(), ...stored.marks })
-    await browser.storage.local.set({ [key]: { ...stored, marks } })
+    // A table from before the list was editable. Fill in the marks that didn't
+    // exist when it was written — a stored mark wins whole, which keeps the
+    // order the reader chose (it rides along in each mark's `order`), and
+    // normalizing after the merge settles the slots a newly shipped mark lands
+    // on top of. This is the last time any of that happens.
+    const marks = normalizeMarkOrder(withIconNames({ ...createDefaultMarks(), ...stored.marks }))
+    await browser.storage.local.set({ [key]: { ...stored, marks, version: MARKS_VERSION } })
     return
   }
 
@@ -272,5 +284,25 @@ async function migrateWorkMarks(): Promise<void> {
   marks.read!.hideSearchResult = !!stored.hideRead
   marks.favorite!.items = packIds(favorites)
 
-  await browser.storage.local.set({ [key]: { enabled: !!stored.enabled, marks } })
+  await browser.storage.local.set({ [key]: { enabled: !!stored.enabled, marks, version: MARKS_VERSION } })
+}
+
+/**
+ * Rewrite each mark's `icon` as an icon file name. It used to be a key into a
+ * per-context registry that happened to be spelled like the mark's own id
+ * (`favorite` → a heart); now it names the icon itself (`mdi/heart`), which is
+ * what lets the options page offer a palette that isn't one-icon-per-mark.
+ *
+ * The resolver translates the old spellings anyway — a table can reach a device
+ * from a build that never ran this — so converting on disk is about the stored
+ * value matching what the palette shows as selected, not about the icon drawing
+ * at all. Which is also why it goes through `legacyMarkIcon` and not the
+ * resolver: a value neither map knows is left exactly as it is rather than
+ * written down as the fallback bookmark.
+ */
+function withIconNames(marks: Record<string, any>): Record<string, any> {
+  return Object.fromEntries(Object.entries(marks).map(([id, config]) => {
+    const icon = legacyMarkIcon(config?.icon)
+    return [id, icon === undefined ? config : { ...config, icon }]
+  }))
 }

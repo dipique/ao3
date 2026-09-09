@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-// Node strips the TS types on import; workMarks.ts is pure (no imports at all),
-// so it loads without a build, a DOM, or the extension APIs.
+// Node strips the TS types on import; workMarks.ts is pure (its one import is
+// the equally pure icon-name list), so it loads without a build, a DOM, or the
+// extension APIs.
 import {
   createDefaultMarks,
   hiddenByMarks,
@@ -170,8 +171,8 @@ describe('the mark order', () => {
 
   test('normalizing settles a slot two marks claim, keeping what the table read as', () => {
     const marks = createDefaultMarks()
-    // What the top-up migration can leave behind: a newly shipped mark landing
-    // on a slot the reader had already moved something else into.
+    // What the one-shot top-up migration can leave behind: a newly shipped mark
+    // landing on a slot the reader had already moved something else into.
     marks.hot.order = marks.good.order
     const before = markIds(marks)
     const after = normalizeMarkOrder(marks)

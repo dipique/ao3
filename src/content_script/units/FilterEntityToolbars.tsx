@@ -7,7 +7,7 @@ import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, fetchAndParseDocument, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, fetchAndParseDocument, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markIsOffered, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -339,6 +339,10 @@ abstract class FilterEntityToolbar extends Unit {
    * ({@link markIsExclusive}), so offering it on a work that already carries one
    * would be offering a click that quietly clears it. Its row is left out
    * instead, and comes back as soon as the last verdict does.
+   *
+   * A mark switched off in the options ({@link markIsOffered}) is left out too —
+   * unless *this* work carries it, in which case its row is the only way back
+   * off, and dropping it would strand the mark on the work for good.
    */
   private markSetItems(id: string, link: HTMLElement): MenuItem[] {
     const { marks } = this.options.workMarks
@@ -352,6 +356,8 @@ abstract class FilterEntityToolbar extends Unit {
     for (const markId of localMarkIds(marks)) {
       const config = marks[markId]!
       const has = markSets.get(markId)?.has(id) ?? false
+      if (!has && !markIsOffered(marks, markId))
+        continue
       // The progress mark stands alone too, but keeps its rows: it opens an
       // editor rather than toggling, so the reader gets to see and confirm the
       // trade before a verdict is replaced by "actually, I'm still reading it".

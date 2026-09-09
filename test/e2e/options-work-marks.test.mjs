@@ -93,6 +93,50 @@ describe('options UI — work marks', { skip }, () => {
     title,
   )
 
+  /** Any button, by its title — the row's icon, pencil and move buttons all carry one. */
+  const clickTitled = title => page.evaluate(
+    t => [...document.querySelectorAll('button')].find(b => b.title === t)?.click(),
+    title,
+  )
+
+  const openAddDialog = () => page.evaluate(() => {
+    [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Add mark')?.click()
+  })
+
+  /** A button inside the open dialog, by the text on it. */
+  const clickDialogButton = text => page.evaluate(
+    t => [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === t)?.click(),
+    text,
+  )
+
+  /** What the dialog currently says: its heading, the key preview, and any error. */
+  const dialogState = () => page.evaluate(() => {
+    const dialog = document.querySelector('[role="dialog"]')
+    if (!dialog)
+      return null
+    const save = [...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save')
+    return {
+      title: dialog.querySelector('h1')?.textContent.trim() ?? '',
+      name: dialog.querySelector('input[name="mark-name"]')?.value ?? '',
+      key: dialog.querySelector('code')?.textContent.trim() ?? null,
+      error: dialog.querySelector('[role="alert"]')?.textContent.trim() ?? null,
+      saveDisabled: save?.disabled ?? null,
+    }
+  })
+
+  /** Replace the dialog's name field, the way a reader would. */
+  const typeName = async (text) => {
+    await page.click('[role="dialog"] input[name="mark-name"]', { clickCount: 3 })
+    await page.keyboard.press('Backspace')
+    await page.type('[role="dialog"] input[name="mark-name"]', text)
+  }
+
+  /** The last mark table written to storage. */
+  const storedMarks = () => page.evaluate(() => {
+    const w = window.__writes.filter(x => 'option.workMarks' in x).map(x => x['option.workMarks'])
+    return w.at(-1) ?? null
+  })
+
   test('renders one row per mark that holds ids, in table order', async () => {
     const got = await rows()
     assert.deepEqual(got.map(r => r.mark), ['Read', 'Favorite', 'Good', 'Gross', 'Ongoing'])
@@ -158,6 +202,111 @@ describe('options UI — work marks', { skip }, () => {
       { favorite: 0, read: 1, good: 2, gross: 3, continue: 4, saved: 5 },
     )
     assert.equal(stored.marks.read.items, 'pico,4mm7y', 'the marks themselves are untouched')
+  })
+
+  test('each row carries its key for hovering, and the name is separate from it', async () => {
+    const titles = await page.evaluate(() => [...document.querySelectorAll('span[title^="id: "]')]
+      .map(el => [el.getAttribute('title'), el.textContent.trim()]))
+    assert.deepEqual(titles, [
+      ['id: favorite', 'Favorite'],
+      ['id: read', 'Read'],
+      ['id: good', 'Good'],
+      ['id: gross', 'Gross'],
+      ['id: continue', 'Ongoing'],
+    ])
+  })
+
+  test('"in menus" writes the disabled flag, and clearing it removes the field', async () => {
+    await page.evaluate(() => {
+      const s = [...document.querySelectorAll('[role="switch"]')]
+        .find(el => el.getAttribute('aria-label') === 'Offer Gross when marking a work')
+      s.click()
+    })
+    await sleep(1000)
+    assert.equal((await storedMarks())?.marks?.gross?.disabled, true)
+    assert.equal((await storedMarks())?.marks?.gross?.items, '', 'the mark itself is untouched')
+
+    await page.evaluate(() => {
+      const s = [...document.querySelectorAll('[role="switch"]')]
+        .find(el => el.getAttribute('aria-label') === 'Offer Gross when marking a work')
+      s.click()
+    })
+    await sleep(1000)
+    assert.ok(!('disabled' in (await storedMarks()).marks.gross), 'back to the shape it shipped as')
+  })
+
+  test('the pencil renames a mark without moving the key its works are filed under', async () => {
+    await clickTitled('Rename Good')
+    await sleep(300)
+    assert.deepEqual(await dialogState(), {
+      title: 'Edit mark',
+      name: 'Good',
+      key: 'good',
+      error: null,
+      saveDisabled: false,
+    })
+
+    await typeName('Great')
+    await clickDialogButton('Save')
+    await sleep(1000)
+
+    const stored = await storedMarks()
+    assert.equal(stored.marks.good.label, 'Great', 'the display name moved')
+    assert.ok(!stored.marks.great, 'and nothing else did')
+    assert.deepEqual((await rows()).map(r => r.mark), ['Favorite', 'Read', 'Great', 'Gross', 'Ongoing'])
+  })
+
+  test('the row icon opens the same dialog, where the palette sets the icon', async () => {
+    await clickTitled('Change the Great icon')
+    await sleep(300)
+    assert.equal((await dialogState()).title, 'Edit mark')
+
+    await page.evaluate(() => {
+      [...document.querySelectorAll('[role="dialog"] button')].find(b => b.title === 'mdi/star')?.click()
+    })
+    await clickDialogButton('Save')
+    await sleep(1000)
+
+    assert.equal((await storedMarks()).marks.good.icon, 'mdi/star')
+  })
+
+  test('a name whose key is taken is refused rather than merged', async () => {
+    await openAddDialog()
+    await sleep(300)
+    assert.equal((await dialogState()).title, 'Add mark')
+
+    await typeName('read')
+    await sleep(100)
+    const state = await dialogState()
+    assert.match(state.error, /already taken/)
+    assert.equal(state.saveDisabled, true, 'and there is no way to save it anyway')
+
+    await clickDialogButton('Cancel')
+    await sleep(300)
+  })
+
+  test('adding a mark files it under a key worked out from the name', async () => {
+    await openAddDialog()
+    await sleep(300)
+
+    await typeName('Did Not Finish')
+    await sleep(100)
+    assert.equal((await dialogState()).key, 'did-not-finish', 'shown before it is committed to')
+
+    await clickDialogButton('Save')
+    await sleep(1000)
+
+    const added = (await storedMarks()).marks['did-not-finish']
+    assert.equal(added.label, 'Did Not Finish')
+    assert.equal(added.triggerAlias, 'read', 'another reading of read')
+    assert.equal(added.hideSearchResult, true, 'hidden by default')
+    assert.equal(added.icon, 'mdi/book-check', 'the Read icon until it is changed')
+    assert.equal(added.items, '')
+    assert.deepEqual(
+      (await rows()).map(r => r.mark),
+      ['Favorite', 'Read', 'Great', 'Gross', 'Did Not Finish', 'Ongoing'],
+      'last among the verdicts, still ahead of Ongoing',
+    )
   })
 
   test('renders without console errors', () => {

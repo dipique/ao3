@@ -29,9 +29,11 @@
  * always produces the same string, so the sync engine's hash-based change
  * detection doesn't see a write that changed nothing.
  *
- * Everything here is pure (no browser APIs, no imports) so it can be unit-tested
- * headlessly with `node --test`.
+ * Everything here is pure (no browser APIs, and the one import is the equally
+ * pure icon-name list) so it can be unit-tested headlessly with `node --test`.
  */
+
+import { DEFAULT_MARK_ICON } from './markIcons.ts'
 
 /** A mark's id — the key it lives under in {@link WorkMarks.marks}. */
 export type MarkId = string
@@ -42,9 +44,11 @@ export type MarkId = string
  */
 export interface MarkConfig {
   /**
-   * Icon key. Resolved against a static registry per context — see
-   * `content_script/markIcons.tsx` and the options UI's `MARK_ICON_CLASSES` —
-   * because both ends need the icon to exist at build time.
+   * Icon file name — `<collection>/<name>`, one of the palette in
+   * {@link file://./markIcons.ts}. Each context resolves it against a static
+   * registry of its own (`content_script/markIcons.tsx`, `options_ui/markIcons.ts`)
+   * because both ends need the icon to exist at build time, which is also why
+   * the palette is a fixed list rather than any name at all.
    */
   icon: string
   /** Display noun, e.g. "Read", "Favorite". Menus read "Mark as <label>". */
@@ -102,6 +106,18 @@ export interface MarkConfig {
    * An entry whose work isn't in `items` is ignored on read and dropped on write.
    */
   progress?: string
+  /**
+   * Stop offering this mark: it disappears from the menus a work is marked
+   * from, but stays in the table with everything it holds. A mark can't be
+   * deleted — the ids under it are years of reading, and a key that came back
+   * later would silently re-adopt them — so this is how a mark you've stopped
+   * using gets out of the way. Read it through {@link markIsOffered}.
+   *
+   * A work that *already* carries it is the exception: its row is still offered,
+   * or there would be no way to take the mark back off. See the menu in
+   * `content_script/units/FilterEntityToolbars.tsx`.
+   */
+  disabled?: boolean
 }
 
 /** The `workMarks` option: the feature switch plus the mark table. */
@@ -110,7 +126,28 @@ export interface WorkMarks {
   enabled: boolean
   /** Every mark, keyed by id. {@link MarkConfig.order} is menu/indicator order. */
   marks: Record<MarkId, MarkConfig>
+  /**
+   * Which shape {@link marks} was written in — {@link MARKS_VERSION} once the
+   * table is the reader's own. Absent means a table written before the mark
+   * list was editable, which is the one and only time the upgrade path is
+   * allowed to merge shipped defaults into it.
+   */
+  version?: number
 }
+
+/**
+ * The current {@link WorkMarks.version}. Stamped by the migration that brings a
+ * table up to date and by the shipped defaults, and never read for anything but
+ * "has this table been handed over to the reader yet?".
+ *
+ * That handover is the whole point of the field. The table used to be topped up
+ * with every newly shipped mark on each upgrade, which was right while the list
+ * was ours; now that a reader can add marks, rename them and switch them off, an
+ * upgrade that reached back into the table would undo those decisions — a mark
+ * switched off would come back on, and one whose defaults changed would be
+ * rewritten under them.
+ */
+export const MARKS_VERSION = 1
 
 /**
  * The mark whose group means "done with this work". The one piece of behaviour
@@ -146,26 +183,29 @@ export const SAVED_MARK: MarkId = 'saved'
  * than among the verdicts: the pair is the same work in two states, one still
  * going and one that never will, and neither says whether it was any good.
  *
- * Only the starting order, though: the reader can rearrange the verdicts from
- * the options page (see {@link moveMark}), and everything that draws them reads
- * the stored order rather than this one.
+ * Only the starting *table*, though. From the options page the reader
+ * rearranges the verdicts ({@link moveMark}), renames them, repaints them,
+ * switches them off ({@link MarkConfig.disabled}) and adds their own
+ * ({@link addMark}) — so everything that draws marks reads the stored table
+ * rather than this one, and once a table carries {@link MARKS_VERSION} nothing
+ * merges this list back into it.
  */
 export function createDefaultMarks(): Record<MarkId, MarkConfig> {
   return numbered({
-    read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
-    no: { icon: 'no', label: 'No', color: '#991b1b', triggerAlias: READ_MARK, items: '' },
-    bad: { icon: 'bad', label: 'Bad', color: '#b45309', triggerAlias: READ_MARK, items: '' },
-    boring: { icon: 'boring', label: 'Boring', color: '#8a8a8a', triggerAlias: READ_MARK, items: '' },
-    gross: { icon: 'gross', label: 'Gross', color: '#4d7c0f', triggerAlias: READ_MARK, items: '' },
-    good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: READ_MARK, items: '' },
-    hot: { icon: 'hot', label: 'Hot', color: '#d0342c', triggerAlias: READ_MARK, items: '' },
-    dark: { icon: 'dark', label: 'Dark', color: '#4c1d95', triggerAlias: READ_MARK, items: '' },
-    feelsy: { icon: 'feelsy', label: 'Feelsy', color: '#0891b2', triggerAlias: READ_MARK, items: '' },
-    fluff: { icon: 'fluff', label: 'Fluff', color: '#a78bfa', triggerAlias: READ_MARK, items: '' },
-    favorite: { icon: 'favorite', label: 'Favorite', color: '#c2185b', triggerAlias: READ_MARK, items: '' },
-    abandoned: { icon: 'abandoned', label: 'Abandoned', color: '#78350f', triggerAlias: READ_MARK, items: '' },
+    read: { icon: 'mdi/book-check', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
+    no: { icon: 'mdi/close-circle', label: 'No', color: '#991b1b', triggerAlias: READ_MARK, items: '' },
+    bad: { icon: 'mdi/thumb-down', label: 'Bad', color: '#b45309', triggerAlias: READ_MARK, items: '' },
+    boring: { icon: 'mdi/sleep', label: 'Boring', color: '#8a8a8a', triggerAlias: READ_MARK, items: '' },
+    gross: { icon: 'mdi/emoticon-sick', label: 'Gross', color: '#4d7c0f', triggerAlias: READ_MARK, items: '' },
+    good: { icon: 'mdi/thumb-up', label: 'Good', color: '#2f8f4e', triggerAlias: READ_MARK, items: '' },
+    hot: { icon: 'mdi/chili-hot', label: 'Hot', color: '#d0342c', triggerAlias: READ_MARK, items: '' },
+    dark: { icon: 'mdi/skull', label: 'Dark', color: '#4c1d95', triggerAlias: READ_MARK, items: '' },
+    feelsy: { icon: 'mdi/emoticon-cry', label: 'Feelsy', color: '#0891b2', triggerAlias: READ_MARK, items: '' },
+    fluff: { icon: 'mdi/cloud', label: 'Fluff', color: '#a78bfa', triggerAlias: READ_MARK, items: '' },
+    favorite: { icon: 'mdi/heart', label: 'Favorite', color: '#c2185b', triggerAlias: READ_MARK, items: '' },
+    abandoned: { icon: 'mdi/book-off', label: 'Abandoned', color: '#78350f', triggerAlias: READ_MARK, items: '' },
     continue: {
-      icon: 'continue',
+      icon: 'mdi/calendar-clock',
       label: 'Ongoing',
       color: '#0369a1',
       triggerAlias: READ_MARK,
@@ -174,7 +214,7 @@ export function createDefaultMarks(): Record<MarkId, MarkConfig> {
       items: '',
       progress: '',
     },
-    saved: { icon: 'saved', label: 'Marked for later', color: '#2f8f4e' },
+    saved: { icon: 'mdi/clock-check', label: 'Marked for later', color: '#2f8f4e' },
   })
 }
 
@@ -289,6 +329,16 @@ export function markHidesResults(marks: Record<MarkId, MarkConfig>, id: MarkId):
     return own
   const root = markRoot(marks, id)
   return root === id ? false : !!marks[root]?.hideSearchResult
+}
+
+/**
+ * Whether this mark is still offered when marking a work — see
+ * {@link MarkConfig.disabled}. Nothing about a mark that isn't offered changes
+ * otherwise: the works under it keep it, keep being hidden by it, and keep
+ * showing its indicator. It has only stopped being one of the answers.
+ */
+export function markIsOffered(marks: Record<MarkId, MarkConfig>, id: MarkId): boolean {
+  return !marks[id]?.disabled
 }
 
 /** Whether this mark carries per-work progress (see {@link MarkConfig.tracksProgress}). */
@@ -460,6 +510,103 @@ export function marksHideAnything(marks: Record<MarkId, MarkConfig>): boolean {
   return progressMarkIds(marks).some(
     id => markHidesResults(marks, id) && countIds(marks[id]?.progress ?? '') > 0,
   )
+}
+
+// ---------------------------------------------------------------------------
+// Adding a mark. The reader names one and everything else is derived, because
+// the only field they can't change afterwards is the one they'd get wrong: the
+// key. It is what every work id in `items` is filed under, so a rename would
+// orphan them — the display name is {@link MarkConfig.label}, and that is the
+// one the menus read.
+// ---------------------------------------------------------------------------
+
+/**
+ * A display name as a key: lower-cased, accents folded away, and every run of
+ * anything else turned into a single hyphen. Empty when the name has no ASCII
+ * letters or digits in it at all (a name written in another script), which is
+ * what {@link markIdFor} falls back for.
+ *
+ * ASCII-only on purpose. A mark id isn't only a JSON key — it is written into a
+ * class name on every indicator and read back out of stored tables by devices on
+ * other builds — so the safest thing it can be made of is the same alphabet the
+ * shipped ids already use.
+ *
+ * The decompose-then-drop-the-marks pass is what makes "naïve" `naive` rather
+ * than `nai-ve`: NFKD splits the letter from its accent, and the accent has to
+ * go before the sweep, or it counts as one of the runs that become a hyphen.
+ */
+export function sanitizeMarkId(label: string): MarkId {
+  return label
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * The key a new mark called `label` would get: {@link sanitizeMarkId}, or the
+ * first free `mark-N` when that comes out empty. Deterministic given the table,
+ * so the options page can show the reader the key before they commit to it.
+ */
+export function markIdFor(marks: Record<MarkId, MarkConfig>, label: string): MarkId {
+  const base = sanitizeMarkId(label)
+  if (base)
+    return base
+  let n = 1
+  while (marks[`mark-${n}`])
+    n++
+  return `mark-${n}`
+}
+
+/**
+ * Why a mark called `label` can't be added, or null when it can. The clash is
+ * on the *key*, not the display name: two marks may read the same in a menu (an
+ * odd thing to want, but harmless), while two marks under one key would be one
+ * mark wearing the other's works.
+ */
+export function markNameError(marks: Record<MarkId, MarkConfig>, label: string): string | null {
+  if (!label.trim())
+    return 'Give the mark a name.'
+  const id = markIdFor(marks, label)
+  const clash = marks[id]
+  if (clash)
+    return `"${id}" is already taken by ${clash.label || id}. Pick a different name.`
+  return null
+}
+
+/**
+ * Add a mark named `label`, or return the table unchanged (identity-equal) when
+ * {@link markNameError} would refuse it.
+ *
+ * A new mark is a finer reading of `read`, like every shipped one but `read`
+ * itself: it aliases the group, so it stacks with the other readings, takes a
+ * work off Marked for Later, and can be turned off per work. It hides by
+ * default — the reason to mark a work at all is usually to stop being shown it
+ * — and lands at the end of the reorderable run, which is where "highest
+ * existing order + 1" resolves to once {@link normalizeMarkOrder} has put the
+ * pinned marks back after it.
+ */
+export function addMark(marks: Record<MarkId, MarkConfig>, label: string): Record<MarkId, MarkConfig> {
+  if (markNameError(marks, label))
+    return marks
+  const id = markIdFor(marks, label)
+  const highest = Object.values(marks).reduce(
+    (max, config) => (typeof config.order === 'number' && Number.isFinite(config.order) ? Math.max(max, config.order) : max),
+    -1,
+  )
+  return normalizeMarkOrder({
+    ...marks,
+    [id]: {
+      icon: DEFAULT_MARK_ICON,
+      label: label.trim(),
+      color: marks[READ_MARK]?.color,
+      triggerAlias: READ_MARK,
+      hideSearchResult: true,
+      items: '',
+      order: highest + 1,
+    },
+  })
 }
 
 // ---------------------------------------------------------------------------
