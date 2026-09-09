@@ -2,6 +2,7 @@ import { debounce } from '@antfu/utils'
 
 import type { Options } from '#common'
 import type { Work } from '#content_script/blurb.js'
+import type { FacetValueRef } from '#content_script/searchView/engine.js'
 import type { SearchView, SearchViewConfig, ViewState } from '#content_script/searchView/view.js'
 import type { SiteData, SiteManifestWork } from '#content_script/siteExport/payload.js'
 
@@ -164,9 +165,10 @@ export async function startSite(ctx: SiteContext): Promise<void> {
 
   async function build(current: Options, initialState?: ViewState): Promise<SearchView> {
     const works = worksFromHtml(blurbsHtml)
-    prepare(works, current)
+    const autoExcludes = prepare(works, current)
     const config: SearchViewConfig = {
       perPage: current.searchPerPage,
+      autoExcludes,
       decorateBlurb: blurb => decorateBlurb(blurb, current),
       decorateContainer: root => decorateContainer(root, current),
       hideFacetValue: makeFacetHider(current),
@@ -192,13 +194,14 @@ export async function startSite(ctx: SiteContext): Promise<void> {
    * shared host runs on a live listing, plus the one thing only an export has
    * to say: which of these works it does not actually carry.
    */
-  function prepare(works: Work[], current: Options): void {
+  function prepare(works: Work[], current: Options): FacetValueRef[] {
     if (sourceId === 'marked-for-later')
       seedMarkedForLater(works.map(work => work.workId))
     applyStatus(works, current)
-    applyHidden(works, current)
+    const autoExcludes = applyHidden(works, current)
     for (const work of works)
       noteIfAbsent(work, listed.get(work.workId))
+    return autoExcludes
   }
 
   function noteIfAbsent(work: Work, entry: SiteManifestWork | undefined): void {

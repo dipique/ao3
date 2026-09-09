@@ -74,6 +74,13 @@
     >
       <OptionRowRules />
       <OptionDivider />
+      <OptionRow
+        title="Exclude hidden works from the search"
+        subtitle="When a rule hides a work outright, add what hid it to the search itself — ticking AO3's own Sort &amp; Filter exclusions, and typing in tags it doesn't list when the rule names one exactly. Stops a page of twenty arriving with one work left on it. Nothing is submitted for you: press Sort and Filter when you're ready. Values still carried by a work you've told the extension to always show are left alone."
+      >
+        <OptionSwitch option-id="autoExcludeHidden" />
+      </OptionRow>
+      <OptionDivider />
       <OptionRowHideCrossovers />
       <OptionDivider />
       <OptionRowHideLanguages />

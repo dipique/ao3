@@ -11,7 +11,7 @@ import type { Work } from '#content_script/blurb.js'
 import { ADDON_CLASS } from '#common'
 import React from '#dom'
 
-import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FilterState, SortKey } from './engine.ts'
+import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FacetValueRef, FilterState, SortKey } from './engine.ts'
 import type { SearchViewPrefs } from './prefs.ts'
 
 import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
@@ -64,8 +64,12 @@ export interface ViewState {
 export interface SearchView {
   /** The view root — insert this into the page. */
   el: HTMLElement
-  /** Swap in freshly scraped works (e.g. after a background refresh), keeping filters. */
-  update: (works: Work[]) => void
+  /**
+   * Swap in freshly scraped works (e.g. after a background refresh), keeping
+   * filters. `autoExcludes` re-states the exclusions the reader's hide rules
+   * imply over the new set; omit it to keep the ones the view already has.
+   */
+  update: (works: Work[], autoExcludes?: FacetValueRef[]) => void
   /** Toggle the subtle "updating in the background" indicator. */
   setUpdating: (updating: boolean) => void
   /** Current filter/sort/page, so a caller can rebuild the view where it left off. */
@@ -108,6 +112,15 @@ export interface SearchViewConfig {
    * filtered by, and any selection on it is dropped.
    */
   hideFacetValue?: (key: FacetKey, value: string) => boolean
+  /**
+   * Facet values to keep excluded on the reader's behalf: the exclusions their
+   * hide rules imply, worked out over the whole set by the host (see
+   * {@link file://./hidden.ts}). Seeded before the first render, re-stated after
+   * a refresh, and restored by "Reset filters" — but never forced back onto a
+   * value the reader has deliberately un-excluded, which is the one way they can
+   * say "show me those after all".
+   */
+  autoExcludes?: FacetValueRef[]
   /** Called after a {@link BlurbAction} removes a work, so the host can persist. */
   onWorksChanged?: (works: Work[]) => void
   /**
@@ -207,6 +220,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // is the whole difference between a hide rule and a collapse rule in a view we
   // page ourselves; see {@link Work.hidden}.
   let pool = results(works)
+  // The exclusions the reader's hide rules imply over the current set, and the
+  // ones they have since lifted by hand. Kept apart from `state` because they
+  // are re-derived from the works rather than dialled in: a refresh restates
+  // them, and only a deliberate un-exclude takes one off again.
+  let autoExcludes: FacetValueRef[] = config.autoExcludes ?? []
+  let autoKeys = new Set(autoExcludes.map(({ key, value }) => `${key}:${value}`))
+  const released = new Set<string>()
   // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
   // start blank. cloneFilterState so we never mutate the caller's snapshot.
   const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
@@ -483,6 +503,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // for them.
     for (const value of defaultStatus)
       state.facets.status.include.add(value)
+    // "Reset filters" is back to how the view opens, and it opens with the
+    // reader's own rules applied — including the ones they had lifted since.
+    released.clear()
+    applyAutoExcludes()
     state.wordsMin = null
     state.wordsMax = null
     state.sort = fresh.sort
@@ -533,8 +557,33 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   const FACET_DIRS: FacetDir[] = ['require', 'include', 'exclude']
 
+  /** Take on a fresh set of rule-implied exclusions (a refresh re-derived them). */
+  function setAutoExcludes(next: FacetValueRef[]): void {
+    autoExcludes = next
+    autoKeys = new Set(next.map(({ key, value }) => `${key}:${value}`))
+  }
+
+  /**
+   * Put the rule-implied exclusions back into the filter, skipping any the reader
+   * has lifted. Idempotent, so it can run on every render path that rebuilds the
+   * selections: the first assembly, a refresh, and "Reset filters".
+   */
+  function applyAutoExcludes(): void {
+    for (const { key, value } of autoExcludes) {
+      if (released.has(`${key}:${value}`))
+        continue
+      state.facets[key].include.delete(value)
+      state.facets[key].require.delete(value)
+      state.facets[key].exclude.add(value)
+    }
+  }
+
   function toggleSelection(key: FacetKey, dir: FacetDir, value: string): void {
     const sel = state.facets[key][dir]
+    // Lifting a rule-implied exclusion — by clearing it, or by including or
+    // requiring the same value — is the reader overruling their own rule for
+    // this view, so it must survive the next refresh restating it.
+    const wasExcluded = state.facets[key].exclude.has(value)
     if (sel.has(value)) {
       sel.delete(value)
     }
@@ -546,6 +595,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
           state.facets[key][other].delete(value)
       }
     }
+    if (wasExcluded && !state.facets[key].exclude.has(value) && autoKeys.has(`${key}:${value}`))
+      released.add(`${key}:${value}`)
     filterChanged()
     // The blurbs carry the same selection a second time (the little include /
     // exclude / require icons the tag menus leave next to a tag), so tell them
@@ -1074,9 +1125,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     config.decorateContainer?.(resultsOl)
   }
 
-  function update(nextWorks: Work[]): void {
+  function update(nextWorks: Work[], nextAutoExcludes?: FacetValueRef[]): void {
     works = nextWorks
     pool = results(works)
+    if (nextAutoExcludes)
+      setAutoExcludes(nextAutoExcludes)
     // Drop selections for values that no longer exist so the UI stays honest.
     const present = buildFacets(pool)
     for (const key of FACET_KEYS) {
@@ -1088,6 +1141,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         }
       }
     }
+    // After the prune, not before: these values are carried by works this set
+    // still holds, so nothing here drops them, but the order says which wins.
+    applyAutoExcludes()
     pageIndex = 0 // fresh data — start at the first page
     mountResults()
     renderFacets()
@@ -1116,12 +1172,17 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   // --- Assemble -------------------------------------------------------------
 
+  // The exclusions the reader's hide rules imply, before the first render, so
+  // the works they cover never reach a page.
+  applyAutoExcludes()
+
   // Let shared blurb decorators (e.g. the required-tags menu) drive this view's
   // in-memory facets when they act on a blurb inside it, instead of the page's
   // native filter sidebar. Registered before the first decorateContainer run.
   registerFacetBridge(resultsOl, {
     isSelected: (key, dir, value) => state.facets[key][dir].has(value),
     toggle: (key, dir, value) => toggleSelection(key, dir, value),
+    has: (key, value) => pool.some(work => facetValues(work, key).includes(value)),
     getWordCount: () => state.wordsMin === null && state.wordsMax === null
       ? null
       : { from: state.wordsMin, to: state.wordsMax },

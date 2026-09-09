@@ -20,6 +20,12 @@ import type { FacetDir, FacetKey } from './engine.ts'
 export interface FacetBridge {
   isSelected: (key: FacetKey, dir: FacetDir, value: string) => boolean
   toggle: (key: FacetKey, dir: FacetDir, value: string) => void
+  /**
+   * Whether any work in the view carries `value` in this group — i.e. the facet
+   * sidebar has a row for it. The engine's answer to "is there already a control
+   * for this?"; see {@link FilterTarget.hasControl}.
+   */
+  has: (key: FacetKey, value: string) => boolean
   /** The view's current word-count bounds, or null when it isn't filtering by length. */
   getWordCount: () => WordCountRange | null
   /** Replace those bounds (null clears them) and re-run the filter. */

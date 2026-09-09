@@ -204,6 +204,17 @@ export function hasTagFilterFields(): boolean {
 }
 
 /**
+ * Whether the sidebar already offers this tag as a checkbox in that direction —
+ * i.e. it can be filtered by ticking a box the reader can see, rather than by
+ * typing the name into the free-text field. What
+ * {@link file://./units/AutoExcludeHidden.ts} keys "is there a matching
+ * exclusion?" off.
+ */
+export function hasTagCheckbox(direction: Direction, name: string): boolean {
+  return findTagCheckbox(direction, name) !== null
+}
+
+/**
  * A tag is "selected" in a direction if its sidebar checkbox is checked, or
  * (failing a checkbox) it's listed in that direction's free-text field.
  */
@@ -476,6 +487,11 @@ export function hasFandomFilterFields(): boolean {
   )
 }
 
+/** Whether the sidebar already has a checkbox for this fandom id in that direction. */
+export function hasFandomCheckbox(direction: Direction, id: number): boolean {
+  return getFandomCheckboxIndex()[direction].has(id)
+}
+
 export function isFandomSelected(direction: Direction, id: number): boolean {
   return getFandomCheckboxIndex()[direction].get(id)?.checked ?? false
 }
@@ -547,6 +563,11 @@ export function hasCheckboxGroupFields(group: CheckboxGroup): boolean {
   return !!map && map.size > 0
 }
 
+/** Whether the group offers a checkbox for this displayed name in that direction. */
+export function hasGroupCheckbox(direction: Direction, group: CheckboxGroup, name: string): boolean {
+  return findGroupCheckbox(direction, group, name) !== null
+}
+
 export function isCheckboxGroupSelected(direction: Direction, group: CheckboxGroup, name: string): boolean {
   return findGroupCheckbox(direction, group, name)?.checked ?? false
 }
@@ -562,6 +583,22 @@ export function toggleCheckboxGroupFilter(direction: Direction, group: CheckboxG
   checkbox.checked = !checkbox.checked
   notifyFilterChange()
   return true
+}
+
+// ===========================================================================
+// Page-level questions.
+// ===========================================================================
+
+/**
+ * Whether this page has any of AO3's own works filter at all — the text-tag
+ * fields, the fandom checkboxes, or the fixed rating/warning/category groups.
+ * Lets a unit that only exists to fill that filter in bail out on the many pages
+ * that have none, before it weighs a single work.
+ */
+export function hasFilterSidebar(): boolean {
+  return hasTagFilterFields()
+    || hasFandomFilterFields()
+    || (['rating', 'archive_warning', 'category'] as CheckboxGroup[]).some(hasCheckboxGroupFields)
 }
 
 // ---------------------------------------------------------------------------

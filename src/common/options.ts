@@ -64,6 +64,20 @@ export interface Options {
     colors: RuleColors
   }
   /**
+   * Narrow the search itself to match the rules, instead of only hiding what it
+   * returns. Whenever a rule takes a work out of a listing *outright*, the value
+   * that did it is ticked in AO3's own Sort & Filter sidebar (or, for an exact
+   * Additional Tags rule, typed into its "excluded tags" field), so the next
+   * search never fetches those works at all — which is what stops a page of
+   * twenty from arriving with one work left on it. Inside one of our own search
+   * views the same reasons become facet exclusions, which the view applies as it
+   * goes.
+   *
+   * The controls are only filled in; nothing is submitted, so a native listing
+   * takes effect the next time the reader presses Sort and Filter.
+   */
+  autoExcludeHidden: boolean
+  /**
    * Per-work marks (read, favorite, and the finer dispositions), plus how each
    * one behaves. Unlike the rules these grow one entry per work you finish, so
    * the id sets are stored delta-packed — see {@link file://./workMarks.ts}.
@@ -213,6 +227,7 @@ export const options = createStorage<Options>({
     hideCrossovers: { enabled: true, maxFandoms: 7 },
     hideLanguages: { enabled: false, show: [], applyToSearch: false },
     rules: { enabled: false, filters: [], colors: {} },
+    autoExcludeHidden: false,
     workMarks: { enabled: false, marks: createDefaultMarks(), version: MARKS_VERSION },
 
     compressSearchUrls: false,

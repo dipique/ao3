@@ -7,6 +7,7 @@ import { extensionAlive } from '#content_script/extensionAlive.js'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
+import type { FacetValueRef } from './engine.ts'
 import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
 
 import { readSnapshot, writeSnapshot } from './cache.ts'
@@ -191,10 +192,14 @@ export function takeReopen(cacheKey: string): ViewState | null {
  * shares — working out which works the reader's rules take away outright, so the
  * view can page around them. Deliberately after {@link persist}: what's stamped
  * here answers to today's options, and the snapshot is the blurbs alone.
+ *
+ * Returns the facet exclusions that pass hands to the view in place of hiding
+ * the works outright (see {@link file://./hidden.ts}); empty unless the reader
+ * has `autoExcludeHidden` on.
  */
-function prepare(source: SearchSource, works: Work[], options: Options): void {
+function prepare(source: SearchSource, works: Work[], options: Options): FacetValueRef[] {
   source.prepare?.(works)
-  applyHidden(works, options)
+  return applyHidden(works, options)
 }
 
 /** Write the blurb snapshot, plus whatever else the source keeps in step with it. */
@@ -302,8 +307,7 @@ async function refresh(source: SearchSource, view: SearchView, options: Options)
       return
     applyLimit(result.works, budget)
     await persist(source, result.works)
-    prepare(source, result.works, options)
-    view.update(result.works)
+    view.update(result.works, prepare(source, result.works, options))
     if (result.loadedPages < result.totalPages)
       toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
   }
@@ -374,8 +378,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     }
 
     const show = (works: Work[]): SearchView => {
-      prepare(source, works, options)
-      const view = createSearchView(works, handlers, config)
+      const autoExcludes = prepare(source, works, options)
+      const view = createSearchView(works, handlers, { ...config, autoExcludes })
       active = { source, view }
       container.replaceChildren(view.el)
       return view

@@ -37,7 +37,7 @@ const EXCLUDE_ACTIVE_CLASS = `${ADDON_CLASS}--hide-works--exclude-active`
  * one, else the sidebar field/checkbox AO3 filters that type with. See
  * {@link file://../filterTarget.tsx}.
  */
-interface ExcludeTarget {
+export interface ExcludeTarget {
   name: string
   type?: TagType
   /** The tag's own page, so an unknown fandom's id can be fetched on demand. */
@@ -83,6 +83,13 @@ interface HideCandidate {
   label: string
   item: ReasonItem
   kind: HideKind
+  /**
+   * The rule that asked for this, when a rule did. Absent for the hides that are
+   * not rules at all (language, crossover, marks), which is how
+   * {@link HideVerdict.excludes} tells a reason it can hand to a search filter
+   * from one it can only apply itself.
+   */
+  rule?: Rule
   /** The rule's effective priority; non-rule hides (language, crossover, marks) sit at 0. */
   priority: number
   /**
@@ -94,6 +101,23 @@ interface HideCandidate {
 }
 
 /**
+ * One reason a work was *hidden* outright, as something a search filter might be
+ * able to take over — which is what `autoExcludeHidden` needs to know before it
+ * narrows the search itself (see {@link file://./AutoExcludeHidden.ts}).
+ *
+ * `target` is null for a reason no filter can express — an author, work or
+ * series rule — so a caller can tell "every reason this work is gone could be
+ * handed to the filter" from "some of it could". `rule` is absent for the hides
+ * that aren't rules (marks, crossovers, language), which are never handed over:
+ * they are the reader's own bookkeeping, not a property of the works AO3 would
+ * be asked to leave out.
+ */
+export interface HideExclusion {
+  target: ExcludeTarget | null
+  rule?: Rule
+}
+
+/**
  * The verdict on one blurb: how it leaves the listing (`null` when nothing hides
  * it), why, and which categories of rule were responsible.
  */
@@ -101,6 +125,13 @@ export interface HideVerdict {
   mode: HideMode | null
   reasons: HideReasons
   kinds: Set<HideKind>
+  /**
+   * One entry per surviving reason that asked for the work to be *hidden*, in
+   * the terms a search filter would need. Empty unless {@link HideVerdict.mode}
+   * is `'hide'` — a work that is merely collapsed is still on the page, and
+   * excluding what it carries would quietly take it away.
+   */
+  excludes: HideExclusion[]
 }
 
 function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
@@ -277,7 +308,7 @@ export class HideWorks extends Unit {
       if (!mode)
         continue
 
-      if (this.hideWork(blurbElement, mode, reasons, kinds))
+      if (this.hideWork(blurbElement, handedToFilter(blurbElement) ? 'collapse' : mode, reasons, kinds))
         usedFandomExclude = true
     }
 
@@ -354,6 +385,7 @@ export class HideWorks extends Unit {
       hides.push({
         label,
         kind,
+        rule,
         priority: rulePriority(rule),
         mode: ruleHideMode(rule),
         item: { ...item, rule: describeRule(rule) },
@@ -472,18 +504,24 @@ export class HideWorks extends Unit {
     // says how the work goes, hiding outright winning a tie.
     let mode: HideMode | null = null
     let winner = -1
+    const excludes: HideExclusion[] = []
     for (const candidate of hides) {
       if (candidate.priority <= bar)
         continue
       addReason(reasons, candidate.label, candidate.item)
       kinds.add(candidate.kind)
+      if (candidate.mode === 'hide')
+        excludes.push({ target: candidate.item.exclude ?? null, rule: candidate.rule })
       if (candidate.priority > winner || (candidate.priority === winner && candidate.mode === 'hide')) {
         winner = candidate.priority
         mode = candidate.mode
       }
     }
 
-    return { mode, reasons, kinds }
+    // Only a work that is actually gone has anything to hand a filter; on one
+    // that survived, or was merely collapsed, the collected reasons describe a
+    // work still on the page.
+    return { mode, reasons, kinds, excludes: mode === 'hide' ? excludes : [] }
   }
 
   /**
@@ -636,6 +674,17 @@ export class HideWorks extends Unit {
     excludeButtons.push(entry)
     return entry
   }
+}
+
+/**
+ * Whether this work's hide reasons were handed to a search view's own filter
+ * (see `AutoExcludeHidden` and the search view's `applyHidden`). Such a work is
+ * only on screen at all because the reader lifted that exclusion — so it
+ * collapses to its reason line, with a "Show" button, rather than leaving the
+ * empty slot an outright hide would.
+ */
+function handedToFilter(blurb: Element): boolean {
+  return blurb instanceof HTMLElement && blurb.dataset.ao3eFiltered !== undefined
 }
 
 /**

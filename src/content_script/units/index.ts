@@ -1,5 +1,6 @@
 import type { Unit } from '#content_script/Unit.js'
 
+import { AutoExcludeHidden } from './AutoExcludeHidden.ts'
 import { CaptureMarkButtons } from './CaptureMarkButtons.ts'
 import { CollapsibleDashboard } from './CollapsibleDashboard.ts'
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
@@ -41,6 +42,10 @@ export const UNITS = [
   HideWorks,
   // Runs after HideWorks so it can count the works HideWorks marked as hidden.
   FilterToolbar,
+  // Beside HideWorks: it weighs the same works, and turns the ones a rule takes
+  // away outright into exclusions in AO3's own filter, so the next search never
+  // fetches them.
+  AutoExcludeHidden,
   HighlightTags,
   // After HighlightTags: a tag can't be both highlighted and hidden, but if a
   // page ever matched both rules, hiding should be what the reader sees.

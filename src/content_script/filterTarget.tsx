@@ -13,7 +13,10 @@ import type { FacetDir, FacetKey } from './searchView/engine.ts'
 
 import {
   hasCheckboxGroupFields,
+  hasFandomCheckbox,
   hasFandomFilterFields,
+  hasGroupCheckbox,
+  hasTagCheckbox,
   hasTagFilterFields,
   isCheckboxGroupSelected,
   isFandomSelected,
@@ -57,6 +60,15 @@ export interface FilterTarget {
   dirs: readonly FilterDir[]
   isSelected: (dir: FilterDir, value: string) => boolean
   toggle: (dir: FilterDir, value: string) => void
+  /**
+   * Whether the filter already offers a control standing for this value — a
+   * sidebar checkbox, a facet row — as opposed to having to be told about it in
+   * free text. Nothing a reader clicks needs the distinction (a manual exclude
+   * takes either path), but automatic exclusion does: adding a name AO3 never
+   * offered is a guess, and {@link file://./units/AutoExcludeHidden.ts} only
+   * makes it where the reader's rule was exact enough to justify one.
+   */
+  hasControl: (dir: FilterDir, value: string) => boolean
 }
 
 /**
@@ -107,6 +119,9 @@ export function filterTargetFor(
       dirs: FACET_DIRS,
       isSelected: (dir, value) => bridge.isSelected(facet, dir, value),
       toggle: (dir, value) => bridge.toggle(facet, dir, value),
+      // A facet group holds every value its works actually carry, in every
+      // direction, so the row either exists or the value isn't in the set.
+      hasControl: (_dir, value) => bridge.has(facet, value),
     }
   }
   return native
@@ -127,6 +142,7 @@ export function nativeTagTarget(): FilterTarget | null {
       if (dir !== 'require')
         void toggleTagFilter(dir, value)
     },
+    hasControl: (dir, value) => dir !== 'require' && hasTagCheckbox(dir, value),
   }
 }
 
@@ -158,6 +174,15 @@ export function nativeFandomTarget(href?: string): FilterTarget | null {
           toggleFandomFilter(dir, id, value)
       })()
     },
+    // The sidebar lists a fandom only when the listing has works in it, and only
+    // an already-resolved id can name one — a name we would have to fetch (or
+    // inject a checkbox for) is not a control the page is offering.
+    hasControl: (dir, value) => {
+      if (dir === 'require')
+        return false
+      const id = resolveFandomIdSync(value)
+      return id != null && hasFandomCheckbox(dir, id)
+    },
   }
 }
 
@@ -176,6 +201,7 @@ export function nativeCheckboxTarget(group: CheckboxGroup): FilterTarget | null 
       if (dir !== 'require')
         void toggleCheckboxGroupFilter(dir, group, value)
     },
+    hasControl: (dir, value) => dir !== 'require' && hasGroupCheckbox(dir, group, value),
   }
 }
 

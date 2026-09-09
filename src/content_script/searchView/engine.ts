@@ -91,6 +91,16 @@ export function facetValues(work: Work, key: FacetKey): string[] {
   }
 }
 
+/**
+ * One value in one facet group — the pair a caller needs to name a single facet
+ * row. Used to hand the view a set of selections worked out elsewhere (the
+ * exclusions the reader's hide rules imply; see `searchView/hidden.ts`).
+ */
+export interface FacetValueRef {
+  key: FacetKey
+  value: string
+}
+
 export interface FacetSelection {
   /** OR within the group: a work matches if it has any included value. */
   include: Set<string>
