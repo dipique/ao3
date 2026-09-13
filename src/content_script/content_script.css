@@ -1076,19 +1076,13 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
    the controls that open one, the native-list hide, and the scrape progress
    panel — shared by every place the view is offered.
    --------------------------------------------------------------------------- */
-.AO3E--search-host--native-hidden {
+.AO3E--search-host--native-hidden,
+.AO3E--clear-history-hidden {
   display: none !important;
 }
 
-.AO3E--search-marked-for-later--button,
 .AO3E--search-read-works--button {
   cursor: pointer;
-}
-
-/* Hide the buttons while the search view is open — they don't do anything there. */
-#main:has(.AO3E--search-host)
-  li:is(:has(.AO3E--search-marked-for-later--button), :has(.AO3E--search-read-works--button)) {
-  display: none;
 }
 
 /* AO3 floats this subnav right, and the view standing in for the list contains

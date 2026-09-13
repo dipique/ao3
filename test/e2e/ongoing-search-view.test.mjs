@@ -118,7 +118,8 @@ describe('the Status facet in the search view', { skip }, () => {
     await page.addScriptTag({ content: js })
     await sleep(1200)
 
-    await page.click('.AO3E--search-marked-for-later--button')
+    // The view opens by itself on the Marked for Later page; wait for the
+    // scrape and the first render.
     await sleep(1800)
   }, { timeout: 180000 })
 

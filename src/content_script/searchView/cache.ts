@@ -1,6 +1,6 @@
 import type { SnapshotDescriptor } from '#common'
 
-import { cache } from '#common'
+import { cache, packIds, unpackIds } from '#common'
 import { parseWork, type Work } from '#content_script/blurb.js'
 
 /**
@@ -147,6 +147,34 @@ export async function deleteSnapshot(key: string): Promise<void> {
     return
   delete snapshots[key]
   await cache.set({ searchSnapshots: snapshots })
+  // What the list failed to find goes with the list.
+  const misses = await cache.get('searchMisses')
+  if (key in misses) {
+    delete misses[key]
+    await cache.set({ searchMisses: misses })
+  }
+}
+
+/**
+ * The work ids a source looked for in its listing and did not find, as of its
+ * last scrape that could have found them. See the `searchMisses` cache entry.
+ */
+export async function readMisses(key: string): Promise<Set<string>> {
+  const misses = await cache.get('searchMisses')
+  return unpackIds(misses[key] ?? '')
+}
+
+/** Replace the recorded misses for `key` — the whole set, not an addition to it. */
+export async function writeMisses(key: string, ids: Iterable<string>): Promise<void> {
+  const misses = await cache.get('searchMisses')
+  const packed = packIds(ids)
+  if (packed === (misses[key] ?? ''))
+    return
+  if (packed)
+    misses[key] = packed
+  else
+    delete misses[key]
+  await cache.set({ searchMisses: misses })
 }
 
 /** Rebuild `Work[]` from cached blurb HTML, mounting fresh nodes in the document. */

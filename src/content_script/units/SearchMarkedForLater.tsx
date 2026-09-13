@@ -2,19 +2,16 @@ import type { Work } from '#content_script/blurb.js'
 import type { SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
 
-import { ADDON_CLASS, getArchiveLink, parseUser, toast } from '#common'
+import { getArchiveLink, parseUser, toast } from '#common'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
+import { hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
 import { seedMarkedForLater } from '#content_script/units/FilterEntityToolbars.tsx'
 import { applyMarkGroup } from '#content_script/workMarks.js'
-import React from '#dom'
-
-const FEATURE = `${ADDON_CLASS}--search-marked-for-later`
-const BUTTON_CLASS = `${FEATURE}--button`
 
 /**
  * Identifies this use of the search view for local layout prefs (collapsed
@@ -24,12 +21,18 @@ const BUTTON_CLASS = `${FEATURE}--button`
 const SOURCE_ID = 'marked-for-later'
 
 /**
- * Adds a "Search Marked for Later" button to your own to-read page that loads
- * every page of the list into one in-memory, instantly filterable/sortable view
- * (rendered in place; a "Back to list" button restores the native page). A
- * cached snapshot renders instantly on revisit while a fresh scrape runs in the
- * background. Everything generic about that lives in the shared search-view host
- * ({@link file://./../searchView/host.tsx}); this unit is only the source.
+ * Replaces your own Marked for Later page with one in-memory, instantly
+ * filterable/sortable view of every page of the list. It opens by itself and
+ * there is no native list to go back to: two versions of the same list on one
+ * page was one too many, and a reload landing on AO3's paged version instead of
+ * the one being used was the worst of both.
+ *
+ * A stored snapshot renders instantly, and the list is only reloaded behind it
+ * once that snapshot is older than the reader's refresh interval — which, now
+ * that every visit to the page opens the view, is what keeps a long list from
+ * costing dozens of requests each time. Everything generic about that lives in
+ * the shared search-view host ({@link file://./../searchView/host.tsx}); this
+ * unit is only the source.
  */
 export class SearchMarkedForLater extends Unit {
   static override get name() { return 'SearchMarkedForLater' }
@@ -39,6 +42,7 @@ export class SearchMarkedForLater extends Unit {
     // A global re-run (options change, navigation) tears the view down. If it was
     // open, snapshot it so ready() can reopen it where the user left off.
     suspendSearchView()
+    showClearHistory()
   }
 
   override async ready(): Promise<void> {
@@ -55,27 +59,14 @@ export class SearchMarkedForLater extends Unit {
     if (!currentUser || currentUser.toLowerCase() !== pageUser.toLowerCase())
       return
 
-    const current = Array.from(document.querySelectorAll('#main ul.navigation.actions span.current'))
-      .find(span => span.textContent?.trim() === 'Marked for Later')
-    const host = current?.closest('li')
-    if (!host || host.parentElement?.querySelector(`.${BUTTON_CLASS}`))
-      return
+    // Clearing the reader's whole history is History's business, not this list's.
+    hideClearHistory()
 
-    const button = (
-      <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search Marked for Later</button>
-    ) as HTMLElement as HTMLButtonElement
-    button.addEventListener('click', () => {
-      void this.openView(pageUser)
-    })
-    host.after(<li class={ADDON_CLASS}>{button}</li>)
-    this.logger.debug('Search Marked for Later button added.')
-
-    // If a global re-run closed an open view, reopen it (from cache, no re-scrape)
-    // where the user left off — so e.g. a "Hide tag" context-menu action doesn't
-    // dump them back to the native list.
+    // If a global re-run closed the view, put it back (from cache, no re-scrape)
+    // where the reader left off — so e.g. a "Hide tag" context-menu action
+    // doesn't reset their filters. Otherwise it simply opens, as the page.
     const pending = takeReopen(snapshotKey(pageUser))
-    if (pending)
-      void this.openView(pageUser, { initialState: pending, refresh: false })
+    void this.openView(pageUser, pending ? { initialState: pending, refresh: false } : {})
   }
 
   async openView(userId: string, opts: { initialState?: ViewState, refresh?: boolean } = {}): Promise<void> {
@@ -94,9 +85,10 @@ export class SearchMarkedForLater extends Unit {
       }),
       pageUrl: page => getArchiveLink(`/users/${userId}/readings?show=to-read&page=${page}`),
       pageCount: () => detectPageCount(document),
+      replacesListing: true,
       // A to-read list runs to hundreds of works for some readers, and a full
       // reload on every visit is exactly what gets them rate-limited.
-      refreshInterval: () => Math.max(0, this.options.searchMarkedForLaterRefreshHours || 0) * 60 * 60_000,
+      refreshInterval: () => Math.max(0, this.options.searchProfileListsRefreshHours || 0) * 60 * 60_000,
       nativeElements: () => document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
       mount: (container) => {
         const anchor = document.querySelector('#main ul.navigation.actions')

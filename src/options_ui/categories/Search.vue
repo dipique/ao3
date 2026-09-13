@@ -16,13 +16,13 @@
     >
       <OptionRow
         title="Search your Marked for Later list"
-        subtitle="Adds a button to your own Marked for Later page that loads the whole to-read list into the instant search view."
+        subtitle="Replaces your own Marked for Later page with the instant search view of the whole to-read list."
       >
         <OptionSwitch option-id="searchMarkedForLater" />
       </OptionRow>
       <OptionDivider />
       <OptionRow
-        title="Reload Marked for Later automatically"
+        title="Auto-reload frequency for profile search lists"
         subtitle="Time before the cached list auto-refreshes. Should be set to longer periods if you have many items on the list. Does not restrict manual reloads."
       >
         <OptionSearchRefreshHours />
@@ -30,7 +30,7 @@
       <OptionDivider />
       <OptionRow
         title="Search the works you've read"
-        subtitle="Adds a “Search read items” button next to it that collects every work you have marked read — or favourite, good, boring, bad, gross — into the same view, with a Marks filter to narrow it to one of them. Needs work marks on, and finds each work's details in your AO3 history."
+        subtitle="Adds a “Search read items” button to your History and Marked for Later pages that collects every work you have marked read — or favourite, good, boring, bad, gross — into the same view, with a Marks filter to narrow it to one of them. Needs work marks on, and finds each work's details in your AO3 history."
       >
         <OptionSwitch option-id="searchReadWorks" />
       </OptionRow>

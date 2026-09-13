@@ -601,7 +601,7 @@ abstract class FilterEntityToolbar extends Unit {
   /**
    * The Mark for Later / Mark as Read row. When the work's saved state is known
    * first-hand (acted on this session, read off this page, or seeded by a listing
-   * that knows its works are saved — the Search Marked for Later view), it renders
+   * that knows its works are saved — the Marked for Later search view), it renders
    * directly and stands.
    *
    * Otherwise the row opens *with* the menu and patches itself once a background

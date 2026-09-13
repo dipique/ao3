@@ -196,29 +196,46 @@ describe('search read items', { skip }, () => {
 
   let tab
 
-  test('the offer sits next to the one for Marked for Later', async () => {
+  test('the Marked for Later page is the search view, with nothing to go back to', async () => {
     tab = await load(TO_READ_URL)
-    const found = await tab.evaluate(() => {
+    await sleep(2000)
+    const page = await tab.evaluate(() => {
+      const shown = el => !!el && getComputedStyle(el).display !== 'none'
       const button = document.querySelector('.AO3E--search-read-works--button')
-      if (!button)
-        return null
-      const items = Array.from(button.closest('ul.navigation.actions').children)
+      const items = Array.from(document.querySelectorAll('#main ul.navigation.actions > li'))
       return {
-        text: button.textContent.trim(),
-        before: items[items.indexOf(button.closest('li')) - 1]?.textContent.trim(),
+        view: !!document.querySelector('.AO3E--search-host.AO3E--marked-for-later'),
+        nativeList: shown(document.querySelector('#main ol.reading.work.index.group')),
+        back: !!document.querySelector('.AO3E--search-view--back'),
+        mflButton: !!document.querySelector('.AO3E--search-marked-for-later--button'),
+        readButton: button?.textContent.trim(),
+        readButtonAfter: items[items.indexOf(button?.closest('li')) - 1]?.textContent.trim(),
       }
     })
-    assert.ok(found, 'the button should be added')
-    assert.equal(found.text, 'Search read items')
-    assert.equal(found.before, 'Search Marked for Later')
+    assert.equal(page.view, true, 'the view opens by itself')
+    assert.equal(page.nativeList, false, 'and AO3\u2019s paged list is not shown alongside it')
+    assert.equal(page.back, false, 'no "Back to list" \u2014 the view is the list')
+    assert.equal(page.mflButton, false, 'no button to open what is already open')
+    assert.equal(page.readButton, 'Search read items')
+    assert.equal(page.readButtonAfter, 'Marked for Later')
   })
 
-  test('opening it from the to-read page still finds the read works', async () => {
+  test('Clear Entire History is not offered beside the to-read list', async () => {
+    const chrome = await pageChrome(tab)
+    assert.deepEqual(chrome.links.map(link => link.text), ['History'])
+  })
+
+  test('the read view replaces the Marked for Later one rather than being refused by it', async () => {
     // The page count can't be read off this document — it is the to-read
     // listing, not the history — so the source fetches page 1 to find out.
     await tab.click('.AO3E--search-read-works--button')
     await sleep(2500)
     assert.deepEqual(await shownTitles(tab), ['Work number 1', 'Work number 3'])
+    assert.equal(await tab.$('.AO3E--search-host.AO3E--marked-for-later'), null, 'one view at a time')
+    // Opened over a page that is itself a search view, "Back to list" would
+    // mean AO3's paged list, which this page no longer shows. The subnav's
+    // Marked for Later link is the way back instead.
+    assert.equal(await tab.$('.AO3E--search-view--back'), null)
 
     // The page was Marked for Later; what is on screen now is the read list, and
     // the heading and subnav have to stop claiming otherwise.
@@ -228,7 +245,6 @@ describe('search read items', { skip }, () => {
       links: [
         { text: 'History', href: '/users/me/readings' },
         { text: 'Marked for Later', href: '/users/me/readings?show=to-read' },
-        { text: 'Clear Entire History', href: '/users/me/readings/confirm_clear' },
       ],
     })
     await tab.close()
@@ -237,6 +253,10 @@ describe('search read items', { skip }, () => {
   test('the list is what you marked, not what you visited', async () => {
     tab = await load(HISTORY_URL)
     assert.ok(await tab.$('.AO3E--search-read-works--button'), 'the button should be added here too')
+    // History is not replaced: its own listing, and its own Clear, stay put
+    // until the reader asks for the read list.
+    assert.equal(await tab.$('.AO3E--search-host'), null)
+    assert.deepEqual((await pageChrome(tab)).links.map(link => link.text), ['Marked for Later', 'Clear Entire History'])
     await tab.click('.AO3E--search-read-works--button')
     await sleep(2500)
 
@@ -248,7 +268,8 @@ describe('search read items', { skip }, () => {
     const chrome = await pageChrome(tab)
     assert.deepEqual(chrome.heading, ['Read'])
     assert.deepEqual(chrome.current, ['Read'], 'History is no longer the current item')
-    assert.deepEqual(chrome.links.map(link => link.text), ['History', 'Marked for Later', 'Clear Entire History'])
+    // And with History off screen, so is its Clear.
+    assert.deepEqual(chrome.links.map(link => link.text), ['History', 'Marked for Later'])
   })
 
   test('and it stops reading the history once it has found them', async () => {
@@ -346,5 +367,161 @@ describe('search read items', { skip }, () => {
     const other = await load('https://archiveofourown.org/users/someone/readings')
     assert.equal(await other.$('.AO3E--search-read-works--button'), null, 'not your history')
     await other.close()
+  })
+})
+
+const HOUR = 60 * 60_000
+
+/**
+ * A stored read list, `ageMs` old, holding `ids`. Stored blurbs are titled
+ * "Stored work N" and the live history's "Work number N", so a test can see
+ * whether a work on screen was fetched again or kept as it was.
+ */
+function storedReadList(ids, ageMs) {
+  return {
+    'read-works:me': {
+      version: 2,
+      scrapedAt: Date.now() - ageMs,
+      blurbsHtml: ids.map(id => blurb(id, `Stored work ${id}`)),
+      descriptor: { sourceId: 'read-works', label: 'Read works \u2014 me', listUrl: HISTORY_URL },
+    },
+  }
+}
+
+/** {@link SEED}, with the read mark holding works 1, 3 and 99 \u2014 which is in no history at all. */
+const SEED_WITH_ABSENT = {
+  ...SEED,
+  'option.workMarks': {
+    ...SEED['option.workMarks'],
+    marks: { ...SEED['option.workMarks'].marks, read: { ...SEED['option.workMarks'].marks.read, items: '1,2,2o' } },
+  },
+}
+
+/**
+ * Reloading the read list on a timer.
+ *
+ * It can run to thousands of works and they rarely change, so an automatic
+ * reload is a top-up: it goes looking only for works marked since the list was
+ * stored, never re-reads a work it already has, and doesn't go looking again for
+ * works an earlier scrape couldn't find. The Refresh button re-reads in full.
+ */
+describe('read list auto-reload', { skip }, () => {
+  let browser
+  let css
+  let js
+  let listPages
+
+  before(async () => {
+    ensureBuilt()
+    css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
+    js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
+    browser = await puppeteer.launch({
+      executablePath: chromePath,
+      headless: 'new',
+      args: ['--no-first-run', '--no-default-browser-check'],
+    })
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  /** History, with a stored read list and whatever else `extra` seeds, and the view opened. */
+  const open = async ({ seed = SEED, stored, misses }) => {
+    const tab = await browser.newPage()
+    listPages = []
+    await tab.setViewport({ width: 1280, height: 900 })
+    await tab.setRequestInterception(true)
+    tab.on('request', (req) => {
+      if (!req.url().startsWith('https://archiveofourown.org/'))
+        return void req.abort()
+      const params = new URL(req.url()).searchParams
+      const page = Number(params.get('page') ?? 1)
+      if (params.has('page'))
+        listPages.push(page)
+      void req.respond({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: readingsPage({ toRead: params.get('show') === 'to-read', page }),
+      })
+    })
+    await tab.evaluateOnNewDocument(installMock, {
+      ...seed,
+      'cache.searchSnapshots': stored,
+      ...misses && { 'cache.searchMisses': { 'read-works:me': misses } },
+    })
+    await tab.goto(HISTORY_URL, { waitUntil: 'domcontentloaded' })
+    await tab.addStyleTag({ content: css })
+    await tab.addScriptTag({ content: js })
+    await sleep(1000)
+    await tab.click('.AO3E--search-read-works--button')
+    await sleep(3000)
+    return tab
+  }
+
+  const shownTitles = tab => tab.evaluate(() =>
+    Array.from(document.querySelectorAll('.AO3E--search-view--results > li.blurb'))
+      .filter(li => !li.classList.contains('AO3E--search-view--hidden'))
+      .map(li => li.querySelector('.header h4.heading a')?.textContent?.trim()))
+
+  /** The latest value this page wrote under a cache key. */
+  const lastWrite = (tab, key) => tab.evaluate((k) => {
+    const writes = window.__writes ?? []
+    for (let i = writes.length - 1; i >= 0; i--) {
+      if (k in writes[i])
+        return writes[i][k]
+    }
+    return null
+  }, key)
+
+  test('a stored list younger than the interval is shown without asking AO3 for anything', async () => {
+    // Work 3 is marked but not stored; that is for the next reload to find, not this open.
+    const tab = await open({ stored: storedReadList(['1'], 2 * HOUR) })
+    assert.deepEqual(await shownTitles(tab), ['Stored work 1'])
+    assert.deepEqual(listPages, [])
+    await tab.close()
+  })
+
+  test('an older one only goes looking for the works it lacks, and keeps the ones it has', async () => {
+    const tab = await open({ stored: storedReadList(['1'], 25 * HOUR) })
+    // Work 3 was found and added; work 1 was not fetched again \u2014 it is still
+    // the stored blurb, although the page it sits on had to be read to find 3.
+    assert.deepEqual((await shownTitles(tab)).sort(), ['Stored work 1', 'Work number 3'])
+    assert.ok(listPages.length < PAGES, `read ${listPages.length} of ${PAGES} history pages for one work`)
+    const snapshots = await lastWrite(tab, 'cache.searchSnapshots')
+    assert.equal(snapshots['read-works:me'].blurbsHtml.length, 2, 'the addition is stored with the rest')
+    await tab.close()
+  })
+
+  test('with nothing missing, even an old stored list makes no request at all', async () => {
+    const tab = await open({ stored: storedReadList(['1', '3'], 25 * HOUR) })
+    assert.deepEqual((await shownTitles(tab)).sort(), ['Stored work 1', 'Stored work 3'])
+    assert.deepEqual(listPages, [])
+    await tab.close()
+  })
+
+  test('a marked work the history doesn\u2019t have is looked for once, and remembered', async () => {
+    // Work 99 is marked read but in no history. Finding that out means reading
+    // all of it \u2014 once.
+    const tab = await open({ seed: SEED_WITH_ABSENT, stored: storedReadList(['1', '3'], 25 * HOUR) })
+    assert.equal(listPages.length >= PAGES, true, 'the whole history had to be read to rule it out')
+    assert.equal(await lastWrite(tab, 'cache.searchMisses').then(m => m?.['read-works:me']), '2r', 'work 99, recorded')
+    await tab.close()
+  })
+
+  test('and once remembered, an automatic reload doesn\u2019t go looking for it again', async () => {
+    const tab = await open({ seed: SEED_WITH_ABSENT, stored: storedReadList(['1', '3'], 25 * HOUR), misses: '2r' })
+    assert.deepEqual(listPages, [], 'nothing new to find, so nothing asked for')
+    await tab.close()
+  })
+
+  test('the Refresh button re-reads the whole list, stored works included', async () => {
+    const tab = await open({ stored: storedReadList(['1', '3'], 2 * HOUR) })
+    assert.deepEqual(listPages, [])
+    await tab.click('.AO3E--search-view--refresh')
+    await sleep(3000)
+    assert.ok(listPages.length > 0)
+    assert.deepEqual(await shownTitles(tab), ['Work number 1', 'Work number 3'], 'fresh blurbs, not the stored ones')
+    await tab.close()
   })
 })

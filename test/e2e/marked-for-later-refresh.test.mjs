@@ -67,7 +67,7 @@ function storedSnapshot(ageMs) {
  * A reader with several hundred works saved pays dozens of requests for every
  * full reload, and paying that on every visit is how AO3's rate limit gets
  * tripped. So opening the view shows the stored copy as it is until it is older
- * than `searchMarkedForLaterRefreshHours`, and only then reloads behind it —
+ * than `searchProfileListsRefreshHours`, and only then reloads behind it —
  * while the Refresh button reloads whenever it is pressed.
  */
 describe('Marked for Later auto-refresh interval', { skip }, () => {
@@ -91,8 +91,8 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
   })
 
   /**
-   * Open the to-read page with a stored copy `ageMs` old, press the search
-   * button, and report which pages of the list AO3 was then asked for.
+   * Open the to-read page with a stored copy `ageMs` old — which opens the view
+   * — and report which pages of the list AO3 was then asked for.
    */
   const open = async ({ ageMs, hours }) => {
     const tab = await browser.newPage()
@@ -102,9 +102,11 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
     tab.on('request', (req) => {
       if (!req.url().startsWith('https://archiveofourown.org/'))
         return void req.abort()
-      const page = Number(new URL(req.url()).searchParams.get('page') ?? 1)
-      // The page load itself is not a refresh; only what follows the click is.
-      if (armed)
+      const params = new URL(req.url()).searchParams
+      const page = Number(params.get('page') ?? 1)
+      // A reload asks for numbered pages of the list; the browser's own requests
+      // (a favicon, say) are not one.
+      if (armed && params.has('page'))
         listRequests.push(page)
       void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: toReadPage(page) })
     })
@@ -113,15 +115,15 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
       'cache.searchSnapshots': storedSnapshot(ageMs),
     }
     if (hours !== undefined)
-      seed['option.searchMarkedForLaterRefreshHours'] = hours
+      seed['option.searchProfileListsRefreshHours'] = hours
     await tab.evaluateOnNewDocument(installMock, seed)
     await tab.goto(URL_TO_READ, { waitUntil: 'domcontentloaded' })
+    // The page load itself is not a refresh; everything the view asks for once
+    // the content script is running is. It opens by itself, so that is all of it.
+    armed = true
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1000)
-    armed = true
-    await tab.click('.AO3E--search-marked-for-later--button')
-    await sleep(2500)
+    await sleep(3500)
     return { tab, listRequests }
   }
 

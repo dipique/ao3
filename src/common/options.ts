@@ -105,18 +105,21 @@ export interface Options {
    * (always present) follows the link, so navigation is never lost.
    */
   openMenuOnClick: boolean
-  /** On your own Marked for Later page, add a button that loads every page into one filterable view. */
+  /** Replace your own Marked for Later page with one filterable view of every page of it. */
   searchMarkedForLater: boolean
   /**
-   * How many hours the Marked for Later view goes on trusting the copy it stored
-   * before opening it reloads the whole list in the background. `0` reloads on
-   * every open. The view's own Refresh button always reloads, whatever this says.
+   * How many hours the search views on your own readings pages — Marked for
+   * Later and the read list — go on trusting the copy they stored before
+   * opening one reloads it in the background. `0` reloads on every open. A
+   * view's own Refresh button always reloads, whatever this says.
    *
-   * A list of several hundred works is dozens of page requests, and doing that on
-   * every visit is a reliable way to be rate-limited by AO3 — which is when a
-   * refresh is slowest and least likely to finish.
+   * Both lists run to hundreds or thousands of works, which is dozens of page
+   * requests or more, and doing that on every visit is a reliable way to be
+   * rate-limited by AO3 — which is when a reload is slowest and least likely to
+   * finish. The read list's automatic reload is also only a top-up; see
+   * `SearchSource.topUp`.
    */
-  searchMarkedForLaterRefreshHours: number
+  searchProfileListsRefreshHours: number
   /**
    * On your own readings pages, add a button that puts the works you have marked
    * read — the `read` mark and every verdict aliasing it — into the same
@@ -258,7 +261,7 @@ export const options = createStorage<Options>({
     contextMenusEnabled: true,
     openMenuOnClick: false,
     searchMarkedForLater: true,
-    searchMarkedForLaterRefreshHours: 24,
+    searchProfileListsRefreshHours: 24,
     searchReadWorks: true,
     searchTagWorks: true,
     searchSeriesWorks: true,

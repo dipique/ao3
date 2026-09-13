@@ -106,6 +106,13 @@ export interface SearchSource {
   satisfied?: (ids: ReadonlySet<string>) => boolean
   /** The native elements hidden while the view is up, restored when it closes. */
   nativeElements: () => Iterable<Element>
+  /**
+   * The view *is* this page rather than something opened on top of it, so it
+   * gets no "Back to list" button: there is no native list the reader is meant
+   * to go back to. The Marked for Later page is one — its own AO3 listing is
+   * replaced outright.
+   */
+  replacesListing?: boolean
   /** Insert the (empty, already classed) container where the view belongs. */
   mount: (container: HTMLElement) => void
   /**
@@ -126,6 +133,21 @@ export interface SearchSource {
    */
   refreshInterval?: () => number
   /**
+   * An automatic reload that only *adds to* the stored list, for a list too long
+   * to re-read on a timer and too stable to need it.
+   *
+   * Given the stored works, return what to go looking for — or null when the
+   * stored copy already has everything, in which case the reload makes no request
+   * at all. What it finds is put in front of the stored works (a listing's
+   * newest entries come first) and the whole is stored as the new snapshot.
+   * Nothing already stored is fetched again, so a work that has changed on AO3
+   * keeps its old blurb until the reader presses Refresh, which re-reads the list
+   * in full whatever this says.
+   *
+   * Absent means an automatic reload re-reads the whole listing, like Refresh.
+   */
+  topUp?: (stored: Work[]) => TopUp | null
+  /**
    * Stamp or seed a set of works before the view sees them — readiness, saved
    * state, anything that isn't a property of the blurb. Runs on every load,
    * cached or fresh, and is told which: a source with something to *say* about
@@ -141,6 +163,14 @@ export interface SearchSource {
   emptyMessage: string
   /** Shown when the load fails outright. */
   errorMessage: string
+}
+
+/** What a {@link SearchSource.topUp} goes looking for. */
+export interface TopUp {
+  /** Whether the scrape has found everything it came for (see `ScrapeOptions.satisfied`). */
+  satisfied: (ids: ReadonlySet<string>) => boolean
+  /** The works, of those the scrape brought back, that are new to the list. */
+  select: (works: Work[]) => Work[]
 }
 
 /**
@@ -221,6 +251,14 @@ let active: { source: SearchSource, view: SearchView } | null = null
  * at any point can hand it {@link SearchSource.unmount}.
  */
 let mounted: SearchSource | null = null
+/**
+ * Bumped by every open and every close. An open awaits several times — prefs,
+ * the snapshot, the page count, the scrape — and another view can replace it
+ * during any of them, so after each it checks it is still the current one
+ * rather than rendering into a container that is gone, or closing the view that
+ * replaced it.
+ */
+let generation = 0
 let controller: AbortController | null = null
 let busy = false
 /**
@@ -237,6 +275,7 @@ export function isSearchViewOpen(): boolean {
 
 /** Restore the native page: abort any scrape, remove the view, un-hide the list. */
 export function closeSearchView(): void {
+  generation++
   controller?.abort()
   controller = null
   active = null
@@ -444,8 +483,16 @@ function mountLimitGate(
   })
 }
 
-/** Re-scrape in the background and feed the result into the live view + cache. */
-async function refresh(source: SearchSource, view: SearchView, options: Options): Promise<void> {
+/**
+ * Re-scrape in the background and feed the result into the live view + cache.
+ * With `topUp`, only look for what the stored works lack, and add it to them.
+ */
+async function refresh(
+  source: SearchSource,
+  view: SearchView,
+  options: Options,
+  topUp?: { plan: TopUp, stored: Work[] },
+): Promise<void> {
   controller?.abort()
   const own = new AbortController()
   controller = own
@@ -460,12 +507,19 @@ async function refresh(source: SearchSource, view: SearchView, options: Options)
       pageUrl: source.pageUrl,
       blurbSelector: source.blurbSelector,
       firstPageDoc: source.firstPageDoc?.(),
-      satisfied: source.satisfied,
+      satisfied: topUp ? topUp.plan.satisfied : source.satisfied,
       signal: own.signal,
     })
     if (own.signal.aborted)
       return
-    const works = applyLimit(selected(source, result.works), budget.limit)
+    const scraped = topUp
+      ? [...topUp.plan.select(result.works), ...topUp.stored]
+      : selected(source, result.works)
+    // The "listing order" sort reads `markedOrder`, and a top-up's new works and
+    // its stored ones were numbered by two different scrapes.
+    if (topUp)
+      scraped.forEach((work, index) => work.markedOrder = index)
+    const works = applyLimit(scraped, budget.limit)
     // A refusal taught us nothing about the list, so the list is left exactly as
     // it was — neither written over nor taken off the screen. What came back is
     // whatever the archive let through before it stopped answering, and putting
@@ -507,7 +561,11 @@ export interface OpenOptions {
  * otherwise scrapes the whole listing behind a progress bar first.
  */
 export async function openSearchView(source: SearchSource, options: Options, opts: OpenOptions = {}): Promise<void> {
-  if (busy || isSearchViewOpen())
+  // This list is already on screen, or on its way there: a second click, or a
+  // unit re-running, has nothing to add. "On screen" is the container being in
+  // the page — a global re-run removes it mid-load, and a load with nowhere to
+  // render has to be started again, not waited for.
+  if (isSearchViewOpen() && mounted?.cacheKey === source.cacheKey)
     return
   // An orphaned page could still scrape the listing — the fetches are the
   // reader's own session, not ours — but nothing it learned would survive:
@@ -517,11 +575,20 @@ export async function openSearchView(source: SearchSource, options: Options, opt
   // {@link file://./../extensionAlive.ts}).
   if (!extensionAlive())
     return
+  // A different list is up, or loading: this one replaces it. Two readings lists
+  // share one page, and the reader moving from one to the other should get the
+  // one they asked for, not a refusal because the other got there first.
+  if (busy || isSearchViewOpen())
+    closeSearchView()
+  const gen = ++generation
+  const stale = (): boolean => gen !== generation
   busy = true
   try {
     const container = mountContainer(source)
     // Local (never-synced) layout prefs for this application of the view.
     const prefs = await loadPrefs(source.id)
+    if (stale())
+      return
     const config: SearchViewConfig = {
       perPage: options.searchPerPage,
       decorateBlurb: blurb => decorateBlurb(blurb, options),
@@ -540,7 +607,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       },
     }
     const handlers = {
-      onBack: () => closeSearchView(),
+      onBack: source.replacesListing ? undefined : () => closeSearchView(),
       onRefresh: () => {
         if (!active)
           return
@@ -561,6 +628,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     }
 
     const cached = await readSnapshot(source.cacheKey)
+    if (stale())
+      return
     if (cached && selected(source, cached.works).length) {
       // A snapshot taken under a higher ceiling than the reader now has; trim it
       // to what they asked for rather than waiting for the refresh to say so.
@@ -580,9 +649,11 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       // Refresh button is right there when they want it sooner.
       const age = Date.now() - cached.scrapedAt
       const recent = age >= 0 && age < (source.refreshInterval?.() ?? 0)
-      if (opts.refresh !== false && !recent) {
+      // `undefined` is a full reload, `null` is a top-up with nothing to find.
+      const plan = !recent && opts.refresh !== false && source.topUp ? source.topUp(stored) : undefined
+      if (opts.refresh !== false && !recent && plan !== null) {
         view.setUpdating(true)
-        void refresh(source, view, options).finally(() => view.setUpdating(false))
+        void refresh(source, view, options, plan ? { plan, stored } : undefined).finally(() => view.setUpdating(false))
       }
       return
     }
@@ -601,6 +672,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     let progress = mountProgress(container)
     try {
       const budget = await budgetFor(source, options)
+      if (stale())
+        return
       if (own.signal.aborted) {
         closeSearchView()
         return
@@ -611,7 +684,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       // cap and `satisfied` bound the reading instead, and the progress panel's
       // Cancel is the say-so.
       if (isTruncated(budget) && !source.select) {
-        if (!await mountLimitGate(container, source, budget, own.signal)) {
+        const go = await mountLimitGate(container, source, budget, own.signal)
+        if (stale())
+          return
+        if (!go) {
           closeSearchView()
           return
         }
@@ -628,12 +704,16 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         onProgress: progress.onProgress,
         signal: own.signal,
       })
+      if (stale())
+        return
       const works = applyLimit(selected(source, result.works), budget.limit)
       // Not persisted when the archive refused us outright: an empty scrape
       // would otherwise overwrite a perfectly good stored list with nothing,
       // and "AO3 said no" is not news about what is on the reader's list.
       if (!result.blocked || works.length)
         await persist(source, works)
+      if (stale())
+        return
       if (!works.length) {
         // Two different things, and telling them apart matters: an empty list is
         // a fact about the reader, a refusal is a fact about this minute.
@@ -652,6 +732,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       }
     }
     catch (err) {
+      // Replaced while it loaded: the abort is the replacement's doing, and the
+      // view on screen now is not this one's to close.
+      if (stale())
+        return
       if ((err as Error)?.name !== 'AbortError') {
         log.error(`Failed to load ${source.id}`, err)
         // Counting the listing's pages is a request of its own for some sources
@@ -669,6 +753,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     }
   }
   finally {
-    busy = false
+    if (!stale())
+      busy = false
   }
 }

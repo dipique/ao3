@@ -93,7 +93,7 @@ describe('the search view layout', { skip }, () => {
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
     await sleep(1200)
-    await tab.click('.AO3E--search-marked-for-later--button')
+    // The view opens by itself on the Marked for Later page.
     await sleep(1800)
     return tab
   }
@@ -144,7 +144,7 @@ describe('the search view layout', { skip }, () => {
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
     await sleep(1200)
-    await tab.click('.AO3E--search-marked-for-later--button')
+    // The view opens by itself on the Marked for Later page.
     await sleep(1800)
 
     // Scroll well past the sidebar. A sticky element sits exactly where it was

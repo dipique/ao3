@@ -3,6 +3,8 @@ import type { ViewState } from '#content_script/searchView/view.tsx'
 
 import { ADDON_CLASS, getArchiveLink, parseUser, readWorkIds, toast } from '#common'
 import { loadMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
+import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
+import { readMisses, writeMisses } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { limitFor, openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
 import { detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
@@ -79,6 +81,7 @@ export class SearchReadWorks extends Unit {
     // A global re-run (options change, navigation) tears the view down. If it was
     // open, snapshot it so ready() can reopen it where the user left off.
     suspendSearchView()
+    showClearHistory()
   }
 
   override async ready(): Promise<void> {
@@ -89,6 +92,11 @@ export class SearchReadWorks extends Unit {
     const currentUser = parseUser(document)?.userId
     if (!currentUser || currentUser.toLowerCase() !== pageUser.toLowerCase())
       return
+
+    // Only History's own listing offers to clear it; on the to-read page it is
+    // hidden for good, and on History while this view is up (see `listChrome`).
+    if (!onHistoryPage())
+      hideClearHistory()
 
     const host = anchorItem()
     if (!host || host.parentElement?.querySelector(`.${BUTTON_CLASS}`))
@@ -123,14 +131,19 @@ export class SearchReadWorks extends Unit {
     // the Marked for Later view loads it; on History nothing else does, and a
     // work saved for a re-read is worth seeing here.
     await loadMarkedForLaterIndex(userId).catch(err => this.logger.error('Could not read the saved-work index', err))
-    await openSearchView(this.source(userId, wanted), this.options, opts)
+    const absent = await readMisses(snapshotKey(userId)).catch((err) => {
+      this.logger.error('Could not read the works the last scrape missed', err)
+      return new Set<string>()
+    })
+    await openSearchView(this.source(userId, wanted, absent), this.options, opts)
   }
 
   /**
-   * Everything the shared host needs: the marked works to look for, and the
-   * history to look for them in.
+   * Everything the shared host needs: the marked works to look for, the history
+   * to look for them in, and which of them the last scrape looked for and didn't
+   * find (kept up to date as scrapes finish, which is why it is a live set).
    */
-  source(userId: string, wanted: Set<string>): SearchSource {
+  source(userId: string, wanted: Set<string>, absent: Set<string>): SearchSource {
     const listUrl = getArchiveLink(`/users/${userId}/readings`)
     // Page 1, when counting the pages had to fetch it (see `pageCount`). One-shot:
     // whoever reads it next is the scrape that the count was worked out for.
@@ -148,6 +161,26 @@ export class SearchReadWorks extends Unit {
         listUrl,
       }),
       pageUrl: page => `${listUrl}?page=${page}`,
+      // Opened over the to-read page, there is nothing native to go back to —
+      // that page is itself a search view — so the subnav's Marked for Later
+      // link is the way back. Over History, "Back to list" means History.
+      replacesListing: !onHistoryPage(),
+      refreshInterval: () => Math.max(0, this.options.searchProfileListsRefreshHours || 0) * 60 * 60_000,
+      // Thousands of works that almost never change: an automatic reload only
+      // goes looking for works marked since the list was stored. Not for the
+      // ones the last scrape already looked for and didn't find, either — a work
+      // missing from the history can only be ruled out by reading all of it, and
+      // doing that every day for works that aren't there is the cost this avoids.
+      topUp: (stored) => {
+        const have = new Set(stored.map(work => work.workId))
+        const missing = new Set([...wanted].filter(id => !have.has(id) && !absent.has(id)))
+        if (!missing.size)
+          return null
+        return {
+          satisfied: ids => [...missing].every(id => ids.has(id)),
+          select: works => works.filter(work => missing.has(work.workId)),
+        }
+      },
       pageCount: async () => {
         if (onHistoryPage())
           return detectPageCount(document)
@@ -184,7 +217,21 @@ export class SearchReadWorks extends Unit {
       },
       prepare: (works, { fresh }) => {
         applyStatus(works, this.options)
-        if (reported || !fresh)
+        if (!fresh)
+          return
+        // Record what this scrape couldn't find, for the next top-up to leave
+        // alone. Not when the works ceiling cut the list short: a work trimmed
+        // off the end was found, and calling it missing would hide it for good.
+        if (works.length < limitFor(this.options)) {
+          const shown = new Set(works.map(work => work.workId))
+          absent.clear()
+          for (const id of wanted) {
+            if (!shown.has(id))
+              absent.add(id)
+          }
+          void writeMisses(snapshotKey(userId), absent).catch(err => this.logger.error('Could not record the works this scrape missed', err))
+        }
+        if (reported)
           return
         // Only of a set just scraped, and only against what a whole one could
         // have held: a cached render answers an older question (marks made since
@@ -226,6 +273,8 @@ function listChrome(): Element[] {
     document.querySelector('#main > h2.heading'),
     nav?.querySelector(`:scope > li:not(.${ADDON_CLASS}) > span.current`)?.parentElement,
     nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li'),
+    // The read list isn't History, so History's "clear everything" goes too.
+    clearHistoryItem(),
   ].filter((el): el is HTMLElement => !!el)
 }
 
@@ -241,7 +290,7 @@ function listChrome(): Element[] {
 function showReadChrome(userId: string): void {
   const hidden = `.${NATIVE_HIDDEN_CLASS}`
   const heading = document.querySelector(`#main > h2.heading${hidden}`)
-  heading?.after(<h2 class={`heading  ${ADDON_CLASS}  ${CHROME_CLASS}`}>{LIST_NAME}</h2>)
+  heading?.after(<h2 class={`heading ${ADDON_CLASS}  ${CHROME_CLASS}`}>{LIST_NAME}</h2>)
 
   const nav = document.querySelector('#main ul.navigation.actions')
   const current = nav?.querySelector(`:scope > li${hidden} > span.current`)
@@ -261,8 +310,7 @@ function showReadChrome(userId: string): void {
 /**
  * The subnav item our button goes after: the Marked for Later one (a link on
  * History, the current page's own label on the to-read list), skipping past
- * anything of ours already there — which is the "Search Marked for Later"
- * button, so the two searches sit together as one pair.
+ * anything of ours already there.
  */
 function anchorItem(): HTMLElement | null {
   const item = Array.from(document.querySelectorAll('#main ul.navigation.actions > li'))

@@ -86,8 +86,8 @@ describe('word-count range menu in the search view', { skip }, () => {
     await page.addScriptTag({ content: js })
     await sleep(1200)
 
-    // Open the in-memory view, then wait for the scrape + first render.
-    await page.click('.AO3E--search-marked-for-later--button')
+    // The view opens by itself on the Marked for Later page; wait for the
+    // scrape and the first render.
     await sleep(1500)
   }, { timeout: 180000 })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const optionValue = useOption('searchMarkedForLaterRefreshHours')
+const optionValue = useOption('searchProfileListsRefreshHours')
 const id = OptionLabelId.inject()
 const choices: { hours: number, label: string }[] = [
   { hours: 0, label: 'Every time' },

@@ -2,7 +2,7 @@ import { cache, packIds, unpackIds } from '#common'
 
 /**
  * The set of works on your Marked for Later list, as of the last time we scraped
- * it in bulk (the Search Marked for Later view, which caches the list anyway).
+ * it in bulk (the Marked for Later search view, which caches the list anyway).
  *
  * A blurb doesn't say whether its work is marked for later — only the work's own
  * page does — so reading the state honestly costs one fetch per work, which is

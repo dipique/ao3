@@ -79,6 +79,19 @@ export interface Cache {
   searchSnapshots: { [key: string]: SearchSnapshot }
   /** Per-application local UI prefs for the search view (see {@link SearchViewPrefs}). */
   searchViewPrefs: { [appId: string]: SearchViewPrefs }
+  /**
+   * Work ids a search view went looking for in its listing and did not find, by
+   * snapshot key, delta-packed like the marks. Only a view that knows its works
+   * before it scrapes has any: the read list, whose works are the reader's marks
+   * and whose listing is AO3's history — where a work marked read without being
+   * opened, or read before a history was cleared, is simply not there.
+   *
+   * Recorded so that an automatic reload doesn't go looking for them again. A
+   * work that isn't in the history can only be found by reading all of it, and
+   * doing that on a timer for a handful of works that will never turn up is
+   * exactly the cost the timer exists to avoid. The Refresh button still looks.
+   */
+  searchMisses: { [key: string]: string }
   /** Which works are on your Marked for Later list (see {@link MarkedForLaterIndex}). */
   markedForLater: MarkedForLaterIndex
   /**
@@ -100,6 +113,7 @@ export const cache = createStorage<Cache>({
     chapterDates: {},
     searchSnapshots: {},
     searchViewPrefs: {},
+    searchMisses: {},
     markedForLater: { userId: '', updatedAt: 0, ids: '' },
     appliedChangeOps: [],
   },
