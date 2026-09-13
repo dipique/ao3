@@ -108,6 +108,23 @@ export interface Options {
   /** On your own Marked for Later page, add a button that loads every page into one filterable view. */
   searchMarkedForLater: boolean
   /**
+   * How many hours the Marked for Later view goes on trusting the copy it stored
+   * before opening it reloads the whole list in the background. `0` reloads on
+   * every open. The view's own Refresh button always reloads, whatever this says.
+   *
+   * A list of several hundred works is dozens of page requests, and doing that on
+   * every visit is a reliable way to be rate-limited by AO3 — which is when a
+   * refresh is slowest and least likely to finish.
+   */
+  searchMarkedForLaterRefreshHours: number
+  /**
+   * On your own readings pages, add a button that puts the works you have marked
+   * read — the `read` mark and every verdict aliasing it — into the same
+   * filterable view, where the Marks facet narrows them to one. Needs
+   * {@link Options.workMarks} on: the marks *are* the list.
+   */
+  searchReadWorks: boolean
+  /**
    * On a non-canonical ("uncommon") tag's page — the one AO3 offers no sort or
    * filter for — add a link that loads every page of its works into the same
    * filterable view.
@@ -241,6 +258,8 @@ export const options = createStorage<Options>({
     contextMenusEnabled: true,
     openMenuOnClick: false,
     searchMarkedForLater: true,
+    searchMarkedForLaterRefreshHours: 24,
+    searchReadWorks: true,
     searchTagWorks: true,
     searchSeriesWorks: true,
     searchTextResults: true,

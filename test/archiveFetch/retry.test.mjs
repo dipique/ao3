@@ -242,14 +242,109 @@ describe('archiveFetch — the pause is shared', () => {
     stubFetch(t, [{ status: 429, retryAfter: 5 }, { status: 200 }])
 
     const seen = []
-    const unwatch = onArchiveWait(until => seen.push(until))
+    const unwatch = onArchiveWait((until, reason) => seen.push({ until, reason }))
     const pending = fetchWithRetry(url)
     await clk.until(() => seen.length >= 2)
     await pending
     unwatch()
 
-    assert.ok(seen[0] > 0, 'the first report names when the wait ends')
-    assert.equal(seen.at(-1), 0, 'and the last one says it is over')
+    assert.ok(seen[0].until > 0, 'the first report names when the wait ends')
+    assert.equal(seen[0].reason, 'refused', 'and says whose idea the wait was')
+    assert.equal(seen.at(-1).until, 0, 'the last one says it is over')
+  })
+})
+
+/**
+ * Twenty requests, then five seconds off. A rate limit is AO3 telling us we were
+ * already going too fast; a steady breather is the cheaper way of never being
+ * told. It comes out of the same shared pause, so the whole pool breathes at
+ * once rather than each worker keeping its own count.
+ */
+describe('archiveFetch — pacing ourselves', () => {
+  test('a set of twenty goes out back-to-back, and the next one waits', async (t) => {
+    const clk = useClock(t)
+    const calls = stubFetch(t, [{ status: 200 }])
+
+    for (let i = 0; i < 20; i++)
+      await fetchWithRetry(url)
+    assert.equal(calls.length, 20)
+    assert.ok(calls.every(call => call.at === calls[0].at), 'nothing inside the set is held up')
+
+    const next = watch(fetchWithRetry(url))
+    await clk.tick(4000)
+    assert.equal(calls.length, 20, 'the twenty-first waits for the breather')
+
+    await clk.until(() => next.done)
+    assert.equal(calls[20].at - calls[19].at, 5000)
+  })
+
+  test('and the set after that gets its own breather, not a longer one', async (t) => {
+    const clk = useClock(t)
+    const calls = stubFetch(t, [{ status: 200 }])
+
+    for (let i = 0; i < 41; i++) {
+      const pending = watch(fetchWithRetry(url))
+      await clk.until(() => pending.done, 1000, 10)
+    }
+
+    // Two breathers in forty-one requests, each of them five seconds.
+    assert.equal(calls[20].at - calls[19].at, 5000)
+    assert.equal(calls[40].at - calls[39].at, 5000)
+  })
+
+  test('the breather is announced as ours, not as AO3 complaining', async (t) => {
+    const clk = useClock(t)
+    stubFetch(t, [{ status: 200 }])
+
+    for (let i = 0; i < 20; i++)
+      await fetchWithRetry(url)
+
+    const seen = []
+    const unwatch = onArchiveWait((until, reason) => seen.push({ until, reason }))
+    const next = watch(fetchWithRetry(url))
+    await clk.until(() => next.done)
+    unwatch()
+
+    assert.equal(seen[0].reason, 'pacing')
+    assert.equal(seen.at(-1).until, 0)
+  })
+
+  test('a burst that stops for a minute starts counting again', async (t) => {
+    const clk = useClock(t)
+    const calls = stubFetch(t, [{ status: 200 }])
+
+    for (let i = 0; i < 19; i++)
+      await fetchWithRetry(url)
+    // Long enough that the burst those nineteen belonged to is over; whatever
+    // comes next is a new one and should not inherit their count.
+    await clk.tick(2 * MINUTE)
+    for (let i = 0; i < 19; i++)
+      await fetchWithRetry(url)
+
+    assert.equal(calls.length, 38)
+    assert.equal(calls.at(-1).at, calls[19].at, 'no breather inside the second burst')
+  })
+
+  test('a refusal during a breather is still written down', async (t) => {
+    const clk = useClock(t)
+    // Twenty to earn the breather, then a refusal for the twenty-first.
+    const calls = stubFetch(t, [
+      ...Array.from({ length: 20 }, () => ({ status: 200 })),
+      { status: 429, retryAfter: 600 },
+      { status: 200 },
+    ])
+
+    for (let i = 0; i < 20; i++)
+      await fetchWithRetry(url)
+
+    const next = watch(fetchWithRetry(url, undefined, PATIENCE.bulk))
+    await clk.until(() => calls.length === 22, 10_000)
+    await next.done
+
+    // The breather was in force when the 429 arrived. If that had counted as
+    // "a pause is already running", the archive's own answer would have been
+    // swallowed and the retry would have gone out five seconds later.
+    assert.equal(calls[21].at - calls[20].at, 600_000, 'AO3 said ten minutes; ten minutes it is')
   })
 })
 
@@ -272,14 +367,61 @@ describe('archiveFetch — when waiting stops being sensible', () => {
 
   test('a bulk fetch settles in for hours before it gives up', async (t) => {
     const clk = useClock(t)
-    const calls = stubFetch(t, [{ status: 429, retryAfter: 600 }])
+    const retryAfter = 600
+    const calls = stubFetch(t, [{ status: 429, retryAfter }])
 
     const state = watch(fetchWithRetry(url, undefined, PATIENCE.bulk))
     await clk.until(() => state.done, MINUTE)
 
     assert.equal(state.value.status, 429)
+    // The budget is a ceiling, not a stopwatch: it keeps going back for hours,
+    // and stops one pause short rather than sitting through a wait it already
+    // knows it cannot afford.
     const spent = calls.at(-1).at - calls[0].at
-    assert.ok(spent >= PATIENCE.bulk, `waited ${spent}ms, expected at least ${PATIENCE.bulk}ms`)
+    assert.ok(spent <= PATIENCE.bulk, `waited ${spent}ms, which is past the budget`)
+    assert.ok(
+      spent > PATIENCE.bulk - retryAfter * 1000 - 1,
+      `waited ${spent}ms, expected to have used nearly all of ${PATIENCE.bulk}ms`,
+    )
+  })
+
+  /**
+   * The case a reader actually meets: press the search button, and AO3 answers
+   * with the kind of 429 that names no `Retry-After` at all. The blind ladder
+   * starts at five minutes, which is more than the whole interactive budget —
+   * so the request must hand the refusal straight back instead of disappearing
+   * into a wait it cannot afford. The scrape above it is what waits, where the
+   * reader can see a countdown and press Cancel.
+   */
+  test('a wait it cannot afford is not one it starts', async (t) => {
+    const clk = useClock(t)
+    const calls = stubFetch(t, [{ status: 429 }])
+
+    const state = watch(fetchWithRetry(url))
+    await clk.until(() => state.done, 1000)
+
+    assert.equal(state.value.status, 429)
+    assert.equal(calls.length, 1, 'asked once, and did not sit through five minutes to ask again')
+    // Handed back at once — but with the five minutes written down, so whatever
+    // decides to come back knows exactly how long it has to stay away.
+    assert.ok(archiveWaitRemaining() > 4 * MINUTE)
+  })
+
+  /**
+   * The refusal that ends a request is still the archive's answer to everyone.
+   * Handing it back without writing it down is how a queue of pages used to fail
+   * one at a time: each one found the pause expired, went out, was refused, and
+   * paid the whole wait again to learn what the one before it already knew.
+   */
+  test('giving up still records the pause, so the next caller knows', async (t) => {
+    const clk = useClock(t)
+    stubFetch(t, [{ status: 429, retryAfter: 30 }])
+
+    const state = watch(fetchWithRetry(url))
+    await clk.until(() => state.done, 10_000)
+
+    assert.equal(state.value.status, 429)
+    assert.ok(archiveWaitRemaining() > 0, 'the refusal that ended it is still in force')
   })
 
   test('a stop during a wait is a stop, not a slow retry', async (t) => {
@@ -287,7 +429,10 @@ describe('archiveFetch — when waiting stops being sensible', () => {
     const calls = stubFetch(t, [{ status: 429, retryAfter: 120 }])
     const controller = new AbortController()
 
-    const pending = fetchWithRetry(url, controller.signal)
+    // The patient budget, so there is a wait to interrupt at all: two minutes is
+    // the whole of the interactive one, which would hand the refusal back rather
+    // than start a pause it cannot afford.
+    const pending = fetchWithRetry(url, controller.signal, PATIENCE.bulk)
     await new Promise(setImmediate)
     assert.equal(calls.length, 1)
 

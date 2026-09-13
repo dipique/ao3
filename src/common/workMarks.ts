@@ -277,6 +277,40 @@ export function markRoot(marks: Record<MarkId, MarkConfig>, id: MarkId): MarkId 
 }
 
 /**
+ * The marks that mean "I have read this": the {@link READ_MARK} trigger group,
+ * minus any mark that tracks progress.
+ *
+ * The group is the right unit — a work called "gross" has been read just as
+ * much as one called "read", which is why they alias it — but `continue`
+ * ("Ongoing") is in the group precisely to say the opposite. It is the one mark
+ * that means you are *not* done with a work, so it is not a verdict and a work
+ * carrying only that one has not been read.
+ */
+export function readMarkIds(marks: Record<MarkId, MarkConfig>): MarkId[] {
+  return markGroup(marks, READ_MARK).filter(id => !markTracksProgress(marks, id))
+}
+
+/**
+ * Every work the reader has given a verdict to, by id — the whole of what
+ * "the works I have read" means, gathered from {@link readMarkIds}.
+ *
+ * Lives here rather than with the view that shows it because it is a question
+ * about the mark table, and two places outside the content script ask it: the
+ * read list itself, and the stored-list refresh behind the site export, which
+ * must not import a content-script Unit.
+ */
+export function readWorkIds(workMarks: WorkMarks): Set<string> {
+  const ids = new Set<string>()
+  if (!workMarks.enabled)
+    return ids
+  for (const mark of readMarkIds(workMarks.marks)) {
+    for (const workId of markItems(workMarks.marks, mark))
+      ids.add(workId)
+  }
+  return ids
+}
+
+/**
  * Every mark that behaves as `id` does — the group's root plus each mark
  * aliasing it, in table order. Which of them can sit on one work together is
  * {@link markClears}.

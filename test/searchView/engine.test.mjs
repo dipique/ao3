@@ -286,6 +286,53 @@ describe('the status facet', () => {
   })
 })
 
+describe('the marks facet', () => {
+  test('an unstamped work contributes nothing', () => {
+    // Unlike `status`, which falls back to Ready, there is no sensible default
+    // mark — so a set the host never stamped (marks turned off) simply has no
+    // Marks group at all rather than a group full of guesses.
+    assert.deepEqual(facetValues(work(), 'marks'), [])
+    assert.deepEqual(buildFacets([work(), work()]).marks, [])
+  })
+
+  test('precomputed labels are used as-is', () => {
+    assert.deepEqual(facetValues(work({ marks: ['Read', 'Favorite'] }), 'marks'), ['Read', 'Favorite'])
+  })
+
+  test('including one mark is how you ask for everything you called it', () => {
+    const set = [
+      work({ workId: '1', markedOrder: 0, marks: ['Read', 'Favorite'] }),
+      work({ workId: '2', markedOrder: 1, marks: ['Read'] }),
+      work({ workId: '3', markedOrder: 2, marks: ['Unmarked'] }),
+    ]
+    const state = emptyFilterState()
+    state.facets.marks.include.add('Favorite')
+    assert.deepEqual(applyFilters(set, state).map(w => w.workId), ['1'])
+
+    // And "Unmarked" is the one question excluding the rest can't ask: excluding
+    // Favorite still leaves everything marked some other way.
+    const unmarked = emptyFilterState()
+    unmarked.facets.marks.include.add('Unmarked')
+    assert.deepEqual(applyFilters(set, unmarked).map(w => w.workId), ['3'])
+  })
+
+  test('counts and drill-down treat it like any other group', () => {
+    const set = [
+      work({ workId: '1', markedOrder: 0, marks: ['Read', 'Favorite'], fandoms: ['Naruto'] }),
+      work({ workId: '2', markedOrder: 1, marks: ['Read'], fandoms: ['Bleach'] }),
+      work({ workId: '3', markedOrder: 2, marks: ['Unmarked'], fandoms: ['Naruto'] }),
+    ]
+    assert.deepEqual(
+      Object.fromEntries(buildFacets(set).marks.map(f => [f.value, f.count])),
+      { Read: 2, Favorite: 1, Unmarked: 1 },
+    )
+    const state = emptyFilterState()
+    state.facets.fandoms.include.add('Naruto')
+    const { facetCounts } = computeView(set, state)
+    assert.deepEqual([...facetCounts.marks.entries()].sort(), [['Favorite', 1], ['Read', 1], ['Unmarked', 1]])
+  })
+})
+
 describe('the completion facet', () => {
   test('reads the work’s own complete flag', () => {
     assert.deepEqual(facetValues(work(), 'completion'), ['Complete'])

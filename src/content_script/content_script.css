@@ -1080,12 +1080,14 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   display: none !important;
 }
 
-.AO3E--search-marked-for-later--button {
+.AO3E--search-marked-for-later--button,
+.AO3E--search-read-works--button {
   cursor: pointer;
 }
 
-/* Hide the button while the search view is open — it doesn't do anything there. */
-#main:has(.AO3E--search-host) li:has(.AO3E--search-marked-for-later--button) {
+/* Hide the buttons while the search view is open — they don't do anything there. */
+#main:has(.AO3E--search-host)
+  li:is(:has(.AO3E--search-marked-for-later--button), :has(.AO3E--search-read-works--button)) {
   display: none;
 }
 
@@ -1093,17 +1095,17 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
    its own layout (`container-type` on .AO3E--search-view), so it can't run
    under the float — it shrinks to clear it instead, and the results give up the
    width of the whole subnav for the length of the page. Out of flow, the links
-   keep their corner and the view gets the column back. Only for this source:
-   the works-search view means to share its toolbar line with that page's own
-   "Edit Your Search". */
-#main:has(.AO3E--marked-for-later) {
+   keep their corner and the view gets the column back. Only for the two views
+   offered on the readings pages: the works-search view means to share its
+   toolbar line with that page's own "Edit Your Search". */
+#main:has(:is(.AO3E--marked-for-later, .AO3E--read-works)) {
   /* The corner the subnav is pinned to. AO3's own skin already positions #main;
      saying so here keeps a skin that doesn't from flinging it to the top of the
      page instead. */
   position: relative;
 }
 
-#main:has(.AO3E--marked-for-later) > ul.navigation.actions {
+#main:has(:is(.AO3E--marked-for-later, .AO3E--read-works)) > ul.navigation.actions {
   position: absolute;
   top: 0;
   right: 0;

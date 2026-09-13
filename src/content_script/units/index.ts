@@ -19,6 +19,7 @@ import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { ReaderMode } from './ReaderMode.ts'
 import { RequiredTagsToolbar } from './RequiredTagsToolbar.tsx'
 import { SearchMarkedForLater } from './SearchMarkedForLater.tsx'
+import { SearchReadWorks } from './SearchReadWorks.tsx'
 import { SearchSeriesWorks } from './SearchSeriesWorks.tsx'
 import { SearchTagWorks } from './SearchTagWorks.tsx'
 import { SearchTextResults } from './SearchTextResults.tsx'
@@ -67,6 +68,8 @@ export const UNITS = [
   FilterSeriesToolbar,
   WordCountToolbar,
   SearchMarkedForLater,
+  // After SearchMarkedForLater, whose button its own sits next to.
+  SearchReadWorks,
   SearchSeriesWorks,
   SearchTagWorks,
   SearchTextResults,

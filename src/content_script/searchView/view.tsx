@@ -72,6 +72,8 @@ export interface SearchView {
   update: (works: Work[], autoExcludes?: FacetValueRef[]) => void
   /** Toggle the subtle "updating in the background" indicator. */
   setUpdating: (updating: boolean) => void
+  /** Record when the works were last fetched, for the Refresh button to say. */
+  setRefreshedAt: (at: number) => void
   /** Current filter/sort/page, so a caller can rebuild the view where it left off. */
   getState: () => ViewState
 }
@@ -149,6 +151,11 @@ export interface SearchViewConfig {
    */
   sortLabels?: Partial<Record<SortKey, string>>
   /**
+   * Epoch ms the works were last fetched from AO3. Shown on the Refresh button,
+   * which matters once a stored copy can be days old on purpose.
+   */
+  refreshedAt?: number
+  /**
    * Status values the view opens (and resets) with when the user has no saved
    * selection. Defaults to {@link DEFAULT_STATUS} — "only what's ready", which
    * is triage for a to-read list but would silently hide works when browsing, so
@@ -166,6 +173,18 @@ const DEFAULT_PER_PAGE = 50
  */
 function results(works: Work[]): Work[] {
   return works.filter(work => !work.hidden)
+}
+
+/** `just now`, `5 minutes ago`, `3 hours ago`, `2 days ago`. */
+function timeAgo(at: number, now: number = Date.now()): string {
+  const minutes = Math.floor((now - at) / 60_000)
+  const say = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? '' : 's'} ago`
+  if (minutes < 1)
+    return 'just now'
+  if (minutes < 60)
+    return say(minutes, 'minute')
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? say(hours, 'hour') : say(Math.floor(hours / 24), 'day')
 }
 
 function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
@@ -540,6 +559,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         return button
       })()
     : null
+  let refreshedAt = config.refreshedAt
   const onRefresh = handlers.onRefresh
   const refreshBtn = onRefresh
     ? (() => {
@@ -549,6 +569,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
           </button>
         ) as HTMLElement as HTMLButtonElement
         button.addEventListener('click', onRefresh)
+        // Worked out on hover rather than when set, so "just now" doesn't go on
+        // saying so an hour later on a tab left open.
+        button.addEventListener('mouseenter', () => {
+          button.title = refreshedAt === undefined ? 'Refresh' : `Refresh — last refreshed ${timeAgo(refreshedAt)}`
+        })
         return button
       })()
     : null
@@ -1158,6 +1183,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     refreshBtn?.classList.toggle(cx('refresh-spinning'), updating)
   }
 
+  function setRefreshedAt(at: number): void {
+    refreshedAt = at
+  }
+
   function getState(): ViewState {
     const facetQueries: Partial<Record<FacetKey, string>> = {}
     const collapsedFacets: FacetKey[] = []
@@ -1245,5 +1274,5 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   layoutEl = el.querySelector<HTMLElement>(`.${cx('layout')}`)
   applySidebarWidth()
 
-  return { el, update, setUpdating, getState }
+  return { el, update, setUpdating, setRefreshedAt, getState }
 }

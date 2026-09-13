@@ -20,6 +20,11 @@
  * arriving while the archive is still refusing. One pause held in this module
  * stops all of them together, which is both politer and faster.
  *
+ * The same pause is what paces us when nothing has gone wrong at all: every
+ * {@link PACE_EVERY} requests the pool takes a {@link PACE_PAUSE_MS} breather
+ * ({@link paceOne}). A rate limit is the archive telling us we were already
+ * going too fast; a steady breather is the cheaper way to not find out.
+ *
  * The response comes back whatever its status. Only the caller can say what a
  * 404 or a redirect to the login page *means*, and the work-text cache's whole
  * failure vocabulary depends on being able to tell those apart.
@@ -45,6 +50,23 @@ const BLIND_WAIT_STEP_MS = 5 * 60_000
 const MAX_WAIT_MS = 60 * 60_000
 
 /**
+ * Requests we will make back-to-back before pausing for {@link PACE_PAUSE_MS}.
+ * Twenty is one AO3 listing page's worth of works, so a set is roughly what a
+ * reader going through the same list by hand would have loaded.
+ */
+const PACE_EVERY = 20
+
+/** The breather taken between sets. Short: it is courtesy, not a punishment. */
+const PACE_PAUSE_MS = 5_000
+
+/**
+ * A gap long enough that whatever burst the counter was measuring is over, so
+ * the next request starts a fresh set rather than inheriting a stale count. A
+ * job already going slower than the pacing is not one the pacing need slow.
+ */
+const PACE_IDLE_RESET_MS = 60_000
+
+/**
  * How long a request will spend waiting out 429s before handing the refusal
  * back, by who is waiting for it.
  *
@@ -53,6 +75,13 @@ const MAX_WAIT_MS = 60 * 60_000
  * worse than being told it didn't work; a caching run has nobody in front of it,
  * and stopping only means the reader has to come back and press Continue —
  * which is the babysitting the waiting exists to avoid.
+ *
+ * It is a ceiling on the wait, not a stopwatch that has to run out: a request
+ * gives up rather than *start* a pause that would take it past this. Checking
+ * afterwards instead would have let an interactive fetch sit through the whole
+ * of a five-minute blind refusal before noticing it only had two minutes to
+ * spend — which is precisely the silence the short budget is there to prevent,
+ * and the caller cannot regroup until the refusal is back in its hands.
  */
 export const PATIENCE = {
   interactive: 2 * 60_000,
@@ -60,10 +89,39 @@ export const PATIENCE = {
 } as const
 
 /**
- * Epoch ms until which every caller holds off, set by whichever request last saw
- * a 429. Zero when nothing is waiting.
+ * How long a *job* made of many requests will spend waiting out refusals in
+ * total before it stops and reports what it managed, by who is waiting for it.
+ *
+ * Where {@link PATIENCE} bounds one request, this bounds the run, and the two do
+ * different work. A short patience is what lets a single page give up quickly so
+ * the job can regroup — put the page back, sit out the archive's pause once for
+ * everybody, then ask again for only what is still missing — while this is what
+ * stops that regrouping going on all afternoon. A job a reader is watching must
+ * still end.
  */
-let pausedUntil = 0
+export const WAIT_BUDGET = {
+  interactive: 20 * 60_000,
+  bulk: 4 * 60 * 60_000,
+} as const
+
+/**
+ * Epoch ms until which every caller holds off because the archive refused one of
+ * them. Zero when no refusal is being sat out.
+ */
+let refusedUntil = 0
+
+/**
+ * Epoch ms until which every caller holds off for the routine breather between
+ * sets ({@link paceOne}). Kept apart from {@link refusedUntil} because the two
+ * mean opposite things — one is the archive complaining, the other is us making
+ * sure it has no reason to — and a reader watching a job go quiet deserves to be
+ * told which.
+ */
+let pacedUntil = 0
+
+/** Requests made since the last breather, and when the last one went out. */
+let sinceBreather = 0
+let lastRequestAt = 0
 
 /** The current rung of the blind ladder above, in ms. Zero before we climb it. */
 let blindWait = 0
@@ -71,13 +129,16 @@ let blindWait = 0
 /** When we were last refused, so a fresh episode starts the ladder over. */
 let lastRefusedAt = 0
 
-type WaitListener = (until: number) => void
+/** Why everything has stopped: the archive refused us, or we are pacing ourselves. */
+export type WaitReason = 'refused' | 'pacing'
+
+type WaitListener = (until: number, reason: WaitReason) => void
 
 const waitListeners = new Set<WaitListener>()
 
 /**
- * Watch for AO3 asking us to wait — `until` is the epoch ms the pause runs to,
- * or 0 when it is over.
+ * Watch for fetching to pause — `until` is the epoch ms it runs to, or 0 when it
+ * is over, and `reason` says which kind of pause it was.
  *
  * A long job that has gone quiet for two minutes should be able to say why,
  * rather than looking like it has hung.
@@ -89,14 +150,27 @@ export function onArchiveWait(listener: WaitListener): () => void {
   }
 }
 
-/** How long the current pause has left, in ms; 0 when nothing is waiting. */
-export function archiveWaitRemaining(): number {
-  return Math.max(0, pausedUntil - Date.now())
+/** Epoch ms every caller is holding off until, whichever pause is the longer. */
+function pausedUntil(): number {
+  return Math.max(refusedUntil, pacedUntil)
 }
 
-function announce(until: number): void {
+/** How long the current pause has left, in ms; 0 when nothing is waiting. */
+export function archiveWaitRemaining(): number {
+  return Math.max(0, pausedUntil() - Date.now())
+}
+
+/**
+ * What the current pause is. A refusal outranks a breather: when both are being
+ * sat out, the one worth saying out loud is the archive's.
+ */
+function waitReason(): WaitReason {
+  return refusedUntil > Date.now() ? 'refused' : 'pacing'
+}
+
+function announce(until: number, reason: WaitReason): void {
   for (const listener of waitListeners)
-    listener(until)
+    listener(until, reason)
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -118,11 +192,17 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
-/** Sit out whatever pause is in force, re-reading it in case it is extended. */
-async function holdOff(signal?: AbortSignal): Promise<void> {
+/**
+ * Sit out whatever pause is in force, re-reading it in case it is extended.
+ *
+ * Exported because a job that means to come back after a refusal has to know
+ * when it may — asking again the moment a page gave up would walk the whole
+ * queue into the same wall, which is the thing the shared pause exists to stop.
+ */
+export async function waitForArchive(signal?: AbortSignal): Promise<void> {
   if (archiveWaitRemaining() <= 0)
     return
-  announce(pausedUntil)
+  announce(pausedUntil(), waitReason())
   try {
     let remaining = archiveWaitRemaining()
     while (remaining > 0) {
@@ -133,8 +213,28 @@ async function holdOff(signal?: AbortSignal): Promise<void> {
   finally {
     // Whoever leaves last says the wait is over; the others find it already 0.
     if (archiveWaitRemaining() <= 0)
-      announce(0)
+      announce(0, waitReason())
   }
+}
+
+/**
+ * Count one request against the pacing budget, opening a breather when a set is
+ * done. Synchronous on purpose: the counter has to move before the caller can
+ * `await` anything, or three workers would all read the nineteenth request and
+ * none of them would be the twentieth.
+ *
+ * The request being counted still goes out — it is the last of its set, not the
+ * first of the next — so the pause it opens is sat out by whoever asks next.
+ */
+function paceOne(): void {
+  const now = Date.now()
+  if (now - lastRequestAt > PACE_IDLE_RESET_MS)
+    sinceBreather = 0
+  lastRequestAt = now
+  if (++sinceBreather < PACE_EVERY)
+    return
+  sinceBreather = 0
+  pacedUntil = Math.max(pacedUntil, now + PACE_PAUSE_MS)
 }
 
 /**
@@ -147,7 +247,10 @@ async function holdOff(signal?: AbortSignal): Promise<void> {
  * one — we waited, came back, and were turned away again — climbs.
  */
 function pauseFor(asked: number | null): void {
-  if (archiveWaitRemaining() > 0)
+  // A *refusal* already in force, not any pause at all: a 429 that arrives
+  // during a routine breather is still news, and swallowing it would leave the
+  // archive's own answer unrecorded.
+  if (refusedUntil > Date.now())
     return
   const now = Date.now()
   // Long enough since the last refusal that this is a new episode, not a
@@ -157,7 +260,7 @@ function pauseFor(asked: number | null): void {
   lastRefusedAt = now
   if (asked === null)
     blindWait = Math.min(MAX_WAIT_MS, blindWait + BLIND_WAIT_STEP_MS)
-  pausedUntil = now + Math.min(MAX_WAIT_MS, asked ?? blindWait)
+  refusedUntil = now + Math.min(MAX_WAIT_MS, asked ?? blindWait)
 }
 
 /** `Retry-After` in ms — it may be a count of seconds or an HTTP date. */
@@ -186,17 +289,24 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   const startedAt = Date.now()
   for (;;) {
-    await holdOff(signal)
+    await waitForArchive(signal)
+    paceOne()
     const res = await fetch(url, { credentials: 'same-origin', signal })
     if (res.status !== 429) {
       // Something got through, so whatever we were being paced for is over.
       blindWait = 0
       return res
     }
-    // Measured rather than accumulated, so a wait this request merely joined
-    // still counts against it.
-    if (Date.now() - startedAt >= patience)
-      return res
+    // Recorded before we decide whether to carry on, because the refusal is the
+    // archive's and not this URL's. Giving up without writing it down is how a
+    // queue of pages used to fail one at a time, each rediscovering the same
+    // wall from scratch; with it written down, everything else holds off, and a
+    // job that means to come back knows exactly how long to wait.
     pauseFor(retryAfterMs(res))
+    // Would sitting this one out spend the budget? Measured from the start
+    // rather than accumulated, so a wait this request merely joined still
+    // counts against it.
+    if (Date.now() + archiveWaitRemaining() - startedAt >= patience)
+      return res
   }
 }

@@ -2,10 +2,10 @@ import type { SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import { withPage } from '#common'
-import { PATIENCE } from '#content_script/archiveFetch.js'
+import { PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 
 import { writeSnapshot } from './cache.ts'
-import { detectPageCount, fetchPageDoc, scrapeListing } from './scrape.ts'
+import { detectPageCount, fetchPageDoc, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 
 /**
  * Re-scrape a stored listing from outside the page it came from — the options
@@ -49,6 +49,20 @@ export interface RefreshOptions {
    * the source, and this module only knows the descriptor.
    */
   onPersist?: (works: Work[]) => Promise<void>
+  /**
+   * Which of the listing's works the stored list actually holds, mirroring
+   * `SearchSource.select` on the live path.
+   *
+   * A list whose works are *chosen from* its listing rather than being it — the
+   * read list, which reads the reader's AO3 history looking for the works they
+   * have marked — would otherwise be refreshed into the listing itself, and the
+   * next export would be their whole browsing history. Left to the caller for the
+   * same reason {@link onPersist} is: which listings are like that is a property
+   * of the source, and this module only knows the descriptor.
+   */
+  select?: (works: Work[]) => Work[]
+  /** Whether the scrape may stop early, given the ids seen — see `ScrapeOptions`. */
+  satisfied?: (ids: ReadonlySet<string>) => boolean
 }
 
 export interface RefreshResult {
@@ -61,6 +75,14 @@ export interface RefreshResult {
   totalPages: number
   /** The ceiling cut the listing short. */
   truncated: boolean
+  /**
+   * AO3 kept refusing, so the scrape came back short and **nothing was written**
+   * — the stored list is still whatever it was. A partial listing saved over a
+   * complete one would lose works on the strength of a bad few minutes, and take
+   * the ids of whatever side table the source keeps with them. The caller should
+   * stop and resume later rather than treat this as the new list.
+   */
+  blocked: boolean
   /**
    * Page 1 came back with `body.logged-in`. False means AO3 served the signed-out
    * view, and what was scraped is at best partial: no restricted works, no
@@ -78,7 +100,7 @@ export interface RefreshResult {
  * that fail are skipped, and show up as `loadedPages < fetchedPages`.
  */
 export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResult> {
-  const { cacheKey, descriptor, limit, onProgress, signal, onPersist } = opts
+  const { cacheKey, descriptor, limit, onProgress, signal, onPersist, select, satisfied } = opts
 
   // This is the job's refresh, run from the options page with nobody watching —
   // so it waits a rate limit out rather than failing back to a reader who isn't
@@ -89,9 +111,13 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
 
   // A ceiling under one page would fetch nothing at all; one page is the floor.
   const ceiling = Math.max(WORKS_PER_PAGE, Math.floor(limit) || WORKS_PER_PAGE)
-  const fetchedPages = Math.min(totalPages, Math.ceil(ceiling / WORKS_PER_PAGE))
+  // A selected list is searching a haystack: its ceiling bounds what comes out,
+  // so the listing gets read as far as `satisfied` or the page cap allows.
+  const fetchedPages = select
+    ? Math.min(totalPages, MAX_SCANNED_PAGES)
+    : Math.min(totalPages, Math.ceil(ceiling / WORKS_PER_PAGE))
 
-  const { works, loadedPages } = await scrapeListing({
+  const { works: scraped, loadedPages, blocked } = await scrapeListing({
     pageCount: fetchedPages,
     pageUrl: page => withPage(descriptor.listUrl, page),
     blurbSelector: descriptor.blurbSelector,
@@ -99,20 +125,30 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     onProgress,
     signal,
     patience: PATIENCE.bulk,
+    satisfied,
+    // Nobody is watching this one, so it waits a rate limit out rather than
+    // handing back a listing with holes in it.
+    waitBudget: WAIT_BUDGET.bulk,
   })
 
+  const works = select ? select(scraped) : scraped
   // The pages fetched can hold more than the ceiling; the hard trim keeps it exact.
   if (works.length > ceiling)
     works.length = ceiling
 
-  await writeSnapshot(cacheKey, works, descriptor)
-  await onPersist?.(works)
+  // See `RefreshResult.blocked`: what we have is not the list, so it does not
+  // become the stored one.
+  if (!blocked) {
+    await writeSnapshot(cacheKey, works, descriptor)
+    await onPersist?.(works)
+  }
 
   return {
     works,
     loadedPages,
     fetchedPages,
     totalPages,
+    blocked: !!blocked,
     truncated: fetchedPages < totalPages,
     loggedIn,
   }

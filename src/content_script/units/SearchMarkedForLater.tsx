@@ -94,6 +94,9 @@ export class SearchMarkedForLater extends Unit {
       }),
       pageUrl: page => getArchiveLink(`/users/${userId}/readings?show=to-read&page=${page}`),
       pageCount: () => detectPageCount(document),
+      // A to-read list runs to hundreds of works for some readers, and a full
+      // reload on every visit is exactly what gets them rate-limited.
+      refreshInterval: () => Math.max(0, this.options.searchMarkedForLaterRefreshHours || 0) * 60 * 60_000,
       nativeElements: () => document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
       mount: (container) => {
         const anchor = document.querySelector('#main ul.navigation.actions')

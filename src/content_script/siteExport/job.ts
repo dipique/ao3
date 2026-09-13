@@ -1,7 +1,8 @@
 import type { SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
+import type { RefreshOptions } from '#content_script/searchView/refresh.js'
 
-import { createLogger, options, saveAs } from '#common'
+import { createLogger, options, readWorkIds, saveAs } from '#common'
 import { onArchiveWait } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { readSnapshot } from '#content_script/searchView/cache.js'
@@ -272,10 +273,10 @@ async function drive(job: ExportJob): Promise<void> {
   // A pause can run to minutes, and every worker is inside it, so without this
   // the run looks like it has hung. Nothing else publishes while it holds, which
   // is what lets this stand until a fetch actually resumes.
-  const unwatch = onArchiveWait((until) => {
+  const unwatch = onArchiveWait((until, reason) => {
     waitingUntil = until || null
     if (until)
-      message = 'AO3 asked us to slow down'
+      message = reason === 'refused' ? 'AO3 asked us to slow down' : 'Giving AO3 a moment'
     publish()
   })
 
@@ -329,6 +330,7 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
     limit,
     signal,
     onPersist: sideTableWriter(job.descriptor),
+    ...await selectionFor(job.descriptor),
     onProgress: (done, total) => {
       job.done = done
       job.total = total
@@ -336,6 +338,16 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
       publish()
     },
   })
+
+  // Nothing was written, so the stored list and any queue planned against it are
+  // still good; the step stays in place and Continue picks it up where it left
+  // off, exactly as a rate-limited caching run does.
+  if (result.blocked) {
+    job.blocked = 'rate-limited'
+    await persist(job)
+    publish()
+    return
+  }
 
   // The list has been replaced, so any queue planned against the old one is void.
   job.queue = []
@@ -540,6 +552,28 @@ function sideTableWriter(descriptor: SnapshotDescriptor): ((works: Work[]) => Pr
   if (descriptor.sourceId !== 'marked-for-later' || !userId)
     return undefined
   return works => saveMarkedForLaterIndex(decodeURIComponent(userId), works.map(work => work.workId))
+}
+
+/**
+ * The stored lists whose works are *chosen from* a listing rather than being it,
+ * mirroring `SearchSource.select` on the live path.
+ *
+ * Only the read list is one: it reads the reader's AO3 history looking for the
+ * works they have marked, so refreshing it without this would replace the list
+ * with their whole browsing history — and the next export would be of that.
+ * Recognised from the descriptor's `sourceId`, since the source's module is
+ * content-script-only and importing it here would drag every Unit in with it;
+ * the question it asks is of the mark table, which is shared
+ * ({@link file://../../common/workMarks.ts}).
+ */
+async function selectionFor(descriptor: SnapshotDescriptor): Promise<Pick<RefreshOptions, 'select' | 'satisfied'>> {
+  if (descriptor.sourceId !== 'read-works')
+    return {}
+  const wanted = readWorkIds(await options.get('workMarks'))
+  return {
+    select: works => works.filter(work => wanted.has(work.workId)),
+    satisfied: ids => [...wanted].every(id => ids.has(id)),
+  }
 }
 
 function addError(job: ExportJob, entry: ExportJobError): void {

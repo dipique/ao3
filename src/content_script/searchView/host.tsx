@@ -2,11 +2,13 @@ import type { Options, SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS, logger, toast } from '#common'
+import { onArchiveWait } from '#content_script/archiveFetch.js'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
+import type { WriteSnapshotOptions } from './cache.ts'
 import type { FacetValueRef } from './engine.ts'
 import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
 
@@ -15,7 +17,7 @@ import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
 import { applyHidden } from './hidden.ts'
 import { loadPrefs, savePrefs } from './prefs.ts'
-import { scrapeListing } from './scrape.ts'
+import { isArchiveBusy, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 import { createSearchView } from './view.tsx'
 
 /**
@@ -30,6 +32,13 @@ import { createSearchView } from './view.tsx'
  */
 
 const log = logger.child('searchView')
+
+/**
+ * What to say when AO3 turned us away and kept turning us away. Deliberately not
+ * worded as a failure: nothing is wrong, we were asking too often, and the one
+ * useful thing the reader can do is come back in a few minutes.
+ */
+const RATE_LIMITED = 'AO3 asked us to slow down. Try again in a few minutes.'
 
 /**
  * Everything that differs between the places the search view is offered: where
@@ -52,8 +61,21 @@ export interface SearchSource {
   descriptor: () => SnapshotDescriptor
   /** Builds the URL of a 1-based page of the source listing. */
   pageUrl: (page: number) => string
-  /** How many pages that listing has. Read from the live page, at load time. */
-  pageCount: () => number
+  /**
+   * How many pages that listing has, at load time — read off the live page when
+   * that page *is* the listing. A source offered somewhere else (the read-items
+   * view, which is offered on the Marked for Later page too) has to fetch page 1
+   * to find out, so this may answer with a promise; such a source hands the page
+   * it fetched back through {@link firstPageDoc} rather than letting the scrape
+   * ask AO3 for it twice.
+   */
+  pageCount: () => number | Promise<number>
+  /**
+   * Page 1 of the listing, if {@link pageCount} had to fetch it. Consumed once
+   * per count — a later scrape gets its own — so returning a stale document
+   * here would be a bug rather than a saving.
+   */
+  firstPageDoc?: () => Document | undefined
   /**
    * How many works the listing says it holds, when it says so at all. Only used
    * to explain a truncated load ({@link budgetFor}) — the cap itself is counted
@@ -62,16 +84,55 @@ export interface SearchSource {
   resultCount?: () => number | null
   /** Where blurbs sit in a fetched page (see `DEFAULT_BLURB_SELECTOR`). */
   blurbSelector?: string
+  /**
+   * Which of the listing's works this source actually means to show.
+   *
+   * Most sources show their listing; the read list does not. Its works are the
+   * ones the reader has marked, which the extension knows only as work ids —
+   * a mark table holds no titles, tags or authors — so the listing it scrapes
+   * (the archive's own history) is a **haystack it reads to find their blurbs**,
+   * not the answer. Everything the reader sees, everything cached, and
+   * everything faceted is what this returns.
+   *
+   * A source that sets it is budgeted differently: the works ceiling bounds what
+   * comes out rather than how much is read, and {@link satisfied} is how it
+   * avoids reading more of the haystack than it has to.
+   */
+  select?: (works: Work[]) => Work[]
+  /**
+   * Whether the scrape can stop, given the work ids seen so far — passed
+   * straight through to the scraper, which is where it is explained.
+   */
+  satisfied?: (ids: ReadonlySet<string>) => boolean
   /** The native elements hidden while the view is up, restored when it closes. */
   nativeElements: () => Iterable<Element>
   /** Insert the (empty, already classed) container where the view belongs. */
   mount: (container: HTMLElement) => void
   /**
+   * Undo whatever {@link mount} did to the page besides inserting the container
+   * — which the host removes itself — however the view closes: Back, Cancel, a
+   * failed load, or a global re-run suspending it. Anything native it hid should
+   * be in {@link nativeElements}, which the host puts back on its own.
+   */
+  unmount?: () => void
+  /**
+   * How long, in ms, a stored snapshot is recent enough that opening the view
+   * shows it without re-scraping the listing behind it. Absent or `0` refreshes
+   * on every open, which suits a listing that costs a page or two.
+   *
+   * Measured from the snapshot's `scrapedAt`, which only a real scrape moves.
+   * The view's Refresh button ignores it, as does a view opened with no stored
+   * copy at all.
+   */
+  refreshInterval?: () => number
+  /**
    * Stamp or seed a set of works before the view sees them — readiness, saved
    * state, anything that isn't a property of the blurb. Runs on every load,
-   * cached or fresh.
+   * cached or fresh, and is told which: a source with something to *say* about
+   * the set it was handed can only say it honestly of one that was just
+   * scraped. A snapshot is by definition the answer to an older question.
    */
-  prepare?: (works: Work[]) => void
+  prepare?: (works: Work[], opts: { fresh: boolean }) => void
   /** Persist alongside the blurb snapshot the host always writes (e.g. an id index). */
   onPersist?: (works: Work[]) => Promise<void>
   /** Source-specific view config, layered over the host's shared defaults. */
@@ -105,11 +166,40 @@ interface Budget {
  * ceiling. AO3 serves a text search for a common word half a million works deep
  * — 25,000 page requests — so no source is ever scraped whole on trust.
  */
-function budgetFor(source: SearchSource, options: Options): Budget {
+async function budgetFor(source: SearchSource, options: Options): Promise<Budget> {
+  const limit = limitFor(options)
+  const totalPages = Math.max(1, await source.pageCount())
+  // A source that selects from its listing is searching a haystack: its works
+  // ceiling bounds what comes *out*, and twenty pages of history might hold one
+  // work the reader wants or none at all. So the pages get their own cap, and
+  // `satisfied` is what usually ends the scrape long before it.
+  const pages = source.select
+    ? Math.min(totalPages, MAX_SCANNED_PAGES)
+    : Math.min(totalPages, Math.ceil(limit / WORKS_PER_PAGE))
+  return { limit, totalPages, pages }
+}
+
+/**
+ * The works a source means to show, out of what its listing held. Applied to a
+ * cached snapshot too: the snapshot stores what was selected last time, and the
+ * reader's marks move on between visits.
+ */
+function selected(source: SearchSource, works: Work[]): Work[] {
+  return source.select ? source.select(works) : works
+}
+
+/**
+ * The reader's works ceiling alone, without asking the source how long it is —
+ * which for some sources is a request ({@link SearchSource.pageCount}). All a
+ * caller trimming an already-loaded set needs.
+ *
+ * Exported because a source that means to report on its own shortfall has to
+ * know it: a list cut short by the reader's own ceiling is not a list with
+ * anything missing from it.
+ */
+export function limitFor(options: Options): number {
   // A ceiling under one page would fetch nothing at all; one page is the floor.
-  const limit = Math.max(WORKS_PER_PAGE, Math.floor(options.searchMaxResults) || WORKS_PER_PAGE)
-  const totalPages = Math.max(1, source.pageCount())
-  return { limit, totalPages, pages: Math.min(totalPages, Math.ceil(limit / WORKS_PER_PAGE)) }
+  return Math.max(WORKS_PER_PAGE, Math.floor(options.searchMaxResults) || WORKS_PER_PAGE)
 }
 
 /** Whether `budget` leaves part of the listing unread. */
@@ -117,14 +207,20 @@ function isTruncated(budget: Budget): boolean {
   return budget.pages < budget.totalPages
 }
 
-/** Drop everything past the budget's ceiling, in place. */
-function applyLimit(works: Work[], budget: Budget): Work[] {
-  if (works.length > budget.limit)
-    works.length = budget.limit
+/** Drop everything past the reader's ceiling, in place. */
+function applyLimit(works: Work[], limit: number): Work[] {
+  if (works.length > limit)
+    works.length = limit
   return works
 }
 
 let active: { source: SearchSource, view: SearchView } | null = null
+/**
+ * The source whose container is in the page, from the moment it is mounted —
+ * which is before {@link active}, while a scrape is still running — so a close
+ * at any point can hand it {@link SearchSource.unmount}.
+ */
+let mounted: SearchSource | null = null
 let controller: AbortController | null = null
 let busy = false
 /**
@@ -149,6 +245,11 @@ export function closeSearchView(): void {
   reopen = null
   for (const el of document.querySelectorAll(`.${HOST}`))
     el.remove()
+  // Before the native page comes back, so the source's stand-ins are never on
+  // screen alongside the things they stood in for.
+  const was = mounted
+  mounted = null
+  was?.unmount?.()
   for (const el of document.querySelectorAll(`.${NATIVE_HIDDEN_CLASS}`))
     el.classList.remove(NATIVE_HIDDEN_CLASS)
   // Release the context-menu triggers on the now-removed blurbs (the native
@@ -197,14 +298,14 @@ export function takeReopen(cacheKey: string): ViewState | null {
  * the works outright (see {@link file://./hidden.ts}); empty unless the reader
  * has `autoExcludeHidden` on.
  */
-function prepare(source: SearchSource, works: Work[], options: Options): FacetValueRef[] {
-  source.prepare?.(works)
+function prepare(source: SearchSource, works: Work[], options: Options, fresh: boolean): FacetValueRef[] {
+  source.prepare?.(works, { fresh })
   return applyHidden(works, options)
 }
 
 /** Write the blurb snapshot, plus whatever else the source keeps in step with it. */
-async function persist(source: SearchSource, works: Work[]): Promise<void> {
-  await writeSnapshot(source.cacheKey, works, source.descriptor())
+async function persist(source: SearchSource, works: Work[], opts: WriteSnapshotOptions = {}): Promise<void> {
+  await writeSnapshot(source.cacheKey, works, source.descriptor(), opts)
   await source.onPersist?.(works)
 }
 
@@ -213,12 +314,35 @@ function mountContainer(source: SearchSource): HTMLElement {
   for (const el of source.nativeElements())
     el.classList.add(NATIVE_HIDDEN_CLASS)
   const container = (<div class={`${ADDON_CLASS}  ${HOST}  ${ADDON_CLASS}--${source.id}`} />) as HTMLElement
+  mounted = source
   source.mount(container)
   return container
 }
 
-/** Determinate progress panel shown while a fresh scrape runs. */
-function mountProgress(container: HTMLElement): (done: number, total: number) => void {
+/** `2:05`, or `9s` under a minute — a wait too short to need the colon. */
+function countdown(ms: number): string {
+  const total = Math.ceil(ms / 1000)
+  const seconds = total % 60
+  return total >= 60 ? `${Math.floor(total / 60)}:${String(seconds).padStart(2, '0')}` : `${seconds}s`
+}
+
+interface ProgressPanel {
+  onProgress: (done: number, total: number) => void
+  /** Stop watching for pauses. The panel itself goes with whatever replaces it. */
+  dispose: () => void
+}
+
+/**
+ * Determinate progress panel shown while a fresh scrape runs.
+ *
+ * It also watches for fetching to pause ({@link file://./../archiveFetch.ts}),
+ * because a scrape that has been asked to wait stands still for minutes at a
+ * time and would otherwise be indistinguishable from one that has hung. The bar
+ * keeps whatever it had reached — nothing has been lost, and the pages already
+ * in hand are still in hand — and the line says what we are waiting for and how
+ * much longer.
+ */
+function mountProgress(container: HTMLElement): ProgressPanel {
   const label = (<div class={cx('progress-label')}>Preparing…</div>) as HTMLElement
   const fill = (<div class={cx('progress-fill')} />) as HTMLElement
   const cancel = (<button type="button" class={cx('progress-cancel')}>Cancel</button>) as HTMLElement
@@ -231,9 +355,41 @@ function mountProgress(container: HTMLElement): (done: number, total: number) =>
     </div>
   )
   container.replaceChildren(panel)
-  return (done, total) => {
-    label.textContent = `Loaded ${done} of ${total} pages…`
-    fill.style.width = `${total ? Math.round((done / total) * 100) : 0}%`
+
+  let progressText = 'Preparing…'
+  let waitUntil = 0
+  let waitText = ''
+  let ticker: ReturnType<typeof setInterval> | undefined
+
+  const draw = (): void => {
+    const left = Math.max(0, waitUntil - Date.now())
+    if (left <= 0 && ticker !== undefined) {
+      clearInterval(ticker)
+      ticker = undefined
+    }
+    label.textContent = left > 0 ? `${waitText} — trying again in ${countdown(left)}` : progressText
+  }
+
+  // The pause is held for the whole pool, so one subscription says it once
+  // rather than once per worker sitting inside it.
+  const unwatch = onArchiveWait((until, reason) => {
+    waitUntil = until
+    waitText = reason === 'refused' ? 'AO3 asked us to slow down' : 'Giving AO3 a moment'
+    if (until && ticker === undefined)
+      ticker = setInterval(draw, 1000)
+    draw()
+  })
+
+  return {
+    onProgress: (done, total) => {
+      progressText = `Loaded ${done} of ${total} pages…`
+      fill.style.width = `${total ? Math.round((done / total) * 100) : 0}%`
+      draw()
+    },
+    dispose: () => {
+      unwatch()
+      clearInterval(ticker)
+    },
   }
 }
 
@@ -296,19 +452,36 @@ async function refresh(source: SearchSource, view: SearchView, options: Options)
   try {
     // Re-budgeted rather than reused: the reader may have changed the ceiling,
     // and the listing may have grown, since the view was opened.
-    const budget = budgetFor(source, options)
+    const budget = await budgetFor(source, options)
+    if (own.signal.aborted)
+      return
     const result = await scrapeListing({
       pageCount: budget.pages,
       pageUrl: source.pageUrl,
       blurbSelector: source.blurbSelector,
+      firstPageDoc: source.firstPageDoc?.(),
+      satisfied: source.satisfied,
       signal: own.signal,
     })
     if (own.signal.aborted)
       return
-    applyLimit(result.works, budget)
-    await persist(source, result.works)
-    view.update(result.works, prepare(source, result.works, options))
-    if (result.loadedPages < result.totalPages)
+    const works = applyLimit(selected(source, result.works), budget.limit)
+    // A refusal taught us nothing about the list, so the list is left exactly as
+    // it was — neither written over nor taken off the screen. What came back is
+    // whatever the archive let through before it stopped answering, and putting
+    // *that* in front of a reader already looking at the whole list would drop
+    // works from under them and write the gap to disk (and, for Marked for
+    // Later, out of the saved-work index) on the strength of a bad minute.
+    if (result.blocked) {
+      toast(`AO3 asked us to slow down, so the list wasn't refreshed. It is still showing what was stored. Try again in a few minutes.`, { type: 'error' })
+      return
+    }
+    await persist(source, works)
+    view.update(works, prepare(source, works, options, true))
+    view.setRefreshedAt(Date.now())
+    // A scrape that stopped because it had found everything it came for is not
+    // a scrape that fell short.
+    if (!result.satisfied && result.loadedPages < result.totalPages)
       toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
   }
   catch (err) {
@@ -363,7 +536,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       },
       // Fires when a blurb action drops a work; keep the snapshot in step.
       onWorksChanged: (works) => {
-        void persist(source, works).catch(err => log.error('Failed to persist the search-view snapshot', err))
+        void persist(source, works, { keepScrapedAt: true }).catch(err => log.error('Failed to persist the search-view snapshot', err))
       },
     }
     const handlers = {
@@ -377,28 +550,37 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       },
     }
 
-    const show = (works: Work[]): SearchView => {
-      const autoExcludes = prepare(source, works, options)
-      const view = createSearchView(works, handlers, { ...config, autoExcludes })
+    // Set for the one call that follows a scrape; a cached render is not fresh.
+    let fresh = false
+    const show = (works: Work[], refreshedAt: number): SearchView => {
+      const autoExcludes = prepare(source, works, options, fresh)
+      const view = createSearchView(works, handlers, { ...config, autoExcludes, refreshedAt })
       active = { source, view }
       container.replaceChildren(view.el)
       return view
     }
 
     const cached = await readSnapshot(source.cacheKey)
-    if (cached && cached.works.length) {
+    if (cached && selected(source, cached.works).length) {
       // A snapshot taken under a higher ceiling than the reader now has; trim it
       // to what they asked for rather than waiting for the refresh to say so.
-      applyLimit(cached.works, budgetFor(source, options))
+      // The ceiling alone: how long the listing is only matters to a scrape, and
+      // asking can cost a request.
+      const stored = applyLimit(selected(source, cached.works), limitFor(options))
       // The snapshot itself is already on disk — but whatever the source keeps in
       // step with it may not be (a snapshot from before that record existed, or a
       // refresh that failed), so re-derive it from the cache. The refresh below
       // normally overwrites it within seconds.
-      void source.onPersist?.(cached.works).catch(err => log.error(`Failed to seed records for ${source.id}`, err))
+      void source.onPersist?.(stored).catch(err => log.error(`Failed to seed records for ${source.id}`, err))
       // Render instantly from cache, then refresh in the background (unless the
       // caller knows the cache is fresh, e.g. a reopen right after a re-run).
-      const view = show(cached.works)
-      if (opts.refresh !== false) {
+      const view = show(stored, cached.scrapedAt)
+      // A copy younger than the source's interval is taken as it is: reloading a
+      // long list on every visit is how a reader gets rate-limited, and the
+      // Refresh button is right there when they want it sooner.
+      const age = Date.now() - cached.scrapedAt
+      const recent = age >= 0 && age < (source.refreshInterval?.() ?? 0)
+      if (opts.refresh !== false && !recent) {
         view.setUpdating(true)
         void refresh(source, view, options).finally(() => view.setUpdating(false))
       }
@@ -408,43 +590,80 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     // No cache: scrape with a progress bar before showing the view. A listing
     // too big for the reader's ceiling gets a say-so first — it's their request
     // being narrowed, not ours.
-    const budget = budgetFor(source, options)
     const own = new AbortController()
-    // Registered before the gate so a "Back"/re-run teardown, which aborts the
-    // live controller, also releases a gate still waiting on an answer.
+    // Registered before the count and the gate so a "Back"/re-run teardown,
+    // which aborts the live controller, releases either of them rather than
+    // leaving one running behind a page that has moved on.
     controller = own
-    if (isTruncated(budget) && !await mountLimitGate(container, source, budget, own.signal)) {
-      closeSearchView()
-      return
-    }
-    const onProgress = mountProgress(container)
+    // Counting the listing's pages can itself be a request (see
+    // `SearchSource.pageCount`), so the progress panel — and its Cancel button
+    // — goes up before the count rather than after it.
+    let progress = mountProgress(container)
     try {
+      const budget = await budgetFor(source, options)
+      if (own.signal.aborted) {
+        closeSearchView()
+        return
+      }
+      // No gate for a source that selects: what the gate asks about is loading
+      // the first N of a listing instead of all of it, and for a haystack that
+      // is neither what is being loaded nor what the reader would get. Its page
+      // cap and `satisfied` bound the reading instead, and the progress panel's
+      // Cancel is the say-so.
+      if (isTruncated(budget) && !source.select) {
+        if (!await mountLimitGate(container, source, budget, own.signal)) {
+          closeSearchView()
+          return
+        }
+        // The gate replaced the progress panel with its question; put it back.
+        progress.dispose()
+        progress = mountProgress(container)
+      }
       const result = await scrapeListing({
         pageCount: budget.pages,
         pageUrl: source.pageUrl,
         blurbSelector: source.blurbSelector,
-        onProgress,
+        firstPageDoc: source.firstPageDoc?.(),
+        satisfied: source.satisfied,
+        onProgress: progress.onProgress,
         signal: own.signal,
       })
-      applyLimit(result.works, budget)
-      await persist(source, result.works)
-      if (!result.works.length) {
-        toast(source.emptyMessage, { type: 'error' })
+      const works = applyLimit(selected(source, result.works), budget.limit)
+      // Not persisted when the archive refused us outright: an empty scrape
+      // would otherwise overwrite a perfectly good stored list with nothing,
+      // and "AO3 said no" is not news about what is on the reader's list.
+      if (!result.blocked || works.length)
+        await persist(source, works)
+      if (!works.length) {
+        // Two different things, and telling them apart matters: an empty list is
+        // a fact about the reader, a refusal is a fact about this minute.
+        toast(result.blocked ? RATE_LIMITED : source.emptyMessage, { type: 'error' })
         closeSearchView()
         return
       }
-      show(result.works)
-      if (result.loadedPages < result.totalPages)
-        toast(`Loaded ${result.loadedPages} of ${result.totalPages} pages — some couldn't be fetched.`, { type: 'error' })
+      fresh = true
+      show(works, Date.now())
+      // A scrape that stopped because it had found everything it came for is not
+      // a scrape that fell short.
+      if (!result.satisfied && result.loadedPages < result.totalPages) {
+        toast(result.blocked
+          ? `AO3 asked us to slow down — only ${result.loadedPages} of ${result.totalPages} pages loaded. Refresh in a few minutes for the rest.`
+          : `Loaded ${result.loadedPages} of ${result.totalPages} pages — some couldn't be fetched.`, { type: 'error' })
+      }
     }
     catch (err) {
       if ((err as Error)?.name !== 'AbortError') {
         log.error(`Failed to load ${source.id}`, err)
-        toast(source.errorMessage, { type: 'error' })
+        // Counting the listing's pages is a request of its own for some sources
+        // ({@link SearchSource.pageCount}), so it can be refused before the
+        // scrape has fetched anything at all — which is not the source being
+        // unreachable, and should not be reported as though it were.
+        toast(isArchiveBusy(err) ? RATE_LIMITED : source.errorMessage, { type: 'error' })
       }
       closeSearchView()
     }
     finally {
+      progress.dispose()
       if (controller === own)
         controller = null
     }

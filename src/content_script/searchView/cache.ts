@@ -100,15 +100,31 @@ export async function snapshotWorkIds(): Promise<Set<string>> {
   return ids
 }
 
+export interface WriteSnapshotOptions {
+  /**
+   * This write is not a scrape — a blurb action took one work out of the stored
+   * list — so keep the time the list was last actually fetched. That time is
+   * what an auto-refresh interval measures and what "as of" displays; a
+   * "Mark as Read" click resetting it would put off a real refresh indefinitely.
+   */
+  keepScrapedAt?: boolean
+}
+
 /**
  * Persist a snapshot of the given works (their blurb HTML, in order), plus how
  * to re-fetch the listing later ({@link SnapshotDescriptor}).
  */
-export async function writeSnapshot(key: string, works: Work[], descriptor: SnapshotDescriptor): Promise<void> {
+export async function writeSnapshot(
+  key: string,
+  works: Work[],
+  descriptor: SnapshotDescriptor,
+  opts: WriteSnapshotOptions = {},
+): Promise<void> {
   const snapshots = await cache.get('searchSnapshots')
+  const previous = snapshots[key]
   snapshots[key] = {
     version: SNAPSHOT_VERSION,
-    scrapedAt: Date.now(),
+    scrapedAt: opts.keepScrapedAt && previous ? previous.scrapedAt : Date.now(),
     blurbsHtml: works.map(work => work.el.outerHTML),
     descriptor,
   }

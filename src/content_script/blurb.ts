@@ -198,6 +198,17 @@ export interface Work {
    */
   statuses?: string[]
   /**
+   * The marks this work carries, by label — the Marks facet's values, or the
+   * single "Unmarked" value when it carries none. The same marks the Status
+   * facet folds in among its own values, on their own: Status answers "where am
+   * I with this one?", so it mixes in what the reader hasn't done and how ready
+   * the work is to be read on, while this group is the marks and nothing else,
+   * for picking one out ("everything I called a favourite"). Stamped by the host
+   * ({@link file://./searchView/status.ts}) alongside {@link Work.statuses}, and
+   * for the same reasons.
+   */
+  marks?: string[]
+  /**
    * The reader's rules take this work out of the listing outright (as opposed to
    * collapsing it, which the view leaves to HideWorks to draw on the blurb). Such
    * a work is dropped from the results altogether — out of the facet counts, the
