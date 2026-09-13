@@ -41,10 +41,10 @@ interface BehaviorRow {
 }
 
 const BEHAVIOR_ROWS: BehaviorRow[] = [
-  { behavior: 'hide', icon: () => <MdiEyeOff />, label: noun => `Hide ${noun}`, danger: true },
-  { behavior: 'collapse', icon: () => <MdiArrowCollapseVertical />, label: noun => `Collapse ${noun}` },
-  { behavior: 'invert', icon: () => <MdiEyeCheck />, label: () => 'Always show' },
-  { behavior: 'highlight', icon: () => <MdiStar />, label: () => 'Highlight' },
+  { behavior: 'hide', icon: () => <MdiEyeOff />, label: noun => `Hide works with ${noun}`, danger: true },
+  { behavior: 'collapse', icon: () => <MdiArrowCollapseVertical />, label: noun => `Collapse works with ${noun}` },
+  { behavior: 'invert', icon: () => <MdiEyeCheck />, label: noun => `Always show works with ${noun}` },
+  { behavior: 'highlight', icon: () => <MdiStar />, label: noun => `Highlight ${noun}` },
   {
     // Hides the tag itself wherever it's listed, leaving the work alone. Once
     // applied the tag is gone from the page, so undoing it is a settings job.
@@ -53,7 +53,7 @@ const BEHAVIOR_ROWS: BehaviorRow[] = [
     // gates its `hideFilter` option on.
     behavior: 'hideFilter',
     icon: () => <MdiTagOff />,
-    label: () => 'Remove tag from results',
+    label: () => 'Hide useless tag',
     applies: key => isTagTarget(key.target),
   },
 ]

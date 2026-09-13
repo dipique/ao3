@@ -3,8 +3,9 @@ import type { Work } from '#content_script/blurb.js'
 import type { RefreshOptions } from '#content_script/searchView/refresh.js'
 
 import { createLogger, options, readWorkIds, saveAs } from '#common'
-import { onArchiveWait } from '#content_script/archiveFetch.js'
+import { onArchiveWait, PATIENCE } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
+import { recoverReadWorks } from '#content_script/readWorks.ts'
 import { readSnapshot } from '#content_script/searchView/cache.js'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
 
@@ -330,7 +331,7 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
     limit,
     signal,
     onPersist: sideTableWriter(job.descriptor),
-    ...await selectionFor(job.descriptor),
+    ...await selectionFor(job.descriptor, job.cacheKey),
     onProgress: (done, total) => {
       job.done = done
       job.total = total
@@ -356,6 +357,8 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
 
   if (result.truncated)
     warn(`Kept the first ${result.works.length} works — this list is longer than your "Maximum results" setting.`)
+  if (result.recoveryBlocked)
+    warn('AO3 asked us to slow down before every read work outside your history could be fetched. The ones it didn’t reach kept their stored copies and will be tried again.')
   if (result.loadedPages < result.fetchedPages)
     warn(`${result.fetchedPages - result.loadedPages} of ${result.fetchedPages} list pages could not be fetched, so the list may be incomplete.`)
 
@@ -566,13 +569,20 @@ function sideTableWriter(descriptor: SnapshotDescriptor): ((works: Work[]) => Pr
  * the question it asks is of the mark table, which is shared
  * ({@link file://../../common/workMarks.ts}).
  */
-async function selectionFor(descriptor: SnapshotDescriptor): Promise<Pick<RefreshOptions, 'select' | 'satisfied'>> {
+async function selectionFor(
+  descriptor: SnapshotDescriptor,
+  cacheKey: string,
+): Promise<Pick<RefreshOptions, 'select' | 'satisfied' | 'recover'>> {
   if (descriptor.sourceId !== 'read-works')
     return {}
   const wanted = readWorkIds(await options.get('workMarks'))
   return {
     select: works => works.filter(work => wanted.has(work.workId)),
     satisfied: ids => [...wanted].every(id => ids.has(id)),
+    // Works in no history come from their own pages, as on the live path. A
+    // refresh from here was asked for, so it retries the ones that failed before,
+    // and nobody is watching it, so it is as patient as the caching run.
+    recover: (works, signal) => recoverReadWorks(cacheKey, wanted, works, { full: true, signal, patience: PATIENCE.bulk }),
   }
 }
 

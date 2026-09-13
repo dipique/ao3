@@ -447,6 +447,12 @@ function getFilterForm(): HTMLFormElement | null {
  * Inject a pre-checked checkbox for a fandom that has no sidebar entry. Prefers
  * the matching `dd#…_fandom_tags` list (so it shows up natively in the sidebar),
  * falling back to a hidden input appended to the form so it still serializes.
+ *
+ * Marked `data-ao3e-injected` and deliberately *not* {@link ADDON_CLASS}: every
+ * options change re-runs the content script, whose cleanup removes each
+ * `ADDON_CLASS` node — and an injected box is a filter the reader has picked but
+ * not yet submitted, as much theirs as one they ticked by hand. It stays until
+ * the search runs; the checkbox index finds it again by its `name`.
  */
 function injectCheckbox(direction: Direction, id: number, name: string): HTMLInputElement | null {
   const { checkboxName, ddId } = FANDOM_DIRECTIONS[direction]
@@ -455,7 +461,7 @@ function injectCheckbox(direction: Direction, id: number, name: string): HTMLInp
   const list = document.getElementById(ddId)?.querySelector('ul')
   if (list) {
     const li = (
-      <li class={ADDON_CLASS}>
+      <li data-ao3e-injected>
         <label for={inputId}>
           <input type="checkbox" name={checkboxName} id={inputId} value={String(id)} checked />
           <span class="indicator" aria-hidden="true" />
@@ -470,7 +476,7 @@ function injectCheckbox(direction: Direction, id: number, name: string): HTMLInp
   const form = getFilterForm()
   if (form) {
     const input = (
-      <input class={ADDON_CLASS} type="checkbox" name={checkboxName} id={inputId} value={String(id)} checked style={{ display: 'none' }} />
+      <input data-ao3e-injected type="checkbox" name={checkboxName} id={inputId} value={String(id)} checked style={{ display: 'none' }} />
     ) as HTMLElement as HTMLInputElement
     form.append(input)
     return input

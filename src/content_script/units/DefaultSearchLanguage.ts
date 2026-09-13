@@ -47,6 +47,19 @@ export function resolveDefaultLanguage(options: Options): Language | null {
   return null
 }
 
+/**
+ * The default each dropdown has already been offered, so it is offered once.
+ *
+ * Every options change re-runs every unit — a rule picked from a context menu
+ * included — and a reader who set the dropdown back to "any language" and hasn't
+ * searched yet would otherwise find the default quietly put back. So a dropdown
+ * only takes the default the first time this unit sees it with that default to
+ * give. Keyed by the default rather than a plain seen-set so that changing the
+ * setting itself still reaches an open page: that is a new instruction, not a
+ * re-run of the old one.
+ */
+const offered = new WeakMap<HTMLSelectElement, string>()
+
 export class DefaultSearchLanguage extends Unit {
   static override get name() { return 'DefaultSearchLanguage' }
 
@@ -62,6 +75,9 @@ export class DefaultSearchLanguage extends Unit {
     const selects = this.root.querySelectorAll<HTMLSelectElement>(LANGUAGE_SELECT_SELECTOR)
     let applied = 0
     for (const select of selects) {
+      if (offered.get(select) === language.value)
+        continue
+      offered.set(select, language.value)
       // Respect a language the user already has chosen; only fill in the default
       // when the dropdown is still on its blank "any language" option.
       if (select.value !== '')

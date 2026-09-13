@@ -4,7 +4,9 @@ import type { Work } from '#content_script/blurb.js'
 import { withPage } from '#common'
 import { PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 
-import { writeSnapshot } from './cache.ts'
+import type { Recovered } from './workPageBlurb.tsx'
+
+import { readSnapshot, writeSnapshot } from './cache.ts'
 import { detectPageCount, fetchPageDoc, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 
 /**
@@ -63,6 +65,11 @@ export interface RefreshOptions {
   select?: (works: Work[]) => Work[]
   /** Whether the scrape may stop early, given the ids seen — see `ScrapeOptions`. */
   satisfied?: (ids: ReadonlySet<string>) => boolean
+  /**
+   * Fetch the works the list should hold that the listing didn't turn up,
+   * mirroring `SearchSource.recover` on the live path.
+   */
+  recover?: (works: Work[], signal?: AbortSignal) => Promise<Recovered>
 }
 
 export interface RefreshResult {
@@ -75,6 +82,12 @@ export interface RefreshResult {
   totalPages: number
   /** The ceiling cut the listing short. */
   truncated: boolean
+  /**
+   * AO3 stopped answering while `recover` was fetching works one by one. What
+   * it did fetch is stored, and the works it didn't reach kept their stored
+   * copies; they'll be tried again.
+   */
+  recoveryBlocked: boolean
   /**
    * AO3 kept refusing, so the scrape came back short and **nothing was written**
    * — the stored list is still whatever it was. A partial listing saved over a
@@ -100,7 +113,7 @@ export interface RefreshResult {
  * that fail are skipped, and show up as `loadedPages < fetchedPages`.
  */
 export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResult> {
-  const { cacheKey, descriptor, limit, onProgress, signal, onPersist, select, satisfied } = opts
+  const { cacheKey, descriptor, limit, onProgress, signal, onPersist, select, satisfied, recover } = opts
 
   // This is the job's refresh, run from the options page with nobody watching —
   // so it waits a rate limit out rather than failing back to a reader who isn't
@@ -131,7 +144,23 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     waitBudget: WAIT_BUDGET.bulk,
   })
 
-  const works = select ? select(scraped) : scraped
+  let works = select ? select(scraped) : scraped
+  let recoveryBlocked = false
+  if (recover && !blocked) {
+    const recovered = await recover(works, signal)
+    works = [...works, ...recovered.works]
+    recoveryBlocked = recovered.blocked
+    // Same as the live path: a work this didn't reach keeps its stored copy.
+    if (recoveryBlocked) {
+      const have = new Set(works.map(work => work.workId))
+      const previous = await readSnapshot(cacheKey)
+      const carried = previous?.works ?? []
+      works.push(...(select ? select(carried) : carried).filter(work => !have.has(work.workId)))
+    }
+    works.forEach((work, index) => {
+      work.markedOrder = index
+    })
+  }
   // The pages fetched can hold more than the ceiling; the hard trim keeps it exact.
   if (works.length > ceiling)
     works.length = ceiling
@@ -149,6 +178,7 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     fetchedPages,
     totalPages,
     blocked: !!blocked,
+    recoveryBlocked,
     truncated: fetchedPages < totalPages,
     loggedIn,
   }

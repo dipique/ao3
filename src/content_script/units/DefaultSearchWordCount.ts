@@ -2,7 +2,7 @@ import type { Options, WordCountRange } from '#common'
 
 import { isValidRange } from '#common'
 import { Unit } from '#content_script/Unit.js'
-import { getWordCountRange, setWordCountRange } from '#content_script/wordCountFilter.js'
+import { getWordCountRange, setWordCountRange, wordCountControl } from '#content_script/wordCountFilter.js'
 
 /**
  * Pre-fill AO3's Word Count filter with a default range, so browsing defaults to
@@ -25,6 +25,15 @@ export function resolveDefaultWordCount(options: Options): WordCountRange | null
   return isValidRange(range) ? range : null
 }
 
+/**
+ * The default each word-count control has already been offered, so it is
+ * offered once. The same arrangement as the language dropdown's, for the same
+ * reason: every options change re-runs this unit, and a reader who cleared the
+ * range without searching yet must not find it filled back in. Keyed by the
+ * range so that changing the setting itself still reaches an open page.
+ */
+const offered = new WeakMap<HTMLInputElement, string>()
+
 export class DefaultSearchWordCount extends Unit {
   static override get name() { return 'DefaultSearchWordCount' }
 
@@ -34,8 +43,14 @@ export class DefaultSearchWordCount extends Unit {
 
   override async ready(): Promise<void> {
     const range = resolveDefaultWordCount(this.options)
-    if (!range)
+    const control = wordCountControl(this.root)
+    if (!range || !control)
       return
+
+    const key = `${range.from ?? ''}-${range.to ?? ''}`
+    if (offered.get(control) === key)
+      return
+    offered.set(control, key)
 
     // Respect a range the user (or the URL) already put there.
     if (getWordCountRange(this.root) !== null)

@@ -30,7 +30,7 @@
       <OptionDivider />
       <OptionRow
         title="Search the works you've read"
-        subtitle="Adds a “Search read items” button to your History and Marked for Later pages that collects every work you have marked read — or favourite, good, boring, bad, gross — into the same view, with a Marks filter to narrow it to one of them. Needs work marks on, and finds each work's details in your AO3 history."
+        subtitle="Adds a “Search read items” button to your History and Marked for Later pages that collects every work you have marked read — or favourite, good, boring, bad, gross — into the same view, with a Status filter to narrow it to one of them. Needs work marks on, and finds each work's details in your AO3 history."
       >
         <OptionSwitch option-id="searchReadWorks" />
       </OptionRow>

@@ -23,14 +23,6 @@ import { markedForLaterIds } from '#content_script/markedForLaterIndex.js'
 export const UNREAD = 'Unread'
 
 /**
- * The Marks value for a work carrying no mark at all. Its own value for the same
- * reason {@link UNREAD} is one: "everything I've never marked" is a question the
- * group should be able to answer, and no combination of excluding the other
- * values asks it.
- */
-export const UNMARKED = 'Unmarked'
-
-/**
  * Stamp each work with its Status facet values — everything the reader has (or
  * hasn't) done with it, as opposed to anything the blurb says about the work
  * itself. Four kinds of value, all in one group because they're all answers to
@@ -50,10 +42,11 @@ export const UNMARKED = 'Unmarked'
  * ready by definition. A work already read is neither ready nor caught up — it's
  * done, and the mark that says so is the value it carries instead.
  *
- * The same pass fills {@link Work.marks}, the Marks facet: the marks alone, plus
- * {@link UNMARKED} for a work carrying none. Everything it needs is already
- * unpacked here, and the two groups have to agree about what a work carries —
- * deriving them apart would be two chances to disagree.
+ * Every mark is a Status value rather than a group of its own on purpose. A
+ * separate Marks group would repeat the marks with nothing beside them — and
+ * what sits beside them here is the point: on the read list, where every work
+ * has a verdict, a "Marked for later" value showing up among them is a work the
+ * extension calls read and AO3 still has saved, which is a desync worth seeing.
  *
  * A post-pass rather than something `parseWork` does, for two reasons that both
  * come down to the same thing — none of this is a property of the blurb. The
@@ -90,22 +83,16 @@ export function applyStatus(works: Work[], options: Options): void {
 
   for (const work of works) {
     const values: string[] = []
-    const carried: string[] = []
     let verdict = false
     let progress: WorkProgress | undefined
     for (const mark of carriers) {
       if (!mark.items.has(work.workId))
         continue
       values.push(mark.label)
-      carried.push(mark.label)
       if (readGroup.has(mark.id))
         verdict = true
       progress ??= mark.progress?.get(work.workId)
     }
-    // Marks only — not the saved state, which is a cache that can only ever say
-    // who *is* saved (so "Unmarked" could never be trusted beside it), and not
-    // readiness, which is not a mark at all. Both stay Status values.
-    work.marks = carried.length ? carried : [UNMARKED]
     if (!verdict)
       values.push(UNREAD)
     if (savedLabel && saved?.has(work.workId))

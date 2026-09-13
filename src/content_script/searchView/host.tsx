@@ -11,6 +11,7 @@ import React from '#dom'
 import type { WriteSnapshotOptions } from './cache.ts'
 import type { FacetValueRef } from './engine.ts'
 import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
+import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
 
 import { readSnapshot, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
@@ -99,6 +100,33 @@ export interface SearchSource {
    * avoids reading more of the haystack than it has to.
    */
   select?: (works: Work[]) => Work[]
+  /**
+   * Whether a work still belongs on the list, given what the reader has done
+   * since it was stored — applied wherever {@link select} is, and to the stored
+   * copy on every open.
+   *
+   * The Marked for Later list uses it for works the reader has marked read: AO3
+   * may well still list one (the request to take it off can fail), but the
+   * reader has said they're done with it, so it goes the moment they say so
+   * rather than at the next reload. A view reopens from its snapshot on every
+   * options change, which is what makes that immediate.
+   *
+   * A source that sets it keeps its side records ({@link onPersist}) in step with
+   * the *listing*, not with the pruned list — only a scrape has that, so only a
+   * scrape calls `onPersist`. A work pruned here is exactly the kind of thing
+   * those records exist to remember.
+   */
+  belongs?: (work: Work) => boolean
+  /**
+   * Fetch, some other way, the works the list should hold that its listing
+   * didn't turn up — given every work the list does hold. Runs after each scrape
+   * that isn't refused; what it returns goes on the end of the list.
+   *
+   * The read list's works are marks and its listing is the reader's history,
+   * where a work marked read without being opened simply isn't; its own work
+   * page is where such a work's details are found instead.
+   */
+  recover?: (works: Work[], opts: RecoverOptions) => Promise<Recovered>
   /**
    * Whether the scrape can stop, given the work ids seen so far — passed
    * straight through to the scraper, which is where it is explained.
@@ -215,7 +243,45 @@ async function budgetFor(source: SearchSource, options: Options): Promise<Budget
  * reader's marks move on between visits.
  */
 function selected(source: SearchSource, works: Work[]): Work[] {
-  return source.select ? source.select(works) : works
+  const chosen = source.select ? source.select(works) : works
+  return source.belongs ? chosen.filter(source.belongs) : chosen
+}
+
+/**
+ * Renumber a list put together from more than one place — a scrape, a stored
+ * copy, works fetched one by one — in the order it now stands, which is what
+ * the "listing order" sort reads.
+ */
+function renumber(works: Work[]): Work[] {
+  works.forEach((work, index) => {
+    work.markedOrder = index
+  })
+  return works
+}
+
+/**
+ * The list a scrape produced, completed by the source's {@link SearchSource.recover}.
+ *
+ * If AO3 stopped answering partway through, every work the stored copy had that
+ * this didn't reach keeps its stored copy — a refusal is no reason to drop a
+ * work from the list, and saving what *was* fetched means the next attempt
+ * starts further on instead of from scratch.
+ */
+async function complete(
+  source: SearchSource,
+  kept: Work[],
+  opts: RecoverOptions,
+): Promise<{ works: Work[], blocked: boolean }> {
+  if (!source.recover)
+    return { works: kept, blocked: false }
+  const recovered = await source.recover(kept, opts)
+  const works = [...kept, ...recovered.works]
+  if (recovered.blocked) {
+    const have = new Set(works.map(work => work.workId))
+    const previous = await readSnapshot(source.cacheKey)
+    works.push(...selected(source, previous?.works ?? []).filter(work => !have.has(work.workId)))
+  }
+  return { works, blocked: recovered.blocked }
 }
 
 /**
@@ -343,9 +409,15 @@ function prepare(source: SearchSource, works: Work[], options: Options, fresh: b
 }
 
 /** Write the blurb snapshot, plus whatever else the source keeps in step with it. */
-async function persist(source: SearchSource, works: Work[], opts: WriteSnapshotOptions = {}): Promise<void> {
-  await writeSnapshot(source.cacheKey, works, source.descriptor(), opts)
-  await source.onPersist?.(works)
+async function persist(
+  source: SearchSource,
+  works: Work[],
+  opts: WriteSnapshotOptions & { listing?: Work[] } = {},
+): Promise<void> {
+  await writeSnapshot(source.cacheKey, works, source.descriptor(), { keepScrapedAt: opts.keepScrapedAt })
+  // A pruned list says nothing about what the listing holds; see `belongs`.
+  if (!source.belongs || opts.listing)
+    await source.onPersist?.(opts.listing ?? works)
 }
 
 /** Hide the source's native listing and insert an empty view container for it. */
@@ -367,6 +439,8 @@ function countdown(ms: number): string {
 
 interface ProgressPanel {
   onProgress: (done: number, total: number) => void
+  /** Fetching works one page each, after the listing (see `SearchSource.recover`). */
+  onRecover: (done: number, total: number) => void
   /** Stop watching for pauses. The panel itself goes with whatever replaces it. */
   dispose: () => void
 }
@@ -422,6 +496,11 @@ function mountProgress(container: HTMLElement): ProgressPanel {
   return {
     onProgress: (done, total) => {
       progressText = `Loaded ${done} of ${total} pages…`
+      fill.style.width = `${total ? Math.round((done / total) * 100) : 0}%`
+      draw()
+    },
+    onRecover: (done, total) => {
+      progressText = `Fetching ${done} of ${total} works from their own pages…`
       fill.style.width = `${total ? Math.round((done / total) * 100) : 0}%`
       draw()
     },
@@ -512,14 +591,6 @@ async function refresh(
     })
     if (own.signal.aborted)
       return
-    const scraped = topUp
-      ? [...topUp.plan.select(result.works), ...topUp.stored]
-      : selected(source, result.works)
-    // The "listing order" sort reads `markedOrder`, and a top-up's new works and
-    // its stored ones were numbered by two different scrapes.
-    if (topUp)
-      scraped.forEach((work, index) => work.markedOrder = index)
-    const works = applyLimit(scraped, budget.limit)
     // A refusal taught us nothing about the list, so the list is left exactly as
     // it was — neither written over nor taken off the screen. What came back is
     // whatever the archive let through before it stopped answering, and putting
@@ -530,12 +601,23 @@ async function refresh(
       toast(`AO3 asked us to slow down, so the list wasn't refreshed. It is still showing what was stored. Try again in a few minutes.`, { type: 'error' })
       return
     }
-    await persist(source, works)
+    const kept = topUp
+      ? [...topUp.plan.select(result.works), ...topUp.stored]
+      : selected(source, result.works)
+    // A reload the reader asked for retries works an earlier one couldn't get;
+    // a top-up is automatic, and leaves them be.
+    const completed = await complete(source, kept, { signal: own.signal, full: !topUp })
+    if (own.signal.aborted)
+      return
+    const works = applyLimit(renumber(completed.works), budget.limit)
+    await persist(source, works, { listing: topUp ? undefined : result.works })
     view.update(works, prepare(source, works, options, true))
     view.setRefreshedAt(Date.now())
+    if (completed.blocked)
+      toast('AO3 asked us to slow down before every work could be fetched. The rest keep their stored copies and will be tried again.', { type: 'error' })
     // A scrape that stopped because it had found everything it came for is not
     // a scrape that fell short.
-    if (!result.satisfied && result.loadedPages < result.totalPages)
+    else if (!result.satisfied && result.loadedPages < result.totalPages)
       toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
   }
   catch (err) {
@@ -630,17 +712,26 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     const cached = await readSnapshot(source.cacheKey)
     if (stale())
       return
-    if (cached && selected(source, cached.works).length) {
+    const kept = cached ? selected(source, cached.works) : []
+    if (cached && kept.length) {
+      // Works that stopped belonging since the snapshot was taken — marked read
+      // off Marked for Later, or unmarked off the read list — come out of the
+      // stored copy now, not at the next reload. This is also how the change
+      // reaches the screen: an options change reopens the view from here.
+      if (kept.length < cached.works.length)
+        void persist(source, [...kept], { keepScrapedAt: true }).catch(err => log.error(`Failed to prune the stored copy of ${source.id}`, err))
       // A snapshot taken under a higher ceiling than the reader now has; trim it
       // to what they asked for rather than waiting for the refresh to say so.
       // The ceiling alone: how long the listing is only matters to a scrape, and
       // asking can cost a request.
-      const stored = applyLimit(selected(source, cached.works), limitFor(options))
+      const stored = applyLimit(kept, limitFor(options))
       // The snapshot itself is already on disk — but whatever the source keeps in
       // step with it may not be (a snapshot from before that record existed, or a
       // refresh that failed), so re-derive it from the cache. The refresh below
-      // normally overwrites it within seconds.
-      void source.onPersist?.(stored).catch(err => log.error(`Failed to seed records for ${source.id}`, err))
+      // normally overwrites it within seconds. Not for a source that prunes its
+      // stored copy: that copy is no longer the listing (see `belongs`).
+      if (!source.belongs)
+        void source.onPersist?.(stored).catch(err => log.error(`Failed to seed records for ${source.id}`, err))
       // Render instantly from cache, then refresh in the background (unless the
       // caller knows the cache is fresh, e.g. a reopen right after a re-run).
       const view = show(stored, cached.scrapedAt)
@@ -706,12 +797,17 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       })
       if (stale())
         return
-      const works = applyLimit(selected(source, result.works), budget.limit)
+      const completed = result.blocked
+        ? { works: selected(source, result.works), blocked: true }
+        : await complete(source, selected(source, result.works), { signal: own.signal, full: true, onProgress: progress.onRecover })
+      if (stale())
+        return
+      const works = applyLimit(renumber(completed.works), budget.limit)
       // Not persisted when the archive refused us outright: an empty scrape
       // would otherwise overwrite a perfectly good stored list with nothing,
       // and "AO3 said no" is not news about what is on the reader's list.
       if (!result.blocked || works.length)
-        await persist(source, works)
+        await persist(source, works, { listing: result.works })
       if (stale())
         return
       if (!works.length) {
@@ -725,7 +821,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       show(works, Date.now())
       // A scrape that stopped because it had found everything it came for is not
       // a scrape that fell short.
-      if (!result.satisfied && result.loadedPages < result.totalPages) {
+      if (completed.blocked && !result.blocked) {
+        toast('AO3 asked us to slow down before every work could be fetched. The rest will be tried again next time.', { type: 'error' })
+      }
+      else if (!result.satisfied && result.loadedPages < result.totalPages) {
         toast(result.blocked
           ? `AO3 asked us to slow down — only ${result.loadedPages} of ${result.totalPages} pages loaded. Refresh in a few minutes for the rest.`
           : `Loaded ${result.loadedPages} of ${result.totalPages} pages — some couldn't be fetched.`, { type: 'error' })

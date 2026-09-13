@@ -41,6 +41,19 @@ function findFields(root: ParentNode = document): WordCountFields | null {
   return input ? { kind: 'query', input } : null
 }
 
+/**
+ * The one element that stands for this page's word-count control — the `from`
+ * field of a pair, or the single query field — so a caller can remember
+ * something about the control without caring which shape it has. Null when the
+ * page has none.
+ */
+export function wordCountControl(root: ParentNode = document): HTMLInputElement | null {
+  const fields = findFields(root)
+  if (!fields)
+    return null
+  return fields.kind === 'query' ? fields.input : fields.from
+}
+
 /** Whether this page can filter by word count at all. */
 export function hasWordCountFields(root: ParentNode = document): boolean {
   return findFields(root) !== null
@@ -85,10 +98,7 @@ export function setWordCountRange(range: WordCountRange | null, root: ParentNode
 
 /** The filter/search form the word-count control submits with. */
 function getWordCountForm(root: ParentNode = document): HTMLFormElement | null {
-  const fields = findFields(root)
-  if (!fields)
-    return null
-  return (fields.kind === 'query' ? fields.input : fields.from).form
+  return wordCountControl(root)?.form ?? null
 }
 
 /**

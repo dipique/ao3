@@ -48,6 +48,18 @@ import { hideVerdict } from './HideWorks.tsx'
  * every work it holds, not just the page on screen, so its exclusions are worked
  * out there instead (see {@link file://../searchView/hidden.ts}).
  */
+/**
+ * The values (see {@link valueKey}) this page has already had its say about.
+ *
+ * Every options change re-runs every unit, and picking a rule from a context menu
+ * is one. Once a value has been excluded it's the reader's: unticking it before
+ * they search is a decision, and a re-run that ticked it again would quietly
+ * overrule them. So each value is weighed once per page load. A value that only
+ * turns up later — a work newly hidden by the rule just added — is still new,
+ * which is the case a re-run is for.
+ */
+const handled = new Set<string>()
+
 export class AutoExcludeHidden extends Unit {
   static override get name() { return 'AutoExcludeHidden' }
 
@@ -58,8 +70,7 @@ export class AutoExcludeHidden extends Unit {
   /**
    * Nothing to undo. What this unit leaves behind is filter state the reader is
    * about to submit — ticked boxes and typed tag names, indistinguishable from
-   * their own — and a re-run would only put it back. Re-running is safe anyway:
-   * a value already excluded is left alone rather than toggled off.
+   * their own. A re-run doesn't put it back either: see {@link handled}.
    */
   static override async clean(): Promise<void> {}
 
@@ -107,17 +118,22 @@ export class AutoExcludeHidden extends Unit {
       await loadFandomIdLookup()
 
     let applied = 0
-    for (const { target, rule } of pending.values()) {
+    for (const [key, { target, rule }] of pending) {
       // Straight to the native sidebar: the blurbs that answer to a search view
       // were skipped above, so there is no bridge left to prefer over it.
       const filter = nativeTargetForTag(target, target.href)
       if (!filter)
         continue
-      // Already excluded, or deliberately filtered *for* — either way the reader
-      // (or an earlier run of this) has spoken, and toggling would undo it.
-      if (filter.isSelected('exclude', target.name) || filter.isSelected('include', target.name))
-        continue
       if (!filter.hasControl('exclude', target.name) && !namesAWholeTag(rule))
+        continue
+      // Weighed on an earlier run of this page — whatever the filter says about
+      // it now is the reader's doing.
+      if (handled.has(key))
+        continue
+      handled.add(key)
+      // Already excluded, or deliberately filtered *for* — either way the reader
+      // has spoken, and toggling would undo it.
+      if (filter.isSelected('exclude', target.name) || filter.isSelected('include', target.name))
         continue
       filter.toggle('exclude', target.name)
       // Counted from what actually moved rather than from the attempt: a page

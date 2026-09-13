@@ -123,7 +123,7 @@ export interface Options {
   /**
    * On your own readings pages, add a button that puts the works you have marked
    * read — the `read` mark and every verdict aliasing it — into the same
-   * filterable view, where the Marks facet narrows them to one. Needs
+   * filterable view, where the Status facet narrows them to one. Needs
    * {@link Options.workMarks} on: the marks *are* the list.
    */
   searchReadWorks: boolean

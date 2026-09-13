@@ -4,7 +4,8 @@ import type { ViewState } from '#content_script/searchView/view.tsx'
 import { ADDON_CLASS, getArchiveLink, parseUser, readWorkIds, toast } from '#common'
 import { loadMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
-import { readMisses, writeMisses } from '#content_script/searchView/cache.ts'
+import { recoverReadWorks } from '#content_script/readWorks.ts'
+import { readMisses } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { limitFor, openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
 import { detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
@@ -45,7 +46,7 @@ function onHistoryPage(): boolean {
  * Marked for Later one, that puts **the works you have marked read** — the
  * `read` mark and every verdict that aliases it, Favorite and Good and the rest
  * ({@link readWorkIds}) — into the same in-memory, instantly filterable view,
- * where the Marks facet narrows them to one ("everything I called a favourite").
+ * where the Status facet narrows them to one ("everything I called a favourite").
  *
  * **Where the blurbs come from, and why it matters.** A mark table holds work
  * ids and nothing else: no title, no author, no tags, nothing a listing could be
@@ -215,23 +216,12 @@ export class SearchReadWorks extends Unit {
         for (const el of document.querySelectorAll(`.${CHROME_CLASS}`))
           el.remove()
       },
+      // A read work in no history is fetched from its own page; only one whose
+      // page fails is written off (and remembered, for `topUp` above to skip).
+      recover: (works, opts) => recoverReadWorks(snapshotKey(userId), wanted, works, opts),
       prepare: (works, { fresh }) => {
         applyStatus(works, this.options)
-        if (!fresh)
-          return
-        // Record what this scrape couldn't find, for the next top-up to leave
-        // alone. Not when the works ceiling cut the list short: a work trimmed
-        // off the end was found, and calling it missing would hide it for good.
-        if (works.length < limitFor(this.options)) {
-          const shown = new Set(works.map(work => work.workId))
-          absent.clear()
-          for (const id of wanted) {
-            if (!shown.has(id))
-              absent.add(id)
-          }
-          void writeMisses(snapshotKey(userId), absent).catch(err => this.logger.error('Could not record the works this scrape missed', err))
-        }
-        if (reported)
+        if (!fresh || reported)
           return
         // Only of a set just scraped, and only against what a whole one could
         // have held: a cached render answers an older question (marks made since
@@ -243,7 +233,7 @@ export class SearchReadWorks extends Unit {
           return
         reported = true
         toast(
-          `${missed.toLocaleString()} of your ${wanted.size.toLocaleString()} read works aren’t in your AO3 history, so they can’t be shown here.`,
+          `${missed.toLocaleString()} of your ${wanted.size.toLocaleString()} read works couldn’t be loaded from AO3 — deleted, locked, or not reached yet.`,
           { type: 'error' },
         )
       },
@@ -255,7 +245,7 @@ export class SearchReadWorks extends Unit {
         // the whole list behind a facet the reader never set.
         defaultStatus: [],
       },
-      emptyMessage: 'None of the works you’ve marked read are in your AO3 history.',
+      emptyMessage: 'None of the works you’ve marked read could be loaded from AO3.',
       errorMessage: 'Could not load your reading history.',
     }
   }

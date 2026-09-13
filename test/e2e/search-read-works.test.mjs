@@ -283,8 +283,10 @@ describe('search read items', { skip }, () => {
     assert.ok(fetched.includes(1), 'the page the marked works are on was read')
   })
 
-  test('the Marks facet lists the verdicts, and nothing it did not collect', async () => {
-    assert.deepEqual(await facetRows(tab, 'Marks'), [
+  test('the Status facet lists the verdicts, and nothing it did not collect', async () => {
+    // Every work here has a verdict, so no Unread and no readiness values: just
+    // the marks. Anything else turning up would be a desync worth seeing.
+    assert.deepEqual(await facetRows(tab, 'Status'), [
       // Sorted by count, then by name — the engine's own row order.
       { value: 'Read', count: 2 },
       { value: 'Favorite', count: 1 },
@@ -372,6 +374,25 @@ describe('search read items', { skip }, () => {
 
 const HOUR = 60 * 60_000
 
+/** A work's own page in miniature: enough of the meta block and preface to build a blurb from. */
+function workPage(id, title) {
+  return `<!DOCTYPE html><html><body class="logged-in"><div id="main">
+  <dl class="work meta group">
+    <dt class="rating tags">Rating:</dt>
+    <dd class="rating tags"><ul class="commas"><li><a class="tag" href="/tags/General%20Audiences/works">General Audiences</a></li></ul></dd>
+    <dt class="fandom tags">Fandom:</dt>
+    <dd class="fandom tags"><ul class="commas"><li><a class="tag" href="/tags/F/works">A Fandom</a></li></ul></dd>
+    <dt class="stats">Stats:</dt>
+    <dd class="stats"><dl class="stats"><dt class="published">Published:</dt><dd class="published">2024-01-02</dd>
+      <dt class="words">Words:</dt><dd class="words">500</dd><dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd></dl></dd>
+  </dl>
+  <div id="workskin"><div class="preface group">
+    <h2 class="title heading">${title}</h2>
+    <h3 class="byline heading"><a rel="author" href="/users/someone/pseuds/someone">someone</a></h3>
+  </div></div>
+</div></body></html>`
+}
+
 /**
  * A stored read list, `ageMs` old, holding `ids`. Stored blurbs are titled
  * "Stored work N" and the live history's "Work number N", so a test can see
@@ -410,6 +431,8 @@ describe('read list auto-reload', { skip }, () => {
   let css
   let js
   let listPages
+  /** Work ids whose own page AO3 was asked for. */
+  let workRequests
 
   before(async () => {
     ensureBuilt()
@@ -426,16 +449,28 @@ describe('read list auto-reload', { skip }, () => {
     await browser?.close()
   })
 
-  /** History, with a stored read list and whatever else `extra` seeds, and the view opened. */
-  const open = async ({ seed = SEED, stored, misses }) => {
+  /**
+   * History, with a stored read list, and the view opened. `workPages` maps a
+   * work id to the title its own page carries; any other work's page is a 404.
+   */
+  const open = async ({ seed = SEED, stored, misses, workPages = {} }) => {
     const tab = await browser.newPage()
     listPages = []
+    workRequests = []
     await tab.setViewport({ width: 1280, height: 900 })
     await tab.setRequestInterception(true)
     tab.on('request', (req) => {
       if (!req.url().startsWith('https://archiveofourown.org/'))
         return void req.abort()
-      const params = new URL(req.url()).searchParams
+      const url = new URL(req.url())
+      const workId = url.pathname.match(/^\/works\/(\d+)$/)?.[1]
+      if (workId) {
+        workRequests.push(workId)
+        return void req.respond(workPages[workId]
+          ? { status: 200, contentType: 'text/html; charset=utf-8', body: workPage(workId, workPages[workId]) }
+          : { status: 404, body: '' })
+      }
+      const params = url.searchParams
       const page = Number(params.get('page') ?? 1)
       if (params.has('page'))
         listPages.push(page)
@@ -500,18 +535,54 @@ describe('read list auto-reload', { skip }, () => {
     await tab.close()
   })
 
-  test('a marked work the history doesn\u2019t have is looked for once, and remembered', async () => {
-    // Work 99 is marked read but in no history. Finding that out means reading
-    // all of it \u2014 once.
+  test('a marked work the history doesn’t have is fetched from its own page', async () => {
+    // Work 99 is marked read but in no history. Once the history has been read
+    // without finding it, its work page is the next place to look.
+    const tab = await open({
+      seed: SEED_WITH_ABSENT,
+      stored: storedReadList(['1', '3'], 25 * HOUR),
+      workPages: { 99: 'Work from its own page' },
+    })
+    assert.deepEqual(workRequests, ['99'], 'only the work nothing else had')
+    assert.deepEqual((await shownTitles(tab)).sort(), ['Stored work 1', 'Stored work 3', 'Work from its own page'])
+    const snapshots = await lastWrite(tab, 'cache.searchSnapshots')
+    assert.equal(snapshots['read-works:me'].blurbsHtml.length, 3, 'and stored, so it isn’t fetched again')
+    assert.equal(await lastWrite(tab, 'cache.searchMisses').then(m => m?.['read-works:me'] ?? ''), '', 'nothing recorded as missing')
+    await tab.close()
+  })
+
+  test('only a work whose own page fails too is written off, and remembered', async () => {
     const tab = await open({ seed: SEED_WITH_ABSENT, stored: storedReadList(['1', '3'], 25 * HOUR) })
-    assert.equal(listPages.length >= PAGES, true, 'the whole history had to be read to rule it out')
+    assert.deepEqual(workRequests, ['99'])
     assert.equal(await lastWrite(tab, 'cache.searchMisses').then(m => m?.['read-works:me']), '2r', 'work 99, recorded')
     await tab.close()
   })
 
-  test('and once remembered, an automatic reload doesn\u2019t go looking for it again', async () => {
+  test('and once remembered, an automatic reload doesn’t go looking for it again', async () => {
     const tab = await open({ seed: SEED_WITH_ABSENT, stored: storedReadList(['1', '3'], 25 * HOUR), misses: '2r' })
     assert.deepEqual(listPages, [], 'nothing new to find, so nothing asked for')
+    assert.deepEqual(workRequests, [], 'not even its own page')
+    await tab.close()
+  })
+
+  test('taking the last read mark off a work takes it off the list at once', async () => {
+    const tab = await open({ stored: storedReadList(['1', '3'], 2 * HOUR) })
+    assert.deepEqual((await shownTitles(tab)).sort(), ['Stored work 1', 'Stored work 3'])
+    const { scrapedAt } = storedReadList(['1', '3'], 2 * HOUR)['read-works:me']
+
+    // Work 3's only verdict was Read. Work 1 keeps Favorite, so it stays.
+    const marks = {
+      ...SEED['option.workMarks'],
+      marks: { ...SEED['option.workMarks'].marks, read: { ...SEED['option.workMarks'].marks.read, items: '' } },
+    }
+    await tab.evaluate(m => browser.storage.local.set({ 'option.workMarks': m }), marks)
+    await sleep(2000)
+
+    assert.deepEqual(await shownTitles(tab), ['Stored work 1'], 'gone without a reload')
+    assert.deepEqual(listPages, [])
+    const stored = (await lastWrite(tab, 'cache.searchSnapshots'))?.['read-works:me']
+    assert.equal(stored?.blurbsHtml.length, 1, 'and gone from the stored copy')
+    assert.ok(Math.abs(stored.scrapedAt - scrapedAt) < 5000, 'without counting as a reload')
     await tab.close()
   })
 

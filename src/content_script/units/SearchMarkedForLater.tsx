@@ -2,8 +2,8 @@ import type { Work } from '#content_script/blurb.js'
 import type { SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
 
-import { getArchiveLink, parseUser, toast } from '#common'
-import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
+import { getArchiveLink, parseUser, readWorkIds, toast } from '#common'
+import { loadMarkedForLaterIndex, noteMarkedForLater, saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
 import { hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
@@ -70,11 +70,15 @@ export class SearchMarkedForLater extends Unit {
   }
 
   async openView(userId: string, opts: { initialState?: ViewState, refresh?: boolean } = {}): Promise<void> {
-    await openSearchView(this.source(userId), this.options, opts)
+    // Loaded up front so a "Mark as Read" here can take the work out of it
+    // straight away (`noteMarkedForLater` does nothing to an index it hasn't
+    // read), rather than waiting for the next scrape to rewrite it.
+    await loadMarkedForLaterIndex(userId).catch(err => this.logger.error('Could not read the saved-work index', err))
+    await openSearchView(this.source(userId, readWorkIds(this.options.workMarks)), this.options, opts)
   }
 
   /** Everything the shared host needs to know about a Marked for Later list. */
-  source(userId: string): SearchSource {
+  source(userId: string, read: ReadonlySet<string>): SearchSource {
     return {
       id: SOURCE_ID,
       cacheKey: snapshotKey(userId),
@@ -86,6 +90,10 @@ export class SearchMarkedForLater extends Unit {
       pageUrl: page => getArchiveLink(`/users/${userId}/readings?show=to-read&page=${page}`),
       pageCount: () => detectPageCount(document),
       replacesListing: true,
+      // A work the reader has marked read is done with, whatever AO3 still lists
+      // — it comes off the moment the mark goes on. If AO3 didn't take it off
+      // its own list too, the read list's Status facet will say so.
+      belongs: work => !read.has(work.workId),
       // A to-read list runs to hundreds of works for some readers, and a full
       // reload on every visit is exactly what gets them rate-limited.
       refreshInterval: () => Math.max(0, this.options.searchProfileListsRefreshHours || 0) * 60 * 60_000,
@@ -117,6 +125,11 @@ export class SearchMarkedForLater extends Unit {
             try {
               // save: false ⇒ POST /works/:id/mark_as_read (leaves reading history).
               await submitMark(work.workId, false)
+              // The saved-work index is kept by scrapes and by the actions that
+              // change it, not by this list's snapshot, which leaves out works
+              // it has pruned (see `belongs`) and so can't be what it's rebuilt
+              // from.
+              noteMarkedForLater(work.workId, false)
             }
             catch (err) {
               this.logger.error('Mark as read failed', err)

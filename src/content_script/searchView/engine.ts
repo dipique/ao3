@@ -9,7 +9,6 @@ import type { Work } from '#content_script/blurb.js'
 /** A facetable field. Each maps a work to zero or more string values. */
 export type FacetKey
   = | 'status'
-    | 'marks'
     | 'rating'
     | 'warnings'
     | 'categories'
@@ -23,7 +22,6 @@ export type FacetKey
 /** Facet groups in sidebar display order. */
 export const FACET_KEYS: FacetKey[] = [
   'status',
-  'marks',
   'rating',
   'warnings',
   'categories',
@@ -37,7 +35,6 @@ export const FACET_KEYS: FacetKey[] = [
 
 export const FACET_LABELS: Record<FacetKey, string> = {
   status: 'Status',
-  marks: 'Marks',
   rating: 'Rating',
   warnings: 'Archive Warnings',
   categories: 'Categories',
@@ -82,10 +79,6 @@ export function facetValues(work: Work, key: FacetKey): string[] {
     // to Ready — an untracked work on your to-read list is exactly that, with
     // nothing standing between you and reading it.
     case 'status': return work.statuses ?? ['Ready']
-    // Precomputed by the host for the same reason as `status`. A work the host
-    // never stamped — marks turned off, or a set that predates the stamping —
-    // contributes nothing, so the group simply doesn't appear.
-    case 'marks': return work.marks ?? []
     case 'rating': return work.rating ? [work.rating] : []
     case 'warnings': return work.warnings
     case 'categories': return work.categories
