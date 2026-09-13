@@ -65,13 +65,13 @@ export interface Options {
   }
   /**
    * Narrow the search itself to match the rules, instead of only hiding what it
-   * returns. Whenever a rule takes a work out of a listing *outright*, the value
-   * that did it is ticked in AO3's own Sort & Filter sidebar (or, for an exact
-   * Additional Tags rule, typed into its "excluded tags" field), so the next
-   * search never fetches those works at all — which is what stops a page of
-   * twenty from arriving with one work left on it. Inside one of our own search
-   * views the same reasons become facet exclusions, which the view applies as it
-   * goes.
+   * returns. Whenever a rule takes a work out of a listing *outright*, one value
+   * that did it is ticked in AO3's own Sort & Filter sidebar (or typed into its
+   * "excluded tags" field), so the next search never fetches that work at all —
+   * which is what stops a page of twenty from arriving with one work left on it.
+   * Only one per work, however many values hid it, so a broad `contains` rule
+   * can't balloon the query. Inside one of our own search views every reason
+   * becomes a facet exclusion instead, which the view applies as it goes.
    *
    * The controls are only filled in; nothing is submitted, so a native listing
    * takes effect the next time the reader presses Sort and Filter.

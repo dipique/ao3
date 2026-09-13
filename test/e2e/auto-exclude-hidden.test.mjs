@@ -16,9 +16,14 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
  * - `Omegaverse`  exact Additional Tags, no sidebar row  -> typed into the field
  * - `Fluff`       exact Additional Tags, sidebar row     -> its checkbox ticked
  * - `Explicit`    a rating, always a checkbox            -> its checkbox ticked
- * - `coffee`      a *contains* rule, no sidebar row      -> left alone
+ * - `coffee`      a *contains* rule, no sidebar row      -> the matched tag typed in
  * - `Angst`       exact, but an always-show keeps a work carrying it -> left alone
  * - `Meh`         a *collapse* rule                      -> left alone
+ * - `torture`     a *contains* rule matching several tags on one work -> only the first
+ *
+ * Each hidden work adds at most one exclusion: a work already covered by one an
+ * earlier work added gets nothing more, and a work whose first match is off
+ * limits falls back to its next.
  */
 const SEED = {
   'option.autoExcludeHidden': true,
@@ -32,6 +37,7 @@ const SEED = {
       { target: 'F', value: 'coffee', matcher: 'contains', behavior: 'hide' },
       { target: 'F', value: 'Angst', matcher: 'exact', behavior: 'hide' },
       { target: 'F', value: 'Meh', matcher: 'exact', behavior: 'collapse' },
+      { target: 'F', value: 'torture', matcher: 'contains', behavior: 'hide' },
       { target: 'author', value: 'keeper', matcher: 'exact', behavior: 'invert' },
     ],
   },
@@ -70,6 +76,9 @@ const PAGE = `
     ${blurb(5, 'An angsty one', ['Angst'])}
     ${blurb(6, 'An angsty one by a keeper', ['Angst'], { author: 'keeper' })}
     ${blurb(7, 'A so-so one', ['Meh'])}
+    ${blurb(8, 'A dark one', ['Torture', 'Whump Torture'])}
+    ${blurb(9, 'A dark omegaverse one', ['Dark Torture Themes', 'Omegaverse'])}
+    ${blurb(10, 'A dark angsty one', ['Angst', 'Torture Mention'])}
   </ol>
 
   <form id="work-filters" action="/tags/x/works">
@@ -134,8 +143,8 @@ describe('auto-excluding what the rules hide', { skip }, () => {
   })
   const checked = id => page.evaluate(sel => document.getElementById(sel).checked, id)
 
-  test('types an exact Additional Tags rule into the excluded tags field', async () => {
-    assert.deepEqual(await excluded(), ['Omegaverse'])
+  test('types one tag per hidden work into the excluded tags field', async () => {
+    assert.deepEqual(await excluded(), ['Omegaverse', 'Coffee Shop AU', 'Torture', 'Torture Mention'])
   })
 
   test('ticks the sidebar checkbox a tag already has, rather than re-typing it', async () => {
@@ -147,8 +156,20 @@ describe('auto-excluding what the rules hide', { skip }, () => {
     assert.equal(await checked('ex_r_9'), false, 'an unmatched rating should be left alone')
   })
 
-  test('leaves a contains rule alone — it names a shape, not a tag', async () => {
-    assert.ok(!(await excluded()).includes('Coffee Shop AU'))
+  test('types the tag a contains rule matched', async () => {
+    assert.ok((await excluded()).includes('Coffee Shop AU'))
+  })
+
+  test('adds only the first match when a rule matches several tags on one work', async () => {
+    assert.ok(!(await excluded()).includes('Whump Torture'))
+  })
+
+  test('adds nothing for a work an earlier exclusion already covers', async () => {
+    assert.ok(!(await excluded()).includes('Dark Torture Themes'))
+  })
+
+  test('falls back to the next match when the first is kept on screen', async () => {
+    assert.ok((await excluded()).includes('Torture Mention'))
   })
 
   test('leaves a value alone while an always-show rule keeps a work carrying it', async () => {

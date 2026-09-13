@@ -64,9 +64,9 @@ export interface FilterTarget {
    * Whether the filter already offers a control standing for this value — a
    * sidebar checkbox, a facet row — as opposed to having to be told about it in
    * free text. Nothing a reader clicks needs the distinction (a manual exclude
-   * takes either path), but automatic exclusion does: adding a name AO3 never
-   * offered is a guess, and {@link file://./units/AutoExcludeHidden.ts} only
-   * makes it where the reader's rule was exact enough to justify one.
+   * takes either path), but automatic exclusion does: a fixed checkbox group
+   * with no box for a value can't be told about it at all — see
+   * {@link file://./units/AutoExcludeHidden.ts}.
    */
   hasControl: (dir: FilterDir, value: string) => boolean
 }

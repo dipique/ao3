@@ -206,9 +206,7 @@ export function hasTagFilterFields(): boolean {
 /**
  * Whether the sidebar already offers this tag as a checkbox in that direction —
  * i.e. it can be filtered by ticking a box the reader can see, rather than by
- * typing the name into the free-text field. What
- * {@link file://./units/AutoExcludeHidden.ts} keys "is there a matching
- * exclusion?" off.
+ * typing the name into the free-text field.
  */
 export function hasTagCheckbox(direction: Direction, name: string): boolean {
   return findTagCheckbox(direction, name) !== null
