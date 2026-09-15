@@ -59,6 +59,7 @@ describe('sync scenarios', () => {
     const cloud = createCloud()
     const laptop = mainBrowser(cloud, 'laptop', { version: 1 })
     await laptop.enableSync()
+    await cloud.run()
     createLegacyDevice(cloud, 'legacy', { knownKeys: LEGACY_KNOWN, legacyOptions: LEGACY_ONLY })
 
     // Every change on the laptop is echoed back as a copy without rules or marks.
@@ -78,7 +79,29 @@ describe('sync scenarios', () => {
     assert.equal(laptop.options.textReplacements.rules.length, 11)
   })
 
-  test('a pending push survives a worker restart', { todo: 'fixed by resuming a pending push on start' }, async () => {
+  test('a browser adopting a copy it can\'t reproduce doesn\'t push it back', async () => {
+    const cloud = createCloud()
+    const laptop = mainBrowser(cloud, 'laptop', { version: 1 })
+    await laptop.enableSync()
+    await cloud.run()
+    createLegacyDevice(cloud, 'legacy', { knownKeys: LEGACY_KNOWN, legacyOptions: LEGACY_ONLY })
+    await laptop.edit({ textReplacements: textReplacementsFixture(11) })
+    await cloud.run()
+    const echo = cloud.manifest()
+    assert.match(echo.w, /^legacy\./, 'precondition: the newest cloud copy is the stale build\'s')
+
+    // The stale copy carries an option this build drops, so no browser on it
+    // can ever hash to what the copy says.
+    const fresh = createDevice(cloud, 'fresh', { version: 1 })
+    await fresh.enableSync()
+    await cloud.run()
+
+    assert.equal(fresh.meta.dirty, false)
+    assert.equal(fresh.options.textReplacements.rules.length, 11, 'the copy was adopted')
+    assert.equal(cloud.manifest().w, echo.w, 'and nothing was pushed over it')
+  })
+
+  test('a pending push survives a worker restart', async () => {
     const cloud = createCloud()
     const laptop = mainBrowser(cloud)
     await laptop.enableSync()

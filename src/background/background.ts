@@ -8,6 +8,7 @@ import {
   initSyncEngine,
   onAlarm,
   onStorageChanged,
+  resumeSync,
   setSyncEnabled,
 } from './syncEngine.ts'
 
@@ -22,6 +23,9 @@ logBanner()
 browser.storage.onChanged.addListener(onStorageChanged)
 browser.alarms.onAlarm.addListener(onAlarm)
 browser.runtime.onStartup.addListener(() => void initSyncEngine())
+// Every worker start, not just browser start or install: a push left pending
+// when the worker last stopped would otherwise wait for the next edit.
+void resumeSync()
 
 browser.runtime.onInstalled.addListener(async () => {
   // Run migrations when we install or update extension

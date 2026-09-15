@@ -129,6 +129,20 @@ export function createSyncEngine(deps: SyncDeps) {
       void withLock(pull)
   }
 
+  /**
+   * Run every time the worker starts, whatever woke it: re-arm a push that was
+   * pending when the last one stopped. Alarms don't reliably survive an
+   * extension reload (which an import does straight after writing options), and
+   * nothing else notices a browser still marked dirty.
+   */
+  async function start(): Promise<void> {
+    await withLock(async () => {
+      const { enabled, dirty } = await meta.get(['enabled', 'dirty'])
+      if (enabled && dirty && !(await alarms.get(ALARM_PUSH)))
+        await scheduleAlarm()
+    })
+  }
+
   /** Startup reconciliation: adopt anything newer, resume a pending push. */
   async function init(): Promise<void> {
     if (!(await meta.get(['enabled'])).enabled)
@@ -200,9 +214,10 @@ export function createSyncEngine(deps: SyncDeps) {
     if (!(await meta.get(['enabled'])).enabled)
       return
 
-    // Real dirtiness is "does the pruned local state differ from what's synced?".
-    // This naturally absorbs our own pull-writes (which leave localHash === meta.h)
-    // and per-device churn like theme.current, so no echo-suppression flag is needed.
+    // Real dirtiness is "does the pruned local state differ from what we last
+    // agreed on?". A pull records the hash of what it left behind, so its own
+    // writes land here equal, as does per-device churn like theme.current — no
+    // echo-suppression flag is needed.
     const localHash = await currentHash()
     const { meta: agreed, dirty } = await meta.get(['meta', 'dirty'])
     if (localHash === agreed.h)
@@ -314,8 +329,14 @@ export function createSyncEngine(deps: SyncDeps) {
     if (Object.keys(update).length)
       await deps.writeOptions(update)
 
+    // Agree on what this browser now holds, not on the payload's own hash. The
+    // two differ whenever the payload carries something this build can't
+    // reproduce — options it doesn't know, or ones a writer on an older build
+    // left out — and treating that difference as a local edit is how a browser
+    // that had just adopted a copy used to push it straight back, claiming
+    // defaults for everything the copy lacked.
     await meta.set({
-      meta: { g: remote!.g, h: remote!.h, w: remote!.w },
+      meta: { g: remote!.g, h: await currentHash(), w: remote!.w },
       dirty: false,
       dirtySince: 0,
       lastError: '',
@@ -384,7 +405,7 @@ export function createSyncEngine(deps: SyncDeps) {
     return id
   }
 
-  return { onStorageChanged, onAlarm, init, setEnabled, clearSyncedData, getUsage, getStatus, idle }
+  return { onStorageChanged, onAlarm, start, init, setEnabled, clearSyncedData, getUsage, getStatus, idle }
 }
 
 export type SyncEngine = ReturnType<typeof createSyncEngine>

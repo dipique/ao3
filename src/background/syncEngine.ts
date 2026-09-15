@@ -30,6 +30,7 @@ const engine = createSyncEngine({
 
 export const onStorageChanged = engine.onStorageChanged
 export const onAlarm = engine.onAlarm
+export const resumeSync = engine.start
 export const initSyncEngine = engine.init
 export const setSyncEnabled = engine.setEnabled
 export const clearSyncedData = engine.clearSyncedData
