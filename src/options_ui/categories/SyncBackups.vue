@@ -49,8 +49,8 @@ function formatLastSync(ts: number) {
 
     <OptionRow
       v-if="state.backupsEnabled"
-      title="Number of backups to keep"
-      subtitle="Older backups beyond this count are deleted automatically."
+      title="Number of daily backups to keep"
+      subtitle="Older daily backups beyond this count are deleted automatically. Backups taken around turning on sync, a restore, or a sync update you held back are kept separately: the newest five of each."
     >
       <template #default="{ id }">
         <NumberInput :id="id" v-model="backupCountModel" :min="1" :max="90" />

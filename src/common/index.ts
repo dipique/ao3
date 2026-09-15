@@ -1,6 +1,8 @@
 export { api } from './api.ts'
 export type { BackupKind, BackupSummary, MarkDelegation, SyncStatus, SyncUsage } from './api.ts'
 
+export * from './backupIndex.ts'
+
 export * from './blurbRecord.ts'
 
 export { cache } from './cache.ts'

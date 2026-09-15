@@ -1,3 +1,5 @@
+import type { BackupSummary } from './api.ts'
+
 import { createStorage } from './storage.ts'
 import { SYNC_META_DEFAULTS } from './syncMetaDefaults.ts'
 
@@ -16,8 +18,15 @@ export interface SyncMeta {
   enabled: boolean
   /** Keep daily local backups of the options. */
   backupsEnabled: boolean
-  /** How many backups to retain. */
+  /** How many daily backups to retain. */
   backupCount: number
+  /**
+   * Every stored backup, newest first, without its options. Kept so listing and
+   * pruning backups never has to find them by reading all of `storage.local`,
+   * which also holds cached work text and every stored blurb. `null` until the
+   * first backup operation on a build that keeps it builds it.
+   */
+  backups: BackupSummary[] | null
 
   /** The sync generation/hash/writer-token this device's working copy agrees with. */
   meta: { g: number, h: string, w: string }
@@ -28,7 +37,7 @@ export interface SyncMeta {
   /** Stable random id for this browser instance (writer-token component). */
   deviceId: string
 
-  /** YYYY-MM-DD of the most recent backup — cheap daily-dedup without scanning storage. */
+  /** YYYY-MM-DD of the most recent daily backup — cheap daily-dedup without scanning storage. */
   lastBackupDate: string
 
   /** Last sync error message surfaced to the UI ('' when healthy). */
@@ -41,7 +50,7 @@ export const syncMeta = createStorage<SyncMeta>({
   area: 'local',
   name: 'SyncMeta',
   prefix: 'sync.',
-  ignoredEvents: ['meta', 'dirty', 'dirtySince', 'deviceId', 'lastBackupDate'],
+  ignoredEvents: ['meta', 'dirty', 'dirtySince', 'deviceId', 'lastBackupDate', 'backups'],
   defaults: SYNC_META_DEFAULTS,
 })
 

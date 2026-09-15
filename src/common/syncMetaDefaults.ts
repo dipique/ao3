@@ -10,6 +10,7 @@ export const SYNC_META_DEFAULTS: SyncMeta = {
   enabled: false,
   backupsEnabled: true,
   backupCount: 7,
+  backups: null,
 
   meta: { g: 0, h: '', w: '' },
   dirty: false,

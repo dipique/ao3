@@ -103,7 +103,7 @@ function createAPI<const API extends { [k: string]: (...args: any) => Promise<an
 export type MarkDelegation = { ok: true } | { ok: false, error: string }
 
 /** Lightweight backup descriptor for the options UI (no heavy options blob). */
-export type BackupKind = 'daily' | 'pre-restore' | 'pre-sync'
+export type BackupKind = 'daily' | 'pre-restore' | 'pre-sync' | 'sync-held' | 'sync-declined'
 export interface BackupSummary {
   key: string
   createdAt: number
