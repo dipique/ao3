@@ -7,6 +7,7 @@ import type { SyncMeta } from './syncMeta.ts'
 
 import { buildLocalUpdate, canonicalStringify, decode, diffChunks, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
 import { decidePull, decidePush } from './syncDecide.ts'
+import { assessPull } from './syncGuard.ts'
 
 /**
  * Replication engine: keeps the canonical `option.*` working copy in
@@ -68,7 +69,8 @@ export interface SyncDeps {
   backups: {
     /** Snapshot the current options if today has no backup yet. */
     maybeDaily: () => Promise<void>
-    create: (kind: BackupKind) => Promise<void>
+    /** Snapshot `snapshot`, or the current options when it's absent. */
+    create: (kind: BackupKind, snapshot?: Partial<Options>) => Promise<void>
   }
   now?: () => number
   randomId?: () => string
@@ -118,15 +120,15 @@ export function createSyncEngine(deps: SyncDeps) {
     }
     else if (areaName === 'sync') {
       if (Object.keys(changes).some(k => k === MANIFEST_KEY || isChunkKey(k)))
-        void withLock(pull)
+        void withLock(() => pull())
     }
   }
 
   function onAlarm(alarm: { name: string }): void {
     if (alarm.name === ALARM_PUSH)
-      void withLock(push)
+      void withLock(() => push())
     else if (alarm.name === ALARM_PULL_RETRY)
-      void withLock(pull)
+      void withLock(() => pull())
   }
 
   /**
@@ -168,6 +170,41 @@ export function createSyncEngine(deps: SyncDeps) {
       if (keys.length)
         await sync.remove(keys)
       await meta.set({ meta: { g: 0, h: '', w: '' }, dirty: false, dirtySince: 0, lastError: '', lastSyncAt: 0 })
+    })
+  }
+
+  /**
+   * The reader's answer to a held update. `accept` applies it — this browser's
+   * settings were backed up when it was held. `keep` saves the incoming copy as
+   * a backup, so whatever the other browser had is still restorable, and pushes
+   * this browser's settings over it.
+   */
+  async function resolveHeld(choice: 'accept' | 'keep'): Promise<boolean> {
+    return withLock(async () => {
+      const { pause } = await meta.get(['pause'])
+      if (pause?.reason !== 'held')
+        return false
+
+      if (choice === 'accept') {
+        await pull({ acceptLoss: true })
+      }
+      else {
+        const items = await sync.get(null)
+        const result = await decode(items)
+        if (result.ok) {
+          const remote = items[MANIFEST_KEY] as Manifest
+          const incoming = buildLocalUpdate(result.options, defaults, await deps.readOptions(), remote.k)
+          await backups.create('sync-declined', incoming)
+        }
+        await meta.set({ pause: null })
+        await push({ force: true })
+      }
+
+      // Answered either way, even if the cloud couldn't be read just now: the
+      // next update will be assessed afresh.
+      if ((await meta.get(['pause'])).pause?.reason === 'held')
+        await meta.set({ pause: null })
+      return true
     })
   }
 
@@ -227,17 +264,25 @@ export function createSyncEngine(deps: SyncDeps) {
     await scheduleAlarm()
   }
 
-  async function push(): Promise<void> {
-    if (!(await meta.get(['enabled'])).enabled)
+  /** `force` pushes over a newer cloud copy: the reader chose this browser's settings. */
+  async function push({ force = false }: { force?: boolean } = {}): Promise<void> {
+    const { enabled, meta: agreed, pause } = await meta.get(['enabled', 'meta', 'pause'])
+    if (!enabled)
       return
+    // While an update is held, pushing would answer the question for the reader.
+    if (pause?.reason === 'held' && !force) {
+      logger.log('push waits: an incoming update is held for the reader')
+      return
+    }
 
-    const { meta: agreed } = await meta.get(['meta'])
     const opts = await deps.readOptions()
     const pruned = pruneToSynced(opts, defaults)
     const localHash = hash(canonicalStringify(pruned))
     const remote = await readManifest()
 
-    const decision = decidePush(agreed, remote, localHash)
+    let decision = decidePush(agreed, remote, localHash)
+    if (force && decision === 'pull')
+      decision = 'push'
     logger.log('push decision', decision)
     if (decision === 'noop') {
       if (localHash === agreed.h)
@@ -287,14 +332,18 @@ export function createSyncEngine(deps: SyncDeps) {
     }
   }
 
-  async function pull(): Promise<void> {
-    if (!(await meta.get(['enabled'])).enabled)
+  /** `acceptLoss` applies an update the deletion guard would hold: the reader accepted it. */
+  async function pull({ acceptLoss = false }: { acceptLoss?: boolean } = {}): Promise<void> {
+    const { enabled, meta: agreed, pause } = await meta.get(['enabled', 'meta', 'pause'])
+    if (!enabled)
       return
 
-    const { meta: agreed } = await meta.get(['meta'])
     const items = await sync.get(null)
     const remote = (items[MANIFEST_KEY] as Manifest | undefined) ?? null
     if (decidePull(agreed, remote) === 'noop')
+      return
+    // The copy already held: nothing new to assess until something newer arrives.
+    if (!acceptLoss && pause?.reason === 'held' && remote!.g === pause.g && remote!.w === pause.w)
       return
 
     const result = await decode(items)
@@ -325,6 +374,21 @@ export function createSyncEngine(deps: SyncDeps) {
     // `remote.k` tells us which options the writing device knew about, so a device
     // on an older build can't silently reset (and wipe) ones it has never heard of.
     const desired = buildLocalUpdate(result.options, defaults, current, remote?.k)
+
+    // An update that would take away a large share of the rules, marked works or
+    // text replacements waits for the reader — see syncGuard.ts for why no key
+    // list or version can make that call. Nothing is applied and the agreement
+    // doesn't move, so this browser's pushes wait too.
+    const loss = acceptLoss ? null : assessPull(current, desired)
+    if (loss) {
+      const { backupsEnabled } = await meta.get(['backupsEnabled'])
+      if (backupsEnabled)
+        await backups.create('sync-held')
+      await meta.set({ pause: { reason: 'held', g: remote!.g, w: remote!.w, loss, at: now(), backedUp: backupsEnabled } })
+      logger.warn('holding back a sync update that would remove', loss)
+      return
+    }
+
     const update = diffOptions(current, desired)
     if (Object.keys(update).length)
       await deps.writeOptions(update)
@@ -341,6 +405,7 @@ export function createSyncEngine(deps: SyncDeps) {
       dirtySince: 0,
       lastError: '',
       lastSyncAt: now(),
+      ...(pause?.reason === 'held' ? { pause: null } : {}),
     })
     logger.log('pull ok, gen', remote!.g)
   }
@@ -348,7 +413,7 @@ export function createSyncEngine(deps: SyncDeps) {
   async function enable(): Promise<void> {
     await getDeviceId()
     // Forget any prior agreement so the cloud copy is treated as authoritative.
-    await meta.set({ meta: { g: 0, h: '', w: '' }, lastError: '' })
+    await meta.set({ meta: { g: 0, h: '', w: '' }, lastError: '', pause: null })
 
     const remote = await readManifest()
     if (remote && remote.v > SYNC_SCHEMA_VERSION) {
@@ -369,7 +434,7 @@ export function createSyncEngine(deps: SyncDeps) {
   async function disable(): Promise<void> {
     await alarms.clear(ALARM_PUSH)
     await alarms.clear(ALARM_PULL_RETRY)
-    await meta.set({ dirty: false, dirtySince: 0 })
+    await meta.set({ dirty: false, dirtySince: 0, pause: null })
     // Cloud data is intentionally left intact — clearing would wipe other devices.
   }
 
@@ -405,7 +470,7 @@ export function createSyncEngine(deps: SyncDeps) {
     return id
   }
 
-  return { onStorageChanged, onAlarm, start, init, setEnabled, clearSyncedData, getUsage, getStatus, idle }
+  return { onStorageChanged, onAlarm, start, init, setEnabled, resolveHeld, clearSyncedData, getUsage, getStatus, idle }
 }
 
 export type SyncEngine = ReturnType<typeof createSyncEngine>

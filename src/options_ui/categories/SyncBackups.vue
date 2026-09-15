@@ -1,5 +1,15 @@
 <script setup lang="ts">
-const { state, setEnabled, setBackupsEnabled, setBackupCount } = useSync()
+import { describePullLoss } from '#common'
+
+const { state, setEnabled, setBackupsEnabled, setBackupCount, resolveHeld } = useSync()
+
+const heldMessage = computed(() => {
+  const pause = state.pause
+  if (pause?.reason !== 'held')
+    return ''
+  const backup = pause.backedUp ? ` A backup of this browser's settings was saved first.` : ''
+  return `Sync is on hold: an update from another browser would remove ${describePullLoss(pause.loss)}.${backup}`
+})
 
 const backupCountModel = computed({
   get: () => state.backupCount,
@@ -31,6 +41,19 @@ function formatLastSync(ts: number) {
         <p v-if="state.lastError" text="sm" pt-1 :style="{ color: '#dc2626' }">
           {{ state.lastError }}
         </p>
+        <div v-if="heldMessage" role="alert" data-sync-held flex="~ col gap-2" pt-2>
+          <p text="sm" :style="{ color: '#d97706' }">
+            {{ heldMessage }}
+          </p>
+          <div flex="~ row wrap items-center gap-2">
+            <Button size="sm" variant="outline" :disabled="state.resolving" data-sync-keep @click="resolveHeld('keep')">
+              Keep this browser's settings
+            </Button>
+            <Button size="sm" :disabled="state.resolving" data-sync-accept @click="resolveHeld('accept')">
+              Accept the update
+            </Button>
+          </div>
+        </div>
         <SyncStorageUsage v-if="state.enabled" />
         <p v-if="state.enabled && !state.lastError" text="xs muted-fg" pt-1>
           Last synced: {{ formatLastSync(state.lastSyncAt) }}

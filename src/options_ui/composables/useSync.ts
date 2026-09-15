@@ -1,6 +1,8 @@
 import { clamp } from '@antfu/utils'
 
-import { api, syncMeta } from '#common'
+import type { SyncPause } from '#common'
+
+import { api, syncMeta, toast } from '#common'
 
 /**
  * Options-page view of the device-local sync/backup settings ({@link syncMeta}).
@@ -8,7 +10,8 @@ import { api, syncMeta } from '#common'
  * The `enabled` toggle is routed through the background (`api.setSyncEnabled`) so
  * the engine runs its enable/disable flow (seed, adopt, stop). The plain backup
  * settings are written straight to `syncMeta`. A storage listener keeps this
- * reactive state aligned with whatever the background writes back.
+ * reactive state aligned with whatever the background writes back — including
+ * a pause, which the reader answers through the background too.
  */
 const state = reactive({
   loaded: false,
@@ -17,9 +20,12 @@ const state = reactive({
   backupCount: 7,
   lastError: '',
   lastSyncAt: 0,
+  pause: null as SyncPause | null,
+  /** An answer to a held update is on its way to the background. */
+  resolving: false,
 })
 
-void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt']).then((m) => {
+void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause']).then((m) => {
   Object.assign(state, m, { loaded: true })
 })
 
@@ -38,6 +44,20 @@ export function useSync() {
       }
       catch {
         state.enabled = !value // revert on failure
+      }
+    },
+
+    async resolveHeld(choice: 'accept' | 'keep') {
+      state.resolving = true
+      try {
+        await api.resolveHeldSync.sendToBackground(choice)
+      }
+      catch (error) {
+        toast('Could not answer the held sync update; see console for details', { type: 'error' })
+        console.error(error)
+      }
+      finally {
+        state.resolving = false
       }
     },
 

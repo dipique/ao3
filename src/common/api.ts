@@ -141,6 +141,8 @@ export const api = /* @__PURE__ */ createAPI<{
   // Sync + backups (all handled in the background context).
   // Void-ish actions return `true` so the message channel always sends a response.
   setSyncEnabled: (enabled: boolean) => Promise<boolean>
+  /** Answer a sync update held back by the deletion guard. Always answers (`resolved: false` when nothing was held). */
+  resolveHeldSync: (choice: 'accept' | 'keep') => Promise<{ resolved: boolean }>
   clearSyncedData: () => Promise<boolean>
   getSyncUsage: () => Promise<SyncUsage>
   getSyncStatus: () => Promise<SyncStatus>

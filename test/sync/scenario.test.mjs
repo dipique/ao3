@@ -55,7 +55,7 @@ describe('sync scenarios', () => {
     assert.equal(cloud.manifest().g, before.g, 'the adopting browser pushed nothing')
   })
 
-  test('the incident: a stale build\'s partial copy can\'t cost the main browser its rules or marks', { todo: 'fixed by the pull and deletion-guard changes' }, async () => {
+  test('the incident: a stale build\'s partial copy can\'t cost the main browser its rules or marks', async () => {
     const cloud = createCloud()
     const laptop = mainBrowser(cloud, 'laptop', { version: 1 })
     await laptop.enableSync()
@@ -77,6 +77,73 @@ describe('sync scenarios', () => {
     assert.equal(laptop.options.rules.filters.length, 40, 'rules survive')
     assert.equal(markedWorks(laptop.options).size, 60, 'marked works survive')
     assert.equal(laptop.options.textReplacements.rules.length, 11)
+    // On one sync version, the guard is what catches it: the fresh browser's
+    // copy (rules empty, two marked works) was held rather than applied. The
+    // stale build then echoed a newer copy that leaves rules and marks alone,
+    // which is within bounds, so it applied and superseded the held one.
+    assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held'])
+    assert.equal(laptop.meta.pause, null)
+  })
+
+  describe('an update that would remove most of a list', () => {
+    /** A laptop and desktop in sync, then the desktop deletes 39 of the 40 rules. */
+    async function bulkDelete() {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+      await desktop.edit({ rules: rulesFixture(1) })
+      await cloud.run()
+      return { cloud, laptop, desktop }
+    }
+
+    test('is held, backed up once, and blocks this browser\'s pushes', async () => {
+      const { cloud, laptop } = await bulkDelete()
+      assert.equal(laptop.options.rules.filters.length, 40)
+      assert.equal(laptop.meta.pause?.reason, 'held')
+      assert.equal(laptop.meta.pause.backedUp, true)
+
+      // Hearing about the same copy again doesn't re-assess or re-back-up it,
+      // and the laptop's own edits wait instead of answering for the reader.
+      const before = cloud.manifest()
+      await laptop.edit({ wordsPerMinute: 999 })
+      await cloud.run()
+      assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held'])
+      assert.equal(cloud.manifest().w, before.w, 'nothing pushed while held')
+    })
+
+    test('"keep" pushes this browser\'s list back and saves the declined copy', async () => {
+      const { cloud, laptop, desktop } = await bulkDelete()
+      assert.equal(await laptop.resolveHeld('keep'), true)
+      await cloud.run()
+
+      assert.equal(laptop.meta.pause, null)
+      assert.equal(desktop.options.rules.filters.length, 40, 'the laptop\'s rules won')
+      const declined = laptop.backups.find(b => b.kind === 'sync-declined')
+      assert.equal(declined?.options.rules.filters.length, 1, 'the desktop\'s version is restorable')
+    })
+
+    test('"accept" applies it', async () => {
+      const { cloud, laptop } = await bulkDelete()
+      assert.equal(await laptop.resolveHeld('accept'), true)
+      await cloud.run()
+
+      assert.equal(laptop.meta.pause, null)
+      assert.equal(laptop.options.rules.filters.length, 1)
+      assert.equal(laptop.meta.dirty, false)
+    })
+
+    test('a newer update within bounds applies and clears the hold', async () => {
+      const { cloud, laptop, desktop } = await bulkDelete()
+      await desktop.edit({ rules: rulesFixture(38) })
+      await cloud.run()
+
+      assert.equal(laptop.meta.pause, null)
+      assert.equal(laptop.options.rules.filters.length, 38)
+    })
   })
 
   test('a browser adopting a copy it can\'t reproduce doesn\'t push it back', async () => {

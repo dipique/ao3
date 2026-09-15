@@ -29,8 +29,10 @@ export type { SyncDeps, SyncEngine } from './syncCore.ts'
 
 export * from './syncDecide.ts'
 
+export * from './syncGuard.ts'
+
 export { syncMeta } from './syncMeta.ts'
-export type { SyncMeta } from './syncMeta.ts'
+export type { SyncMeta, SyncPause } from './syncMeta.ts'
 
 export { toast } from './toast/toast.tsx'
 

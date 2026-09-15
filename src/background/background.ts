@@ -8,6 +8,7 @@ import {
   initSyncEngine,
   onAlarm,
   onStorageChanged,
+  resolveHeldSync,
   resumeSync,
   setSyncEnabled,
 } from './syncEngine.ts'
@@ -47,6 +48,7 @@ api.setSyncEnabled.addListener(async (enabled) => {
   await setSyncEnabled(enabled)
   return true
 })
+api.resolveHeldSync.addListener(async choice => ({ resolved: await resolveHeldSync(choice) }))
 api.clearSyncedData.addListener(async () => {
   await clearSyncedData()
   return true

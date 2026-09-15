@@ -214,6 +214,13 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       return result
     },
 
+    /** The reader answers a held update. */
+    async resolveHeld(choice) {
+      const resolved = await engine.resolveHeld(choice)
+      await device.settle()
+      return resolved
+    },
+
     /** A change the reader makes in this browser's options. */
     async edit(update) {
       await deps.writeOptions(update)

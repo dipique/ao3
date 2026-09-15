@@ -1,7 +1,21 @@
 import type { BackupSummary } from './api.ts'
+import type { PullLoss } from './syncGuard.ts'
 
 import { createStorage } from './storage.ts'
 import { SYNC_META_DEFAULTS } from './syncMetaDefaults.ts'
+
+/**
+ * Why this browser has stopped syncing, when it has. Unlike `lastError` (a push
+ * or read that failed and will be retried), a pause lasts until something
+ * changes: the reader answers, or the extension is updated.
+ */
+export type SyncPause
+  /**
+   * An incoming update would remove a large share of this browser's rules,
+   * marked works or text replacements (see `syncGuard.ts`). `g`/`w` name the
+   * copy being held, so the same copy isn't assessed (and backed up) again.
+   */
+  = | { reason: 'held', g: number, w: string, loss: PullLoss, at: number, backedUp: boolean }
 
 /**
  * Device-local sync/backup state and settings. Deliberately kept **out** of the
@@ -11,7 +25,7 @@ import { SYNC_META_DEFAULTS } from './syncMetaDefaults.ts'
  *
  * The noisy engine-internal keys (`meta`, `dirty`, `dirtySince`, `deviceId`) are
  * in `ignoredEvents` so the options UI's listener only wakes for user-facing
- * fields (the enabled toggles, last-error, last-sync time).
+ * fields (the enabled toggles, last-error, last-sync time, a pause).
  */
 export interface SyncMeta {
   /** Master switch — does THIS device replicate options to `storage.sync`? */
@@ -39,6 +53,9 @@ export interface SyncMeta {
 
   /** YYYY-MM-DD of the most recent daily backup — cheap daily-dedup without scanning storage. */
   lastBackupDate: string
+
+  /** Why sync is paused on this browser, or `null` when it isn't. */
+  pause: SyncPause | null
 
   /** Last sync error message surfaced to the UI ('' when healthy). */
   lastError: string

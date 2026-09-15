@@ -19,6 +19,8 @@ export const SYNC_META_DEFAULTS: SyncMeta = {
 
   lastBackupDate: '',
 
+  pause: null,
+
   lastError: '',
   lastSyncAt: 0,
 }
