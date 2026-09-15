@@ -1,1 +1,1 @@
-{"root":["./src/manifest.ts","./src/background/background.ts","./src/background/backups.ts","./src/background/menus.ts","./src/background/migrations.ts","./src/background/syncengine.ts","./src/types/env.d.ts","./src/types/icons.d.ts"],"version":"6.0.3"}
+{"root":["./src/manifest.ts","./src/background/background.ts","./src/background/backups.ts","./src/background/buildcheck.ts","./src/background/menus.ts","./src/background/migrations.ts","./src/background/syncengine.ts","./src/types/env.d.ts","./src/types/icons.d.ts"],"version":"6.0.3"}

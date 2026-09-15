@@ -194,7 +194,7 @@ export function createSyncEngine(deps: SyncDeps) {
       }
       else {
         const items = await sync.get(null)
-        const result = await decode(items)
+        const result = await decode(items, version())
         if (result.ok) {
           const remote = items[MANIFEST_KEY] as Manifest
           const incoming = buildLocalUpdate(result.options, defaults, await deps.readOptions(), remote.k)
