@@ -38,8 +38,9 @@ const applied = new Map<Text, Applied>()
  * With the work-page tools switched on, each replaced run is wrapped in a span
  * carrying the index of the rule behind it, which is what gives
  * {@link file://./TextReplaceTools.tsx} something to underline and something to
- * open when the reader clicks it. The spans deliberately don't carry
- * `ADDON_CLASS`: the global clean-up sweep removes every `.AO3E` element
+ * open when the reader clicks it. Its tooltip holds the text the rule replaced,
+ * so hovering a run shows what the author wrote. The spans deliberately don't
+ * carry `ADDON_CLASS`: the global clean-up sweep removes every `.AO3E` element
  * outright, and these hold the work's own words.
  */
 export class TextReplace extends Unit {
@@ -144,7 +145,13 @@ function nodeFor(span: TextSpan): ChildNode {
   const el = document.createElement('span')
   el.className = REPLACED_CLASS
   el.setAttribute(REPLACED_RULE_ATTR, String(span.rule))
-  el.title = 'Replaced by AO3 Enhancements — click to edit this replacement'
+  el.title = replacedTitle(span.original)
   el.textContent = span.text
   return el
+}
+
+/** The hover text for a replaced run: what it said before, then how to edit the rule. */
+function replacedTitle(original: string | undefined): string {
+  const hint = 'Replaced by AO3 Enhancements — click to edit this replacement'
+  return original === undefined ? hint : `Original text: “${original}”\n${hint}`
 }

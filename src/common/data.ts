@@ -586,6 +586,17 @@ export interface TextSpan {
   segment: number
   /** Index of the rule that produced this run, or `null` for untouched source text. */
   rule: number | null
+  /**
+   * For a replacement, the source text it stands in for — what the reader would
+   * have seen without any rules. Traced back through earlier rules, so a word two
+   * rules rewrote in turn still reports the word the author wrote rather than
+   * the one the first rule left behind. Absent on untouched source text.
+   *
+   * When a later rule rewrites only part of an earlier replacement, the piece it
+   * leaves behind and the new run both report that earlier replacement's whole
+   * source: neither can say which of its characters became which.
+   */
+  original?: string
 }
 
 /**
@@ -644,7 +655,12 @@ function applyRuleToSpans(spans: TextSpan[], rule: TextReplacement, index: numbe
       continue
 
     keepSource(out, spans, flat, owner, at, start)
-    out.push({ text: replacementFor(rule, match[0]), segment: segmentAt(start), rule: index })
+    out.push({
+      text: replacementFor(rule, match[0]),
+      segment: segmentAt(start),
+      rule: index,
+      original: originalOf(spans, flat, owner, start, end),
+    })
     at = end
     matched = true
   }
@@ -669,9 +685,32 @@ function keepSource(out: TextSpan[], spans: TextSpan[], flat: string, owner: num
     while (next < to && owner[next] === which)
       next++
     const source = spans[which]!
-    out.push({ text: flat.slice(cut, next), segment: source.segment, rule: source.rule })
+    const piece: TextSpan = { text: flat.slice(cut, next), segment: source.segment, rule: source.rule }
+    if (source.original !== undefined)
+      piece.original = source.original
+    out.push(piece)
     cut = next
   }
+}
+
+/**
+ * The source text behind `flat[from, to)`: untouched runs give the characters
+ * the range covers, and each earlier replacement it touches gives its own
+ * source, once, however much of it the range covers.
+ */
+function originalOf(spans: TextSpan[], flat: string, owner: number[], from: number, to: number): string {
+  let text = ''
+  let last = -1
+  for (let i = from; i < to; i++) {
+    const which = owner[i]!
+    const source = spans[which]!
+    if (source.original === undefined)
+      text += flat[i]
+    else if (which !== last)
+      text += source.original
+    last = which
+  }
+  return text
 }
 
 /** Apply every rule, in order, to a string (later rules see earlier results). */

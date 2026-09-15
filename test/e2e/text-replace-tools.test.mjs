@@ -100,6 +100,13 @@ describe('text replacement tools on a work page', { skip }, () => {
     ])
   })
 
+  test('shows the replaced text when a run is hovered', async () => {
+    const titles = await tab.evaluate(() => Array.from(document.querySelectorAll('.AO3E--replaced'), el => el.title))
+    assert.equal(titles.length, 2)
+    for (const title of titles)
+      assert.match(title, /^Original text: “middle”\n/)
+  })
+
   // The marks are markup around the same words, not different words: whatever
   // reads the page's text has to see exactly what it saw with the tools off.
   test('leaves the rewritten text reading the same', async () => {

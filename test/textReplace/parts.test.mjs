@@ -91,6 +91,37 @@ describe('the runs a rewrite is made of', () => {
   })
 })
 
+/** What hovering a replaced run shows: the text as the author wrote it. */
+describe('the original text behind a replacement', () => {
+  const originals = spans => spans.filter(s => s.rule !== null).map(s => [s.text, s.original])
+
+  test('is the text the match covered, in its own casing', () => {
+    const spans = replaceTextSegments(['Cat and cat'], [rule('cat', 'dog', { matchCasing: true })])
+    assert.deepEqual(originals(spans), [['Dog', 'Cat'], ['dog', 'cat']])
+  })
+
+  test('is not recorded on untouched text', () => {
+    const spans = replaceTextSegments(['a cat'], [rule('cat', 'dog')])
+    assert.ok(spans.filter(s => s.rule === null).every(s => !('original' in s)))
+  })
+
+  test('reaches back past an earlier rule to the source', () => {
+    const spans = replaceTextSegments(['a cat'], [rule('cat', 'dog'), rule('dog', 'wolf')])
+    assert.deepEqual(originals(spans), [['wolf', 'cat']])
+  })
+
+  test('joins source text and an earlier replacement a later match read across', () => {
+    const spans = replaceTextSegments(['a Xt'], [rule('X', 'ca'), rule('cat', 'dog')])
+    assert.deepEqual(originals(spans), [['dog', 'Xt']])
+  })
+
+  test('is shared by what a later rule left of an earlier replacement', () => {
+    const spans = replaceTextSegments(['a cat'], [rule('cat', 'dog'), rule('og', 'ig')])
+    assert.equal(allText(spans), 'a dig')
+    assert.deepEqual(originals(spans), [['d', 'cat'], ['ig', 'cat']])
+  })
+})
+
 /**
  * The whole point of segments: a work's markup splits one sentence into a text
  * node per change of formatting, and `, Love...` in
@@ -140,6 +171,11 @@ describe('a match that spans a change of formatting', () => {
     assert.equal(segmentText(spans, 1), '')
     assert.equal(segmentText(spans, 2), 'f')
     assert.equal(allText(spans), 'azf')
+  })
+
+  test('remembers the whole source it replaced, seam and all', () => {
+    const spans = replaceTextSegments(SPLIT, [{ ...LOVE, acrossFormatting: true }])
+    assert.deepEqual(spans.filter(s => s.rule !== null).map(s => s.original), [', Love...'])
   })
 
   test('an off rule and an on rule can sit in the same list', () => {
