@@ -68,6 +68,16 @@ export interface SyncMeta {
 
   /** Why sync is paused on this browser, or `null` when it isn't. */
   pause: SyncPause | null
+  /**
+   * Set when the background found itself running a different build than the one
+   * on disk (`build.json`), which Chrome can do for an unpacked extension for as
+   * long as nobody reloads it. Nothing syncs while it's set: an old background
+   * pushes only the options it knows, and whatever it doesn't know is what other
+   * browsers stand to lose. Cleared by the first worker start that matches.
+   */
+  staleBuild: { running: string, onDisk: string } | null
+  /** The on-disk build id the background last reloaded itself for, so it reloads once per build. */
+  reloadAttemptedFor: string
 
   /** Last sync error message surfaced to the UI ('' when healthy). */
   lastError: string
@@ -79,7 +89,7 @@ export const syncMeta = createStorage<SyncMeta>({
   area: 'local',
   name: 'SyncMeta',
   prefix: 'sync.',
-  ignoredEvents: ['meta', 'dirty', 'dirtySince', 'deviceId', 'lastBackupDate', 'backups'],
+  ignoredEvents: ['meta', 'dirty', 'dirtySince', 'deviceId', 'lastBackupDate', 'backups', 'reloadAttemptedFor'],
   defaults: SYNC_META_DEFAULTS,
 })
 

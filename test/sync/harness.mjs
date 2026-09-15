@@ -214,6 +214,11 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       return result
     },
 
+    /** Write device-local sync state directly, as the background does outside the engine. */
+    async setMeta(update) {
+      Object.assign(state, clone(update))
+    },
+
     /** The reader answers a held update. */
     async resolveHeld(choice) {
       const resolved = await engine.resolveHeld(choice)

@@ -260,6 +260,32 @@ describe('sync scenarios', () => {
     assert.equal(cloud.manifest().w, echo.w, 'and nothing was pushed over it')
   })
 
+  test('a background running an out-of-date build doesn\'t sync', async () => {
+    const cloud = createCloud()
+    const laptop = mainBrowser(cloud)
+    await laptop.enableSync()
+    await cloud.run()
+    const desktop = createDevice(cloud, 'desktop')
+    await desktop.enableSync()
+    await cloud.run()
+
+    // The desktop's background finds build.json doesn't match its own build.
+    await desktop.setMeta({ staleBuild: { running: 'old', onDisk: 'new' } })
+    await desktop.edit({ wordsPerMinute: 111 })
+    await laptop.edit({ rules: rulesFixture(41) })
+    await cloud.run()
+    assert.equal(laptop.options.wordsPerMinute, 200, 'the stale background pushed nothing')
+    assert.equal(desktop.options.rules.filters.length, 40, 'and adopted nothing')
+
+    // Reloaded onto the current build: it catches up, and its own edit follows.
+    await desktop.setMeta({ staleBuild: null })
+    await desktop.restart({ init: true })
+    await desktop.edit({ wordsPerMinute: 112 })
+    await cloud.run()
+    assert.equal(desktop.options.rules.filters.length, 41)
+    assert.equal(laptop.options.wordsPerMinute, 112)
+  })
+
   test('a pending push survives a worker restart', async () => {
     const cloud = createCloud()
     const laptop = mainBrowser(cloud)

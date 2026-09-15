@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { syncPauseMessage, syncRefusalMessage } from '../../src/common/syncMessages.ts'
+import { staleBackgroundMessage, syncPauseMessage, syncRefusalMessage } from '../../src/common/syncMessages.ts'
 
 describe('sync messages', () => {
   test('a held update says what it would remove, and whether a backup exists', () => {
@@ -12,6 +12,11 @@ describe('sync messages', () => {
       'Sync is on hold: an update from another browser would remove 348 of your 348 rules and 267 of your 282 marked works. A backup of this browser\'s settings was saved first.',
     )
     assert.doesNotMatch(syncPauseMessage({ ...held, backedUp: false }, 2), /backup/)
+  })
+
+  test('an out-of-date background says whether sync has stopped', () => {
+    assert.match(staleBackgroundMessage(true), /Reload AO3 Enhancements .*Sync is paused until then\.$/)
+    assert.match(staleBackgroundMessage(false), /Sync may not work until then\.$/)
   })
 
   test('version pauses name both versions', () => {

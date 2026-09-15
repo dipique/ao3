@@ -143,8 +143,8 @@ export function createSyncEngine(deps: SyncDeps) {
    */
   async function start(): Promise<void> {
     await withLock(async () => {
-      const { enabled, dirty } = await meta.get(['enabled', 'dirty'])
-      if (enabled && dirty && !(await alarms.get(ALARM_PUSH)))
+      const { enabled, dirty, staleBuild } = await meta.get(['enabled', 'dirty', 'staleBuild'])
+      if (enabled && !staleBuild && dirty && !(await alarms.get(ALARM_PUSH)))
         await scheduleAlarm()
     })
   }
@@ -252,8 +252,8 @@ export function createSyncEngine(deps: SyncDeps) {
     // Backups are independent of sync — keep a daily restore point regardless.
     await backups.maybeDaily()
 
-    const { enabled, pause } = await meta.get(['enabled', 'pause'])
-    if (!enabled)
+    const { enabled, pause, staleBuild } = await meta.get(['enabled', 'pause', 'staleBuild'])
+    if (!enabled || staleBuild)
       return
     // Paused for a newer cloud copy: what's edited on this build won't be
     // pushed once it's updated either — the update pulls the newer copy first.
@@ -275,8 +275,8 @@ export function createSyncEngine(deps: SyncDeps) {
 
   /** `force` pushes over a newer cloud copy: the reader chose this browser's settings. */
   async function push({ force = false }: { force?: boolean } = {}): Promise<void> {
-    const { enabled, meta: agreed, pause } = await meta.get(['enabled', 'meta', 'pause'])
-    if (!enabled)
+    const { enabled, meta: agreed, pause, staleBuild } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild'])
+    if (!enabled || staleBuild)
       return
     // While an update is held, pushing would answer the question for the reader.
     if (pause?.reason === 'held' && !force) {
@@ -352,8 +352,8 @@ export function createSyncEngine(deps: SyncDeps) {
 
   /** `acceptLoss` applies an update the deletion guard would hold: the reader accepted it. */
   async function pull({ acceptLoss = false }: { acceptLoss?: boolean } = {}): Promise<void> {
-    const { enabled, meta: agreed, pause } = await meta.get(['enabled', 'meta', 'pause'])
-    if (!enabled)
+    const { enabled, meta: agreed, pause, staleBuild } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild'])
+    if (!enabled || staleBuild)
       return
 
     const items = await sync.get(null)

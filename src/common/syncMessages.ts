@@ -21,6 +21,16 @@ export function syncPauseMessage(pause: SyncPause, version: number): string {
   }
 }
 
+/**
+ * The background isn't running the extension's current code. `confirmed` when
+ * the background noticed itself (and has stopped syncing); otherwise it's the
+ * options page that couldn't get a current answer from it.
+ */
+export function staleBackgroundMessage(confirmed: boolean): string {
+  const effect = confirmed ? 'Sync is paused until then.' : 'Sync may not work until then.'
+  return `This browser is running an out-of-date copy of the extension's background script. Reload AO3 Enhancements from your browser's extensions page. ${effect}`
+}
+
 export function syncRefusalMessage(result: Extract<SetSyncResult, { ok: false }>): string {
   return `Can't turn on sync: your synced settings need a newer version of AO3 Enhancements (sync version ${result.remoteVersion}; this browser has ${result.version}). Update or reload the extension first.`
 }

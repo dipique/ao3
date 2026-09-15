@@ -1,6 +1,7 @@
-import { api, cache, logBanner, options, syncMeta } from '#common'
+import { api, cache, logBanner, options, SYNC_SCHEMA_VERSION, syncMeta } from '#common'
 
 import { listBackups, restoreBackup } from './backups.ts'
+import { checkBuild } from './buildCheck.ts'
 import {
   clearSyncedData,
   getSyncStatus,
@@ -17,18 +18,31 @@ import './menus.ts'
 
 logBanner()
 
+// Is this worker the build on disk? Everything that syncs or migrates waits for
+// the answer, and a stale worker reloads itself rather than doing either.
+const current = checkBuild()
+
 // --- Sync engine listeners ---
 // Registered synchronously at the top level so an MV3 wake-up event (a remote
 // sync change, or the debounce alarm) is never delivered before its handler is
-// attached.
+// attached. The engine itself does nothing while a stale build is recorded.
 browser.storage.onChanged.addListener(onStorageChanged)
 browser.alarms.onAlarm.addListener(onAlarm)
-browser.runtime.onStartup.addListener(() => void initSyncEngine())
+browser.runtime.onStartup.addListener(async () => {
+  if (await current)
+    await initSyncEngine()
+})
 // Every worker start, not just browser start or install: a push left pending
 // when the worker last stopped would otherwise wait for the next edit.
-void resumeSync()
+void current.then(async (isCurrent) => {
+  if (isCurrent)
+    await resumeSync()
+})
 
 browser.runtime.onInstalled.addListener(async () => {
+  // Never migrate with code that isn't the code on disk.
+  if (!(await current))
+    return
   // Run migrations when we install or update extension
   await runMigrations()
   await initSyncEngine()
@@ -39,9 +53,12 @@ api.openOptionsPage.addListener(async () => {
 })
 
 api.runMigrations.addListener(async () => {
-  await runMigrations()
+  if (await current)
+    await runMigrations()
   browser.runtime.reload()
 })
+
+api.getBuildInfo.addListener(async () => ({ buildId: process.env.BUILD_ID, syncVersion: SYNC_SCHEMA_VERSION }))
 
 // --- Sync + backups API ---
 api.setSyncEnabled.addListener(async enabled => setSyncEnabled(enabled))

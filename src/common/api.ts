@@ -152,6 +152,8 @@ export const api = /* @__PURE__ */ createAPI<{
   setSyncEnabled: (enabled: boolean) => Promise<SetSyncResult>
   /** Answer a sync update held back by the deletion guard. Always answers (`resolved: false` when nothing was held). */
   resolveHeldSync: (choice: 'accept' | 'keep') => Promise<{ resolved: boolean }>
+  /** Which build the background is running, for the options page to compare with its own. */
+  getBuildInfo: () => Promise<{ buildId: string, syncVersion: number }>
   clearSyncedData: () => Promise<boolean>
   getSyncUsage: () => Promise<SyncUsage>
   getSyncStatus: () => Promise<SyncStatus>

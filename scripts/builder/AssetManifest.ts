@@ -12,7 +12,8 @@ import type { Browser } from './common.ts'
 import pJson from '../../package.json' with { type: 'json' }
 import { createAsset } from './Asset.ts'
 import { AssetBase } from './AssetBase.ts'
-import { CHOKIDAR_OPTIONS, colorizePath, DefaultMap, logTime } from './utils.ts'
+import { BUILD_ID } from './common.ts'
+import { CHOKIDAR_OPTIONS, colorizePath, DefaultMap, logTime, writeFile } from './utils.ts'
 
 const TARGET_VERSION_MANIFEST_KEYS: Record<Browser, string> = {
   chrome: 'minimum_chrome_version',
@@ -111,6 +112,17 @@ export class AssetManifest extends AssetParent {
     this.parseVersion(manifest)
 
     this.contents = () => JSON.stringify(manifest, null, 2)
+  }
+
+  /**
+   * Beside the manifest, the id of the build that wrote it (see `BUILD_ID`).
+   * Written here rather than as a `src/data/` file, so it isn't gzipped and
+   * isn't referenced from the manifest: the background fetches it directly.
+   */
+  override async write() {
+    await super.write()
+    const contents = new TextEncoder().encode(`${JSON.stringify({ buildId: BUILD_ID })}\n`)
+    await writeFile({ fileName: path.join(this.opts.dist, 'build.json'), contents, size: contents.byteLength })
   }
 
   parseSubAssets(manifest: Record<string, unknown>) {

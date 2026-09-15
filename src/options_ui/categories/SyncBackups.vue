@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { SYNC_SCHEMA_VERSION, syncPauseMessage } from '#common'
+import { staleBackgroundMessage, SYNC_SCHEMA_VERSION, syncPauseMessage } from '#common'
 
 const { state, setEnabled, setBackupsEnabled, setBackupCount, resolveHeld } = useSync()
 
 const pauseMessage = computed(() => state.pause ? syncPauseMessage(state.pause, SYNC_SCHEMA_VERSION) : '')
+const staleMessage = computed(() => {
+  if (state.staleBuild)
+    return staleBackgroundMessage(true)
+  return state.backgroundOutdated ? staleBackgroundMessage(false) : ''
+})
 
 const backupCountModel = computed({
   get: () => state.backupCount,
@@ -32,6 +37,9 @@ function formatLastSync(ts: number) {
         <Switch :id="id" :model-value="state.enabled" @update:model-value="setEnabled" />
       </template>
       <template #extra>
+        <p v-if="staleMessage" role="alert" data-sync-stale text="sm" pt-1 :style="{ color: '#dc2626' }">
+          {{ staleMessage }}
+        </p>
         <p v-if="state.lastError" text="sm" pt-1 :style="{ color: '#dc2626' }">
           {{ state.lastError }}
         </p>

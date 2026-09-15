@@ -1,6 +1,6 @@
 import { clamp } from '@antfu/utils'
 
-import type { SyncPause } from '#common'
+import type { SyncMeta, SyncPause } from '#common'
 
 import { api, syncMeta, syncRefusalMessage, toast } from '#common'
 
@@ -25,11 +25,38 @@ const state = reactive({
   resolving: false,
   /** Why turning sync on was just refused, until the switch is next touched. */
   refusal: '',
+  /** The background noticed it isn't running the build on disk. */
+  staleBuild: null as SyncMeta['staleBuild'],
+  /** The background didn't answer as this page's own build (see {@link checkBackgroundBuild}). */
+  backgroundOutdated: false,
 })
 
-void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause']).then((m) => {
+void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause', 'staleBuild']).then((m) => {
   Object.assign(state, m, { loaded: true })
 })
+
+/** How long the background gets to say which build it is before it's presumed outdated. */
+const BUILD_CHECK_TIMEOUT_MS = 5000
+
+/**
+ * Ask the background which build it's running. This page is always served
+ * fresh from disk; the background may not be (Chrome can keep an unpacked
+ * extension's old service worker running). A background from before this
+ * question existed never answers at all, which is what the timeout is for; an
+ * immediate empty answer means nothing is listening, which says nothing about
+ * its build.
+ */
+async function checkBackgroundBuild(): Promise<void> {
+  const timeout = new Promise<'timeout'>(resolve => setTimeout(resolve, BUILD_CHECK_TIMEOUT_MS, 'timeout'))
+  try {
+    const info = await Promise.race([api.getBuildInfo.sendToBackground(), timeout])
+    state.backgroundOutdated = info === 'timeout' || (!!info && info.buildId !== process.env.BUILD_ID)
+  }
+  catch {
+    // No background to ask.
+  }
+}
+void checkBackgroundBuild()
 
 syncMeta.addListener((change) => {
   Object.assign(state, change)

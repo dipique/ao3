@@ -38,10 +38,21 @@ export const ALIAS = (asset: AssetBase): Record<string, string> => {
   return objectMap(pJson.imports, (v, k) => ([v, resolve(asset.opts.root, k)] as [string, string]))
 }
 
+/**
+ * One id per builder run, shared by every bundle it writes and by the
+ * `build.json` beside the manifest. The background compares its own copy with
+ * that file to notice it's running code older than what's on disk — Chrome can
+ * keep serving an unpacked extension's cached service worker across rebuilds
+ * and browser restarts, since the manifest version never changes. A `serve`
+ * session keeps one id throughout, so its rebuilds don't count as stale.
+ */
+export const BUILD_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
 export const DEFINE = (asset: AssetBase): Record<string, string> => ({
   'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
   'process.env.BROWSER': JSON.stringify(process.env.BROWSER),
   'process.env.CONTEXT': JSON.stringify(asset.type),
+  'process.env.BUILD_ID': JSON.stringify(BUILD_ID),
 })
 
 export const IconsPlugin = createUnplugin<UnpluginIconsOptions>((options, meta) => {
