@@ -10,10 +10,11 @@ import React from '#dom'
 
 import type { WriteSnapshotOptions } from './cache.ts'
 import type { FacetValueRef } from './engine.ts'
+import type { SearchViewPrefs } from './prefs.ts'
 import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
 
-import { readSnapshot, writeSnapshot } from './cache.ts'
+import { pristineBlurb, readSnapshot, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
 import { applyHidden } from './hidden.ts'
@@ -108,8 +109,8 @@ export interface SearchSource {
    * The Marked for Later list uses it for works the reader has marked read: AO3
    * may well still list one (the request to take it off can fail), but the
    * reader has said they're done with it, so it goes the moment they say so
-   * rather than at the next reload. A view reopens from its snapshot on every
-   * options change, which is what makes that immediate.
+   * rather than at the next reload. A view is reopened on every options change,
+   * and each reopen asks this again, which is what makes that immediate.
    *
    * A source that sets it keeps its side records ({@link onPersist}) in step with
    * the *listing*, not with the pruned list — only a scrape has that, so only a
@@ -310,7 +311,12 @@ function applyLimit(works: Work[], limit: number): Work[] {
   return works
 }
 
-let active: { source: SearchSource, view: SearchView } | null = null
+/**
+ * The view on screen, with what a re-run needs to put it straight back: when its
+ * works were last fetched, and the layout prefs it is drawn with (kept in step
+ * with every change the reader makes to them).
+ */
+let active: { source: SearchSource, view: SearchView, scrapedAt: number, prefs: Partial<SearchViewPrefs> } | null = null
 /**
  * The source whose container is in the page, from the moment it is mounted —
  * which is before {@link active}, while a scrape is still running — so a close
@@ -328,11 +334,38 @@ let generation = 0
 let controller: AbortController | null = null
 let busy = false
 /**
- * Set when a global re-run (e.g. an options change from a context menu) closed an
- * open view, carrying the state needed to reopen it where it left off. Cleared by
- * {@link closeSearchView}, so a user-initiated close (Back) stays closed.
+ * An open view a global re-run took down, with everything needed to put it back
+ * as it was — without going back to storage for any of it.
+ *
+ * Every options change re-runs the page, and most of them are one mark on one
+ * work: something the stored list has nothing new to say about. Reopening from
+ * the snapshot meant reading every list the reader has ever stored and parsing
+ * every blurb in this one again, while the list was off the screen. Its works are
+ * still in memory, so they come back from there: the reopen starts and finishes
+ * inside the re-run that closed it, and the list is never seen to leave.
  */
-let reopen: { cacheKey: string, state: ViewState } | null = null
+interface Reopen {
+  cacheKey: string
+  state: ViewState
+  works: Work[]
+  scrapedAt: number
+  prefs: Partial<SearchViewPrefs>
+  /** Where the reader was on the page, for a document that briefly got shorter. */
+  scrollY: number
+}
+
+/**
+ * Set when a global re-run (e.g. an options change from a context menu) closed an
+ * open view. Cleared by {@link closeSearchView}, so a user-initiated close (Back)
+ * stays closed.
+ */
+let reopen: Reopen | null = null
+/**
+ * A {@link reopen} its unit has claimed through {@link takeReopen}, waiting for
+ * the {@link openSearchView} that call leads to. Matched to it by the very state
+ * object `takeReopen` handed out, so nothing but that open can pick it up.
+ */
+let claimed: Reopen | null = null
 
 /** Whether a view is currently mounted (by this host, for any source). */
 export function isSearchViewOpen(): boolean {
@@ -375,7 +408,15 @@ export function suspendSearchView(): void {
   // must leave an already-armed reopen alone.
   if (!active)
     return
-  const snapshot = { cacheKey: active.source.cacheKey, state: active.view.getState() }
+  const { source, view, scrapedAt, prefs } = active
+  const snapshot: Reopen = {
+    cacheKey: source.cacheKey,
+    state: view.getState(),
+    works: view.getWorks(),
+    scrapedAt,
+    prefs,
+    scrollY: window.scrollY,
+  }
   closeSearchView()
   reopen = snapshot
 }
@@ -387,9 +428,27 @@ export function suspendSearchView(): void {
 export function takeReopen(cacheKey: string): ViewState | null {
   if (!reopen || reopen.cacheKey !== cacheKey)
     return null
-  const { state } = reopen
+  claimed = reopen
   reopen = null
-  return state
+  return claimed.state
+}
+
+/** The claimed reopen this open was handed, if it is one. One-shot, like the claim. */
+function takeClaimed(source: SearchSource, opts: OpenOptions): Reopen | null {
+  const carried = claimed
+  claimed = null
+  return carried && carried.cacheKey === source.cacheKey && carried.state === opts.initialState ? carried : null
+}
+
+/**
+ * A reopened view's works, ready to be shown again: the same parsed works, with
+ * everything the last view and its decorations did to their blurbs taken off, as
+ * a stored copy's would be. The new view decorates them under today's options.
+ */
+function undecorated(works: Work[]): Work[] {
+  for (const work of works)
+    pristineBlurb(work.el, { inPlace: true })
+  return works
 }
 
 /**
@@ -612,7 +671,10 @@ async function refresh(
     const works = applyLimit(renumber(completed.works), budget.limit)
     await persist(source, works, { listing: topUp ? undefined : result.works })
     view.update(works, prepare(source, works, options, true))
-    view.setRefreshedAt(Date.now())
+    const now = Date.now()
+    view.setRefreshedAt(now)
+    if (active?.view === view)
+      active.scrapedAt = now
     if (completed.blocked)
       toast('AO3 asked us to slow down before every work could be fetched. The rest keep their stored copies and will be tried again.', { type: 'error' })
     // A scrape that stopped because it had found everything it came for is not
@@ -643,6 +705,9 @@ export interface OpenOptions {
  * otherwise scrapes the whole listing behind a progress bar first.
  */
 export async function openSearchView(source: SearchSource, options: Options, opts: OpenOptions = {}): Promise<void> {
+  // Claimed before anything can return early, so a reopen never outlives the
+  // open it was meant for.
+  const carried = takeClaimed(source, opts)
   // This list is already on screen, or on its way there: a second click, or a
   // unit re-running, has nothing to add. "On screen" is the container being in
   // the page — a global re-run removes it mid-load, and a load with nowhere to
@@ -667,8 +732,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
   busy = true
   try {
     const container = mountContainer(source)
-    // Local (never-synced) layout prefs for this application of the view.
-    const prefs = await loadPrefs(source.id)
+    // Local (never-synced) layout prefs for this application of the view. A
+    // reopen has the ones it was showing — and nothing on its way back to the
+    // screen may wait on storage, or the page is drawn without it.
+    let prefs = carried ? carried.prefs : await loadPrefs(source.id)
     if (stale())
       return
     const config: SearchViewConfig = {
@@ -681,6 +748,9 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       initialState: opts.initialState,
       prefs,
       onPrefsChange: (next) => {
+        prefs = next
+        if (active?.source === source)
+          active.prefs = next
         void savePrefs(source.id, next).catch(err => log.error('Failed to save search-view prefs', err))
       },
       // Fires when a blurb action drops a work; keep the snapshot in step.
@@ -704,20 +774,23 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     const show = (works: Work[], refreshedAt: number): SearchView => {
       const autoExcludes = prepare(source, works, options, fresh)
       const view = createSearchView(works, handlers, { ...config, autoExcludes, refreshedAt })
-      active = { source, view }
+      active = { source, view, scrapedAt: refreshedAt, prefs }
       container.replaceChildren(view.el)
       return view
     }
 
-    const cached = await readSnapshot(source.cacheKey)
+    const cached = carried
+      ? { works: undecorated(carried.works), scrapedAt: carried.scrapedAt }
+      : await readSnapshot(source.cacheKey)
     if (stale())
       return
     const kept = cached ? selected(source, cached.works) : []
     if (cached && kept.length) {
-      // Works that stopped belonging since the snapshot was taken — marked read
-      // off Marked for Later, or unmarked off the read list — come out of the
-      // stored copy now, not at the next reload. This is also how the change
-      // reaches the screen: an options change reopens the view from here.
+      // Works that stopped belonging since the snapshot was taken, or since the
+      // view a re-run closed was drawn — marked read off Marked for Later, or
+      // unmarked off the read list — come out of the stored copy now, not at the
+      // next reload. This is also how the change reaches the screen: an options
+      // change reopens the view through here.
       if (kept.length < cached.works.length)
         void persist(source, [...kept], { keepScrapedAt: true }).catch(err => log.error(`Failed to prune the stored copy of ${source.id}`, err))
       // A snapshot taken under a higher ceiling than the reader now has; trim it
@@ -732,9 +805,13 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       // stored copy: that copy is no longer the listing (see `belongs`).
       if (!source.belongs)
         void source.onPersist?.(stored).catch(err => log.error(`Failed to seed records for ${source.id}`, err))
-      // Render instantly from cache, then refresh in the background (unless the
-      // caller knows the cache is fresh, e.g. a reopen right after a re-run).
+      // Render instantly, then refresh in the background (unless the caller
+      // knows the works are fresh, e.g. a reopen right after a re-run).
       const view = show(stored, cached.scrapedAt)
+      // Taking the old view down can shorten the page for as long as a layout
+      // lasts, and a shorter page pulls the scroll position up with it.
+      if (carried && window.scrollY !== carried.scrollY)
+        window.scrollTo({ top: carried.scrollY, behavior: 'instant' })
       // A copy younger than the source's interval is taken as it is: reloading a
       // long list on every visit is how a reader gets rate-limited, and the
       // Refresh button is right there when they want it sooner.

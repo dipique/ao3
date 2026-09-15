@@ -62,7 +62,7 @@ export class SearchMarkedForLater extends Unit {
     // Clearing the reader's whole history is History's business, not this list's.
     hideClearHistory()
 
-    // If a global re-run closed the view, put it back (from cache, no re-scrape)
+    // If a global re-run closed the view, put it back (from memory, no re-scrape)
     // where the reader left off — so e.g. a "Hide tag" context-menu action
     // doesn't reset their filters. Otherwise it simply opens, as the page.
     const pending = takeReopen(snapshotKey(pageUser))

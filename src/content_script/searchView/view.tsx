@@ -76,6 +76,12 @@ export interface SearchView {
   setRefreshedAt: (at: number) => void
   /** Current filter/sort/page, so a caller can rebuild the view where it left off. */
   getState: () => ViewState
+  /**
+   * The works the view holds right now — what it was given, less any a
+   * {@link BlurbAction} has since removed. Their blurbs are still decorated, and
+   * still the view's own nodes.
+   */
+  getWorks: () => Work[]
 }
 
 /**
@@ -1277,5 +1283,5 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   layoutEl = el.querySelector<HTMLElement>(`.${cx('layout')}`)
   applySidebarWidth()
 
-  return { el, update, setUpdating, setRefreshedAt, getState }
+  return { el, update, setUpdating, setRefreshedAt, getState, getWorks: () => works }
 }

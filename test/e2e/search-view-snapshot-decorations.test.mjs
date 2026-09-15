@@ -71,31 +71,39 @@ const READINGS_HTML = `<!doctype html>
  */
 describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
   let browser
+  let css
+  let js
   let page
+
+  /** The to-read page, opened on `seed`. */
+  const open = async (seed) => {
+    const tab = await browser.newPage()
+    await tab.setRequestInterception(true)
+    tab.on('request', (req) => {
+      if (!req.url().startsWith('https://archiveofourown.org/'))
+        return void req.abort()
+      // The mark-as-read POST is answered like any other request: a 200 is success.
+      void req.respond({ status: 200, contentType: 'text/html', body: READINGS_HTML })
+    })
+    await tab.evaluateOnNewDocument(installMock, seed)
+    await tab.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
+    await tab.addStyleTag({ content: css })
+    await tab.addScriptTag({ content: js })
+    await sleep(2700)
+    return tab
+  }
 
   before(async () => {
     ensureBuilt()
-    const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
-    const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
+    css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
+    js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
     browser = await puppeteer.launch({
       executablePath: chromePath,
       headless: 'new',
       args: ['--no-first-run', '--no-default-browser-check'],
     })
-    page = await browser.newPage()
-    await page.setRequestInterception(true)
-    page.on('request', (req) => {
-      if (!req.url().startsWith('https://archiveofourown.org/'))
-        return void req.abort()
-      // The mark-as-read POST is answered like any other request: a 200 is success.
-      void req.respond({ status: 200, contentType: 'text/html', body: READINGS_HTML })
-    })
-    await page.evaluateOnNewDocument(installMock, SEED)
-    await page.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
-    await page.addStyleTag({ content: css })
-    await page.addScriptTag({ content: js })
-    await sleep(2700)
+    page = await open(SEED)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -103,7 +111,7 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
   })
 
   /** Per work in the view: stars after its tags, and "Mark as Read" buttons. */
-  const decorations = () => page.evaluate(() => {
+  const decorations = (tab = page) => tab.evaluate(() => {
     const out = {}
     for (const li of document.querySelectorAll('.AO3E--search-view--results > li.blurb')) {
       const indicatorsAfter = (a) => {
@@ -121,11 +129,10 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
     return out
   })
 
-  /** The blurbs of the most recently written stored list. */
-  const storedBlurbs = () => page.evaluate(async () => {
-    const snapshots = (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots']
-    return Object.values(snapshots)[0].blurbsHtml
-  })
+  /** The stored lists as last written, and the blurbs of the first of them. */
+  const storedSnapshots = () => page.evaluate(async () =>
+    (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots'])
+  const storedBlurbs = async () => Object.values(await storedSnapshots())[0].blurbsHtml
 
   const EXPECTED = {
     'Fluffy one': { tags: [1], actions: 1, reasons: 0 },
@@ -155,17 +162,12 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
     assert.match(stored[0], /<dd class="chapters"><a href="\/works\/1\/chapters\/1">12<\/a>\/23<\/dd>/)
   })
 
-  test('a list stored decorated by an earlier build opens decorated once', async () => {
-    await page.evaluate(async () => {
-      const key = 'cache.searchSnapshots'
-      const snapshots = (await browser.storage.local.get(key))[key]
-      const live = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')].map(li => li.outerHTML)
-      for (const entry of Object.values(snapshots))
-        entry.blurbsHtml = live
-      await browser.storage.local.set({ [key]: snapshots })
+  test('a list reopened by an options change is decorated once', async () => {
+    await page.evaluate(() => {
       document.querySelector('.AO3E--search-view--results').dataset.stale = ''
     })
-    // Any options change re-runs the units, which reopens the view from storage.
+    // Any options change re-runs the units, which reopens the view from the works
+    // it was already showing — the same blurbs, decorated once already.
     await page.evaluate(() => browser.storage.local.set({ 'option.searchPerPage': 49 }))
     await sleep(2500)
     assert.ok(
@@ -173,5 +175,16 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
       'the view should have reopened',
     )
     assert.deepEqual(await decorations(), EXPECTED)
+  })
+
+  test('a list stored decorated by an earlier build opens decorated once', async () => {
+    const snapshots = await storedSnapshots()
+    const live = await page.evaluate(() =>
+      [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')].map(li => li.outerHTML))
+    for (const entry of Object.values(snapshots))
+      entry.blurbsHtml = live
+    const tab = await open({ ...SEED, 'cache.searchSnapshots': snapshots })
+    assert.deepEqual(await decorations(tab), EXPECTED)
+    await tab.close()
   })
 })

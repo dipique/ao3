@@ -186,7 +186,7 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
     const { scrapedAt } = storedSnapshot(2 * HOUR)['marked-for-later:me']
 
     // What the work menu's "Mark as read" writes. Every options change re-runs
-    // the page, which reopens the view from its stored copy.
+    // the page, which reopens the view and prunes its stored copy.
     await tab.evaluate(marks => browser.storage.local.set({ 'option.workMarks': marks }), workMarks('1'))
     await sleep(2000)
 
