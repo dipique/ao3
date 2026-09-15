@@ -201,6 +201,16 @@ describe('tag and fandom menus in the search view', { skip }, () => {
     assert.equal((await visibleTitles()).length, 4)
   })
 
+  test('"Reset filters" clears the indicators along with the facet rows', async () => {
+    await openMenuOn('ul.tags a.tag', 'Fluff')
+    await pick('Require in filter')
+    assert.deepEqual(await indicatorsOn('ul.tags a.tag', 'Fluff'), ['require'])
+    await page.click('.AO3E--search-view--reset')
+    await sleep(400)
+    assert.equal((await visibleTitles()).length, 4)
+    assert.deepEqual(await indicatorsOn('ul.tags a.tag', 'Fluff'), [])
+  })
+
   test('a fandom menu drives the view too — by name, with no id to resolve', async () => {
     const labels = await openMenuOn('h5.fandoms a.tag', 'Other Fandom')
     assert.ok(labels.includes('Exclude from filter'), labels.join(' | '))

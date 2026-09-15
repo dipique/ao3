@@ -10,7 +10,7 @@ import { ADDON_CLASS, formatBoundPick, formatWordCountRange, isValidRange, sameR
 import { attachMenuTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import { findFacetBridge } from '#content_script/searchView/facetBridge.ts'
 import { Unit } from '#content_script/Unit.js'
-import { applyWordCountRange, getWordCountRange, hasWordCountFields } from '#content_script/wordCountFilter.js'
+import { getWordCountRange, hasWordCountFields, setWordCountRange } from '#content_script/wordCountFilter.js'
 import React from '#dom'
 
 /**
@@ -22,8 +22,8 @@ import React from '#dom'
  * Where the pick lands depends on where the blurb is. Inside one of our
  * in-memory search views it drives that view's own word-count filter (via
  * {@link findFacetBridge}); on a native listing it fills AO3's Word Count filter
- * and submits, so the results change straight away — the sidebar's own submit
- * button is a long scroll away from the stats line the reader just clicked.
+ * and stops there, like every other pick that lands in the sidebar — the reader
+ * may have more to change, and runs the search when they're ready.
  *
  * Both the "Words:" label and the number are wired, since either is a natural
  * thing to aim at.
@@ -55,7 +55,7 @@ function targetFor(el: Element): WordCountTarget | null {
   if (hasWordCountFields()) {
     return {
       current: () => getWordCountRange(),
-      apply: range => void applyWordCountRange(range),
+      apply: range => void setWordCountRange(range),
     }
   }
   return null

@@ -59,8 +59,8 @@ const PAGE = `
 
 /**
  * The word-count menu on a native listing: clicking a work's word count offers
- * the configured ranges, writes the pick into AO3's own Word Count filter, and
- * submits so the search re-runs.
+ * the configured ranges and writes the pick into AO3's own Word Count filter —
+ * without submitting it, so the reader runs the search when they're ready.
  */
 describe('word-count range menu', { skip }, () => {
   let browser
@@ -150,13 +150,13 @@ describe('word-count range menu', { skip }, () => {
     assert.ok(!labels.some(l => l.includes('Clear')), 'nothing to clear yet')
   })
 
-  test('picking a range fills AO3\'s filter and re-runs the search', async () => {
+  test('picking a range fills AO3\'s filter without re-running the search', async () => {
     await page.evaluate(() => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.textContent.includes('5,000')).click()
     })
     await sleep(200)
-    assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 1 })
+    assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 0 })
   })
 
   test('the applied range is shown as current, and a clear row appears', async () => {
@@ -168,13 +168,13 @@ describe('word-count range menu', { skip }, () => {
     assert.equal(applied.disabled, true, 'the range already on should not be selectable again')
   })
 
-  test('clearing empties both bounds and re-runs the search', async () => {
+  test('clearing empties both bounds without re-running the search', async () => {
     await page.evaluate(() => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.textContent.startsWith('Clear')).click()
     })
     await sleep(200)
-    assert.deepEqual(await bounds(), { from: '', to: '', submits: 2 })
+    assert.deepEqual(await bounds(), { from: '', to: '', submits: 0 })
   })
 
   test('Ctrl+Shift+right-click hands the gesture back to the browser', async () => {
@@ -215,7 +215,7 @@ describe('word-count range menu', { skip }, () => {
       rows.find(el => el.textContent.startsWith('50,000+')).click()
     })
     await sleep(200)
-    assert.deepEqual(await bounds(), { from: '50000', to: '', submits: 3 })
+    assert.deepEqual(await bounds(), { from: '50000', to: '', submits: 0 })
   })
 
   test('lists each distinct bound of the configured ranges in its own section', async () => {
@@ -235,13 +235,13 @@ describe('word-count range menu', { skip }, () => {
   test('picking an upper bound leaves the lower one alone', async () => {
     await openMenu()
     await pickInSection('Set upper bound', '100,000')
-    assert.deepEqual(await bounds(), { from: '50000', to: '100000', submits: 4 })
+    assert.deepEqual(await bounds(), { from: '50000', to: '100000', submits: 0 })
   })
 
   test('picking a lower bound leaves the upper one alone', async () => {
     await openMenu()
     await pickInSection('Set lower bound', '5,000')
-    assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 5 })
+    assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 0 })
   })
 
   test('a bound that would invert the range drops the other one', async () => {
@@ -252,7 +252,7 @@ describe('word-count range menu', { skip }, () => {
     const row = items.find(i => i.section === 'Set upper bound' && i.label.startsWith('0'))
     assert.equal(row.label, '0 – 3,000 words')
     await pickInSection('Set upper bound', row.label)
-    assert.deepEqual(await bounds(), { from: '', to: '3000', submits: 6 })
+    assert.deepEqual(await bounds(), { from: '', to: '3000', submits: 0 })
   })
 })
 

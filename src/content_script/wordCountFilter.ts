@@ -16,10 +16,7 @@ import { normalizeBound, parseWordCountQuery, serializeWordCountQuery } from '#c
  *   takes a range as text (`1000-5000`, `>1000`, `<5000`).
  *
  * Mirrors {@link file://./filterSidebar.tsx}: we only set the controls, never
- * post anything ourselves. The one difference is {@link applyWordCountRange},
- * which submits the filter form afterwards — a range picked from a work's stats
- * is a long way from the sidebar's own submit button, so leaving it un-applied
- * would read as nothing having happened.
+ * post anything ourselves. The reader submits the filter form when they're ready.
  */
 
 const RANGE_FROM_SELECTOR = 'input[name$="[words_from]"]'
@@ -79,7 +76,7 @@ export function getWordCountRange(root: ParentNode = document): WordCountRange |
 /**
  * Write `range` into the page's word-count control — or clear it, for null.
  * Returns false when the page has no such control, so callers can leave the row
- * out of the menu entirely. Does not submit; see {@link applyWordCountRange}.
+ * out of the menu entirely. Does not submit.
  */
 export function setWordCountRange(range: WordCountRange | null, root: ParentNode = document): boolean {
   const fields = findFields(root)
@@ -93,23 +90,5 @@ export function setWordCountRange(range: WordCountRange | null, root: ParentNode
 
   fields.from.value = range?.from != null ? String(range.from) : ''
   fields.to.value = range?.to != null ? String(range.to) : ''
-  return true
-}
-
-/** The filter/search form the word-count control submits with. */
-function getWordCountForm(root: ParentNode = document): HTMLFormElement | null {
-  return wordCountControl(root)?.form ?? null
-}
-
-/**
- * Set the range and re-run the search. Submitting through `requestSubmit()`
- * fires a real submit event, so `CompressSearchUrls` still gets its chance to
- * shorten the resulting URL. Falls back to leaving the fields filled in (for the
- * user to submit) if the control somehow isn't in a form.
- */
-export function applyWordCountRange(range: WordCountRange | null, root: ParentNode = document): boolean {
-  if (!setWordCountRange(range, root))
-    return false
-  getWordCountForm(root)?.requestSubmit()
   return true
 }

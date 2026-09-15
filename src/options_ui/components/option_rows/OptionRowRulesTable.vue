@@ -167,200 +167,211 @@ const context = OptionRowRulesContext.inject()
   </div>
 
   <div mx="-4" relative mt-2>
-    <div mx="sm:4" max-h-96 overflow-auto border rounded-md bg-default>
-      <RulesDataTable
-        id="rules-filters"
-        :data="filters"
-        :render-data="renderData"
-        text="sm"
-        w-full
-        class="[&_td,&_th]:h-7 [&_td,&_th]:min-h-7 [&_td,&_th]:align-middle"
-      >
-        <template #header="{ inner, header }">
-          <th
-            scope="col" sticky top-0 z-10 bg-default text-muted-fg font-medium
-            :aria-sort="ariaSort(header.column.props.id)"
-          >
-            <div flex="~ items-center justify-center " h-8 border-b>
-              <button
-                v-if="sortKeyFor(header.column.props.id)"
-                type="button"
-                class="input-ring"
-                flex="~ items-center justify-center gap-0.5"
-                h-6 w-full cursor-pointer rounded-md px-1
-                :title="sortHint(header.column.props.id)"
-                @click="toggleSort(sortKeyFor(header.column.props.id)!)"
-              >
-                <Render :render="inner" />
-                <!-- Written out rather than a bound class: UnoCSS only ships the
-                     icons it can see spelled out in a template. -->
-                <Icon
-                  v-if="sortKey === sortKeyFor(header.column.props.id) && sortDir === 'asc'"
-                  i-mdi-arrow-up text="3" label="sorted ascending"
-                />
-                <Icon
-                  v-else-if="sortKey === sortKeyFor(header.column.props.id)"
-                  i-mdi-arrow-down text="3" label="sorted descending"
-                />
-              </button>
-              <Render v-else :render="inner" />
-            </div>
-          </th>
-        </template>
-        <template #row="{ inner, row }">
-          <tr
-            bg="hover:muted/50"
-            transition-colors
-            class="[&:not(:last-child)]:border-b"
-            :class="row.data.behavior === 'none' ? 'op50' : ''"
-            @dblclick="context.edit?.(row.data)"
-          >
-            <Render :render="inner" />
-          </tr>
-        </template>
-        <RulesDataTable.Column accessor="behavior">
-          <template #header>
-            <th w-1>
-              <Icon i-mdi-lightning-bolt text="3.5" label="Action" />
+    <!--
+      The rounded border is on a wrapper that doesn't clip, around a square
+      scroller. A rounded corner anywhere on the scroller's clip — its own
+      `border-radius`, or an `overflow: hidden` / `clip-path` parent — stops the
+      browser's compositor from hit-testing it, so every trackpad or wheel gesture
+      over the list waits on the main thread before it may scroll (dragging the
+      scrollbar is hit-tested separately, which is why that stayed smooth). The
+      `p-0.5` keeps the square corners inside the 6px curve.
+    -->
+    <div mx="sm:4" border rounded-md bg-default p-0.5>
+      <div max-h-96 overflow-auto>
+        <RulesDataTable
+          id="rules-filters"
+          :data="filters"
+          :render-data="renderData"
+          text="sm"
+          w-full
+          class="[&_td,&_th]:h-7 [&_td,&_th]:min-h-7 [&_td,&_th]:align-middle"
+        >
+          <template #header="{ inner, header }">
+            <th
+              scope="col" sticky top-0 z-10 bg-default text-muted-fg font-medium
+              :aria-sort="ariaSort(header.column.props.id)"
+            >
+              <div flex="~ items-center justify-center " h-8 border-b>
+                <button
+                  v-if="sortKeyFor(header.column.props.id)"
+                  type="button"
+                  class="input-ring"
+                  flex="~ items-center justify-center gap-0.5"
+                  h-6 w-full cursor-pointer rounded-md px-1
+                  :title="sortHint(header.column.props.id)"
+                  @click="toggleSort(sortKeyFor(header.column.props.id)!)"
+                >
+                  <Render :render="inner" />
+                  <!-- Written out rather than a bound class: UnoCSS only ships the
+                       icons it can see spelled out in a template. -->
+                  <Icon
+                    v-if="sortKey === sortKeyFor(header.column.props.id) && sortDir === 'asc'"
+                    i-mdi-arrow-up text="3" label="sorted ascending"
+                  />
+                  <Icon
+                    v-else-if="sortKey === sortKeyFor(header.column.props.id)"
+                    i-mdi-arrow-down text="3" label="sorted descending"
+                  />
+                </button>
+                <Render v-else :render="inner" />
+              </div>
             </th>
           </template>
-          <template #cell="cell">
-            <td w-1>
-              <Tooltip>
-                <div flex="~ items-center justify-center" h-full px-2 text="4">
-                  <Icon
-                    v-if="cell.value === 'highlight'"
-                    i-mdi-star
-                    :style="{ color: starColor(cell.row.data) }"
-                    label="Highlight"
-                  />
-                  <Icon v-else-if="cell.value === 'collapse'" i-mdi-arrow-collapse-vertical op60 label="Collapse" />
-                  <Icon v-else-if="cell.value === 'invert'" i-tabler-eye-exclamation op100 label="Show" />
-                  <Icon v-else-if="cell.value === 'hideFilter'" i-mdi-tag-off op100 label="Hide tag" />
-                  <Icon v-else-if="cell.value === 'none'" i-mdi-cancel op40 label="Disabled" />
-                  <Icon v-else i-tabler-eye-off op40 label="Hide" />
-                </div>
-                <template #content>
-                  <span v-if="cell.value === 'highlight'">Highlight the match on results (does not hide).</span>
-                  <span v-else-if="cell.value === 'collapse'">Collapse matching works to a line saying why, with a button to show them.</span>
-                  <span v-else-if="cell.value === 'invert'">Always show matching works - unless a hide rule outranks this one.</span>
-                  <span v-else-if="cell.value === 'hideFilter'">Hide the matching tags themselves, on works and in the filter sidebar (does not hide works).</span>
-                  <span v-else-if="cell.value === 'none'">Disabled - the rule is kept, but does nothing at all.</span>
-                  <span v-else>Hide matching works completely - they leave the listing.</span>
-                </template>
-              </Tooltip>
-            </td>
+          <template #row="{ inner, row }">
+            <tr
+              bg="hover:muted/50"
+              transition-colors
+              class="[&:not(:last-child)]:border-b"
+              :class="row.data.behavior === 'none' ? 'op50' : ''"
+              @dblclick="context.edit?.(row.data)"
+            >
+              <Render :render="inner" />
+            </tr>
           </template>
-        </RulesDataTable.Column>
-        <RulesDataTable.Column accessor="priority" header="Pri">
-          <template #cell="cell">
-            <td w-1>
-              <Tooltip>
-                <div
-                  flex="~ items-center justify-center" h-full px-1
-                  text="xs center"
-                  :class="isCustomPriority(cell.row.data) ? 'font-medium' : 'text-muted-fg op60'"
-                >
-                  {{ rulePriority(cell.row.data) }}
-                </div>
-                <template #content>
-                  <span>
-                    Priority {{ rulePriority(cell.row.data) }} of 9.
-                    The highest-priority rule matching a work decides whether it is hidden; ties go to "always show".
-                  </span>
-                </template>
-              </Tooltip>
-            </td>
-          </template>
-        </RulesDataTable.Column>
-        <RulesDataTable.Column accessor="value">
-          <template #cell="cell">
-            <th scope="row">
-              <div
-                text="start"
-                flex="~ items-center"
-                ws-nowrap
-              >
-                <pre font="leading-[1em]" my-0.5 ws-pre-wrap>{{ cell.value }}<span v-if="cell.row.data.pseud" text="muted-fg">&nbsp;({{ cell.row.data.pseud }})</span></pre>
+          <RulesDataTable.Column accessor="behavior">
+            <template #header>
+              <th w-1>
+                <Icon i-mdi-lightning-bolt text="3.5" label="Action" />
+              </th>
+            </template>
+            <template #cell="cell">
+              <td w-1>
                 <Tooltip>
-                  <div
-                    flex="~ items-center justify-center"
-                    mx-1 h-5 w-5 rounded-md
-                  >
+                  <div flex="~ items-center justify-center" h-full px-2 text="4">
                     <Icon
-                      v-if="(cell.row.data.target === 'work' || cell.row.data.target === 'series') && /^\d+$/.test(cell.value.trim())"
-                      i-codicon-symbol-numeric
-                      label="Id"
+                      v-if="cell.value === 'highlight'"
+                      i-mdi-star
+                      :style="{ color: starColor(cell.row.data) }"
+                      label="Highlight"
                     />
-                    <Icon v-else-if="cell.row.data.matcher === 'exact'" i-codicon-symbol-string label="Exact" />
-                    <Icon v-else-if="cell.row.data.matcher === 'contains'" i-codicon-whole-word label="Contains" />
-                    <Icon v-else-if="cell.row.data.matcher === 'regex'" i-codicon-regex label="Regex" />
+                    <Icon v-else-if="cell.value === 'collapse'" i-mdi-arrow-collapse-vertical op60 label="Collapse" />
+                    <Icon v-else-if="cell.value === 'invert'" i-tabler-eye-exclamation op100 label="Show" />
+                    <Icon v-else-if="cell.value === 'hideFilter'" i-mdi-tag-off op100 label="Hide tag" />
+                    <Icon v-else-if="cell.value === 'none'" i-mdi-cancel op40 label="Disabled" />
+                    <Icon v-else i-tabler-eye-off op40 label="Hide" />
                   </div>
                   <template #content>
-                    <span v-if="(cell.row.data.target === 'work' || cell.row.data.target === 'series') && /^\d+$/.test(cell.value.trim())">A numeric value matches the id exactly.</span>
-                    <span v-else-if="cell.row.data.matcher === 'exact'">Matches if the value exactly equals the rule. (default)</span>
-                    <span v-else-if="cell.row.data.matcher === 'contains'">Matches if the value contains the rule. Often used for matching one person in a Relationship tag.</span>
-                    <span v-else-if="cell.row.data.matcher === 'regex'">Uses regular expressions to match the rule to the value.</span>
+                    <span v-if="cell.value === 'highlight'">Highlight the match on results (does not hide).</span>
+                    <span v-else-if="cell.value === 'collapse'">Collapse matching works to a line saying why, with a button to show them.</span>
+                    <span v-else-if="cell.value === 'invert'">Always show matching works - unless a hide rule outranks this one.</span>
+                    <span v-else-if="cell.value === 'hideFilter'">Hide the matching tags themselves, on works and in the filter sidebar (does not hide works).</span>
+                    <span v-else-if="cell.value === 'none'">Disabled - the rule is kept, but does nothing at all.</span>
+                    <span v-else>Hide matching works completely - they leave the listing.</span>
                   </template>
                 </Tooltip>
-              </div>
-            </th>
-          </template>
-          <template #header>
-            <th>
-              Rule
-            </th>
-          </template>
-        </RulesDataTable.Column>
-        <RulesDataTable.Column accessor="target" header="Applies to">
-          <template #cell="cell">
-            <div text="xs tracking-tight center">
-              <span ws-nowrap>{{ ruleTargetLabel(cell.value) }}</span>
-            </div>
-          </template>
-        </RulesDataTable.Column>
-        <RulesDataTable.Column id="actions">
-          <template #cell="cell">
-            <td w-2>
-              <div mx-2 ws-nowrap>
-                <DialogDetachedTrigger
-                  v-if="context.editDialog.value"
-                  :id="`${cell.id}.edit`"
-                  :dialog="context.editDialog.value"
-                  class="input-ring"
-                  text="4 muted-fg hover:default-fg"
-                  :aria-labelledby="`${cell.id}.edit ${cell.row.cells.value?.id}`"
-                  mr-1 cursor-pointer rounded-md
-                  @click="context.edit?.(cell.row.data)"
+              </td>
+            </template>
+          </RulesDataTable.Column>
+          <RulesDataTable.Column accessor="priority" header="Pri">
+            <template #cell="cell">
+              <td w-1>
+                <Tooltip>
+                  <div
+                    flex="~ items-center justify-center" h-full px-1
+                    text="xs center"
+                    :class="isCustomPriority(cell.row.data) ? 'font-medium' : 'text-muted-fg op60'"
+                  >
+                    {{ rulePriority(cell.row.data) }}
+                  </div>
+                  <template #content>
+                    <span>
+                      Priority {{ rulePriority(cell.row.data) }} of 9.
+                      The highest-priority rule matching a work decides whether it is hidden; ties go to "always show".
+                    </span>
+                  </template>
+                </Tooltip>
+              </td>
+            </template>
+          </RulesDataTable.Column>
+          <RulesDataTable.Column accessor="value">
+            <template #cell="cell">
+              <th scope="row">
+                <div
+                  text="start"
+                  flex="~ items-center"
+                  ws-nowrap
                 >
-                  <Icon i-codicon-edit label="Edit" />
-                </DialogDetachedTrigger>
-                <button
-                  class="input-ring"
-                  text="4 muted-fg hover:default-fg"
-                  cursor-pointer rounded-md
-                  @click="context.remove?.(cell.row.data)"
-                >
-                  <Icon i-codicon-trash label="Remove" />
-                </button>
+                  <pre font="leading-[1em]" my-0.5 ws-pre-wrap>{{ cell.value }}<span v-if="cell.row.data.pseud" text="muted-fg">&nbsp;({{ cell.row.data.pseud }})</span></pre>
+                  <Tooltip>
+                    <div
+                      flex="~ items-center justify-center"
+                      mx-1 h-5 w-5 rounded-md
+                    >
+                      <Icon
+                        v-if="(cell.row.data.target === 'work' || cell.row.data.target === 'series') && /^\d+$/.test(cell.value.trim())"
+                        i-codicon-symbol-numeric
+                        label="Id"
+                      />
+                      <Icon v-else-if="cell.row.data.matcher === 'exact'" i-codicon-symbol-string label="Exact" />
+                      <Icon v-else-if="cell.row.data.matcher === 'contains'" i-codicon-whole-word label="Contains" />
+                      <Icon v-else-if="cell.row.data.matcher === 'regex'" i-codicon-regex label="Regex" />
+                    </div>
+                    <template #content>
+                      <span v-if="(cell.row.data.target === 'work' || cell.row.data.target === 'series') && /^\d+$/.test(cell.value.trim())">A numeric value matches the id exactly.</span>
+                      <span v-else-if="cell.row.data.matcher === 'exact'">Matches if the value exactly equals the rule. (default)</span>
+                      <span v-else-if="cell.row.data.matcher === 'contains'">Matches if the value contains the rule. Often used for matching one person in a Relationship tag.</span>
+                      <span v-else-if="cell.row.data.matcher === 'regex'">Uses regular expressions to match the rule to the value.</span>
+                    </template>
+                  </Tooltip>
+                </div>
+              </th>
+            </template>
+            <template #header>
+              <th>
+                Rule
+              </th>
+            </template>
+          </RulesDataTable.Column>
+          <RulesDataTable.Column accessor="target" header="Applies to">
+            <template #cell="cell">
+              <div text="xs tracking-tight center">
+                <span ws-nowrap>{{ ruleTargetLabel(cell.value) }}</span>
               </div>
-            </td>
-          </template>
-          <template #header>
-            <button
-              class="btn"
-              text="5 primary"
-              h-6 w-6
-              @click="context.edit?.()"
-            >
-              <Icon i-mdi-plus-box label="Add new rule" />
-            </button>
-          </template>
-        </RulesDataTable.Column>
-      </RulesDataTable>
-      <p v-if="needle && shown === 0" text="sm center muted-fg" py-6>
-        No rules match “{{ query.trim() }}”.
-      </p>
+            </template>
+          </RulesDataTable.Column>
+          <RulesDataTable.Column id="actions">
+            <template #cell="cell">
+              <td w-2>
+                <div mx-2 ws-nowrap>
+                  <DialogDetachedTrigger
+                    v-if="context.editDialog.value"
+                    :id="`${cell.id}.edit`"
+                    :dialog="context.editDialog.value"
+                    class="input-ring"
+                    text="4 muted-fg hover:default-fg"
+                    :aria-labelledby="`${cell.id}.edit ${cell.row.cells.value?.id}`"
+                    mr-1 cursor-pointer rounded-md
+                    @click="context.edit?.(cell.row.data)"
+                  >
+                    <Icon i-codicon-edit label="Edit" />
+                  </DialogDetachedTrigger>
+                  <button
+                    class="input-ring"
+                    text="4 muted-fg hover:default-fg"
+                    cursor-pointer rounded-md
+                    @click="context.remove?.(cell.row.data)"
+                  >
+                    <Icon i-codicon-trash label="Remove" />
+                  </button>
+                </div>
+              </td>
+            </template>
+            <template #header>
+              <button
+                class="btn"
+                text="5 primary"
+                h-6 w-6
+                @click="context.edit?.()"
+              >
+                <Icon i-mdi-plus-box label="Add new rule" />
+              </button>
+            </template>
+          </RulesDataTable.Column>
+        </RulesDataTable>
+        <p v-if="needle && shown === 0" text="sm center muted-fg" py-6>
+          No rules match “{{ query.trim() }}”.
+        </p>
+      </div>
     </div>
   </div>
 </template>

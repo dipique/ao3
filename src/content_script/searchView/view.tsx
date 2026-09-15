@@ -541,6 +541,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     }
     syncDir()
     filterChanged()
+    // The blurbs' include/exclude/require icons show the same selections a
+    // second time, and every one of them just moved.
+    notifyFacetChange()
     // Sort reset to default is a visible change; keep the stored pref in step.
     persist()
   })

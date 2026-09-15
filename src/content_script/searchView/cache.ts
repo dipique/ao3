@@ -1,6 +1,6 @@
 import type { SnapshotDescriptor } from '#common'
 
-import { cache, packIds, unpackIds } from '#common'
+import { ADDON_CLASS, cache, packIds, unpackIds } from '#common'
 import { parseWork, type Work } from '#content_script/blurb.js'
 
 /**
@@ -125,7 +125,7 @@ export async function writeSnapshot(
   snapshots[key] = {
     version: SNAPSHOT_VERSION,
     scrapedAt: opts.keepScrapedAt && previous ? previous.scrapedAt : Date.now(),
-    blurbsHtml: works.map(work => work.el.outerHTML),
+    blurbsHtml: works.map(work => pristineBlurb(work.el).outerHTML),
     descriptor,
   }
   await cache.set({ searchSnapshots: snapshots })
@@ -177,6 +177,68 @@ export async function writeMisses(key: string, ids: Iterable<string>): Promise<v
   await cache.set({ searchMisses: misses })
 }
 
+/** The attribute prefix of every `data-*` the extension stamps on a page. */
+const DATA_PREFIX = 'data-ao3e-'
+
+/** The custom-property prefix the highlight units colour native elements with. */
+const STYLE_PREFIX = '--ao3e-'
+
+/**
+ * A copy of a blurb as AO3 served it, with everything the extension did to it
+ * taken back off — or, given `{ inPlace: true }`, the blurb itself stripped.
+ *
+ * A snapshot is the blurbs *before* decoration, because opening one decorates
+ * it: store a decorated blurb and the next open adds a second star after every
+ * highlighted tag, a second clock after the title, a second "Mark as Read". And
+ * a list is not always written before its blurbs are decorated — a blurb action
+ * writes the list it is showing, a top-up keeps the stored works it already
+ * put on screen — so the write can't simply be timed to miss it.
+ *
+ * Nearly everything the units add is marked with {@link ADDON_CLASS}: nodes
+ * carry the class itself, classes put on native elements start with it, and so
+ * do their `data-ao3e-*` attributes and `--ao3e-*` colours. The exceptions are
+ * undone by name — HideWorks' wrapper around a hidden work's children and the
+ * `hidden` it sets on the `<li>`, Stats' unmarked `<div>` around each `dt`/`dd`
+ * pair and the reformatted numbers it stashes the originals of.
+ */
+export function pristineBlurb<T extends Element>(blurb: T, { inPlace = false } = {}): T {
+  const li = inPlace ? blurb : blurb.cloneNode(true) as T
+  const unwrap = (el: Element): void => {
+    el.replaceWith(...el.childNodes)
+  }
+
+  li.querySelectorAll(`.${ADDON_CLASS}--hide-works--wrapper`).forEach(unwrap)
+  li.removeAttribute('hidden')
+  // AO3's own stats list holds nothing but `dt`/`dd` pairs.
+  li.querySelectorAll('dl.stats > div').forEach(unwrap)
+  li.querySelectorAll<HTMLElement>(`[${DATA_PREFIX}original]`).forEach((el) => {
+    el.textContent = el.dataset.ao3eOriginal!
+  })
+  li.querySelectorAll(`.${ADDON_CLASS}`).forEach(el => el.remove())
+
+  for (const el of [li, ...li.querySelectorAll('*')]) {
+    for (const name of [...el.classList]) {
+      if (name === ADDON_CLASS || name.startsWith(`${ADDON_CLASS}--`))
+        el.classList.remove(name)
+    }
+    if (el.getAttribute('class') === '')
+      el.removeAttribute('class')
+    for (const { name } of [...el.attributes]) {
+      if (name.startsWith(DATA_PREFIX))
+        el.removeAttribute(name)
+    }
+    if (el instanceof HTMLElement && el.style.length) {
+      for (const prop of [...el.style]) {
+        if (prop.startsWith(STYLE_PREFIX))
+          el.style.removeProperty(prop)
+      }
+      if (!el.style.length)
+        el.removeAttribute('style')
+    }
+  }
+  return li
+}
+
 /** Rebuild `Work[]` from cached blurb HTML, mounting fresh nodes in the document. */
 export function worksFromHtml(blurbsHtml: string[]): Work[] {
   const template = document.createElement('template')
@@ -185,6 +247,10 @@ export function worksFromHtml(blurbsHtml: string[]): Work[] {
     template.innerHTML = html
     const li = template.content.firstElementChild
     if (li instanceof HTMLLIElement) {
+      // Stripped on the way in as well as on the way out: a list stored before
+      // the write side did so still carries the decorations of every time it was
+      // written, and would go on drawing them twice until it was next refreshed.
+      pristineBlurb(li, { inPlace: true })
       document.adoptNode(li)
       works.push(parseWork(li, index))
     }
