@@ -85,6 +85,98 @@ describe('sync scenarios', () => {
     assert.equal(laptop.meta.pause, null)
   })
 
+  describe('sync versions', () => {
+    test('rollout: an older build\'s copy is waited on, not adopted, until an updated browser replaces it', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud, 'laptop', { version: 1 })
+      await laptop.enableSync()
+      await cloud.run()
+      const legacy = createLegacyDevice(cloud, 'legacy', { knownKeys: LEGACY_KNOWN, legacyOptions: LEGACY_ONLY })
+      await laptop.edit({ textReplacements: textReplacementsFixture(11) })
+      await cloud.run()
+      assert.equal(cloud.manifest().v, 1, 'precondition: the cloud holds the stale build\'s copy')
+
+      // A browser on the new build turns sync on. It can't adopt that copy and
+      // has nothing agreed of its own to replace it with.
+      const fresh = createDevice(cloud, 'fresh')
+      await fresh.enableSync()
+      await cloud.run()
+      assert.equal(fresh.meta.pause?.reason, 'older-cloud')
+      assert.equal(fresh.options.rules.filters.length, 0)
+      assert.equal(cloud.manifest().v, 1, 'nothing pushed over it')
+
+      // The laptop is updated, and moves the cloud to the new version.
+      const pushes = legacy.pushes
+      await laptop.restart({ version: 2, init: true })
+      await cloud.run()
+
+      assert.equal(cloud.manifest().v, 2)
+      assert.equal(legacy.pushes, pushes, 'the stale build went quiet')
+      assert.equal(fresh.meta.pause, null)
+      assert.equal(fresh.options.rules.filters.length, 40)
+      assert.equal(markedWorks(fresh.options).size, 60)
+      assert.equal(fresh.options.textReplacements.rules.length, 11)
+      assert.equal(laptop.options.rules.filters.length, 40)
+      assert.deepEqual(fresh.backups.map(b => b.kind), ['pre-sync'], 'its own settings were backed up before adopting')
+    })
+
+    test('a newer build\'s copy pauses an older browser, which resumes once updated', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+
+      // The laptop is updated to a build with a higher sync version.
+      await laptop.restart({ version: 3, init: true })
+      await cloud.run()
+      assert.equal(cloud.manifest().v, 3)
+
+      assert.equal(desktop.meta.pause?.reason, 'newer-version')
+      assert.equal(desktop.meta.pause.remoteVersion, 3)
+      await desktop.edit({ wordsPerMinute: 123 })
+      await cloud.run()
+      assert.equal(desktop.meta.dirty, false, 'edits on the outdated build aren\'t queued to sync')
+      assert.equal(cloud.manifest().v, 3)
+
+      // A browser on the old build can't turn sync on at all.
+      const fresh = createDevice(cloud, 'fresh')
+      const result = await fresh.enableSync()
+      assert.deepEqual(result, { ok: false, reason: 'newer-version', remoteVersion: 3, version: 2 })
+      assert.equal(fresh.meta.enabled, false)
+
+      await laptop.edit({ wordsPerMinute: 321 })
+      await cloud.run()
+      await desktop.restart({ version: 3, init: true })
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 321, 'the update adopted the newer copy')
+    })
+
+    test('an offline old build overwriting the cloud is replaced, not adopted', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+
+      const legacy = createLegacyDevice(cloud, 'legacy', { knownKeys: LEGACY_KNOWN, legacyOptions: LEGACY_ONLY })
+      await legacy.overwrite()
+      await cloud.run()
+
+      assert.equal(cloud.manifest().v, 2, 'the current version is back')
+      for (const browser of [laptop, desktop]) {
+        assert.equal(browser.options.rules.filters.length, 40, `${browser.name} kept its rules`)
+        assert.equal(markedWorks(browser.options).size, 60, `${browser.name} kept its marks`)
+        assert.equal(browser.meta.pause, null)
+      }
+    })
+  })
+
   describe('an update that would remove most of a list', () => {
     /** A laptop and desktop in sync, then the desktop deletes 39 of the 40 rules. */
     async function bulkDelete() {

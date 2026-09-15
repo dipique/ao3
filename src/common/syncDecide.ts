@@ -4,14 +4,23 @@ import { SYNC_SCHEMA_VERSION } from './syncCodec.ts'
 
 /**
  * Pure conflict-resolution logic, kept browser-free so every interleaving can be
- * unit-tested headlessly. The engine ({@link file://./../background/syncEngine.ts})
- * is a thin I/O shell that reads state, calls these, and acts on the verdict.
+ * unit-tested headlessly. The engine ({@link file://./syncCore.ts}) is a thin
+ * I/O shell that reads state, calls these, and acts on the verdict.
  *
  * Invariant: the generation counter is a *monotonic hint*, never a version
  * identity. Two devices can race to the same generation with different content;
  * the writer token `w` is the tie-breaker, and the engine confirms a push with a
  * read-back (compare-after-write) so a lost race converges to a pull instead of
  * silently diverging.
+ *
+ * **The sync version gates everything else.** A cloud copy written at a higher
+ * {@link SYNC_SCHEMA_VERSION} than this build's is `'blocked'`: this build can't
+ * be trusted to read it or to write over it, so it waits to be updated. A copy
+ * written at a lower version is never adopted — the build that wrote it didn't
+ * know everything this one syncs, and adopting its copy is how a browser comes
+ * to hold defaults it then pushes as fact. A browser that has synced before
+ * overwrites such a copy with its own state (moving the cloud up to its version);
+ * one that never has `'wait'`s for a browser that can.
  */
 
 export interface LocalMeta {
@@ -23,7 +32,7 @@ export interface LocalMeta {
   w: string
 }
 
-export type Decision = 'noop' | 'push' | 'pull'
+export type Decision = 'noop' | 'push' | 'pull' | 'blocked' | 'wait'
 
 /** Is the remote payload a version this device's working copy hasn't adopted yet? */
 export function isRemoteNewer(remote: Manifest, local: LocalMeta): boolean {
@@ -39,13 +48,16 @@ export function isRemoteNewer(remote: Manifest, local: LocalMeta): boolean {
 
 /**
  * Decide what a push attempt should actually do. `localHash` is the hash of the
- * current pruned local options (compared against `local.h` to detect changes).
+ * current pruned local options (compared against `local.h` to detect changes);
+ * `version` is the sync version this build speaks.
  */
-export function decidePush(local: LocalMeta, remote: Manifest | null, localHash: string): Decision {
-  // Can't safely act on a newer on-the-wire schema: pushing would downgrade it,
-  // pulling can't decode it. Wait for this device to update.
-  if (remote && remote.v > SYNC_SCHEMA_VERSION)
-    return 'noop'
+export function decidePush(local: LocalMeta, remote: Manifest | null, localHash: string, version = SYNC_SCHEMA_VERSION): Decision {
+  if (remote && remote.v > version)
+    return 'blocked'
+  // An older build's copy: replace it if this browser holds agreed state of its
+  // own, whether or not anything changed here.
+  if (remote && remote.v < version)
+    return local.g > 0 ? 'push' : 'wait'
 
   const hasLocalChanges = localHash !== local.h
   if (!hasLocalChanges)
@@ -60,10 +72,12 @@ export function decidePush(local: LocalMeta, remote: Manifest | null, localHash:
 }
 
 /** Decide whether an observed sync change is worth pulling. */
-export function decidePull(local: LocalMeta, remote: Manifest | null): Decision {
+export function decidePull(local: LocalMeta, remote: Manifest | null, version = SYNC_SCHEMA_VERSION): Decision {
   if (!remote)
     return 'noop'
-  if (remote.v > SYNC_SCHEMA_VERSION)
-    return 'noop'
+  if (remote.v > version)
+    return 'blocked'
+  if (remote.v < version)
+    return 'wait'
   return isRemoteNewer(remote, local) ? 'pull' : 'noop'
 }

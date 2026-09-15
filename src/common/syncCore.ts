@@ -1,9 +1,9 @@
 import { isDeepEqual } from '@antfu/utils'
 
-import type { BackupKind } from './api.ts'
+import type { BackupKind, SetSyncResult } from './api.ts'
 import type { Options } from './options.ts'
 import type { Manifest } from './syncCodec.ts'
-import type { SyncMeta } from './syncMeta.ts'
+import type { SyncMeta, SyncPause } from './syncMeta.ts'
 
 import { buildLocalUpdate, canonicalStringify, decode, diffChunks, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
 import { decidePull, decidePush } from './syncDecide.ts'
@@ -72,6 +72,8 @@ export interface SyncDeps {
     /** Snapshot `snapshot`, or the current options when it's absent. */
     create: (kind: BackupKind, snapshot?: Partial<Options>) => Promise<void>
   }
+  /** The sync version this build speaks. Defaults to {@link SYNC_SCHEMA_VERSION}. */
+  version?: number
   now?: () => number
   randomId?: () => string
   logger?: SyncLogger
@@ -94,6 +96,8 @@ export function createSyncEngine(deps: SyncDeps) {
   const now = deps.now ?? Date.now
   const randomId = deps.randomId ?? (() => crypto.randomUUID().slice(0, 8))
   const logger = deps.logger ?? SILENT
+  /** Read each time: the tests swap the version a simulated browser speaks when it "updates". */
+  const version = () => deps.version ?? SYNC_SCHEMA_VERSION
 
   /** Bounded, in-memory retry counter for half-propagated reads (resets on restart — fine). */
   let pullRetries = 0
@@ -157,9 +161,9 @@ export function createSyncEngine(deps: SyncDeps) {
     })
   }
 
-  async function setEnabled(enabled: boolean): Promise<void> {
+  async function setEnabled(enabled: boolean): Promise<SetSyncResult> {
     await meta.set({ enabled })
-    await withLock(enabled ? enable : disable)
+    return withLock(enabled ? enable : disable)
   }
 
   /** Explicit "forget the cloud copy" action — removes this extension's sync keys. */
@@ -248,7 +252,12 @@ export function createSyncEngine(deps: SyncDeps) {
     // Backups are independent of sync — keep a daily restore point regardless.
     await backups.maybeDaily()
 
-    if (!(await meta.get(['enabled'])).enabled)
+    const { enabled, pause } = await meta.get(['enabled', 'pause'])
+    if (!enabled)
+      return
+    // Paused for a newer cloud copy: what's edited on this build won't be
+    // pushed once it's updated either — the update pulls the newer copy first.
+    if (pause?.reason === 'newer-version')
       return
 
     // Real dirtiness is "does the pruned local state differ from what we last
@@ -280,10 +289,18 @@ export function createSyncEngine(deps: SyncDeps) {
     const localHash = hash(canonicalStringify(pruned))
     const remote = await readManifest()
 
-    let decision = decidePush(agreed, remote, localHash)
+    let decision = decidePush(agreed, remote, localHash, version())
     if (force && decision === 'pull')
       decision = 'push'
     logger.log('push decision', decision)
+    if (decision === 'blocked') {
+      await pauseFor({ reason: 'newer-version', remoteVersion: remote!.v })
+      return
+    }
+    if (decision === 'wait') {
+      await pauseFor({ reason: 'older-cloud', remoteVersion: remote!.v })
+      return
+    }
     if (decision === 'noop') {
       if (localHash === agreed.h)
         await meta.set({ dirty: false, dirtySince: 0 })
@@ -296,7 +313,7 @@ export function createSyncEngine(deps: SyncDeps) {
 
     const token = `${await getDeviceId()}.${randomId()}`
     const newGen = Math.max(agreed.g, remote?.g ?? 0) + 1
-    const { chunks, manifest } = await encode(opts, defaults, newGen, token)
+    const { chunks, manifest } = await encode(opts, defaults, newGen, token, version())
 
     const currentItems = await sync.get(null)
     const { toSet, toRemove } = diffChunks(pickChunks(currentItems), chunks)
@@ -323,6 +340,7 @@ export function createSyncEngine(deps: SyncDeps) {
         dirtySince: 0,
         lastError: '',
         lastSyncAt: now(),
+        ...(isVersionPause(pause) ? { pause: null } : {}),
       })
       logger.log('push ok, gen', newGen)
     }
@@ -340,16 +358,33 @@ export function createSyncEngine(deps: SyncDeps) {
 
     const items = await sync.get(null)
     const remote = (items[MANIFEST_KEY] as Manifest | undefined) ?? null
-    if (decidePull(agreed, remote) === 'noop')
+    const decision = decidePull(agreed, remote, version())
+    if (decision === 'blocked') {
+      await pauseFor({ reason: 'newer-version', remoteVersion: remote!.v })
+      return
+    }
+    if (decision === 'wait') {
+      // Never adopt an older build's copy. A browser with agreed state of its
+      // own replaces it (the push decides so); one without waits for one with.
+      if (agreed.g > 0)
+        await scheduleAlarm()
+      else
+        await pauseFor({ reason: 'older-cloud', remoteVersion: remote!.v })
+      return
+    }
+    // A copy at this build's version: whatever paused for versions is over.
+    if (isVersionPause(pause))
+      await meta.set({ pause: null })
+    if (decision === 'noop')
       return
     // The copy already held: nothing new to assess until something newer arrives.
     if (!acceptLoss && pause?.reason === 'held' && remote!.g === pause.g && remote!.w === pause.w)
       return
 
-    const result = await decode(items)
+    const result = await decode(items, version())
     if (!result.ok) {
       if (result.reason === 'version') {
-        await meta.set({ lastError: 'Synced data uses a newer format; update the extension to sync.' })
+        await pauseFor({ reason: 'newer-version', remoteVersion: remote!.v })
         return
       }
       if (result.reason === 'empty')
@@ -410,37 +445,62 @@ export function createSyncEngine(deps: SyncDeps) {
     logger.log('pull ok, gen', remote!.g)
   }
 
-  async function enable(): Promise<void> {
+  async function enable(): Promise<SetSyncResult> {
     await getDeviceId()
     // Forget any prior agreement so the cloud copy is treated as authoritative.
     await meta.set({ meta: { g: 0, h: '', w: '' }, lastError: '', pause: null })
 
     const remote = await readManifest()
-    if (remote && remote.v > SYNC_SCHEMA_VERSION) {
-      await meta.set({ lastError: 'Synced data uses a newer format; update the extension to sync.' })
-      return
+    if (remote && remote.v > version()) {
+      // Refuse rather than pause: this browser was never syncing, so there's
+      // nothing to resume, and a switch left on would suggest otherwise.
+      await meta.set({ enabled: false })
+      return { ok: false, reason: 'newer-version', remoteVersion: remote.v, version: version() }
+    }
+    // Adopting replaces local settings wholesale, now or once a compatible copy
+    // arrives, so back them up first (a deliberate destructive adopt).
+    if (remote && (await meta.get(['backupsEnabled'])).backupsEnabled)
+      await backups.create('pre-sync')
+    if (remote && remote.v < version()) {
+      // Not adopted, and not seeded over either: nothing here has been agreed.
+      await meta.set({ pause: { reason: 'older-cloud', remoteVersion: remote.v } })
+      return { ok: true }
     }
     if (remote) {
-      // Adopt synced settings; back up local first (deliberate destructive adopt).
-      if ((await meta.get(['backupsEnabled'])).backupsEnabled)
-        await backups.create('pre-sync')
       await pull()
     }
     else {
       await push() // seed the cloud from this device
     }
+    return { ok: true }
   }
 
-  async function disable(): Promise<void> {
+  async function disable(): Promise<SetSyncResult> {
     await alarms.clear(ALARM_PUSH)
     await alarms.clear(ALARM_PULL_RETRY)
     await meta.set({ dirty: false, dirtySince: 0, pause: null })
     // Cloud data is intentionally left intact — clearing would wipe other devices.
+    return { ok: true }
   }
 
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Record a version pause, unless it's already recorded. A held update keeps
+   * its place over `older-cloud`: the question it asks the reader still stands,
+   * and answering it is what moves this browser on.
+   */
+  async function pauseFor(next: Extract<SyncPause, { reason: 'newer-version' | 'older-cloud' }>): Promise<void> {
+    const { pause } = await meta.get(['pause'])
+    if (pause?.reason === 'held' && next.reason === 'older-cloud')
+      return
+    if (isDeepEqual(pause, next))
+      return
+    await meta.set({ pause: next })
+    logger.warn('sync paused', next)
+  }
 
   async function currentHash(): Promise<string> {
     return hash(canonicalStringify(pruneToSynced(await deps.readOptions(), defaults)))
@@ -474,6 +534,11 @@ export function createSyncEngine(deps: SyncDeps) {
 }
 
 export type SyncEngine = ReturnType<typeof createSyncEngine>
+
+/** A pause that lifts once this browser and the cloud copy speak the same sync version. */
+function isVersionPause(pause: SyncPause | null): boolean {
+  return pause?.reason === 'newer-version' || pause?.reason === 'older-cloud'
+}
 
 function pickChunks(items: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {}

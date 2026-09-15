@@ -232,12 +232,15 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
      * back): alarms are gone, the engine's memory is gone, storage survives.
      * `start` is whatever the background does at the top level when it wakes.
      */
-    async restart({ version: nextVersion } = {}) {
+    async restart({ version: nextVersion, init = false } = {}) {
       alarms = new Map()
       if (nextVersion !== undefined)
         deps.version = nextVersion
       engine = createSyncEngine(deps)
       await engine.start?.()
+      // An update or browser start also reconciles with the cloud.
+      if (init)
+        await engine.init()
       await device.settle()
     },
   }
@@ -259,6 +262,7 @@ export function createLegacyDevice(cloud, name, { knownKeys, options = {}, legac
   let opts = { ...clone(legacyDefaults), ...clone(options), ...clone(legacyOptions) }
   let seq = 0
   let pending = false
+  let pushes = 0
 
   const peer = {
     name,
@@ -271,9 +275,21 @@ export function createLegacyDevice(cloud, name, { knownKeys, options = {}, legac
   }
   cloud.attach(peer)
 
+  async function write(generation) {
+    const { chunks, manifest } = await encode(opts, legacyDefaults, generation, `${name}.${++seq}`)
+    manifest.v = 1
+    delete manifest.k
+    for (const [key, value] of Object.entries({ ...chunks, [MANIFEST_KEY]: manifest })) {
+      peer.view.set(key, clone(value))
+      peer.outbox.push([key, clone(value)])
+    }
+    pushes++
+  }
+
   const legacy = {
     peer,
-    pushes: 0,
+    /** How many copies it has written. */
+    get pushes() { return pushes },
     async settle() {},
     async react() {
       if (!pending || !peer.online)
@@ -282,19 +298,19 @@ export function createLegacyDevice(cloud, name, { knownKeys, options = {}, legac
       const remote = peer.view.get(MANIFEST_KEY)
       if (!remote || remote.v > 1 || remote.w.startsWith(`${name}.`))
         return false
-      const result = await decode(Object.fromEntries(peer.view))
+      const result = await decode(Object.fromEntries(peer.view), 1)
       if (!result.ok)
         return false
       opts = { ...opts, ...clone(result.options) }
-      const { chunks, manifest } = await encode(opts, legacyDefaults, remote.g + 1, `${name}.${++seq}`)
-      manifest.v = 1
-      delete manifest.k
-      for (const [key, value] of Object.entries({ ...chunks, [MANIFEST_KEY]: manifest })) {
-        peer.view.set(key, clone(value))
-        peer.outbox.push([key, clone(value)])
-      }
-      legacy.pushes++
+      await write(remote.g + 1)
       return true
+    },
+    /**
+     * Write regardless of what the cloud holds: an old build that was offline
+     * when the newer version landed, and never saw it before writing.
+     */
+    async overwrite() {
+      await write((peer.view.get(MANIFEST_KEY)?.g ?? 0) + 1)
     },
   }
   cloud.addActor(legacy)

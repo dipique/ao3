@@ -1,0 +1,110 @@
+{
+  "2": {
+    "autoExcludeHidden": "boolean",
+    "collapsibleDashboard": "boolean",
+    "compressSearchUrls": "boolean",
+    "contextMenusEnabled": "boolean",
+    "fandomToolbar": "boolean",
+    "filterToolbar": "boolean",
+    "forceAlignment": "null",
+    "hideAuthorToolbar": "boolean",
+    "hideCrossovers": {
+      "enabled": "boolean",
+      "maxFandoms": "number"
+    },
+    "hideLanguages": {
+      "applyToSearch": "boolean",
+      "enabled": "boolean",
+      "show": [
+        "array",
+        "empty"
+      ]
+    },
+    "hideMutedAuthorNotices": "boolean",
+    "hideShowMatchedValues": "boolean",
+    "hideShowReason": "boolean",
+    "markForLaterToolbar": "boolean",
+    "muteAuthorToolbar": "boolean",
+    "openMenuOnClick": "boolean",
+    "pruneOrphanedBlurbs": "boolean",
+    "readerMode": "boolean",
+    "rules": {
+      "colors": {
+        "*": "empty"
+      },
+      "enabled": "boolean",
+      "filters": [
+        "array",
+        "empty"
+      ]
+    },
+    "searchLanguage": {
+      "enabled": "boolean",
+      "language": "null"
+    },
+    "searchMarkedForLater": "boolean",
+    "searchMaxResults": "number",
+    "searchPerPage": "number",
+    "searchProfileListsRefreshHours": "number",
+    "searchReadWorks": "boolean",
+    "searchSeriesWorks": "boolean",
+    "searchTagWorks": "boolean",
+    "searchTextResults": "boolean",
+    "searchWordCount": {
+      "enabled": "boolean",
+      "from": "null",
+      "to": "null"
+    },
+    "showChapterDate": "boolean",
+    "showChapterFinish": "boolean",
+    "showChapterTime": "boolean",
+    "showChapterWords": "boolean",
+    "showKudosHitsRatio": "boolean",
+    "showStatsColumns": "boolean",
+    "showTotalFinish": "boolean",
+    "showTotalTime": "boolean",
+    "styleWidth": "number",
+    "styleWidthEnabled": "boolean",
+    "subscribeAuthorToolbar": "boolean",
+    "tagToolbar": "boolean",
+    "textReplacements": {
+      "enabled": "boolean",
+      "rules": [
+        "array",
+        "empty"
+      ],
+      "tools": "boolean"
+    },
+    "theme": {
+      "chosen": "string"
+    },
+    "wordCountToolbar": {
+      "enabled": "boolean",
+      "ranges": [
+        "array",
+        {
+          "from": "number",
+          "to": "number"
+        }
+      ]
+    },
+    "wordsPerMinute": "number",
+    "workMarks": {
+      "enabled": "boolean",
+      "marks": {
+        "*": {
+          "color": "string",
+          "hideSearchResult": "boolean",
+          "icon": "string",
+          "items": "string",
+          "label": "string",
+          "order": "number",
+          "progress": "string",
+          "tracksProgress": "boolean",
+          "triggerAlias": "string"
+        }
+      },
+      "version": "number"
+    }
+  }
+}

@@ -16,6 +16,18 @@ export type SyncPause
    * copy being held, so the same copy isn't assessed (and backed up) again.
    */
   = | { reason: 'held', g: number, w: string, loss: PullLoss, at: number, backedUp: boolean }
+  /**
+   * The cloud copy was written at a higher sync version than this build speaks.
+   * Lifts by itself once the extension is updated.
+   */
+    | { reason: 'newer-version', remoteVersion: number }
+  /**
+   * The cloud copy was written at a lower sync version, and this browser has
+   * never synced — so it has nothing of its own to replace that copy with, and
+   * waits for a browser that has. (One that has synced replaces it straight
+   * away, and never pauses for this.)
+   */
+    | { reason: 'older-cloud', remoteVersion: number }
 
 /**
  * Device-local sync/backup state and settings. Deliberately kept **out** of the

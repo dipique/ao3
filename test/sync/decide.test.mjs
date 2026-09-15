@@ -51,8 +51,24 @@ describe('decidePush', () => {
     assert.equal(decidePush(local, m({ g: 6, w: 'wB' }), 'Hlocal'), 'pull')
   })
 
-  test('noop on a newer on-the-wire schema (this device is behind)', () => {
-    assert.equal(decidePush(local, m({ g: 9, v: V + 1 }), 'Hchanged'), 'noop')
+  test('blocked by a newer sync version (this browser is behind)', () => {
+    assert.equal(decidePush(local, m({ g: 9, v: V + 1 }), 'Hchanged'), 'blocked')
+    assert.equal(decidePush(local, m({ g: 9, v: V + 1 }), 'Hlocal'), 'blocked', 'even with nothing to push')
+  })
+
+  test('an older build\'s copy is replaced by a browser that has synced before', () => {
+    // Whatever its generation, and whether or not anything changed here.
+    assert.equal(decidePush(local, m({ g: 50, v: V - 1 }), 'Hlocal'), 'push')
+    assert.equal(decidePush(local, m({ g: 2, v: V - 1 }), 'Hchanged'), 'push')
+  })
+
+  test('a browser that has never synced waits instead of replacing an older build\'s copy', () => {
+    assert.equal(decidePush({ g: 0, h: '', w: '' }, m({ g: 5, v: V - 1 }), 'Hnew'), 'wait')
+  })
+
+  test('the version compared against is the one passed in', () => {
+    assert.equal(decidePush(local, m({ g: 5, w: 'wA', v: 3 }), 'Hchanged', 3), 'push')
+    assert.equal(decidePush(local, m({ g: 5, w: 'wA', v: 3 }), 'Hchanged', 2), 'blocked')
   })
 
   test('lost same-gen race resolves to pull', () => {
@@ -84,7 +100,12 @@ describe('decidePull', () => {
     assert.equal(decidePull(local, m({ g: 5, w: 'wB' })), 'pull')
   })
 
-  test('noop on a newer on-the-wire schema we cannot decode', () => {
-    assert.equal(decidePull(local, m({ g: 9, v: V + 1 })), 'noop')
+  test('blocked by a newer sync version', () => {
+    assert.equal(decidePull(local, m({ g: 9, v: V + 1 })), 'blocked')
+  })
+
+  test('never adopts an older build\'s copy, however new', () => {
+    assert.equal(decidePull(local, m({ g: 9, v: V - 1 })), 'wait')
+    assert.equal(decidePull({ g: 0, h: '', w: '' }, m({ g: 1, v: V - 1 })), 'wait')
   })
 })

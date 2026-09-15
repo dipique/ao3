@@ -44,10 +44,7 @@ api.runMigrations.addListener(async () => {
 })
 
 // --- Sync + backups API ---
-api.setSyncEnabled.addListener(async (enabled) => {
-  await setSyncEnabled(enabled)
-  return true
-})
+api.setSyncEnabled.addListener(async enabled => setSyncEnabled(enabled))
 api.resolveHeldSync.addListener(async choice => ({ resolved: await resolveHeldSync(choice) }))
 api.clearSyncedData.addListener(async () => {
   await clearSyncedData()

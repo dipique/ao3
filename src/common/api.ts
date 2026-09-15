@@ -118,6 +118,15 @@ export interface SyncUsage {
   overheadBytes: number
 }
 
+/**
+ * What turning sync on did. Refused when the cloud copy was written at a higher
+ * sync version than this build speaks: this build can't safely read it or write
+ * over it. (Always an object, so the message always gets an answer.)
+ */
+export type SetSyncResult
+  = | { ok: true }
+    | { ok: false, reason: 'newer-version', remoteVersion: number, version: number }
+
 export interface SyncStatus {
   enabled: boolean
   lastError: string
@@ -140,7 +149,7 @@ export const api = /* @__PURE__ */ createAPI<{
 
   // Sync + backups (all handled in the background context).
   // Void-ish actions return `true` so the message channel always sends a response.
-  setSyncEnabled: (enabled: boolean) => Promise<boolean>
+  setSyncEnabled: (enabled: boolean) => Promise<SetSyncResult>
   /** Answer a sync update held back by the deletion guard. Always answers (`resolved: false` when nothing was held). */
   resolveHeldSync: (choice: 'accept' | 'keep') => Promise<{ resolved: boolean }>
   clearSyncedData: () => Promise<boolean>

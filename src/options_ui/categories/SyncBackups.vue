@@ -1,15 +1,9 @@
 <script setup lang="ts">
-import { describePullLoss } from '#common'
+import { SYNC_SCHEMA_VERSION, syncPauseMessage } from '#common'
 
 const { state, setEnabled, setBackupsEnabled, setBackupCount, resolveHeld } = useSync()
 
-const heldMessage = computed(() => {
-  const pause = state.pause
-  if (pause?.reason !== 'held')
-    return ''
-  const backup = pause.backedUp ? ` A backup of this browser's settings was saved first.` : ''
-  return `Sync is on hold: an update from another browser would remove ${describePullLoss(pause.loss)}.${backup}`
-})
+const pauseMessage = computed(() => state.pause ? syncPauseMessage(state.pause, SYNC_SCHEMA_VERSION) : '')
 
 const backupCountModel = computed({
   get: () => state.backupCount,
@@ -41,11 +35,14 @@ function formatLastSync(ts: number) {
         <p v-if="state.lastError" text="sm" pt-1 :style="{ color: '#dc2626' }">
           {{ state.lastError }}
         </p>
-        <div v-if="heldMessage" role="alert" data-sync-held flex="~ col gap-2" pt-2>
+        <p v-if="state.refusal" role="alert" data-sync-refusal text="sm" pt-1 :style="{ color: '#dc2626' }">
+          {{ state.refusal }}
+        </p>
+        <div v-if="pauseMessage" role="alert" :data-sync-pause="state.pause?.reason" flex="~ col gap-2" pt-2>
           <p text="sm" :style="{ color: '#d97706' }">
-            {{ heldMessage }}
+            {{ pauseMessage }}
           </p>
-          <div flex="~ row wrap items-center gap-2">
+          <div v-if="state.pause?.reason === 'held'" flex="~ row wrap items-center gap-2">
             <Button size="sm" variant="outline" :disabled="state.resolving" data-sync-keep @click="resolveHeld('keep')">
               Keep this browser's settings
             </Button>

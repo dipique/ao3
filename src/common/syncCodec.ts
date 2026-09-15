@@ -13,8 +13,30 @@ import type { Options } from './options.ts'
  * writer token) so a reader can detect a half-propagated or stale chunk set.
  */
 
-/** Bump when the on-the-wire shape changes incompatibly. Older clients refuse to decode a higher version. */
-export const SYNC_SCHEMA_VERSION = 1
+/**
+ * The sync compatibility version, stamped into every manifest as `v`. A browser
+ * only syncs with copies at its own version: a higher one pauses it until the
+ * extension is updated, and a lower one is never adopted (see `syncDecide.ts`).
+ * Every build since sync first shipped refuses a higher `v`, so a bump reaches
+ * old installs without them changing.
+ *
+ * **Bump it whenever an older build at this version could lose or misread what
+ * a newer one syncs** — which is any change to the synced options' shape:
+ *
+ * - a synced option added, removed or renamed. Additions count too: a build that
+ *   doesn't know an option leaves it out of its copy and out of its key list, a
+ *   browser adopting that copy holds the option at its default, and its next
+ *   push claims that default for everyone;
+ * - an option's structure changed (a boolean became an object, a list's entries
+ *   gained a field its default shows);
+ * - an option moved in or out of {@link LOCAL_ONLY}.
+ *
+ * `test/sync/compat.test.mjs` fails on all of those, by comparing the synced
+ * shape against the one recorded for this version. It can't see a change in
+ * meaning that keeps the same shape, or a new field on list entries that no
+ * default shows (a new optional field on a rule, say) — bump for those by hand.
+ */
+export const SYNC_SCHEMA_VERSION = 2
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400
@@ -210,6 +232,7 @@ export async function encode(
   defaults: Options,
   generation: number,
   token: string,
+  version = SYNC_SCHEMA_VERSION,
 ): Promise<{ chunks: Record<string, string>, manifest: Manifest }> {
   const pruned = pruneToSynced(options, defaults)
   const canonical = canonicalStringify(pruned)
@@ -221,7 +244,7 @@ export async function encode(
   for (let i = 0; i < n; i++)
     chunks[`${CHUNK_PREFIX}${i}`] = b64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
 
-  return { chunks, manifest: { v: SYNC_SCHEMA_VERSION, n, g: generation, h, w: token, k: syncedKeys(defaults) } }
+  return { chunks, manifest: { v: version, n, g: generation, h, w: token, k: syncedKeys(defaults) } }
 }
 
 /**
@@ -231,11 +254,11 @@ export async function encode(
  * ignored. Returns a discriminated result; callers retry on `incomplete`/`corrupt`
  * (normal mid-propagation states) and permanently skip on `version`.
  */
-export async function decode(items: Record<string, unknown>): Promise<DecodeResult> {
+export async function decode(items: Record<string, unknown>, version = SYNC_SCHEMA_VERSION): Promise<DecodeResult> {
   const manifest = items[MANIFEST_KEY] as Manifest | undefined
   if (!manifest || typeof manifest !== 'object' || typeof manifest.n !== 'number')
     return { ok: false, reason: 'empty' }
-  if (manifest.v > SYNC_SCHEMA_VERSION)
+  if (manifest.v > version)
     return { ok: false, reason: 'version' }
 
   let b64 = ''

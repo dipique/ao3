@@ -2,7 +2,7 @@ import { clamp } from '@antfu/utils'
 
 import type { SyncPause } from '#common'
 
-import { api, syncMeta, toast } from '#common'
+import { api, syncMeta, syncRefusalMessage, toast } from '#common'
 
 /**
  * Options-page view of the device-local sync/backup settings ({@link syncMeta}).
@@ -23,6 +23,8 @@ const state = reactive({
   pause: null as SyncPause | null,
   /** An answer to a held update is on its way to the background. */
   resolving: false,
+  /** Why turning sync on was just refused, until the switch is next touched. */
+  refusal: '',
 })
 
 void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause']).then((m) => {
@@ -39,8 +41,14 @@ export function useSync() {
 
     async setEnabled(value: boolean) {
       state.enabled = value // optimistic
+      state.refusal = ''
       try {
-        await api.setSyncEnabled.sendToBackground(value)
+        const result = await api.setSyncEnabled.sendToBackground(value)
+        // An older background answers `true`; only a refusal is an object with `ok: false`.
+        if (result && typeof result === 'object' && !result.ok) {
+          state.enabled = false
+          state.refusal = syncRefusalMessage(result)
+        }
       }
       catch {
         state.enabled = !value // revert on failure
