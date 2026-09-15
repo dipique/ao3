@@ -2,12 +2,14 @@ import type { SiteData } from '#content_script/siteExport/payload.js'
 
 import { SITE_DATA_ID, SITE_SHELL_ID } from '#content_script/siteExport/payload.js'
 
+import { fail } from './fail.ts'
 import { installBrowserShim } from './shim.ts'
 
 import './site.css'
 
 /**
- * The exported page's entry point: stand up a `browser`, then load the app.
+ * The exported page's app, as the loader (`loader.ts`) unpacks and runs it:
+ * stand up a `browser`, then load the app.
  *
  * **The two-step is load-bearing.** `#common`'s storage layer captures
  * `browser.storage.onChanged` at module scope and its logger reads a setting the
@@ -26,9 +28,6 @@ async function boot(): Promise<void> {
     return
 
   try {
-    if (typeof DecompressionStream !== 'function')
-      throw new TypeError('this browser is too old to unpack the works it holds')
-
     const data = readData()
     const storage = await installBrowserShim({
       generatedAt: data.manifest.generatedAt,
@@ -48,16 +47,6 @@ function readData(): SiteData {
   if (!el?.textContent)
     throw new Error('the list and works are missing from this file')
   return JSON.parse(el.textContent) as SiteData
-}
-
-function fail(shell: HTMLElement, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error)
-  shell.className = 'ao3e-site-inert'
-  shell.replaceChildren()
-  const p = document.createElement('p')
-  p.append(document.createTextNode(`This page could not be opened — ${message}.`))
-  shell.append(p)
-  console.error('[AO3E] site export failed to start', error)
 }
 
 void boot()

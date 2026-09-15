@@ -271,8 +271,11 @@ export async function loadFandomIdLookup(): Promise<Map<string, number>> {
     idLookupPromise = (async () => {
       const map = new Map<string, number>()
       try {
-        const url = browser.runtime.getURL('data/fandom-index.json')
-        const obj = await (await fetch(url)).json() as Record<string, number>
+        // Shipped gzipped by the build; extension files come with no
+        // Content-Encoding, so the unpacking is ours.
+        const response = await fetch(browser.runtime.getURL('data/fandom-index.json.gz'))
+        const json = response.body!.pipeThrough(new DecompressionStream('gzip'))
+        const obj = await new Response(json).json() as Record<string, number>
         for (const [name, id] of Object.entries(obj))
           map.set(name, id)
       }

@@ -19,7 +19,7 @@ import type { AssetSite } from './AssetSite.ts'
 import type { File } from './utils.ts'
 
 import { createAsset } from './Asset.ts'
-import { ALIAS, DEFINE, ESBUILD, ESBUILD_TARGET, IconsPlugin, LIGHTNING_CSS_TARGET } from './common.ts'
+import { ALIAS, DEFINE, ESBUILD, ESBUILD_TARGET, IconsPlugin, LIGHTNING_CSS_TARGET, MINIFY } from './common.ts'
 import { logBuild, makeHash, realPath, writeFile } from './utils.ts'
 
 const ORIGIN_PLACEHOLDER = '__VITE_ORIGIN__'
@@ -110,11 +110,11 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
           banner: `if (!('browser' in self)) { self.browser = self.chrome; }`,
           minify: {
             codegen: {
-              removeWhitespace: false,
+              removeWhitespace: MINIFY,
               legalComments: 'inline',
             },
             compress: true,
-            mangle: false
+            mangle: MINIFY,
           }
         },
       },
@@ -170,8 +170,8 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
   } as vite.InlineConfig
 
   /**
-   * Hands the exported site's app and stylesheet to the options build, as two
-   * strings ({@link file://./AssetSite.ts}).
+   * Hands the exported site's app, loader and stylesheet to the options build,
+   * as data ({@link file://./AssetSite.ts}).
    *
    * A virtual module rather than a `?raw` import of a file on disk, because
    * there is no file: the bundle is built here, on demand, the first time the
@@ -190,7 +190,11 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
           return
         const site = createAsset(join(src, 'site/main.ts'), asset.opts, 'site') as AssetSite
         await site.ensureBuilt()
-        return `export const js = ${JSON.stringify(site.js)}\nexport const css = ${JSON.stringify(site.css)}\n`
+        return [
+          `export const app = ${JSON.stringify(site.app)}`,
+          `export const loader = ${JSON.stringify(site.loader)}`,
+          `export const css = ${JSON.stringify(site.css)}`,
+        ].join('\n')
       },
     }
   }

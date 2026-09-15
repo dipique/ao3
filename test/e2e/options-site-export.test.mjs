@@ -459,6 +459,14 @@ describe('options UI — site export', { skip }, () => {
     assert.equal(data.works.length, 3)
     // Everything the page needs is inside it — no fetch, no second file.
     assert.doesNotMatch(html, /<script src=|<link rel="stylesheet"/)
+
+    // The app travels compressed, the way the works do; only its loader is
+    // plain script. (That it unpacks and runs is the file:// test below.)
+    const open = html.indexOf('<script type="application/json" id="ao3e-app">')
+    assert.ok(open > 0, 'the app should travel in its own data block')
+    const start = html.indexOf('>', open) + 1
+    const app = JSON.parse(html.slice(start, html.indexOf('</script>', start)))
+    assert.ok(app.size > app.b64.length && app.crc > 0, 'the app should be deflated, with what it unpacks to')
   })
 
   test('a page whose scripts never run says so', async () => {

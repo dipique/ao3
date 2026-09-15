@@ -16,8 +16,14 @@ import type { CompressedEntry, CompressedWork } from './compress.ts'
  * <style>                                            the app's stylesheet
  * <div id="ao3e-shell">                              inert until a script replaces it
  * <script type="application/json" id="ao3e-data">    manifest, options, entries
- * <script>                                           the app
+ * <script type="application/json" id="ao3e-app">     the app, compressed
+ * <script>                                           the loader that unpacks and runs it
  * ```
+ *
+ * The app is compressed like a work is — it is the one thing every export
+ * carries, and deflated it is about a third of its size. The stylesheet is not:
+ * it is what draws the shell's explanation in a browser that runs no scripts,
+ * and nothing could unpack it there.
  *
  * **Nothing is fetched, because nothing can be.** `fetch()` against `file://` is
  * blocked in Chrome and restricted in Safari, and the file has to work with
@@ -41,6 +47,9 @@ export const SITE_DATA_ID = 'ao3e-data'
 /** The element that says the file is inert until the app replaces it. */
 export const SITE_SHELL_ID = 'ao3e-shell'
 
+/** The element holding the compressed app, for the loader to unpack. */
+export const SITE_APP_ID = 'ao3e-app'
+
 /**
  * The app and the stylesheet an export carries, as the shell takes them.
  *
@@ -49,9 +58,11 @@ export const SITE_SHELL_ID = 'ao3e-shell'
  * come from is {@link file://./siteBundle.ts}'s problem.
  */
 export interface SiteBundle {
-  /** The whole app, one IIFE, inlined into the export's closing `<script>`. */
-  js: string
-  /** Its stylesheet, inlined into the export's `<head>`. */
+  /** The whole app, one IIFE, as a compressed entry the loader unpacks. */
+  app: CompressedEntry
+  /** The script that unpacks and runs {@link SiteBundle.app}, inlined as-is. */
+  loader: string
+  /** The app's stylesheet, inlined into the export's `<head>` uncompressed. */
   css: string
 }
 
@@ -220,11 +231,12 @@ ${bundle.css}
 <script type="application/json" id="${SITE_DATA_ID}">`
 }
 
-/** Everything below the data block: the app, and the end of the document. */
+/** Everything below the data block: the compressed app, its loader, and the end of the document. */
 export function siteShellTail(bundle: SiteBundle): string {
   return `</script>
+<script type="application/json" id="${SITE_APP_ID}">${scriptJson(bundle.app)}</script>
 <script>
-${bundle.js}
+${bundle.loader}
 </script>
 </body>
 </html>

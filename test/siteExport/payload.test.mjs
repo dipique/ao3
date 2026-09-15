@@ -9,6 +9,7 @@ import {
   escapeHtml,
   rewriteWorkLinks,
   scriptJson,
+  SITE_APP_ID,
   SITE_DATA_ID,
   SITE_SCHEMA_VERSION,
   SITE_SHELL_ID,
@@ -19,7 +20,11 @@ import {
   workHash,
 } from '../../src/content_script/siteExport/payload.ts'
 
-const BUNDLE = { js: 'console.log("app")', css: '.ao3e-site{color:red}' }
+const BUNDLE = {
+  app: { size: 17, crc: 1234, b64: 'Y29uc29sZS5sb2coImFwcCIp' },
+  loader: 'console.log("loader")',
+  css: '.ao3e-site{color:red}',
+}
 
 /** A manifest input with nothing interesting in it, for overriding one field at a time. */
 function input(over = {}) {
@@ -238,8 +243,18 @@ describe('siteExport/payload — the shell', () => {
   test('carries the app and the stylesheet inside it — nothing is fetched', () => {
     const html = siteHtml(manifest, '{}', BUNDLE)
     assert.ok(html.includes(BUNDLE.css))
-    assert.ok(html.includes(BUNDLE.js))
+    assert.ok(html.includes(BUNDLE.loader))
     assert.doesNotMatch(html, /<script src=|<link rel="stylesheet"|<img /)
+  })
+
+  test('carries the app compressed, in a block the loader after it reads', () => {
+    const tail = siteShellTail(BUNDLE)
+    const open = tail.indexOf(`<script type="application/json" id="${SITE_APP_ID}">`)
+    assert.ok(open > 0, 'the app travels in its own data block')
+    const start = tail.indexOf('>', open) + 1
+    assert.deepEqual(JSON.parse(tail.slice(start, tail.indexOf('</script>', start))), BUNDLE.app)
+    // The loader has to come after the block it reads out of.
+    assert.ok(tail.indexOf(BUNDLE.loader) > start)
   })
 
   test('says the file is inert until a script replaces it', () => {

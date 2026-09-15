@@ -3,6 +3,7 @@ import * as esbuild from 'esbuild'
 import { Buffer } from 'node:buffer'
 import fs from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
+import { gzipSync } from 'node:zlib'
 import * as svgo from 'svgo'
 
 import { ICONS_CUSTOM_COLLECTIONS, ICONS_TRANSFORM, SVGO_CONFIG } from '#uno.config'
@@ -125,7 +126,8 @@ function AssetPlugin(asset: AssetMain) {
             // 'other' assets (e.g. icons) are copied via the file loader, which may
             // flatten the output dir; match on filename so the manifest is rewritten
             // to the real output location rather than the (possibly stale) source path.
-            || (asset.type === 'other' && basename(asset.inputPath) === basename(outputPath))
+            // A data file comes out gzipped, under its own name plus `.gz`.
+            || (asset.type === 'other' && [basename(asset.inputPath), `${basename(asset.inputPath)}.gz`].includes(basename(outputPath)))
           ) {
             asset.outputPath.value = resolve(asset.opts.root, outputPath)
           }
@@ -138,13 +140,20 @@ function AssetPlugin(asset: AssetMain) {
 }
 
 /**
- * Copies data JSON files (e.g. the fandom id index) verbatim using the `file`
- * loader so they can be loaded at runtime via browser.runtime.getURL() instead
- * of being bundled. The `file` loader is used rather than `copy` because the
- * AssetPlugin cleanup deletes any `other`-type entry-point output, and a
- * `copy`-loaded file *is* that entry-point output. With `file`, esbuild keeps
- * the copied asset and only the (deleted) JS stub is the entry point — the same
- * mechanism that makes the SvgPlugin work for icon.svg.
+ * Ships data JSON files (e.g. the fandom id index) **gzipped**, as
+ * `<name>.json.gz`, using the `file` loader so they can be fetched at runtime
+ * via browser.runtime.getURL() instead of being bundled. An extension's files
+ * are read straight out of its package with no `Content-Encoding` to lean on, so
+ * whatever fetches one unpacks it itself, with `DecompressionStream('gzip')`.
+ *
+ * The `.gz` is added when the path is resolved, so the name the `file` loader
+ * emits carries it; loading strips it again to read the JSON on disk.
+ *
+ * The `file` loader is used rather than `copy` because the AssetPlugin cleanup
+ * deletes any `other`-type entry-point output, and a `copy`-loaded file *is*
+ * that entry-point output. With `file`, esbuild keeps the emitted asset and only
+ * the (deleted) JS stub is the entry point — the same mechanism that makes the
+ * SvgPlugin work for icon.svg.
  */
 function DataFilePlugin() {
   return {
@@ -152,10 +161,10 @@ function DataFilePlugin() {
     setup(build) {
       build.onResolve(
         { filter: /[\\/]data[\\/][^\\/]+\.json$/ },
-        ({ path, resolveDir }) => ({ path: resolve(resolveDir, path), pluginData: { resolveDir } }),
+        ({ path, resolveDir }) => ({ path: `${resolve(resolveDir, path)}.gz`, pluginData: { resolveDir } }),
       )
-      build.onLoad({ filter: /[\\/]data[\\/][^\\/]+\.json$/ }, async ({ path, pluginData }) => {
-        const contents = await fs.readFile(path)
+      build.onLoad({ filter: /[\\/]data[\\/][^\\/]+\.json\.gz$/ }, async ({ path, pluginData }) => {
+        const contents = gzipSync(await fs.readFile(path.slice(0, -'.gz'.length)), { level: 9 })
         return {
           contents,
           loader: 'file' as const,

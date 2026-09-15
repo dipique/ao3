@@ -16,14 +16,22 @@ export type Browser = typeof BROWSERS[number]
 export const ESBUILD_TARGET = (asset: AssetBase) => Object.entries(asset.opts.target).map(([k, v]) => `${k}${v}`).join(' ')
 export const LIGHTNING_CSS_TARGET = (asset: AssetBase) => objectMap(asset.opts.target, (k, v) => ([k, (v << 16)]))
 
+/**
+ * Whether this build ships. Production output is fully minified — whitespace and
+ * local names as well as syntax — with an external source map beside it for
+ * debugging and the source archive for store review; development keeps both, so
+ * what runs in the browser still reads like the source.
+ */
+export const MINIFY = process.env.NODE_ENV === 'production'
+
 export const ESBUILD = (asset: AssetBase): esbuild.CommonOptions => ({
   target: ESBUILD_TARGET(asset),
   treeShaking: true,
   legalComments: 'none',
   minifySyntax: true,
   platform: 'neutral',
-  minifyWhitespace: false,
-  minifyIdentifiers: false,
+  minifyWhitespace: MINIFY,
+  minifyIdentifiers: MINIFY,
 })
 
 export const ALIAS = (asset: AssetBase): Record<string, string> => {

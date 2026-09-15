@@ -13,12 +13,14 @@ declare module '~icons/*.jsx' {
 }
 
 /**
- * The exported site's app and stylesheet, bundled by the build and handed to the
- * options build as two strings — the exporter runs in a page and has no
- * filesystem, so what it inlines into an export has to reach it as data. There
+ * The exported site's app, loader and stylesheet, bundled by the build and handed
+ * to the options build as data — the exporter runs in a page and has no
+ * filesystem, so what it inlines into an export has to reach it that way. There
  * is no file behind this specifier; the builder produces it on demand.
  */
 declare module 'virtual:site-bundle' {
-  export const js: string
+  /** The app, deflated and checksummed — the shape of a `CompressedEntry`. */
+  export const app: { size: number, crc: number, b64: string }
+  export const loader: string
   export const css: string
 }
