@@ -8,6 +8,8 @@ import style from './toast.css?inline'
 export interface ToastOptions {
   timeout?: number
   type?: 'success' | 'error'
+  /** A button under the message; clicking it runs `onClick` and dismisses the toast. */
+  action?: { label: string, onClick: () => void }
 }
 
 let toastContainer: HTMLElement | null = null
@@ -51,7 +53,7 @@ class Toast {
   private readonly type: ToastOptions['type']
   private timeoutId: number | null = null
 
-  constructor(message: string, { timeout = 5000, type }: ToastOptions = {}) {
+  constructor(message: string, { timeout = 5000, type, action }: ToastOptions = {}) {
     this.el = (
       <div
         class="toast"
@@ -70,6 +72,20 @@ class Toast {
           }
           <div class="text">
             {message}
+            {
+              action && (
+                <button
+                  type="button"
+                  class="action"
+                  onClick={() => {
+                    action.onClick()
+                    this.hide()
+                  }}
+                >
+                  {action.label}
+                </button>
+              )
+            }
           </div>
         </div>
       </div>

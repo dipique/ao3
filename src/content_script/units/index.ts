@@ -25,6 +25,7 @@ import { SearchTagWorks } from './SearchTagWorks.tsx'
 import { SearchTextResults } from './SearchTextResults.tsx'
 import { Stats } from './Stats/Stats.ts'
 import { StyleTweaks } from './StyleTweaks.tsx'
+import { SyncNotice } from './SyncNotice.ts'
 import { TagToolbar } from './TagToolbar.tsx'
 import { TextReplace } from './TextReplace.ts'
 import { TextReplaceTools } from './TextReplaceTools.tsx'
@@ -76,4 +77,6 @@ export const UNITS = [
   Tools,
   Stats,
   OptionsUpdater,
+  // Last: a toast about sync, independent of everything the page itself shows.
+  SyncNotice,
 ] as typeof Unit[]
