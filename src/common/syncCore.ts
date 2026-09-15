@@ -1,0 +1,414 @@
+import { isDeepEqual } from '@antfu/utils'
+
+import type { BackupKind } from './api.ts'
+import type { Options } from './options.ts'
+import type { Manifest } from './syncCodec.ts'
+import type { SyncMeta } from './syncMeta.ts'
+
+import { buildLocalUpdate, canonicalStringify, decode, diffChunks, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
+import { decidePull, decidePush } from './syncDecide.ts'
+
+/**
+ * Replication engine: keeps the canonical `option.*` working copy in
+ * `storage.local` in sync with a compressed, chunked mirror in `storage.sync`.
+ * All conflict logic is in the pure `syncDecide` functions; this is the I/O
+ * around them, and it runs only in the background context (the single writer).
+ *
+ * **Everything it touches arrives as a dependency.** The background wires in the
+ * real `browser.storage` areas, alarms and backups
+ * ({@link file://./../background/syncEngine.ts}); the sync tests wire in fakes —
+ * several engines, one per simulated browser, over one simulated sync server.
+ * A sync bug is an interleaving across devices, and that's the only place one
+ * can be replayed. So this module imports nothing that reaches for `browser`.
+ */
+
+export const ALARM_PUSH = 'ao3e-sync-push'
+export const ALARM_PULL_RETRY = 'ao3e-sync-pull-retry'
+/** Generous debounce so we stay far under sync write-rate limits (≤1 push/min). */
+const DEBOUNCE_MIN = 1
+/** Hard ceiling: a continuous edit stream still flushes within this window. */
+const MAX_WAIT_MS = 5 * 60_000
+const PULL_RETRY_MIN = 0.25
+const MAX_PULL_RETRIES = 3
+
+const isChunkKey = (k: string) => /^o\d+$/.test(k)
+
+/** The subset of a `storage.sync` area the engine uses. */
+export interface SyncStorageArea {
+  get: (keys: string | string[] | null) => Promise<Record<string, unknown>>
+  set: (items: Record<string, unknown>) => Promise<void>
+  remove: (keys: string | string[]) => Promise<void>
+  getBytesInUse?: (keys: null) => Promise<number>
+}
+
+/** The subset of `browser.alarms` the engine uses. */
+export interface SyncAlarms {
+  create: (name: string, info: { delayInMinutes: number }) => unknown
+  get: (name: string) => Promise<unknown>
+  clear: (name: string) => Promise<unknown>
+}
+
+export interface SyncLogger {
+  log: (...args: unknown[]) => void
+  warn: (...args: unknown[]) => void
+  error: (...args: unknown[]) => void
+}
+
+export interface SyncDeps {
+  /** Every option's default (what pruning compares against). */
+  defaults: Options
+  readOptions: () => Promise<Options>
+  writeOptions: (update: Partial<Options>) => Promise<void>
+  meta: {
+    get: <K extends keyof SyncMeta>(keys: K[]) => Promise<Pick<SyncMeta, K>>
+    set: (update: Partial<SyncMeta>) => Promise<void>
+  }
+  sync: SyncStorageArea
+  alarms: SyncAlarms
+  backups: {
+    /** Snapshot the current options if today has no backup yet. */
+    maybeDaily: () => Promise<void>
+    create: (kind: BackupKind) => Promise<void>
+  }
+  now?: () => number
+  randomId?: () => string
+  logger?: SyncLogger
+}
+
+export interface SyncUsageReport { used: number, quota: number, overheadBytes: number }
+
+export interface SyncStatusReport {
+  enabled: boolean
+  lastError: string
+  lastSyncAt: number
+  generation: number
+  dirty: boolean
+}
+
+const SILENT: SyncLogger = { log() {}, warn() {}, error() {} }
+
+export function createSyncEngine(deps: SyncDeps) {
+  const { defaults, meta, sync, alarms, backups } = deps
+  const now = deps.now ?? Date.now
+  const randomId = deps.randomId ?? (() => crypto.randomUUID().slice(0, 8))
+  const logger = deps.logger ?? SILENT
+
+  /** Bounded, in-memory retry counter for half-propagated reads (resets on restart — fine). */
+  let pullRetries = 0
+
+  // Serialize every mutating operation so concurrent storage/alarm events can't
+  // interleave a read-modify-write. This also makes the push's own sync-write echo
+  // harmless: the echoed pull queues behind the push and sees the updated meta.
+  let chain: Promise<unknown> = Promise.resolve()
+  function withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = chain.then(fn, fn)
+    chain = run.then(() => {}, () => {})
+    return run
+  }
+
+  // -------------------------------------------------------------------------
+  // Public surface (wired into background.ts listeners + API)
+  // -------------------------------------------------------------------------
+
+  /** Synchronous storage.onChanged handler — must stay sync so MV3 never misses a wake event. */
+  function onStorageChanged(changes: Record<string, unknown>, areaName: string): void {
+    if (areaName === 'local') {
+      if (Object.keys(changes).some(k => k.startsWith('option.')))
+        void withLock(handleLocalChange)
+    }
+    else if (areaName === 'sync') {
+      if (Object.keys(changes).some(k => k === MANIFEST_KEY || isChunkKey(k)))
+        void withLock(pull)
+    }
+  }
+
+  function onAlarm(alarm: { name: string }): void {
+    if (alarm.name === ALARM_PUSH)
+      void withLock(push)
+    else if (alarm.name === ALARM_PULL_RETRY)
+      void withLock(pull)
+  }
+
+  /** Startup reconciliation: adopt anything newer, resume a pending push. */
+  async function init(): Promise<void> {
+    if (!(await meta.get(['enabled'])).enabled)
+      return
+    await withLock(async () => {
+      await getDeviceId()
+      await pull()
+      if ((await meta.get(['dirty'])).dirty)
+        await scheduleAlarm()
+    })
+  }
+
+  async function setEnabled(enabled: boolean): Promise<void> {
+    await meta.set({ enabled })
+    await withLock(enabled ? enable : disable)
+  }
+
+  /** Explicit "forget the cloud copy" action — removes this extension's sync keys. */
+  async function clearSyncedData(): Promise<void> {
+    await withLock(async () => {
+      const items = await sync.get(null)
+      const keys = Object.keys(items).filter(k => k === MANIFEST_KEY || isChunkKey(k))
+      if (keys.length)
+        await sync.remove(keys)
+      await meta.set({ meta: { g: 0, h: '', w: '' }, dirty: false, dirtySince: 0, lastError: '', lastSyncAt: 0 })
+    })
+  }
+
+  async function getUsage(): Promise<SyncUsageReport> {
+    let used = 0
+    try {
+      used = await sync.getBytesInUse?.(null) ?? 0
+    }
+    catch { /* getBytesInUse can throw if sync is unavailable */ }
+    const manifest = await readManifest()
+    // "Fixed overhead of our format" = the manifest item (key + JSON value + quotes).
+    const overheadBytes = manifest ? MANIFEST_KEY.length + JSON.stringify(manifest).length + 2 : 0
+    return { used, quota: QUOTA_BYTES, overheadBytes }
+  }
+
+  async function getStatus(): Promise<SyncStatusReport> {
+    const m = await meta.get(['enabled', 'lastError', 'lastSyncAt', 'meta', 'dirty'])
+    return {
+      enabled: m.enabled,
+      lastError: m.lastError,
+      lastSyncAt: m.lastSyncAt,
+      generation: m.meta.g,
+      dirty: m.dirty,
+    }
+  }
+
+  /** Resolves once every queued operation has finished (for tests and shutdown). */
+  async function idle(): Promise<void> {
+    let seen: Promise<unknown>
+    do {
+      seen = chain
+      await seen
+    } while (seen !== chain)
+  }
+
+  // -------------------------------------------------------------------------
+  // Core operations (always run inside withLock)
+  // -------------------------------------------------------------------------
+
+  async function handleLocalChange(): Promise<void> {
+    // Backups are independent of sync — keep a daily restore point regardless.
+    await backups.maybeDaily()
+
+    if (!(await meta.get(['enabled'])).enabled)
+      return
+
+    // Real dirtiness is "does the pruned local state differ from what's synced?".
+    // This naturally absorbs our own pull-writes (which leave localHash === meta.h)
+    // and per-device churn like theme.current, so no echo-suppression flag is needed.
+    const localHash = await currentHash()
+    const { meta: agreed, dirty } = await meta.get(['meta', 'dirty'])
+    if (localHash === agreed.h)
+      return
+
+    await meta.set(dirty ? { dirty: true } : { dirty: true, dirtySince: now() })
+    await scheduleAlarm()
+  }
+
+  async function push(): Promise<void> {
+    if (!(await meta.get(['enabled'])).enabled)
+      return
+
+    const { meta: agreed } = await meta.get(['meta'])
+    const opts = await deps.readOptions()
+    const pruned = pruneToSynced(opts, defaults)
+    const localHash = hash(canonicalStringify(pruned))
+    const remote = await readManifest()
+
+    const decision = decidePush(agreed, remote, localHash)
+    logger.log('push decision', decision)
+    if (decision === 'noop') {
+      if (localHash === agreed.h)
+        await meta.set({ dirty: false, dirtySince: 0 })
+      return
+    }
+    if (decision === 'pull') {
+      await pull()
+      return
+    }
+
+    const token = `${await getDeviceId()}.${randomId()}`
+    const newGen = Math.max(agreed.g, remote?.g ?? 0) + 1
+    const { chunks, manifest } = await encode(opts, defaults, newGen, token)
+
+    const currentItems = await sync.get(null)
+    const { toSet, toRemove } = diffChunks(pickChunks(currentItems), chunks)
+
+    try {
+      await sync.set({ ...toSet, [MANIFEST_KEY]: manifest })
+      if (toRemove.length)
+        await sync.remove(toRemove)
+    }
+    catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      logger.error('push failed', msg)
+      // Don't advance meta and keep `dirty` set so a later change retries.
+      await meta.set({ lastError: quotaHint(msg) })
+      return
+    }
+
+    // Compare-after-write: confirm our write survived a possible same-gen race.
+    const after = await readManifest()
+    if (after && after.w === token) {
+      await meta.set({
+        meta: { g: newGen, h: localHash, w: token },
+        dirty: false,
+        dirtySince: 0,
+        lastError: '',
+        lastSyncAt: now(),
+      })
+      logger.log('push ok, gen', newGen)
+    }
+    else {
+      logger.warn('push lost a race; pulling the winner')
+      await pull()
+    }
+  }
+
+  async function pull(): Promise<void> {
+    if (!(await meta.get(['enabled'])).enabled)
+      return
+
+    const { meta: agreed } = await meta.get(['meta'])
+    const items = await sync.get(null)
+    const remote = (items[MANIFEST_KEY] as Manifest | undefined) ?? null
+    if (decidePull(agreed, remote) === 'noop')
+      return
+
+    const result = await decode(items)
+    if (!result.ok) {
+      if (result.reason === 'version') {
+        await meta.set({ lastError: 'Synced data uses a newer format; update the extension to sync.' })
+        return
+      }
+      if (result.reason === 'empty')
+        return
+      // incomplete / corrupt: usually a half-propagated chunk set — retry briefly.
+      if (pullRetries < MAX_PULL_RETRIES) {
+        pullRetries++
+        await alarms.create(ALARM_PULL_RETRY, { delayInMinutes: PULL_RETRY_MIN })
+        logger.log('pull incomplete, retry', pullRetries)
+      }
+      else {
+        pullRetries = 0
+        await meta.set({ lastError: 'Could not read synced data (incomplete).' })
+      }
+      return
+    }
+    pullRetries = 0
+
+    // Back up the pre-pull state, then apply only the keys that actually change.
+    await backups.maybeDaily()
+    const current = await deps.readOptions()
+    // `remote.k` tells us which options the writing device knew about, so a device
+    // on an older build can't silently reset (and wipe) ones it has never heard of.
+    const desired = buildLocalUpdate(result.options, defaults, current, remote?.k)
+    const update = diffOptions(current, desired)
+    if (Object.keys(update).length)
+      await deps.writeOptions(update)
+
+    await meta.set({
+      meta: { g: remote!.g, h: remote!.h, w: remote!.w },
+      dirty: false,
+      dirtySince: 0,
+      lastError: '',
+      lastSyncAt: now(),
+    })
+    logger.log('pull ok, gen', remote!.g)
+  }
+
+  async function enable(): Promise<void> {
+    await getDeviceId()
+    // Forget any prior agreement so the cloud copy is treated as authoritative.
+    await meta.set({ meta: { g: 0, h: '', w: '' }, lastError: '' })
+
+    const remote = await readManifest()
+    if (remote && remote.v > SYNC_SCHEMA_VERSION) {
+      await meta.set({ lastError: 'Synced data uses a newer format; update the extension to sync.' })
+      return
+    }
+    if (remote) {
+      // Adopt synced settings; back up local first (deliberate destructive adopt).
+      if ((await meta.get(['backupsEnabled'])).backupsEnabled)
+        await backups.create('pre-sync')
+      await pull()
+    }
+    else {
+      await push() // seed the cloud from this device
+    }
+  }
+
+  async function disable(): Promise<void> {
+    await alarms.clear(ALARM_PUSH)
+    await alarms.clear(ALARM_PULL_RETRY)
+    await meta.set({ dirty: false, dirtySince: 0 })
+    // Cloud data is intentionally left intact — clearing would wipe other devices.
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------------
+
+  async function currentHash(): Promise<string> {
+    return hash(canonicalStringify(pruneToSynced(await deps.readOptions(), defaults)))
+  }
+
+  async function readManifest(): Promise<Manifest | null> {
+    const got = await sync.get(MANIFEST_KEY)
+    return (got[MANIFEST_KEY] as Manifest | undefined) ?? null
+  }
+
+  async function scheduleAlarm(): Promise<void> {
+    if (await alarms.get(ALARM_PUSH)) {
+      // Don't keep deferring forever — once past the ceiling, let the pending alarm fire.
+      const { dirtySince } = await meta.get(['dirtySince'])
+      if (now() - dirtySince > MAX_WAIT_MS)
+        return
+    }
+    await alarms.create(ALARM_PUSH, { delayInMinutes: DEBOUNCE_MIN })
+  }
+
+  async function getDeviceId(): Promise<string> {
+    let { deviceId: id } = await meta.get(['deviceId'])
+    if (!id) {
+      id = randomId()
+      await meta.set({ deviceId: id })
+    }
+    return id
+  }
+
+  return { onStorageChanged, onAlarm, init, setEnabled, clearSyncedData, getUsage, getStatus, idle }
+}
+
+export type SyncEngine = ReturnType<typeof createSyncEngine>
+
+function pickChunks(items: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(items)) {
+    if (isChunkKey(k) && typeof v === 'string')
+      out[k] = v
+  }
+  return out
+}
+
+function diffOptions(current: Options, desired: Options): Partial<Options> {
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(desired) as (keyof Options)[]) {
+    if (!isDeepEqual(current[key], desired[key]))
+      out[key] = desired[key]
+  }
+  return out as Partial<Options>
+}
+
+function quotaHint(msg: string): string {
+  return /quota/i.test(msg)
+    ? 'Settings are too large to sync — reduce filter lists or text replacements.'
+    : `Sync failed: ${msg}`
+}

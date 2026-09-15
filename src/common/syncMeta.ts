@@ -1,4 +1,5 @@
 import { createStorage } from './storage.ts'
+import { SYNC_META_DEFAULTS } from './syncMetaDefaults.ts'
 
 /**
  * Device-local sync/backup state and settings. Deliberately kept **out** of the
@@ -41,21 +42,7 @@ export const syncMeta = createStorage<SyncMeta>({
   name: 'SyncMeta',
   prefix: 'sync.',
   ignoredEvents: ['meta', 'dirty', 'dirtySince', 'deviceId', 'lastBackupDate'],
-  defaults: {
-    enabled: false,
-    backupsEnabled: true,
-    backupCount: 7,
-
-    meta: { g: 0, h: '', w: '' },
-    dirty: false,
-    dirtySince: 0,
-    deviceId: '',
-
-    lastBackupDate: '',
-
-    lastError: '',
-    lastSyncAt: 0,
-  },
+  defaults: SYNC_META_DEFAULTS,
 })
 
 // eslint-disable-next-line ts/no-namespace, ts/no-redeclare

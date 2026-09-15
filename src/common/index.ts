@@ -22,6 +22,9 @@ export type { Options, ThemeOption } from './options.ts'
 
 export * from './syncCodec.ts'
 
+export { createSyncEngine } from './syncCore.ts'
+export type { SyncDeps, SyncEngine } from './syncCore.ts'
+
 export * from './syncDecide.ts'
 
 export { syncMeta } from './syncMeta.ts'
