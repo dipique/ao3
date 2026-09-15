@@ -35,6 +35,13 @@
       <SiteExportChanges />
       <OptionDivider />
       <SiteExportCache />
+      <OptionDivider />
+      <OptionRow
+        title="Discard unneeded blurbs automatically"
+        subtitle="When a refresh drops a work from a stored list, or a list is deleted, forget that work's blurb straight away if no other list holds it — instead of waiting for Discard orphans. Cached work text is never touched."
+      >
+        <OptionSwitch option-id="pruneOrphanedBlurbs" />
+      </OptionRow>
     </OptionSubsection>
 
     <OptionSubsection

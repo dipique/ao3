@@ -2,21 +2,27 @@
 import { objectMap } from '@antfu/utils'
 import { useFileDialog } from '@vueuse/core'
 
-import { api, filterWithInvert, saveAs, toast } from '#common'
+import { api, BLURB_DATA_PREFIX, BLURB_INDEX_KEY, BLURB_PREFIX, filterWithInvert, saveAs, toast } from '#common'
 
+/**
+ * Which storage keys each variant takes, by prefix. The cache takes the stored
+ * blurbs with it: its lists hold only work keys, and a file of lists without the
+ * blurbs they name would import as lists of nothing. Cached work text stays out
+ * of it — that is megabytes of other people's writing.
+ */
 const EXPORT_VARIANTS = [{
   fileSuffix: '',
-  keyPrefix: '',
+  keyPrefixes: [] as string[],
   title: 'Export all',
   subtitle: 'Recommended for backup',
 }, {
   fileSuffix: '_options',
-  keyPrefix: 'option.',
+  keyPrefixes: ['option.'],
   title: 'Export options only',
   subtitle: 'Recommended for sharing with others',
 }, {
   fileSuffix: '_cache',
-  keyPrefix: 'cache.',
+  keyPrefixes: ['cache.', BLURB_PREFIX, BLURB_DATA_PREFIX, BLURB_INDEX_KEY],
   title: 'Export cache only',
   subtitle: 'Not generally useful/recommended',
 }] as const
@@ -76,10 +82,10 @@ onImportFilesChanged((files) => {
   reader.readAsText(file)
 })
 
-async function startExport({ keyPrefix, fileSuffix }: typeof EXPORT_VARIANTS[number]): Promise<void> {
+async function startExport({ keyPrefixes, fileSuffix }: typeof EXPORT_VARIANTS[number]): Promise<void> {
   let items = await browser.storage.local.get()
-  if (keyPrefix)
-    items = objectMap(items, (k, v) => k.startsWith(keyPrefix) ? [k, v] as [any, any] : undefined)
+  if (keyPrefixes.length)
+    items = objectMap(items, (k, v) => keyPrefixes.some(prefix => k.startsWith(prefix)) ? [k, v] as [any, any] : undefined)
   items = addInvertFlags(items)
   const now = new Date()
   const time = `${now.toISOString().slice(0, 10)}_${now.toISOString().slice(11, 19).replace(/:/g, '-')}`
@@ -109,7 +115,7 @@ async function startExport({ keyPrefix, fileSuffix }: typeof EXPORT_VARIANTS[num
         <DropdownMenuContent>
           <DropdownMenuItem
             v-for="variant in EXPORT_VARIANTS"
-            :key="variant.keyPrefix"
+            :key="variant.fileSuffix"
             flex="~ col items-start gap-1"
             px-4 py-3
             @click="() => startExport(variant)"

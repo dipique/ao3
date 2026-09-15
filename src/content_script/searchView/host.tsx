@@ -3,6 +3,7 @@ import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS, logger, toast } from '#common'
 import { onArchiveWait } from '#content_script/archiveFetch.js'
+import { hasNode } from '#content_script/blurb.js'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
@@ -446,8 +447,11 @@ function takeClaimed(source: SearchSource, opts: OpenOptions): Reopen | null {
  * a stored copy's would be. The new view decorates them under today's options.
  */
 function undecorated(works: Work[]): Work[] {
-  for (const work of works)
-    pristineBlurb(work.el, { inPlace: true })
+  // A work whose node was never built was never decorated either.
+  for (const work of works) {
+    if (hasNode(work))
+      pristineBlurb(work.el, { inPlace: true })
+  }
   return works
 }
 
@@ -780,7 +784,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     }
 
     const cached = carried
-      ? { works: undecorated(carried.works), scrapedAt: carried.scrapedAt }
+      ? { works: undecorated(carried.works), scrapedAt: carried.scrapedAt, missing: 0 }
       : await readSnapshot(source.cacheKey)
     if (stale())
       return
@@ -815,8 +819,9 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       // A copy younger than the source's interval is taken as it is: reloading a
       // long list on every visit is how a reader gets rate-limited, and the
       // Refresh button is right there when they want it sooner.
+      // Nor is a copy missing blurbs it names: only a reload can put them back.
       const age = Date.now() - cached.scrapedAt
-      const recent = age >= 0 && age < (source.refreshInterval?.() ?? 0)
+      const recent = !cached.missing && age >= 0 && age < (source.refreshInterval?.() ?? 0)
       // `undefined` is a full reload, `null` is a top-up with nothing to find.
       const plan = !recent && opts.refresh !== false && source.topUp ? source.topUp(stored) : undefined
       if (opts.refresh !== false && !recent && plan !== null) {

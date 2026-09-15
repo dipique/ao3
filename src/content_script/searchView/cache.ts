@@ -1,104 +1,212 @@
-import type { SnapshotDescriptor } from '#common'
+import type { LegacySearchSnapshot, SnapshotDescriptor, StoredList } from '#common'
+import type { Work } from '#content_script/blurb.js'
 
-import { ADDON_CLASS, cache, packIds, unpackIds } from '#common'
-import { parseWork, type Work } from '#content_script/blurb.js'
+import {
+  cache,
+  droppedIds,
+  isContextInvalidatedError,
+  isExtensionContextValid,
+  LEGACY_SNAPSHOTS_KEY,
+  LIST_VERSION,
+  listedIds,
+  options,
+  packIds,
+  packOrderedIds,
+  toShortId,
+  unpackIds,
+  unpackOrderedIds,
+} from '#common'
+import { parseWork } from '#content_script/blurb.js'
+
+import type { ParsedWork } from './blurbStore.ts'
+
+import { isPersisted, pruneBlurbs, readBlurbIndex, readParsed, readRecords, rewriteStale, storedContext, storeWorks, worksFromRecords } from './blurbStore.ts'
+import { pristineBlurb } from './pristine.ts'
+
+export { normalizeBlurb, pristineBlurb } from './pristine.ts'
 
 /**
- * Persistent snapshot cache for aggregated listings, keyed by an arbitrary
- * source string (e.g. `marked-for-later:USERID`). Stores each work's blurb
- * `outerHTML` in `browser.storage.local` (extension-private, effectively
- * unbounded via the `unlimitedStorage` permission), so a later visit can render
- * the view instantly from cache while a fresh scrape runs in the background.
+ * Persistent lists for the in-memory search view, keyed by an arbitrary source
+ * string (e.g. `marked-for-later:USERID`), so a later visit can render the view
+ * instantly from storage while a fresh scrape runs in the background.
+ *
+ * A list holds its works' short ids (`cache.searchLists`); each blurb is stored
+ * once, under its work, by the shared store ({@link file://./blurbStore.ts}),
+ * however many lists hold it. The functions here keep the names and shapes they
+ * had when a list carried its blurbs inline, so their callers never learned the
+ * difference.
  */
 
-/** Bump when the cached shape changes so old snapshots are ignored. */
-const SNAPSHOT_VERSION = 2
+/** Lists this build can draw. Anything else is kept, and not drawn. */
+function readable(list: StoredList | undefined): list is StoredList {
+  return !!list && list.v === LIST_VERSION && typeof list.ids === 'string'
+}
 
 /**
- * Oldest version still worth reading. v1 is v2 without a
- * {@link SnapshotDescriptor} — the blurbs are identical, so it renders exactly
- * as it always did; the only thing it can't do is be refreshed from outside the
- * page it was scraped on.
+ * Oldest and newest versions of a list stored the old way — blurbs inline —
+ * that the fallback reader will still draw. v1 is v2 without a descriptor.
  */
-const MIN_SNAPSHOT_VERSION = 1
+const LEGACY_VERSIONS = [1, 2] as const
 
 export interface CachedSnapshot {
   scrapedAt: number
   works: Work[]
-  /** Absent on a v1 snapshot — see {@link MIN_SNAPSHOT_VERSION}. */
+  /** Absent on a list first stored before descriptors existed. */
   descriptor?: SnapshotDescriptor
+  /**
+   * Works the list names whose blurbs aren't stored — a partial migration, a
+   * cache-only import, a race with a discard. They are left out of `works`, and
+   * a copy missing some is not one to trust as recent.
+   */
+  missing: number
 }
 
-/** A snapshot's metadata, without paying to re-parse its blurbs. */
+/** A list's metadata, without paying to read its blurbs. */
 export interface SnapshotSummary {
   key: string
   scrapedAt: number
-  /** Works held, from the stored blurb count. */
+  /** Works held. */
   count: number
   /**
-   * The works' ids, in list order — one attribute match per stored blurb, not a
-   * second blurb parser. The options page needs them to say how many of *this*
-   * list's works are cached ({@link file://../siteExport/workTextCache.ts} keys
-   * by work, not by list), and the HTML they come out of is already in hand.
+   * The works' ids, in list order. The options page needs them to say how many
+   * of *this* list's works are cached ({@link file://../siteExport/workTextCache.ts}
+   * keys by work, not by list).
    */
   workIds: string[]
+  /** Of those, how many the blurb index says aren't stored — works a refresh would restore. */
+  unstored: number
   descriptor?: SnapshotDescriptor
 }
 
-/** The `id="work_123"` a blurb carries, which is where `parseWork` reads it from too. */
-const BLURB_ID_RE = /\bid="work_(\d+)"/
+// ---------------------------------------------------------------------------
+// The old layout, for the release that migrates it.
+// ---------------------------------------------------------------------------
 
-/** Read and rehydrate a cached snapshot, or null if absent/stale-shaped. */
-export async function readSnapshot(key: string): Promise<CachedSnapshot | null> {
-  const snapshots = await cache.get('searchSnapshots')
-  const entry = snapshots[key]
-  if (!entry || entry.version < MIN_SNAPSHOT_VERSION || entry.version > SNAPSHOT_VERSION)
-    return null
-  return { scrapedAt: entry.scrapedAt, works: worksFromHtml(entry.blurbsHtml), descriptor: entry.descriptor }
+async function readLegacy(): Promise<{ [key: string]: LegacySearchSnapshot }> {
+  if (!isExtensionContextValid())
+    return {}
+  try {
+    const value = (await browser.storage.local.get(LEGACY_SNAPSHOTS_KEY))[LEGACY_SNAPSHOTS_KEY]
+    return value && typeof value === 'object' ? value as { [key: string]: LegacySearchSnapshot } : {}
+  }
+  catch (error) {
+    if (isContextInvalidatedError(error))
+      return {}
+    throw error
+  }
+}
+
+function legacyReadable(entry: LegacySearchSnapshot | undefined): entry is LegacySearchSnapshot {
+  return !!entry && Array.isArray(entry.blurbsHtml)
+    && entry.version >= LEGACY_VERSIONS[0] && entry.version <= LEGACY_VERSIONS[1]
 }
 
 /**
- * Every readable snapshot, newest first — what the options page lists. Metadata
- * only: rehydrating the blurbs of every list the reader has ever opened would
- * cost far more than the one they actually pick.
+ * Take `key` out of the old layout, if it is still there — once a list has been
+ * written the new way, the copy from before would only come back to haunt the
+ * fallback reader.
+ */
+async function forgetLegacy(key: string): Promise<void> {
+  const legacy = await readLegacy()
+  if (!(key in legacy))
+    return
+  delete legacy[key]
+  if (Object.keys(legacy).length)
+    await browser.storage.local.set({ [LEGACY_SNAPSHOTS_KEY]: legacy })
+  else
+    await browser.storage.local.remove(LEGACY_SNAPSHOTS_KEY)
+}
+
+// ---------------------------------------------------------------------------
+// Reading.
+// ---------------------------------------------------------------------------
+
+/** Read a stored list and its works, or null if there is none this build can draw. */
+export async function readSnapshot(key: string): Promise<CachedSnapshot | null> {
+  const lists = await cache.get('searchLists')
+  const list = lists[key]
+  if (!list) {
+    // Not migrated yet — the background's migration runs on update, and a page
+    // can open a list before it gets there.
+    const entry = (await readLegacy())[key]
+    return legacyReadable(entry)
+      ? { scrapedAt: entry.scrapedAt, works: worksFromHtml(entry.blurbsHtml), descriptor: entry.descriptor, missing: 0 }
+      : null
+  }
+  if (!readable(list))
+    return null
+  const ids = unpackOrderedIds(list.ids)
+  const { works, missing, stale } = worksFromRecords(ids, await readRecords(ids), list.ctx)
+  if (stale.length)
+    void rewriteStale(stale).catch(err => console.error('[searchView] could not rewrite stored blurbs', err))
+  return { scrapedAt: list.scrapedAt, works, descriptor: list.descriptor, missing: missing.length }
+}
+
+/**
+ * A stored list's works as parsed data only — no nodes built, no markup read
+ * for a work whose parsed half is current. For a caller that wants titles and
+ * numbers, like the export job's queue.
+ */
+export async function readSnapshotData(key: string): Promise<{ scrapedAt: number, descriptor?: SnapshotDescriptor, works: ParsedWork[] } | null> {
+  const lists = await cache.get('searchLists')
+  const list = lists[key]
+  if (!list) {
+    const snapshot = await readSnapshot(key)
+    return snapshot && { scrapedAt: snapshot.scrapedAt, descriptor: snapshot.descriptor, works: snapshot.works }
+  }
+  if (!readable(list))
+    return null
+  return { scrapedAt: list.scrapedAt, descriptor: list.descriptor, works: await readParsed(unpackOrderedIds(list.ids)) }
+}
+
+/**
+ * Every readable list, newest first — what the options page lists. Metadata
+ * only: reading the blurbs of every list the reader has ever opened would cost
+ * far more than the one they actually pick.
  */
 export async function listSnapshots(): Promise<SnapshotSummary[]> {
-  const snapshots = await cache.get('searchSnapshots')
-  return Object.entries(snapshots)
-    .filter(([, entry]) => entry.version >= MIN_SNAPSHOT_VERSION && entry.version <= SNAPSHOT_VERSION)
-    .map(([key, entry]) => ({
+  const [lists, legacy, index] = await Promise.all([cache.get('searchLists'), readLegacy(), readBlurbIndex()])
+  const out: SnapshotSummary[] = []
+  for (const [key, list] of Object.entries(lists)) {
+    if (!readable(list))
+      continue
+    const workIds = unpackOrderedIds(list.ids)
+    out.push({
       key,
-      scrapedAt: entry.scrapedAt,
-      count: entry.blurbsHtml.length,
-      workIds: entry.blurbsHtml.map(html => BLURB_ID_RE.exec(html)?.[1]).filter((id): id is string => !!id),
-      descriptor: entry.descriptor,
-    }))
-    .sort((a, b) => b.scrapedAt - a.scrapedAt)
+      scrapedAt: list.scrapedAt,
+      count: workIds.length,
+      workIds,
+      unstored: workIds.filter(id => !index.has(id)).length,
+      descriptor: list.descriptor,
+    })
+  }
+  for (const [key, entry] of Object.entries(legacy)) {
+    if (key in lists || !legacyReadable(entry))
+      continue
+    const workIds = [...listedIds({}, { [key]: entry })]
+    out.push({ key, scrapedAt: entry.scrapedAt, count: entry.blurbsHtml.length, workIds, unstored: 0, descriptor: entry.descriptor })
+  }
+  return out.sort((a, b) => b.scrapedAt - a.scrapedAt)
 }
 
 /**
- * Every work id any stored snapshot holds, readable or not.
+ * Every work id any stored list holds, readable or not.
  *
  * The version gate {@link listSnapshots} applies is deliberately *not* applied
  * here, because the question is different. Listing asks "can this build render
  * it"; this asks "does any stored list still hold this work", which is what
- * decides whether its cached text is an orphan
- * ({@link file://../siteExport/workText.ts}). A snapshot written by a newer
- * build is one the reader kept, and discarding the work text under it because
- * this build cannot draw it would be the worst kind of tidying.
+ * decides whether its blurb and its cached text are orphans. A list written by a
+ * newer build is one the reader kept, and discarding what it holds because this
+ * build cannot draw it would be the worst kind of tidying.
  */
 export async function snapshotWorkIds(): Promise<Set<string>> {
-  const snapshots = await cache.get('searchSnapshots')
-  const ids = new Set<string>()
-  for (const entry of Object.values(snapshots)) {
-    for (const html of entry.blurbsHtml) {
-      const id = BLURB_ID_RE.exec(html)?.[1]
-      if (id)
-        ids.add(id)
-    }
-  }
-  return ids
+  const [lists, legacy] = await Promise.all([cache.get('searchLists'), readLegacy()])
+  return listedIds(lists, legacy)
 }
+
+// ---------------------------------------------------------------------------
+// Writing.
+// ---------------------------------------------------------------------------
 
 export interface WriteSnapshotOptions {
   /**
@@ -111,8 +219,16 @@ export interface WriteSnapshotOptions {
 }
 
 /**
- * Persist a snapshot of the given works (their blurb HTML, in order), plus how
- * to re-fetch the listing later ({@link SnapshotDescriptor}).
+ * Store a list of the given works, in order, plus how to re-fetch the listing
+ * later ({@link SnapshotDescriptor}).
+ *
+ * **Blurbs first, list second**, so a stored list never names a blurb that isn't
+ * there: an interrupted write leaves a blurb nothing references, which the
+ * orphan discard collects, rather than a list pointing at nothing.
+ *
+ * Works the store already holds cost nothing to write again, which is what makes
+ * the commonest write — a blurb action taking one work out of the list — a
+ * rewrite of one small list of ids and nothing else.
  */
 export async function writeSnapshot(
   key: string,
@@ -120,40 +236,79 @@ export async function writeSnapshot(
   descriptor: SnapshotDescriptor,
   opts: WriteSnapshotOptions = {},
 ): Promise<void> {
-  const snapshots = await cache.get('searchSnapshots')
-  const previous = snapshots[key]
-  snapshots[key] = {
-    version: SNAPSHOT_VERSION,
+  await storeWorks(opts.keepScrapedAt ? works.filter(work => !isPersisted(work)) : works)
+
+  // Read after the blurbs are down, so a list another tab wrote meanwhile is kept.
+  // Copied: with nothing stored yet, what comes back is the storage defaults.
+  const lists = { ...await cache.get('searchLists') }
+  const previous = lists[key]
+  const ids = works.map(work => work.workId).filter(Boolean)
+  const ctx: { [sid: string]: string } = {}
+  for (const work of works) {
+    const block = storedContext(work)
+    const sid = toShortId(work.workId)
+    if (block && sid)
+      ctx[sid] = block
+  }
+  const list: StoredList = {
+    v: LIST_VERSION,
     scrapedAt: opts.keepScrapedAt && previous ? previous.scrapedAt : Date.now(),
-    blurbsHtml: works.map(work => pristineBlurb(work.el).outerHTML),
+    ids: packOrderedIds(ids),
     descriptor,
   }
-  await cache.set({ searchSnapshots: snapshots })
+  if (Object.keys(ctx).length)
+    list.ctx = ctx
+  lists[key] = list
+  await cache.set({ searchLists: lists })
+  await forgetLegacy(key)
+
+  if (previous && typeof previous.ids === 'string')
+    await pruneIfWanted(key, unpackOrderedIds(previous.ids), ids, lists)
 }
 
 /**
  * Forget a stored list.
  *
- * The blurbs go; the work text does not. That cache is keyed by work rather
- * than by list ({@link file://../siteExport/workTextCache.ts}), so a work this
- * list held may well be in another one — and the text is hours of requests to
- * AO3, where the blurbs are one scrape. Deleting it is its own action, and the
- * narrow version of that action — the works this leaves behind that nothing else
- * holds — reads its answer from {@link snapshotWorkIds}.
+ * Its blurbs stay unless the reader has asked for blurbs nothing holds to go at
+ * once ({@link file://../../common/options.ts}'s `pruneOrphanedBlurbs`); either
+ * way a blurb another list holds is untouched. The work text never goes with
+ * it: that cache is keyed by work too, and the text is hours of requests to AO3
+ * where the blurbs are one scrape. Deleting it is its own action, and the narrow
+ * version of that action reads its answer from {@link snapshotWorkIds}.
  */
 export async function deleteSnapshot(key: string): Promise<void> {
-  const snapshots = await cache.get('searchSnapshots')
-  if (!(key in snapshots))
-    return
-  delete snapshots[key]
-  await cache.set({ searchSnapshots: snapshots })
+  const lists = { ...await cache.get('searchLists') }
+  const previous = lists[key]
+  if (previous) {
+    delete lists[key]
+    await cache.set({ searchLists: lists })
+  }
+  await forgetLegacy(key)
   // What the list failed to find goes with the list.
-  const misses = await cache.get('searchMisses')
+  const misses = { ...await cache.get('searchMisses') }
   if (key in misses) {
     delete misses[key]
     await cache.set({ searchMisses: misses })
   }
+  if (previous && typeof previous.ids === 'string')
+    await pruneIfWanted(key, unpackOrderedIds(previous.ids), [], lists)
 }
+
+/** Discard the blurbs a list write stranded, if the reader has asked for that. */
+async function pruneIfWanted(key: string, before: string[], after: string[], lists: { [key: string]: StoredList }): Promise<void> {
+  if (!await options.get('pruneOrphanedBlurbs'))
+    return
+  const others = Object.entries(lists).filter(([other]) => other !== key).map(([, list]) => list)
+  const candidates = droppedIds(before, after, others)
+  if (!candidates.length)
+    return
+  const referenced = listedIds(lists, await readLegacy())
+  await pruneBlurbs(candidates, referenced)
+}
+
+// ---------------------------------------------------------------------------
+// Misses.
+// ---------------------------------------------------------------------------
 
 /**
  * The work ids a source looked for in its listing and did not find, as of its
@@ -166,7 +321,7 @@ export async function readMisses(key: string): Promise<Set<string>> {
 
 /** Replace the recorded misses for `key` — the whole set, not an addition to it. */
 export async function writeMisses(key: string, ids: Iterable<string>): Promise<void> {
-  const misses = await cache.get('searchMisses')
+  const misses = { ...await cache.get('searchMisses') }
   const packed = packIds(ids)
   if (packed === (misses[key] ?? ''))
     return
@@ -177,82 +332,24 @@ export async function writeMisses(key: string, ids: Iterable<string>): Promise<v
   await cache.set({ searchMisses: misses })
 }
 
-/** The attribute prefix of every `data-*` the extension stamps on a page. */
-const DATA_PREFIX = 'data-ao3e-'
-
-/** The custom-property prefix the highlight units colour native elements with. */
-const STYLE_PREFIX = '--ao3e-'
-
 /**
- * A copy of a blurb as AO3 served it, with everything the extension did to it
- * taken back off — or, given `{ inPlace: true }`, the blurb itself stripped.
- *
- * A snapshot is the blurbs *before* decoration, because opening one decorates
- * it: store a decorated blurb and the next open adds a second star after every
- * highlighted tag, a second clock after the title, a second "Mark as Read". And
- * a list is not always written before its blurbs are decorated — a blurb action
- * writes the list it is showing, a top-up keeps the stored works it already
- * put on screen — so the write can't simply be timed to miss it.
- *
- * Nearly everything the units add is marked with {@link ADDON_CLASS}: nodes
- * carry the class itself, classes put on native elements start with it, and so
- * do their `data-ao3e-*` attributes and `--ao3e-*` colours. The exceptions are
- * undone by name — HideWorks' wrapper around a hidden work's children and the
- * `hidden` it sets on the `<li>`, Stats' unmarked `<div>` around each `dt`/`dd`
- * pair and the reformatted numbers it stashes the originals of.
+ * Rebuild `Work[]` from blurb HTML, mounting fresh nodes in the document — for
+ * markup that isn't in the store: a site export's blurbs, and a list stored the
+ * old way that hasn't been migrated yet.
  */
-export function pristineBlurb<T extends Element>(blurb: T, { inPlace = false } = {}): T {
-  const li = inPlace ? blurb : blurb.cloneNode(true) as T
-  const unwrap = (el: Element): void => {
-    el.replaceWith(...el.childNodes)
-  }
-
-  li.querySelectorAll(`.${ADDON_CLASS}--hide-works--wrapper`).forEach(unwrap)
-  li.removeAttribute('hidden')
-  // AO3's own stats list holds nothing but `dt`/`dd` pairs.
-  li.querySelectorAll('dl.stats > div').forEach(unwrap)
-  li.querySelectorAll<HTMLElement>(`[${DATA_PREFIX}original]`).forEach((el) => {
-    el.textContent = el.dataset.ao3eOriginal!
-  })
-  li.querySelectorAll(`.${ADDON_CLASS}`).forEach(el => el.remove())
-
-  for (const el of [li, ...li.querySelectorAll('*')]) {
-    for (const name of [...el.classList]) {
-      if (name === ADDON_CLASS || name.startsWith(`${ADDON_CLASS}--`))
-        el.classList.remove(name)
-    }
-    if (el.getAttribute('class') === '')
-      el.removeAttribute('class')
-    for (const { name } of [...el.attributes]) {
-      if (name.startsWith(DATA_PREFIX))
-        el.removeAttribute(name)
-    }
-    if (el instanceof HTMLElement && el.style.length) {
-      for (const prop of [...el.style]) {
-        if (prop.startsWith(STYLE_PREFIX))
-          el.style.removeProperty(prop)
-      }
-      if (!el.style.length)
-        el.removeAttribute('style')
-    }
-  }
-  return li
-}
-
-/** Rebuild `Work[]` from cached blurb HTML, mounting fresh nodes in the document. */
 export function worksFromHtml(blurbsHtml: string[]): Work[] {
   const template = document.createElement('template')
   const works: Work[] = []
-  blurbsHtml.forEach((html, index) => {
+  blurbsHtml.forEach((html) => {
     template.innerHTML = html
     const li = template.content.firstElementChild
     if (li instanceof HTMLLIElement) {
-      // Stripped on the way in as well as on the way out: a list stored before
+      // Stripped on the way in as well as on the way out: markup stored before
       // the write side did so still carries the decorations of every time it was
       // written, and would go on drawing them twice until it was next refreshed.
       pristineBlurb(li, { inPlace: true })
       document.adoptNode(li)
-      works.push(parseWork(li, index))
+      works.push(parseWork(li, works.length))
     }
   })
   return works

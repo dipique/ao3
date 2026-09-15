@@ -15,7 +15,8 @@
  * there with nothing pointing at them and no way out short of deleting the lot.
  * *Discard orphans* is that way out, and it says how much it would take before
  * it is pressed, which is the whole difference between the two buttons: one is
- * measurable in advance, the other is everything.
+ * measurable in advance, the other is everything. Blurbs are stored by work as
+ * well, and strand the same way, so the one button takes both.
  */
 const { usage, orphans, status, purge, discardOrphans } = useSiteExport()
 
@@ -25,17 +26,23 @@ const { usage, orphans, status, purge, discardOrphans } = useSiteExport()
  * fetched is worth clearing but not worth a byte count.
  */
 const stranded = computed(() => {
-  if (orphans.value.cached) {
-    return ` ${orphans.value.cached.toLocaleString()} (~${formatBytes(orphans.value.bytes)}) orphan(s).`
-  }
-  if (orphans.value.works)
-    return ` ${orphans.value.works.toLocaleString()} orphan(s).`
-  return ''
+  const { cached, bytes, works, blurbs, blurbBytes } = orphans.value
+  const parts: string[] = []
+  if (cached)
+    parts.push(`${cached.toLocaleString()} (~${formatBytes(bytes)}) orphaned work text(s)`)
+  else if (works)
+    parts.push(`${works.toLocaleString()} orphaned work text entr${works === 1 ? 'y' : 'ies'}`)
+  if (blurbs)
+    parts.push(`${blurbs.toLocaleString()} (~${formatBytes(blurbBytes)}) orphaned blurb(s)`)
+  return parts.length ? ` ${parts.join(' and ')}.` : ''
 })
+
+/** Everything "Discard orphans" would take, counted the way its confirmation says. */
+const orphanCount = computed(() => orphans.value.works + orphans.value.blurbs)
 
 const subtitle = computed(() => {
   if (!usage.value.cached)
-    return 'No work text cached yet for offline reading.'
+    return `No work text cached yet for offline reading.${stranded.value}`
   const failed = usage.value.failed
     ? ` ${usage.value.failed.toLocaleString()} could not be fetched and will be retried.`
     : ''
@@ -68,10 +75,10 @@ async function press(which: 'orphans' | 'all'): Promise<void> {
       <Button
         :variant="confirming === 'orphans' ? 'destructive' : 'outline'"
         class="disabled:cursor-default disabled:op-50"
-        :disabled="!orphans.works || status.running"
+        :disabled="!orphanCount || status.running"
         @click.prevent="press('orphans')"
       >
-        {{ confirming === 'orphans' ? `Discard ${orphans.works.toLocaleString()}?` : 'Discard orphans' }}
+        {{ confirming === 'orphans' ? `Discard ${orphanCount.toLocaleString()}?` : 'Discard orphans' }}
       </Button>
       <Button
         :variant="confirming === 'all' ? 'destructive' : 'outline'"

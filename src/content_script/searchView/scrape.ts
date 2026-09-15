@@ -189,8 +189,12 @@ export interface ScrapeResult {
   blocked?: boolean
 }
 
-/** Collect and parse the blurbs from already-fetched listing documents. */
-export function collectWorks(docs: Document[], blurbSelector: string = DEFAULT_BLURB_SELECTOR): Work[] {
+/**
+ * Collect and parse the blurbs from already-fetched listing documents.
+ * `seenAt` is when the pages were fetched, stamped on every work: it is what
+ * decides, between this copy of a blurb and a stored one, which is newer.
+ */
+export function collectWorks(docs: Document[], blurbSelector: string = DEFAULT_BLURB_SELECTOR, seenAt: number = Date.now()): Work[] {
   const works: Work[] = []
   const seen = new Set<string>()
   let order = 0
@@ -201,6 +205,7 @@ export function collectWorks(docs: Document[], blurbSelector: string = DEFAULT_B
       // Adopt into the live document so the node can be mounted in the view.
       document.adoptNode(li)
       const work = parseWork(li, order)
+      work.seenAt = seenAt
       if (work.workId && seen.has(work.workId))
         continue
       if (work.workId)
@@ -233,6 +238,9 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
     satisfied,
   } = opts
   const selector = blurbSelector ?? DEFAULT_BLURB_SELECTOR
+  // A scrape that began before another tab's finished holds the older blurbs,
+  // however late it lands.
+  const startedAt = Date.now()
   // Sparse by page index; pages we never got stay holes and are filtered out below.
   const docs: (Document | undefined)[] = []
   // Pages still wanted, by index. A page leaves this list when it lands, or when
@@ -359,7 +367,7 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
 
   const landed = docs.filter((d): d is Document => d !== undefined)
   return {
-    works: collectWorks(landed, selector),
+    works: collectWorks(landed, selector, startedAt),
     loadedPages: landed.length,
     totalPages: pageCount,
     satisfied: enough,

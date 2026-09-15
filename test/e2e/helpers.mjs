@@ -241,3 +241,44 @@ export function installMock(seed) {
 }
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+/**
+ * Storage items for stored search-view lists, in the layout the extension keeps
+ * them in: each list's work ids under `cache.searchLists`, and each work's blurb
+ * once, under `blurb.<short id>`.
+ *
+ * Takes lists in the shape a list used to be stored in — `{ [key]: { scrapedAt,
+ * blurbsHtml, descriptor? } }` — because a fixture says best what a list holds
+ * by its markup. The blurbs go in unparsed, the way a migrated store has them:
+ * the page parses each when it first reads it (and stores what it parsed).
+ */
+export function storedLists(lists) {
+  const items = { 'cache.searchLists': {} }
+  const index = new Set()
+  for (const [key, { scrapedAt, blurbsHtml, descriptor }] of Object.entries(lists)) {
+    const ids = []
+    for (const html of blurbsHtml) {
+      const id = /\bid="work_(\d+)"/.exec(html)?.[1]
+      if (!id)
+        continue
+      const sid = Number(id).toString(36)
+      ids.push(sid)
+      index.add(Number(id))
+      items[`blurb.${sid}`] = { html }
+    }
+    items['cache.searchLists'][key] = { v: 3, scrapedAt, ids: ids.join(','), ...(descriptor ? { descriptor } : {}) }
+  }
+  // The index in its packed form: sorted, base-36 deltas.
+  let prev = 0
+  items.blurbIndex = [...index].sort((a, b) => a - b).map((n) => {
+    const delta = (n - prev).toString(36)
+    prev = n
+    return delta
+  }).join(',')
+  return items
+}
+
+/** The decimal work ids a stored list holds, in order. */
+export function storedListIds(list) {
+  return list?.ids ? list.ids.split(',').map(sid => String(Number.parseInt(sid, 36))) : []
+}

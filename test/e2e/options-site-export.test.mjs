@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock, serveDir, serveDist, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome, installMock, serveDir, serveDist, sleep, storedListIds, storedLists } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -78,7 +78,7 @@ function workPage(id) {
 }
 
 const SEED = {
-  'cache.searchSnapshots': {
+  ...storedLists({
     // Written before descriptors existed: no address, no way to refresh it. Kept
     // here because it is the row the rebuilt-from-the-key link exists for.
     'marked-for-later:olduser': {
@@ -97,7 +97,7 @@ const SEED = {
         listUrl: `${ARCHIVE}/users/tester/readings?show=to-read`,
       },
     },
-  },
+  }),
   // Marks travel with the library, and are the whole of what an exported page
   // records: `boring` aliases `read`, so choosing it means "done with this" —
   // which on a Marked for Later list is also something AO3 has to be told.
@@ -412,8 +412,8 @@ describe('options UI — site export', { skip }, () => {
   test('"List" re-scrapes the listing and its saved-work index', async () => {
     await clickIn(LABEL, 'List')
     await until('the snapshot to be rewritten', async () => {
-      const snapshots = await lastWrite('cache.searchSnapshots')
-      return snapshots?.[CACHE_KEY]?.blurbsHtml?.length === 3
+      const lists = await lastWrite('cache.searchLists')
+      return storedListIds(lists?.[CACHE_KEY]).length === 3
     })
     // Marked for Later owns a side table, and a refresh has to carry it along.
     const marked = await lastWrite('cache.markedForLater')
@@ -1096,8 +1096,8 @@ describe('options UI — site export', { skip }, () => {
     assert.ok(await clickDialog('Cancel'))
     await until('the dialog to close', async () => !(await dialogText()))
     assert.ok(await page.evaluate(async () => {
-      const snapshots = (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots']
-      return 'marked-for-later:tester' in snapshots
+      const lists = (await browser.storage.local.get('cache.searchLists'))['cache.searchLists']
+      return 'marked-for-later:tester' in lists
     }), 'cancelling must not remove anything')
 
     // Confirming removes the list, and only the list.
@@ -1113,7 +1113,7 @@ describe('options UI — site export', { skip }, () => {
       return !titles.includes(LABEL)
     })
     const snapshots = await page.evaluate(
-      async () => (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots'],
+      async () => (await browser.storage.local.get('cache.searchLists'))['cache.searchLists'],
     )
     assert.deepEqual(Object.keys(snapshots), ['marked-for-later:olduser'], 'only the row asked for goes')
 
@@ -1181,7 +1181,7 @@ describe('options UI — site export', { skip }, () => {
       return {
         index: store.workTextIndex,
         texts: Object.keys(store).filter(key => key.startsWith('workText.')),
-        lists: Object.keys(store['cache.searchSnapshots']),
+        lists: Object.keys(store['cache.searchLists']),
       }
     })
     assert.deepEqual(left.index, {})

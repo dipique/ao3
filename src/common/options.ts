@@ -84,6 +84,15 @@ export interface Options {
    */
   workMarks: WorkMarks
 
+  /**
+   * Discard a stored blurb as soon as no stored list holds it — when a refresh
+   * drops a work from a list, or a list is deleted — instead of leaving it for
+   * the "Discard orphans" button. Blurbs are one scrape away, unlike work text,
+   * which this never touches. Off by default: tidying stays something the
+   * reader asks for.
+   */
+  pruneOrphanedBlurbs: boolean
+
   compressSearchUrls: boolean
   tagToolbar: boolean
   fandomToolbar: boolean
@@ -249,6 +258,8 @@ export const options = createStorage<Options>({
     rules: { enabled: false, filters: [], colors: {} },
     autoExcludeHidden: false,
     workMarks: { enabled: false, marks: createDefaultMarks(), version: MARKS_VERSION },
+
+    pruneOrphanedBlurbs: false,
 
     compressSearchUrls: false,
     tagToolbar: false,

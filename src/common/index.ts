@@ -1,9 +1,11 @@
 export { api } from './api.ts'
 export type { BackupKind, BackupSummary, MarkDelegation, SyncStatus, SyncUsage } from './api.ts'
 
+export * from './blurbRecord.ts'
+
 export { cache } from './cache.ts'
 
-export type { Cache, MarkedForLaterIndex, SearchSnapshot, SearchViewPrefs, SnapshotDescriptor } from './cache.ts'
+export type { Cache, LegacySearchSnapshot, MarkedForLaterIndex, SearchViewPrefs, SnapshotDescriptor, StoredList } from './cache.ts'
 export { ADDON_CLASS } from './constants.ts'
 export * from './data.ts'
 export { isContextInvalidatedError, isExtensionContextValid } from './extensionContext.ts'
@@ -30,6 +32,8 @@ export { toast } from './toast/toast.tsx'
 export * from './utils.ts'
 
 export * from './wordCount.ts'
+
+export * from './workId.ts'
 
 export * from './workMarks.ts'
 

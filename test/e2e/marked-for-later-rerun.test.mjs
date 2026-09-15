@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, sleep, storedLists } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -131,7 +131,7 @@ describe('Marked for Later across a re-run', { skip }, () => {
     await tab.evaluateOnNewDocument(installMock, {
       'option.searchMarkedForLater': true,
       'option.workMarks': workMarks(''),
-      'cache.searchSnapshots': snapshots(),
+      ...storedLists(snapshots()),
     })
     await tab.evaluateOnNewDocument(slowStorage)
     await tab.goto(URL_TO_READ, { waitUntil: 'domcontentloaded' })
@@ -167,9 +167,13 @@ describe('Marked for Later across a re-run', { skip }, () => {
     await sleep(4000)
 
     const frames = await tab.evaluate(() => window.__frames)
+    // The view mounts a blurb when its page is first shown, so what is on screen
+    // is one page; the count says what the list holds.
     const titles = await tab.evaluate(() =>
-      Array.from(document.querySelectorAll('.AO3E--search-view--results > li.blurb'), li => li.querySelector('h4.heading a')?.textContent?.trim()))
-    assert.equal(titles.length, LISTED - 1, 'the work marked read is off the list')
+      Array.from(document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)'), li => li.querySelector('h4.heading a')?.textContent?.trim()))
+    const count = await tab.evaluate(() => document.querySelector('.AO3E--search-view--count')?.textContent)
+    assert.match(count, new RegExp(`of ${LISTED - 1} works`), 'the work marked read is off the list')
+    assert.ok(titles.length > 0)
     assert.ok(!titles.includes('Work 1'))
     assert.equal(frames.blank, 0, `the list was missing for ${frames.blank} frames (${Math.round(frames.back - frames.gone)}ms)`)
     assert.equal(await tab.evaluate(() => window.scrollY), scrolled, 'and the reader is still where they were')

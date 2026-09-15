@@ -1,6 +1,6 @@
-import type { cache, Language, Rule, RuleColors, RuleTarget, TagType as TagTypeT } from '#common'
+import type { BlurbMeta, cache, Language, Rule, RuleColors, RuleTarget, StoredList, TagType as TagTypeT } from '#common'
 
-import { createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, legacyMarkIcon, MARKS_VERSION, normalizeMarkOrder, packIds, RULE_TARGETS, TagType, unpackIds } from '#common'
+import { BLURB_INDEX_KEY, blurbDataKey, blurbKey, createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, LEGACY_SNAPSHOTS_KEY, legacyMarkIcon, MARKS_VERSION, migratedBlurbMeta, normalizeMarkOrder, packIds, planLegacyMigration, RULE_TARGETS, TagType, unpackIds } from '#common'
 
 /** The pre-merge `hideAuthors` filter shape. */
 interface LegacyAuthorFilter { userId: string, pseud?: string, behavior?: Rule['behavior'], color?: string }
@@ -158,6 +158,7 @@ export async function migrate() {
 
   await migrateRules()
   await migrateWorkMarks()
+  await migrateSearchSnapshots()
 }
 
 /**
@@ -305,4 +306,79 @@ function withIconNames(marks: Record<string, any>): Record<string, any> {
     const icon = legacyMarkIcon(config?.icon)
     return [id, icon === undefined ? config : { ...config, icon }]
   }))
+}
+
+/** Blurbs written per `set` while migrating. Two keys each. */
+const MIGRATION_CHUNK = 200
+
+/**
+ * Stored lists used to carry every work's blurb inline, all in one value
+ * (`cache.searchSnapshots`). They now hold short work ids (`cache.searchLists`),
+ * and each blurb is stored once, under its work — see `blurbRecord.ts` in
+ * common for the layout and why.
+ *
+ * This runs where there is no DOM (Chrome's background is a service worker), so
+ * it only moves markup: each blurb goes across as a string, split from the
+ * readings block that belongs to its list rather than to the work, and marked
+ * unparsed. The first page that reads it parses it, and writes it back.
+ *
+ * Runs on every update and after every import, so it has to be idempotent and
+ * safe beside new code already writing the new layout:
+ * - a list already in the new layout is never overwritten, nor its blurbs;
+ * - a blurb already stored is only replaced by a copy scraped later than it;
+ * - the lists are re-read immediately before they are written;
+ * - the old value is removed last, and only when every entry in it was
+ *   understood — a version this build doesn't know stays put for a build that
+ *   does. Stopping anywhere before that leaves the next run to finish the job.
+ */
+async function migrateSearchSnapshots(): Promise<void> {
+  const legacy = (await browser.storage.local.get(LEGACY_SNAPSHOTS_KEY))[LEGACY_SNAPSHOTS_KEY]
+  if (legacy === undefined)
+    return
+
+  const listsKey = 'cache.searchLists'
+  const readLists = async (): Promise<{ [key: string]: StoredList }> => {
+    const value = (await browser.storage.local.get(listsKey))[listsKey]
+    return value && typeof value === 'object' ? value as { [key: string]: StoredList } : {}
+  }
+
+  const plan = planLegacyMigration(legacy, await readLists())
+
+  const ids = [...plan.blurbs.keys()]
+  const existing = ids.length ? await browser.storage.local.get(ids.map(blurbDataKey)) : {}
+  const writes: [string, { html: string, seenAt: number }][] = []
+  for (const [id, blurb] of plan.blurbs) {
+    const stored = existing[blurbDataKey(id)] as BlurbMeta | undefined
+    if (!stored || stored.seenAt < blurb.seenAt)
+      writes.push([id, blurb])
+  }
+  for (let start = 0; start < writes.length; start += MIGRATION_CHUNK) {
+    const items: Record<string, unknown> = {}
+    for (const [id, { html, seenAt }] of writes.slice(start, start + MIGRATION_CHUNK)) {
+      items[blurbKey(id)] = { html }
+      items[blurbDataKey(id)] = migratedBlurbMeta(html, seenAt)
+    }
+    await browser.storage.local.set(items)
+  }
+  if (writes.length) {
+    const packed = (await browser.storage.local.get(BLURB_INDEX_KEY))[BLURB_INDEX_KEY]
+    const index = unpackIds(typeof packed === 'string' ? packed : '')
+    for (const [id] of writes)
+      index.add(id)
+    await browser.storage.local.set({ [BLURB_INDEX_KEY]: packIds(index) })
+  }
+
+  const lists = await readLists()
+  let added = false
+  for (const [key, list] of Object.entries(plan.lists)) {
+    if (key in lists)
+      continue
+    lists[key] = list
+    added = true
+  }
+  if (added)
+    await browser.storage.local.set({ [listsKey]: lists })
+
+  if (!plan.skipped.length)
+    await browser.storage.local.remove(LEGACY_SNAPSHOTS_KEY)
 }

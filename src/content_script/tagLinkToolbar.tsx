@@ -7,7 +7,7 @@ import type { IndicatorState } from './contextTrigger.tsx'
 import type { FilterTarget } from './filterTarget.tsx'
 import type { FacetKey } from './searchView/engine.ts'
 
-import { attachMenuTrigger, buildIndicators, standardLinkItems } from './contextTrigger.js'
+import { attachMenuTrigger, buildIndicators, existingIndicator, standardLinkItems } from './contextTrigger.js'
 import { activeFilterDirs, facetForTagType, filterMenuItems, filterTargetFor } from './filterTarget.js'
 import { ruleBehavior, ruleIndicatorBehavior, tagKey } from './persistentFilters.js'
 import { ruleBehaviorItems } from './ruleMenuItems.tsx'
@@ -150,7 +150,7 @@ export abstract class TagLinkToolbar extends Unit {
         // relationship can read differently from a highlighted freeform.
         highlightColor: ruleTargetColor(tag.type ?? 'tag', colors),
         filter: filterTargetFor(link, this.facetFor(tag), this.nativeTargetFor(link)),
-        indicator: null,
+        indicator: existingIndicator(link),
         noun: this.noun,
       }
       entries.push(entry)

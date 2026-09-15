@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, sleep, storedListIds, storedLists } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -112,7 +112,7 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
     })
     const seed = {
       'option.searchMarkedForLater': true,
-      'cache.searchSnapshots': storedSnapshot(ageMs),
+      ...storedLists(storedSnapshot(ageMs)),
     }
     if (hours !== undefined)
       seed['option.searchProfileListsRefreshHours'] = hours
@@ -187,13 +187,17 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
 
     // What the work menu's "Mark as read" writes. Every options change re-runs
     // the page, which reopens the view and prunes its stored copy.
+    const writesBefore = await tab.evaluate(() => window.__writes.length)
     await tab.evaluate(marks => browser.storage.local.set({ 'option.workMarks': marks }), workMarks('1'))
     await sleep(2000)
+    const written = await tab.evaluate(n => window.__writes.slice(n).flatMap(Object.keys), writesBefore)
+    assert.ok(written.includes('cache.searchLists'), 'the list is rewritten')
+    assert.deepEqual(written.filter(key => key.startsWith('blurb')), [], 'and not one blurb with it')
 
     assert.deepEqual(await shownTitles(tab), ['Stored work 2'], 'gone from the screen without a reload')
     assert.deepEqual(listRequests, [], 'and without asking AO3 for the list')
-    const stored = (await lastWrite(tab, 'cache.searchSnapshots'))?.['marked-for-later:me']
-    assert.equal(stored?.blurbsHtml.length, 1, 'gone from the stored copy too')
+    const stored = (await lastWrite(tab, 'cache.searchLists'))?.['marked-for-later:me']
+    assert.deepEqual(storedListIds(stored), ['2'], 'gone from the stored copy too')
     // Pruning is not a reload, so the interval runs on from the last real one.
     assert.ok(Math.abs(stored.scrapedAt - scrapedAt) < 5000, 'the last-reloaded time is untouched')
     await tab.close()
@@ -213,7 +217,7 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
     const scrapedAt = await tab.evaluate(() => {
       const writes = window.__writes ?? []
       for (let i = writes.length - 1; i >= 0; i--) {
-        const snapshots = writes[i]['cache.searchSnapshots']
+        const snapshots = writes[i]['cache.searchLists']
         if (snapshots?.['marked-for-later:me'])
           return snapshots['marked-for-later:me'].scrapedAt
       }

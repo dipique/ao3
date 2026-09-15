@@ -207,9 +207,10 @@ describe('hidden works in the search view', { skip }, () => {
       }
     })
     // The view holds it — it was scraped like any other — but it is not a result:
-    // it costs no slot, is not in the count, and carries no hidden marker for the
-    // peek pill to find. A collapsed work is the opposite on all three.
-    assert.equal(state.mounted, PAGES * PER_PAGE + 1)
+    // it costs no slot, is not in the count, is never mounted, and so carries no
+    // hidden marker for the peek pill to find. A collapsed work is the opposite
+    // on all four.
+    assert.equal(state.mounted, PAGES * PER_PAGE)
     assert.equal((await visibleTitles()).length, PAGES * PER_PAGE)
     assert.ok(!(await visibleTitles()).includes('A rule-gone one'))
     assert.match(state.count, new RegExp(`of ${PAGES * PER_PAGE} works`))

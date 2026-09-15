@@ -4,6 +4,7 @@ import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.j
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
 import { getArchiveLink, toast } from '#common'
+import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
 import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
@@ -40,12 +41,16 @@ export interface SiteExportListRow {
   uncached: number
   /** Bytes of cached text belonging to this list. */
   bytes: number
+  /** Works the list names whose blurbs aren't stored; a refresh brings them back. */
+  unstored: number
   /** The read-out under the title, and the row's search haystack. */
   summary: string
 }
 
 /**
- * What "Discard orphans" would take, so the row can say so before it is pressed.
+ * What "Discard orphans" would take, so the row can say so before it is pressed:
+ * work text and blurbs both, since both are stored by work and outlive the lists
+ * that wanted them.
  *
  * The count is the offer and the confirmation both — a reader who has just
  * deleted a list should be able to see how much that left behind, and a reader
@@ -58,11 +63,14 @@ export interface OrphanSummary {
   /** How many of those hold text, and how much of it. */
   cached: number
   bytes: number
+  /** Stored blurbs no list holds (past the grace period a fresh write gets), and their markup's size. */
+  blurbs: number
+  blurbBytes: number
 }
 
 const rows = ref<SiteExportListRow[]>([])
 const usage = ref<WorkTextUsage>({ cached: 0, failed: 0, bytes: 0 })
-const orphans = ref<OrphanSummary>({ works: 0, cached: 0, bytes: 0 })
+const orphans = ref<OrphanSummary>({ works: 0, cached: 0, bytes: 0, blurbs: 0, blurbBytes: 0 })
 const loading = ref(true)
 const status = shallowRef<JobStatus>(jobStatus())
 
@@ -94,7 +102,14 @@ async function reload(): Promise<void> {
   // Read from every stored list rather than from `snapshots`, which is filtered
   // to the ones this build can render — see {@link snapshotWorkIds}.
   const stranded = planOrphanDiscard(index, listed)
-  orphans.value = { works: stranded.workIds.length, cached: stranded.usage.cached, bytes: stranded.usage.bytes }
+  const blurbs = await blurbOrphans(listed)
+  orphans.value = {
+    works: stranded.workIds.length,
+    cached: stranded.usage.cached,
+    bytes: stranded.usage.bytes,
+    blurbs: blurbs.ids.length,
+    blurbBytes: blurbs.bytes,
+  }
   rows.value = snapshots.map((snapshot) => {
     let cached = 0
     let failed = 0
@@ -121,6 +136,7 @@ async function reload(): Promise<void> {
       failed,
       uncached: Math.max(0, snapshot.count - cached),
       bytes,
+      unstored: snapshot.unstored,
       summary: '',
     }
     row.summary = summarize(row)
@@ -176,6 +192,8 @@ function summarize(row: SiteExportListRow): string {
     parts.push(`${row.uncached.toLocaleString()} uncached`)
   if (row.failed)
     parts.push(`${row.failed.toLocaleString()} failed`)
+  if (row.unstored)
+    parts.push(`${row.unstored.toLocaleString()} need refreshing`)
   return parts.join(' · ')
 }
 
@@ -314,31 +332,33 @@ export function useSiteExport() {
     },
 
     /**
-     * Delete the cached text of works no stored list holds any more.
+     * Delete the cached text and the stored blurbs of works no stored list holds
+     * any more.
      *
-     * The counterpart to `deleteList`, which deliberately leaves work text
-     * behind: without this there is no way back from that but deleting every
-     * cached work and spending the hours of AO3 requests again. The listed set
-     * is read here rather than taken from {@link orphans}, so what is discarded
-     * is measured against the lists as they stand and not as the row was drawn.
+     * The counterpart to `deleteList`, which deliberately leaves both behind:
+     * without this there is no way back from that but deleting every cached work
+     * and spending the hours of AO3 requests again. The listed set is read here
+     * rather than taken from {@link orphans}, so what is discarded is measured
+     * against the lists as they stand and not as the row was drawn.
      */
     async discardOrphans() {
-      const discarded = await discardOrphanedWorkText(await snapshotWorkIds())
+      const listed = await snapshotWorkIds()
+      const discarded = await discardOrphanedWorkText(listed)
+      const blurbs = await discardOrphanedBlurbs(listed)
       await reload()
-      if (discarded.usage.cached) {
-        toast(
-          `Discarded ${discarded.usage.cached.toLocaleString()} cached works (${formatBytes(discarded.usage.bytes)}) that no list holds.`,
-          { type: 'success' },
-        )
-      }
-      else {
-        toast(
-          discarded.workIds.length
-            ? `Cleared ${discarded.workIds.length.toLocaleString()} leftover entries. None of them held any text.`
-            : 'Every cached work still belongs to a stored list.',
-          { type: 'success' },
-        )
-      }
+      const parts: string[] = []
+      if (discarded.usage.cached)
+        parts.push(`${discarded.usage.cached.toLocaleString()} cached works (${formatBytes(discarded.usage.bytes)})`)
+      else if (discarded.workIds.length)
+        parts.push(`${discarded.workIds.length.toLocaleString()} leftover work text entries`)
+      if (blurbs.ids.length)
+        parts.push(`${blurbs.ids.length.toLocaleString()} blurbs (${formatBytes(blurbs.bytes)})`)
+      toast(
+        parts.length
+          ? `Discarded ${parts.join(' and ')} that no list holds.`
+          : 'Everything stored still belongs to a stored list.',
+        { type: 'success' },
+      )
     },
 
     async purge() {

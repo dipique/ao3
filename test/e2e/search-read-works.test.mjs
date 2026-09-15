@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, sleep, storedListIds, storedLists } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -308,12 +308,12 @@ describe('search read items', { skip }, () => {
       const writes = window.__writes ?? []
       let snapshots = null
       for (let i = writes.length - 1; i >= 0 && !snapshots; i--)
-        snapshots = writes[i]['cache.searchSnapshots'] ?? null
+        snapshots = writes[i]['cache.searchLists'] ?? null
       return snapshots
     })
     assert.ok(stored, 'a snapshot should have been written')
     assert.ok('read-works:me' in stored, 'the snapshot should be keyed read-works:me')
-    assert.equal(stored['read-works:me'].blurbsHtml.length, 2, 'the haystack is not the list')
+    assert.equal(storedListIds(stored['read-works:me']).length, 2, 'the haystack is not the list')
     // The options page has no `location` and no AO3 document, so everything a
     // refresh needs has to have been written down here.
     assert.deepEqual(stored['read-works:me'].descriptor, {
@@ -482,7 +482,7 @@ describe('read list auto-reload', { skip }, () => {
     })
     await tab.evaluateOnNewDocument(installMock, {
       ...seed,
-      'cache.searchSnapshots': stored,
+      ...storedLists(stored),
       ...misses && { 'cache.searchMisses': { 'read-works:me': misses } },
     })
     await tab.goto(HISTORY_URL, { waitUntil: 'domcontentloaded' })
@@ -523,8 +523,8 @@ describe('read list auto-reload', { skip }, () => {
     // the stored blurb, although the page it sits on had to be read to find 3.
     assert.deepEqual((await shownTitles(tab)).sort(), ['Stored work 1', 'Work number 3'])
     assert.ok(listPages.length < PAGES, `read ${listPages.length} of ${PAGES} history pages for one work`)
-    const snapshots = await lastWrite(tab, 'cache.searchSnapshots')
-    assert.equal(snapshots['read-works:me'].blurbsHtml.length, 2, 'the addition is stored with the rest')
+    const lists = await lastWrite(tab, 'cache.searchLists')
+    assert.equal(storedListIds(lists['read-works:me']).length, 2, 'the addition is stored with the rest')
     await tab.close()
   })
 
@@ -545,8 +545,8 @@ describe('read list auto-reload', { skip }, () => {
     })
     assert.deepEqual(workRequests, ['99'], 'only the work nothing else had')
     assert.deepEqual((await shownTitles(tab)).sort(), ['Stored work 1', 'Stored work 3', 'Work from its own page'])
-    const snapshots = await lastWrite(tab, 'cache.searchSnapshots')
-    assert.equal(snapshots['read-works:me'].blurbsHtml.length, 3, 'and stored, so it isn’t fetched again')
+    const lists = await lastWrite(tab, 'cache.searchLists')
+    assert.equal(storedListIds(lists['read-works:me']).length, 3, 'and stored, so it isn’t fetched again')
     assert.equal(await lastWrite(tab, 'cache.searchMisses').then(m => m?.['read-works:me'] ?? ''), '', 'nothing recorded as missing')
     await tab.close()
   })
@@ -580,8 +580,8 @@ describe('read list auto-reload', { skip }, () => {
 
     assert.deepEqual(await shownTitles(tab), ['Stored work 1'], 'gone without a reload')
     assert.deepEqual(listPages, [])
-    const stored = (await lastWrite(tab, 'cache.searchSnapshots'))?.['read-works:me']
-    assert.equal(stored?.blurbsHtml.length, 1, 'and gone from the stored copy')
+    const stored = (await lastWrite(tab, 'cache.searchLists'))?.['read-works:me']
+    assert.deepEqual(storedListIds(stored), ['1'], 'and gone from the stored copy')
     assert.ok(Math.abs(stored.scrapedAt - scrapedAt) < 5000, 'without counting as a reload')
     await tab.close()
   })

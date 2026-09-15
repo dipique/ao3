@@ -14,6 +14,7 @@ import {
   attachMenuTrigger,
   buildIndicators,
   clearMenuTriggers,
+  existingIndicator,
   type IndicatorState,
   markIndicatorState,
   standardLinkItems,
@@ -297,7 +298,7 @@ abstract class FilterEntityToolbar extends Unit {
     this.entries.length = 0
 
     for (const { id, link, clickToOpen } of this.links()) {
-      const entry: EntityEntry = { link, id, indicator: null }
+      const entry: EntityEntry = { link, id, indicator: existingIndicator(link) }
       this.entries.push(entry)
       attachMenuTrigger(link, () => this.buildMenu(id, link), { clickToOpen })
       this.syncIndicator(entry)

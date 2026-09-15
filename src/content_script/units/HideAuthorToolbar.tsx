@@ -14,6 +14,7 @@ import {
   attachMenuTrigger,
   buildIndicators,
   clearMenuTriggers,
+  existingIndicator,
   type IndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
@@ -98,7 +99,7 @@ export class HideAuthorToolbar extends Unit {
       if (!caps.hide && !caps.subscribe && !caps.mute)
         continue
 
-      const entry: AuthorEntry = { link, author, highlightColor, indicator: null }
+      const entry: AuthorEntry = { link, author, highlightColor, indicator: existingIndicator(link) }
       entries.push(entry)
       attachMenuTrigger(link, () => this.buildMenu(author, link), { clickToOpen: this.options.openMenuOnClick })
       this.syncIndicator(entry)

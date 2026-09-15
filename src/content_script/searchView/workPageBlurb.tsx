@@ -216,6 +216,7 @@ export interface WorkBlurbOptions {
  */
 export async function fetchWorkBlurbs(ids: readonly string[], opts: WorkBlurbOptions = {}): Promise<WorkBlurbs> {
   const { signal, onProgress, patience = PATIENCE.interactive, concurrency = 3 } = opts
+  const startedAt = Date.now()
   const built = new Map<string, HTMLLIElement>()
   const failed: string[] = []
   let next = 0
@@ -272,7 +273,13 @@ export async function fetchWorkBlurbs(ids: readonly string[], opts: WorkBlurbOpt
 
   const works = ids
     .filter(id => built.has(id))
-    .map((id, index) => parseWork(built.get(id)!, index))
+    .map((id, index) => {
+      const work = parseWork(built.get(id)!, index)
+      // Second-best to a listing's blurb: see `decideBlurbWrite`.
+      work.src = 'workPage'
+      work.seenAt = startedAt
+      return work
+    })
   return { works, failed, blocked }
 }
 

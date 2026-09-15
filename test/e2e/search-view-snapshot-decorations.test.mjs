@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, sleep, storedLists } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -129,10 +129,15 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
     return out
   })
 
-  /** The stored lists as last written, and the blurbs of the first of them. */
-  const storedSnapshots = () => page.evaluate(async () =>
-    (await browser.storage.local.get('cache.searchSnapshots'))['cache.searchSnapshots'])
-  const storedBlurbs = async () => Object.values(await storedSnapshots())[0].blurbsHtml
+  /** The stored lists as last written, and the stored blurbs of the first of them, in its order. */
+  const storedListsNow = () => page.evaluate(async () =>
+    (await browser.storage.local.get('cache.searchLists'))['cache.searchLists'])
+  const storedBlurbs = () => page.evaluate(async () => {
+    const lists = (await browser.storage.local.get('cache.searchLists'))['cache.searchLists']
+    const sids = Object.values(lists)[0].ids.split(',')
+    const got = await browser.storage.local.get(sids.map(sid => `blurb.${sid}`))
+    return sids.map(sid => got[`blurb.${sid}`]?.html)
+  })
 
   const EXPECTED = {
     'Fluffy one': { tags: [1], actions: 1, reasons: 0 },
@@ -177,14 +182,23 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
     assert.deepEqual(await decorations(), EXPECTED)
   })
 
+  /**
+   * Both ways a decorated copy can reach a newer build: a list still in the old
+   * layout, blurbs inline, that the migration hasn't reached; and blurbs moved
+   * across by the migration as they were, unparsed.
+   */
   test('a list stored decorated by an earlier build opens decorated once', async () => {
-    const snapshots = await storedSnapshots()
+    const [key, list] = Object.entries(await storedListsNow())[0]
     const live = await page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')].map(li => li.outerHTML))
-    for (const entry of Object.values(snapshots))
-      entry.blurbsHtml = live
-    const tab = await open({ ...SEED, 'cache.searchSnapshots': snapshots })
-    assert.deepEqual(await decorations(tab), EXPECTED)
-    await tab.close()
+    const legacy = { [key]: { version: 2, scrapedAt: list.scrapedAt, descriptor: list.descriptor, blurbsHtml: live } }
+
+    const unmigrated = await open({ ...SEED, 'cache.searchSnapshots': legacy })
+    assert.deepEqual(await decorations(unmigrated), EXPECTED, 'from the old layout')
+    await unmigrated.close()
+
+    const migrated = await open({ ...SEED, ...storedLists(legacy) })
+    assert.deepEqual(await decorations(migrated), EXPECTED, 'from blurbs moved across unparsed')
+    await migrated.close()
   })
 })

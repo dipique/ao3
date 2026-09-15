@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, sleep, storedListIds } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -227,13 +227,13 @@ describe('search an uncommon tag\'s works', { skip }, () => {
       const writes = window.__writes ?? []
       let snapshots = null
       for (let i = writes.length - 1; i >= 0 && !snapshots; i--)
-        snapshots = writes[i]['cache.searchSnapshots'] ?? null
+        snapshots = writes[i]['cache.searchLists'] ?? null
       return snapshots
     })
     assert.ok(stored, 'a snapshot should have been written')
     const key = 'tag-works:marriage%20problems'
     assert.ok(key in stored, `the snapshot should be keyed ${key}`)
-    assert.equal(stored[key].blurbsHtml.length, PAGES * PER_PAGE)
+    assert.equal(storedListIds(stored[key]).length, PAGES * PER_PAGE)
   })
 
   test('the snapshot records how to re-fetch this listing later', async () => {
@@ -243,11 +243,11 @@ describe('search an uncommon tag\'s works', { skip }, () => {
       const writes = window.__writes ?? []
       let snapshots = null
       for (let i = writes.length - 1; i >= 0 && !snapshots; i--)
-        snapshots = writes[i]['cache.searchSnapshots'] ?? null
+        snapshots = writes[i]['cache.searchLists'] ?? null
       return snapshots
     })
     const entry = stored['tag-works:marriage%20problems']
-    assert.equal(entry.version, 2, 'snapshots carrying a descriptor are v2')
+    assert.equal(entry.v, 3, 'a list of work keys, with its descriptor')
     assert.deepEqual(entry.descriptor, {
       sourceId: 'tag-works',
       label: 'Tag: marriage problems',
@@ -297,10 +297,11 @@ describe('search an uncommon tag\'s works', { skip }, () => {
         wrappers: Math.max(...lis.map(li => li.querySelectorAll('.AO3E--hide-works--wrapper').length)),
       }
     })
-    // Every work is still mounted — the view holds them all — but the one work
-    // per page a hide rule matched is no longer a result: it costs no slot, and
-    // the count the reader is shown never knew about it.
-    assert.equal(state.mounted, PAGES * PER_PAGE)
+    // The view holds every work, but mounts a blurb only when its page is shown
+    // — and the one work per page a hide rule matched is no longer a result: it
+    // costs no slot, it is never mounted, and the count the reader is shown never
+    // knew about it.
+    assert.equal(state.mounted, state.shown.length, 'only the page on screen is mounted')
     assert.equal(state.shown.length, PAGES * PER_PAGE - PAGES, 'one work per page should be gone')
     for (const id of ['work_1', 'work_6', 'work_11'])
       assert.ok(!state.shown.includes(id), `${id} was hidden by a rule and should have left the results`)

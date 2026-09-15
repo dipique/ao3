@@ -6,7 +6,7 @@ import { createLogger, options, readWorkIds, saveAs } from '#common'
 import { onArchiveWait, PATIENCE } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
-import { readSnapshot } from '#content_script/searchView/cache.js'
+import { readSnapshotData } from '#content_script/searchView/cache.js'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
 
 import type { WorkFreshness } from './workText.ts'
@@ -530,7 +530,7 @@ async function runExport(job: ExportJob, signal: AbortSignal): Promise<void> {
  * text, so they have to come from the blurb rather than from the work page.
  */
 async function loadContext(cacheKey: string): Promise<Map<string, QueuedWork> | null> {
-  const snapshot = await readSnapshot(cacheKey)
+  const snapshot = await readSnapshotData(cacheKey)
   if (!snapshot)
     return null
   const context = new Map<string, QueuedWork>()

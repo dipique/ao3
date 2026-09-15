@@ -22,19 +22,54 @@ export interface SnapshotDescriptor {
   blurbSelector?: string
 }
 
-export interface SearchSnapshot {
-  /** Schema version, so stale-shaped snapshots are ignored after upgrades. */
+/**
+ * A list as it was stored before blurbs were shared between lists: every work's
+ * blurb HTML, inline. Nothing writes this shape any more. It is read only to
+ * migrate it (see the background's migrations), and — for the release that does
+ * that — by a reader that opens a list before the migration has reached it.
+ */
+export interface LegacySearchSnapshot {
+  /** 1 (no descriptor) or 2. */
   version: number
-  /** Epoch ms the snapshot was scraped (for "as of" display + staleness). */
   scrapedAt: number
-  /** Each work's blurb `outerHTML`, in list order — re-mounted to rebuild the view instantly. */
+  /** Each work's blurb `outerHTML`, in list order. */
   blurbsHtml: string[]
+  descriptor?: SnapshotDescriptor
+}
+
+/**
+ * One stored list: which works it holds, in order, and how to fetch it again.
+ *
+ * **Keys, not blurbs.** A work's blurb is stored once, under the work
+ * ({@link file://./blurbRecord.ts}), however many lists hold it — the same
+ * work on Marked for Later, the read list and a tag search used to be three
+ * copies of its markup, and every list write rewrote every copy. What a list
+ * keeps is the short id each blurb (and each work's cached text) is found by.
+ */
+export interface StoredList {
+  /** Schema version — {@link file://./blurbRecord.ts}'s `LIST_VERSION`. */
+  v: number
+  /** Epoch ms the listing was last scraped (for "as of" display + staleness). */
+  scrapedAt: number
   /**
-   * How to re-fetch this listing. Absent on a v1 snapshot, written before
-   * descriptors existed — such a snapshot still renders, it just can't be
-   * refreshed until the reader visits its page once more.
+   * Ordered short work ids (`packOrderedIds` in {@link file://./workId.ts}).
+   * The order is the listing's, and is what the view's "listing order" sort shows.
+   */
+  ids: string
+  /**
+   * How to re-fetch this listing. Absent on a list first stored before
+   * descriptors existed — it still renders, it just can't be refreshed until the
+   * reader visits its page once more.
    */
   descriptor?: SnapshotDescriptor
+  /**
+   * Markup that belongs to this list rather than to the work, by short id — the
+   * reading-history block ("Last visited … (Marked for Later.)") a readings page
+   * ends each blurb with, its forms taken out. Kept here so a tag search that
+   * refreshes a shared blurb can't take "Last visited" off the read list, nor a
+   * readings scrape put it on a tag search.
+   */
+  ctx?: { [sid: string]: string }
 }
 
 /**
@@ -72,11 +107,12 @@ export interface MarkedForLaterIndex {
 export interface Cache {
   chapterDates: { [workId: string]: string[] }
   /**
-   * Persisted aggregated-listing snapshots for the in-memory search view, keyed
-   * by source (e.g. `marked-for-later:USERID`). Lets a future visit render
-   * instantly from cache while a fresh scrape runs in the background.
+   * The in-memory search view's stored lists, keyed by source (e.g.
+   * `marked-for-later:USERID`). Lets a future visit render instantly from cache
+   * while a fresh scrape runs in the background. Holds work keys only; the
+   * blurbs are shared between lists (see {@link StoredList}).
    */
-  searchSnapshots: { [key: string]: SearchSnapshot }
+  searchLists: { [key: string]: StoredList }
   /** Per-application local UI prefs for the search view (see {@link SearchViewPrefs}). */
   searchViewPrefs: { [appId: string]: SearchViewPrefs }
   /**
@@ -111,7 +147,7 @@ export const cache = createStorage<Cache>({
   prefix: 'cache.',
   defaults: {
     chapterDates: {},
-    searchSnapshots: {},
+    searchLists: {},
     searchViewPrefs: {},
     searchMisses: {},
     markedForLater: { userId: '', updatedAt: 0, ids: '' },

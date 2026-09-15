@@ -1,8 +1,17 @@
 import type { Work } from '#content_script/blurb.js'
 import type { Recovered, RecoverOptions } from '#content_script/searchView/workPageBlurb.tsx'
 
+import { readStoredWorks } from '#content_script/searchView/blurbStore.ts'
 import { readMisses, writeMisses } from '#content_script/searchView/cache.ts'
 import { fetchWorkBlurbs } from '#content_script/searchView/workPageBlurb.tsx'
+
+/**
+ * How recently another list must have seen a work for its stored blurb to stand
+ * in for the work's own page. Blurbs are shared between lists, so a work marked
+ * read off Marked for Later usually has one already; a month-old copy is as good
+ * as anything a list refresh would bring, and far cheaper than a request each.
+ */
+const STORED_BLURB_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
 /**
  * Fetch, from their own pages, the read works a history scrape didn't turn up,
@@ -18,6 +27,10 @@ import { fetchWorkBlurbs } from '#content_script/searchView/workPageBlurb.tsx'
  * Shared by the live view and the stored-list refresh behind the site export,
  * which is why it lives outside both.
  *
+ * Before any of that, the shared blurb store is asked: a work another stored
+ * list holds — Marked for Later, a tag search — has its blurb already, and a
+ * recent one saves a request to AO3.
+ *
  * `found` is every work the list already holds, from the scrape and from the
  * stored copy; what comes back is only the works fetched here.
  */
@@ -32,9 +45,13 @@ export async function recoverReadWorks(
   // An automatic reload leaves known-missing works alone; one the reader asked
   // for gives them another chance, since a locked work may have been unlocked.
   const lost = [...wanted].filter(id => !have.has(id) && (opts.full || !missing.has(id)))
-  const result = lost.length
-    ? await fetchWorkBlurbs(lost, opts)
+  const stored = lost.length ? await readStoredWorks(lost, STORED_BLURB_MAX_AGE_MS) : []
+  const known = new Set(stored.map(work => work.workId))
+  const unknown = lost.filter(id => !known.has(id))
+  const fetched = unknown.length
+    ? await fetchWorkBlurbs(unknown, opts)
     : { works: [], failed: [], blocked: false }
+  const result = { ...fetched, works: [...stored, ...fetched.works] }
 
   // Only definite answers move the record. A work found (in the history or on
   // its own page) comes off it; a work whose page failed goes on; a work that

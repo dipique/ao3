@@ -2,7 +2,7 @@ import type { Options } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { HideVerdict } from '#content_script/units/HideWorks.tsx'
 
-import { getBlurb } from '#content_script/blurb.js'
+import { blurbOf, hasNode } from '#content_script/blurb.js'
 import { FACET_TAG_TYPES, facetForTagType } from '#content_script/filterTarget.js'
 import { hideVerdict } from '#content_script/units/HideWorks.tsx'
 
@@ -51,7 +51,7 @@ function facetKey(key: FacetKey, value: string): string {
  * Runs on every load, cached or fresh, so it follows an options change.
  */
 export function applyHidden(works: Work[], options: Options): FacetValueRef[] {
-  const verdicts = works.map(work => hideVerdict(getBlurb(work.el), options))
+  const verdicts = works.map(work => hideVerdict(blurbOf(work), options))
   const handOver = options.autoExcludeHidden && options.rules.enabled
 
   // Values still carried by a work the rules leave on screen — one an "always
@@ -83,11 +83,15 @@ export function applyHidden(works: Work[], options: Options): FacetValueRef[] {
     work.hidden = verdict.mode === 'hide' && !handed
     // Tells HideWorks that a work of this kind is on screen only because the
     // reader lifted its exclusion, so it collapses rather than leaving a blank
-    // slot. Cleared explicitly: the same works are re-stamped on every load.
-    if (handed)
-      work.el.dataset.ao3eFiltered = ''
-    else
-      delete work.el.dataset.ao3eFiltered
+    // slot. Cleared explicitly: the same works are re-stamped on every load. A
+    // node not built yet takes the stamp from the work when it is.
+    work.filtered = !!handed
+    if (hasNode(work)) {
+      if (handed)
+        work.el.dataset.ao3eFiltered = ''
+      else
+        delete work.el.dataset.ao3eFiltered
+    }
     for (const ref of handed ?? [])
       excludes.set(facetKey(ref.key, ref.value), ref)
   })

@@ -983,10 +983,19 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     }
   }
 
-  // The DOM order currently applied to the results list (`sort|dir`); '' forces a
-  // re-sort. Filtering never reorders, so we only touch node order when this
-  // changes — moving 400 heavy blurbs on every keystroke was the filter lag.
-  let domOrderSig = ''
+  // The sort the cached `sortedWorks` was made under (`sort|dir`); '' forces a
+  // re-sort. Filtering never reorders, so the works are only sorted again when
+  // this changes.
+  let sortSig = ''
+  // Works whose blurbs are in the results list. A blurb is mounted the first
+  // time its work lands on a page, and stays mounted (hidden when off the page)
+  // until the works are replaced: a list of thousands only ever builds and lays
+  // out the blurbs someone has paged to, and a work read back from storage has
+  // no node at all until then.
+  let mounted = new Set<Work>()
+  // The works on the page currently shown, in the order their blurbs sit at the
+  // end of the list — so an unchanged page touches no node at all.
+  let shown: Work[] = []
 
   /**
    * Add the per-blurb action button to one blurb. On click it disables itself,
@@ -1031,9 +1040,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       return
     works = next
     pool = results(works)
-    work.el.remove()
-    decorated.delete(work.el)
-    domOrderSig = '' // force a re-sort/re-append over the reduced set
+    if (mounted.delete(work)) {
+      work.el.remove()
+      decorated.delete(work.el)
+    }
+    sortSig = '' // force a re-sort over the reduced set
     render()
     config.onWorksChanged?.(works)
   }
@@ -1103,14 +1114,12 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   function render(): void {
     const { visible, facetCounts, resultCounts } = computeView(pool, state)
 
-    // Re-sort the DOM (and cache the order) only when the sort changed or we
-    // re-mounted — filtering never reorders, so this stays off the hot path.
+    // Re-sort (and cache the order) only when the sort changed or the works did —
+    // filtering never reorders, so this stays off the hot path.
     const orderSig = `${state.sort}|${state.dir}`
-    if (orderSig !== domOrderSig) {
+    if (orderSig !== sortSig) {
       sortedWorks = sortWorks(works, state.sort, state.dir)
-      for (const work of sortedWorks)
-        resultsOl.append(work.el)
-      domOrderSig = orderSig
+      sortSig = orderSig
     }
 
     // Visible works in sort order, then the current page's slice.
@@ -1119,17 +1128,42 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     const pageCount = Math.max(1, Math.ceil(total / perPage))
     pageIndex = Math.min(Math.max(pageIndex, 0), pageCount - 1)
     const start = pageIndex * perPage
-    const onPage = new Set(ordered.slice(start, start + perPage))
+    const page = ordered.slice(start, start + perPage)
+    const onPage = new Set(page)
 
-    // Only the current page is shown; everything else is display:none, so the
+    // Only the current page is shown, and only blurbs that have been on a page
+    // are in the list at all; the rest of what's mounted is display:none, so the
     // browser lays out / paints at most `perPage` heavy blurbs no matter how
     // many match. This is what keeps filtering responsive on large lists.
-    for (const work of works)
-      work.el.classList.toggle(HIDDEN_CLASS, !onPage.has(work))
+    const unchanged = page.length === shown.length && page.every((work, i) => work === shown[i])
+    let added = false
+    if (!unchanged) {
+      for (const work of shown) {
+        if (!onPage.has(work) && mounted.has(work))
+          work.el.classList.add(HIDDEN_CLASS)
+      }
+      for (const work of page) {
+        if (!mounted.has(work)) {
+          mounted.add(work)
+          added = true
+        }
+        work.el.classList.remove(HIDDEN_CLASS)
+        // Appended in page order: the page reads in sort order at the end of the
+        // list, whatever order the hidden blurbs before it were mounted in.
+        resultsOl.append(work.el)
+      }
+      shown = page
+    }
+
+    // New blurbs in the list: wire the context-menu toolbars over it again. They
+    // keep one registry for the whole list and start it afresh each run, and
+    // they take up the indicators an earlier run left rather than adding more.
+    if (added)
+      config.decorateContainer?.(resultsOl)
 
     // Decorate the page's blurbs the first time they're shown (kudos ratio, etc.)
     // and attach the optional per-blurb action.
-    for (const work of onPage) {
+    for (const work of page) {
       if (decorated.has(work.el))
         continue
       decorated.add(work.el)
@@ -1152,11 +1186,16 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     config.onRendered?.()
   }
 
+  /**
+   * Empty the results list for a new set of works. Nothing is mounted here:
+   * {@link render} mounts each blurb when its work first lands on a page, and
+   * wires the context-menu toolbars over whatever it mounted.
+   */
   function mountResults(): void {
-    resultsOl.replaceChildren(...works.map(work => work.el))
-    domOrderSig = '' // re-mounted nodes are in array order; force a re-sort.
-    // Wire the context-menu toolbars over the whole (re-)mounted list once.
-    config.decorateContainer?.(resultsOl)
+    resultsOl.replaceChildren()
+    mounted = new Set()
+    shown = []
+    sortSig = '' // new works; force a re-sort.
   }
 
   function update(nextWorks: Work[], nextAutoExcludes?: FacetValueRef[]): void {

@@ -7,7 +7,7 @@ import type { FilterTarget } from '#content_script/filterTarget.js'
 import type { FacetKey } from '#content_script/searchView/engine.ts'
 
 import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
-import { type Blurb, type BlurbTag, getBlurb } from '#content_script/blurb.js'
+import { type Blurb, type BlurbTag, getBlurb, knownBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
   loadFandomIdLookup,
@@ -302,7 +302,8 @@ export class HideWorks extends Unit {
 
     let usedFandomExclude = false
     for (const blurbElement of blurbElements) {
-      const blurb = getBlurb(blurbElement)
+      // A search view's blurb was parsed already, when its list was read.
+      const blurb = knownBlurb(blurbElement) ?? getBlurb(blurbElement)
       const { mode, reasons, kinds } = this.processBlurb(blurb)
 
       if (!mode)

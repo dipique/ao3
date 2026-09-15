@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, sleep, storedListIds } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -207,13 +207,13 @@ describe('search a series\' works', { skip }, () => {
       const writes = window.__writes ?? []
       let snapshots = null
       for (let i = writes.length - 1; i >= 0 && !snapshots; i--)
-        snapshots = writes[i]['cache.searchSnapshots'] ?? null
+        snapshots = writes[i]['cache.searchLists'] ?? null
       return snapshots
     })
     assert.ok(stored, 'a snapshot should have been written')
     const key = `series-works:${SERIES_ID}`
     assert.ok(key in stored, `the snapshot should be keyed ${key}`)
-    assert.equal(stored[key].blurbsHtml.length, PAGES * PER_PAGE)
+    assert.equal(storedListIds(stored[key]).length, PAGES * PER_PAGE)
     // The options page has no `location` and no AO3 document, so everything a
     // refresh needs has to have been written down here.
     assert.deepEqual(stored[key].descriptor, {

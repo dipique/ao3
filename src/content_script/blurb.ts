@@ -1,4 +1,4 @@
-import type { Tag, TagType } from '#common'
+import type { BlurbSource, Tag, TagType } from '#common'
 
 import { getTagFromElement } from '#content_script/utils.js'
 
@@ -207,6 +207,98 @@ export interface Work {
    * {@link parseWork} can see, and the snapshot cache re-parses stored HTML.
    */
   hidden?: boolean
+  /**
+   * A work of this kind is on screen only because the reader lifted the facet
+   * exclusion their rules implied — stamped by the host's hide pass, and put on
+   * the node as `data-ao3e-filtered` (see `handedToFilter` in HideWorks). Kept on
+   * the work as well, because its node may not have been built yet.
+   */
+  filtered?: boolean
+  /**
+   * The blurb as HideWorks reads it ({@link getBlurb}), when it is known without
+   * going back to the node — stored with the blurb, or worked out once already.
+   */
+  blurb?: Blurb
+  /**
+   * Epoch ms this blurb was read off AO3 — set by whatever fetched it, and by
+   * the store for one it read back. What decides, between two copies of a
+   * work's blurb, which is newer.
+   */
+  seenAt?: number
+  /** Where the markup came from; a listing unless said otherwise. */
+  src?: BlurbSource
+}
+
+/**
+ * Works whose node hasn't been built yet. A work read back from the store has
+ * everything the view facets, sorts and hides by without one, so its node is
+ * only built from the stored markup when something first asks for `el` — which,
+ * in a view that mounts only the page on screen, is when its page is shown.
+ */
+const unbuilt = new WeakSet<Work>()
+
+/**
+ * Give `work` an `el` that is built on first access. The builder runs at most
+ * once; assigning `el` replaces the node outright.
+ */
+export function defineLazyNode(work: Omit<Work, 'el'>, build: () => HTMLLIElement): Work {
+  let node: HTMLLIElement | undefined
+  const lazy = work as Work
+  Object.defineProperty(lazy, 'el', {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      if (!node) {
+        node = build()
+        unbuilt.delete(lazy)
+      }
+      return node
+    },
+    set: (value: HTMLLIElement) => {
+      node = value
+      unbuilt.delete(lazy)
+    },
+  })
+  unbuilt.add(lazy)
+  return lazy
+}
+
+/** Whether `work.el` is a node already, rather than one reading it would build. */
+export function hasNode(work: Work): boolean {
+  return !unbuilt.has(work)
+}
+
+/**
+ * Parsed blurbs by node, for the per-blurb units that are handed a node and
+ * would otherwise parse it again ({@link knownBlurb}).
+ */
+const parsedBlurbs = new WeakMap<Element, Blurb>()
+
+/** Record that `el` parses to `blurb`, so HideWorks can skip parsing it. */
+export function rememberBlurb(el: Element, blurb: Blurb): void {
+  parsedBlurbs.set(el, blurb)
+}
+
+/**
+ * The blurb `el` was recorded as ({@link rememberBlurb}), or undefined. Only
+ * ever recorded for a pristine node whose markup the record was parsed from —
+ * what the units add to a blurb afterwards changes nothing {@link getBlurb}
+ * reads.
+ */
+export function knownBlurb(el: Element): Blurb | undefined {
+  return parsedBlurbs.get(el)
+}
+
+/**
+ * A work's blurb as HideWorks reads it — the one it carries when there is one,
+ * else parsed off its node once and kept.
+ */
+export function blurbOf(work: Work): Blurb {
+  if (!work.blurb) {
+    work.blurb = getBlurb(work.el)
+    rememberBlurb(work.el, work.blurb)
+  }
+  return work.blurb
 }
 
 /** Digits-only parse of a stat cell ("1,101" -> 1101); missing/blank -> 0. */

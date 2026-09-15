@@ -535,6 +535,20 @@ function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] 
  * active (so callers can skip inserting an empty node). The span carries the
  * trigger class but is wired to a menu by the caller via {@link attachMenuTrigger}.
  */
+/**
+ * The indicator an earlier run left on `anchor` — right after a link, or at the
+ * end of a bare heading — if there is one.
+ *
+ * A search view mounts its blurbs a page at a time and runs the menu toolbars
+ * over everything mounted each time a page brings new ones, so a toolbar meets
+ * blurbs it has decorated before. Starting its fresh entry from the indicator
+ * already there means the next sync replaces it, rather than adding a second.
+ */
+export function existingIndicator(anchor: Element): HTMLElement | null {
+  const candidate = anchor instanceof HTMLAnchorElement ? anchor.nextElementSibling : anchor.lastElementChild
+  return candidate instanceof HTMLElement && candidate.classList.contains(INDICATORS_CLASS) ? candidate : null
+}
+
 export function buildIndicators(states: Iterable<IndicatorState>, opts: IndicatorOptions = {}): HTMLElement | null {
   const indicators = resolve(new Set(states), opts)
   if (indicators.length === 0)
