@@ -143,6 +143,25 @@ export interface SearchSource {
    * replaced outright.
    */
   replacesListing?: boolean
+  /**
+   * Show every work this list holds, whatever the reader's hiding says about it:
+   * no rule hides or collapses one, no mark does, and neither do the crossover
+   * and language filters. The view's own facets are then the only thing that
+   * narrows it.
+   *
+   * For the lists the reader built themselves — Marked for Later, the works they
+   * have marked read. Hiding earns its keep on a listing *AO3* chose: a tag
+   * search, a series, a fandom's newest, where the reader is being shown works
+   * they never asked for one at a time. On a list they assembled work by work
+   * it has nothing left to do — they already said yes to each of these — and
+   * quietly dropping one for carrying a tag they usually skip only makes their
+   * own list lie about its length.
+   *
+   * It follows that `autoExcludeHidden` has nothing to hand over here either
+   * (see {@link file://./hidden.ts}): an exclusion takes the work off the list
+   * exactly as hiding it would, and leaves a facet row ticked to say so.
+   */
+  hidesNothing?: boolean
   /** Insert the (empty, already classed) container where the view belongs. */
   mount: (container: HTMLElement) => void
   /**
@@ -468,7 +487,7 @@ function undecorated(works: Work[]): Work[] {
  */
 function prepare(source: SearchSource, works: Work[], options: Options, fresh: boolean): FacetValueRef[] {
   source.prepare?.(works, { fresh })
-  return applyHidden(works, options)
+  return applyHidden(works, options, { hidesNothing: source.hidesNothing })
 }
 
 /** Write the blurb snapshot, plus whatever else the source keeps in step with it. */
@@ -744,7 +763,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       return
     const config: SearchViewConfig = {
       perPage: options.searchPerPage,
-      decorateBlurb: blurb => decorateBlurb(blurb, options),
+      decorateBlurb: blurb => decorateBlurb(blurb, options, { hidesNothing: source.hidesNothing }),
       decorateContainer: root => decorateContainer(root, options),
       onRendered: refreshFilterToolbar,
       hideFacetValue: makeFacetHider(options),

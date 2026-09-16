@@ -97,6 +97,10 @@ export class SearchMarkedForLater extends Unit {
       // A to-read list runs to hundreds of works for some readers, and a full
       // reload on every visit is exactly what gets them rate-limited.
       refreshInterval: () => Math.max(0, this.options.searchProfileListsRefreshHours || 0) * 60 * 60_000,
+      // A to-read list is the reader's own: they put every work on it by hand,
+      // and a rule taking one back off would only make the list they built lie
+      // about what is on it.
+      hidesNothing: true,
       nativeElements: () => document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
       mount: (container) => {
         const anchor = document.querySelector('#main ul.navigation.actions')

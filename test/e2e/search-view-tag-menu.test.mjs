@@ -15,14 +15,6 @@ const SEED = {
   'option.searchMarkedForLater': true,
   'option.tagToolbar': true,
   'option.fandomToolbar': true,
-  'option.rules': {
-    enabled: true,
-    colors: {},
-    // Collapsing rather than hiding: this file is about the menus and the inline
-    // exclude button on a collapsed work's reason line, and a hide rule would
-    // take that work out of the view's results before either could be reached.
-    filters: [{ target: 'tag', value: 'HideMe', matcher: 'exact', behavior: 'collapse' }],
-  },
 }
 
 function blurb(id, title, fandom, tags) {
@@ -55,7 +47,7 @@ const READINGS_HTML = `<!doctype html>
       ${blurb(1, 'Fluffy one', 'A Fandom', ['Fluff'])}
       ${blurb(2, 'Angsty one', 'A Fandom', ['Angst'])}
       ${blurb(3, 'Both at once', 'Other Fandom', ['Fluff', 'Angst'])}
-      ${blurb(4, 'A hidden one', 'Other Fandom', ['HideMe'])}
+      ${blurb(4, 'A quiet one', 'Other Fandom', ['Quiet'])}
     </ol>
   </div>
 </body></html>`
@@ -159,7 +151,7 @@ describe('tag and fandom menus in the search view', { skip }, () => {
   test('the view opened with every work', async () => {
     assert.deepEqual(
       (await visibleTitles()).sort(),
-      ['A hidden one', 'Angsty one', 'Both at once', 'Fluffy one'],
+      ['A quiet one', 'Angsty one', 'Both at once', 'Fluffy one'],
     )
   })
 
@@ -173,7 +165,7 @@ describe('tag and fandom menus in the search view', { skip }, () => {
 
   test('excluding a tag filters the view, not AO3', async () => {
     await pick('Exclude from filter')
-    assert.deepEqual((await visibleTitles()).sort(), ['A hidden one', 'Angsty one'])
+    assert.deepEqual((await visibleTitles()).sort(), ['A quiet one', 'Angsty one'])
     assert.equal(page.url(), READINGS_URL, 'nothing should have been submitted')
   })
 
@@ -229,20 +221,5 @@ describe('tag and fandom menus in the search view', { skip }, () => {
     assert.ok(labels.includes('Require in filter'), labels.join(' | '))
     await page.keyboard.press('Escape')
     await sleep(300)
-  })
-
-  test('a collapsed work\'s reason line carries a working exclude button', async () => {
-    const excluded = await page.evaluate(() => {
-      const button = document.querySelector('.AO3E--search-view--results .AO3E--hide-works--exclude')
-      if (!button)
-        return null
-      button.click()
-      return true
-    })
-    assert.ok(excluded, 'the collapsed work should offer an inline exclude button')
-    await sleep(400)
-    // Excluding "HideMe" takes the work out of the view entirely, rather than
-    // leaving it collapsed in place.
-    assert.deepEqual((await visibleTitles()).sort(), ['Angsty one', 'Both at once', 'Fluffy one'])
   })
 })

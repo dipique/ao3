@@ -238,6 +238,35 @@ describe('hidden works in the search view', { skip }, () => {
     assert.equal(await shown(), 'none')
   })
 
+  test('and a reopened view collapses each work once, not twice', async () => {
+    await page.evaluate(() => {
+      document.querySelector('.AO3E--search-view--results').dataset.stale = ''
+    })
+    // Any options change re-runs the units, which puts the view back from the
+    // works it was already showing. HideWorks is the one decoration that
+    // *rewrites* a blurb rather than adding to it, so a copy handed back without
+    // being stripped first shows as a reason line inside a reason line.
+    await page.evaluate(() => browser.storage.local.set({ 'option.showKudosHitsRatio': true }))
+    await sleep(2500)
+    assert.ok(
+      await page.evaluate(() => document.querySelector('.AO3E--search-view--results')?.dataset.stale === undefined),
+      'the view should have reopened',
+    )
+    const collapsed = await page.evaluate(() =>
+      [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
+        .filter(li => li.querySelector('.AO3E--hide-works--msg'))
+        .map(li => ({
+          title: li.querySelector('h4.heading a').textContent,
+          reasons: li.querySelectorAll('.AO3E--hide-works--msg').length,
+          wrappers: li.querySelectorAll('.AO3E--hide-works--wrapper').length,
+        })))
+    assert.deepEqual(collapsed, [
+      { title: 'A rule-hidden one', reasons: 1, wrappers: 1 },
+      { title: 'A Spanish one', reasons: 1, wrappers: 1 },
+    ])
+    assert.equal((await visibleTitles()).length, PAGES * PER_PAGE)
+  })
+
   test('a rule-hidden work offers to exclude the tag that hid it', async () => {
     assert.deepEqual((await visibleTitles()).length, PAGES * PER_PAGE)
     assert.ok(await clickExclude('HideMe'), 'the reason line should carry an exclude button')

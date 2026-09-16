@@ -22,8 +22,6 @@ const SEED = {
     filters: [
       // A star after the tag — the indicator that came out doubled.
       { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'highlight' },
-      // HideWorks' wrapper and reason line: the one unit that rewrites a blurb.
-      { target: 'tag', value: 'HideMe', matcher: 'exact', behavior: 'collapse' },
     ],
   },
 }
@@ -57,7 +55,7 @@ const READINGS_HTML = `<!doctype html>
       ${blurb(1, 'Fluffy one', ['Fluff'])}
       ${blurb(2, 'Angsty one', ['Angst'])}
       ${blurb(3, 'Both at once', ['Fluff', 'Angst'])}
-      ${blurb(4, 'A collapsed one', ['HideMe'])}
+      ${blurb(4, 'A slow one', ['Slow Burn'])}
     </ol>
   </div>
 </body></html>`
@@ -68,6 +66,12 @@ const READINGS_HTML = `<!doctype html>
  * and "Mark as Read" button twice — and a list does get written while its
  * blurbs are on screen (a blurb action, a top-up), so the copy has to be
  * stripped rather than timed.
+ *
+ * Staged on a readings list, which is the one place a blurb action writes a list
+ * back while its blurbs are being looked at. Nothing is hidden on such a list, so
+ * the one decoration that *rewrites* a blurb rather than adding to it — the
+ * wrapper HideWorks puts round a collapsed work — is checked for the same thing
+ * over a tag's works instead, in `search-view-hidden-works.test.mjs`.
  */
 describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
   let browser
@@ -123,7 +127,6 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
       out[li.querySelector('h4.heading a').textContent] = {
         tags: [...li.querySelectorAll('ul.tags a.tag')].map(indicatorsAfter),
         actions: li.querySelectorAll('.AO3E--search-view--blurb-action').length,
-        reasons: li.querySelectorAll('.AO3E--hide-works--msg').length,
       }
     }
     return out
@@ -140,13 +143,13 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
   })
 
   const EXPECTED = {
-    'Fluffy one': { tags: [1], actions: 1, reasons: 0 },
-    'Both at once': { tags: [1, 0], actions: 1, reasons: 0 },
-    'A collapsed one': { tags: [0], actions: 1, reasons: 1 },
+    'Fluffy one': { tags: [1], actions: 1 },
+    'Both at once': { tags: [1, 0], actions: 1 },
+    'A slow one': { tags: [0], actions: 1 },
   }
 
   test('the view opens decorated once', async () => {
-    assert.deepEqual(await decorations(), { ...EXPECTED, 'Angsty one': { tags: [0], actions: 1, reasons: 0 } })
+    assert.deepEqual(await decorations(), { ...EXPECTED, 'Angsty one': { tags: [0], actions: 1 } })
   })
 
   test('a list written while its blurbs are on screen is stored undecorated', async () => {

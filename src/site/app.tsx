@@ -76,6 +76,12 @@ export interface SiteContext {
 export async function startSite(ctx: SiteContext): Promise<void> {
   const { data, shell, storage } = ctx
   const sourceId = data.manifest.source.id
+  // Whether the reader's hiding applies to this list at all. The same split the
+  // live sources make (`SearchSource.hidesNothing`), which an export can only
+  // make by id: the two lists the reader assembled work by work show every work
+  // on them, and an export of one that quietly held some back would be a
+  // shorter list than the page it was taken from.
+  const hidesNothing = sourceId === 'marked-for-later' || sourceId === 'read-works'
 
   const blurbsHtml = JSON.parse(await decompressEntry(data.blurbs)) as string[]
   const texts = new Map(data.works.map(work => [work.id, work]))
@@ -169,7 +175,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     const config: SearchViewConfig = {
       perPage: current.searchPerPage,
       autoExcludes,
-      decorateBlurb: blurb => decorateBlurb(blurb, current),
+      decorateBlurb: blurb => decorateBlurb(blurb, current, { hidesNothing }),
       decorateContainer: root => decorateContainer(root, current),
       hideFacetValue: makeFacetHider(current),
       initialState,
@@ -198,7 +204,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     if (sourceId === 'marked-for-later')
       seedMarkedForLater(works.map(work => work.workId))
     applyStatus(works, current)
-    const autoExcludes = applyHidden(works, current)
+    const autoExcludes = applyHidden(works, current, { hidesNothing })
     for (const work of works)
       noteIfAbsent(work, listed.get(work.workId))
     return autoExcludes

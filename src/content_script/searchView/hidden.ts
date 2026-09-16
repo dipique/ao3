@@ -49,8 +49,20 @@ function facetKey(key: FacetKey, value: string): string {
  * works out, because that decoration only runs on the page being *shown*: the
  * view has to know which works are gone before it can decide what a page is.
  * Runs on every load, cached or fresh, so it follows an options change.
+ *
+ * `hidesNothing` is a list the reader built themselves, where none of this
+ * applies: every work on it is there because they put it there, and taking one
+ * away for carrying a tag they usually skip answers a question nobody asked. No
+ * work is hidden, none is handed to the filter either — an exclusion would take
+ * it off the list just as surely — and the per-blurb half of the same decision
+ * is switched off beside it (see `decorateBlurb`).
  */
-export function applyHidden(works: Work[], options: Options): FacetValueRef[] {
+export function applyHidden(works: Work[], options: Options, opts: { hidesNothing?: boolean } = {}): FacetValueRef[] {
+  if (opts.hidesNothing) {
+    for (const work of works)
+      stamp(work, false, false)
+    return []
+  }
   const verdicts = works.map(work => hideVerdict(blurbOf(work), options))
   const handOver = options.autoExcludeHidden && options.rules.enabled
 
@@ -80,23 +92,35 @@ export function applyHidden(works: Work[], options: Options): FacetValueRef[] {
     const handed = handOver && verdict.mode === 'hide'
       ? asExclusions(verdict, kept, muted)
       : null
-    work.hidden = verdict.mode === 'hide' && !handed
-    // Tells HideWorks that a work of this kind is on screen only because the
-    // reader lifted its exclusion, so it collapses rather than leaving a blank
-    // slot. Cleared explicitly: the same works are re-stamped on every load. A
-    // node not built yet takes the stamp from the work when it is.
-    work.filtered = !!handed
-    if (hasNode(work)) {
-      if (handed)
-        work.el.dataset.ao3eFiltered = ''
-      else
-        delete work.el.dataset.ao3eFiltered
-    }
+    stamp(work, verdict.mode === 'hide' && !handed, !!handed)
     for (const ref of handed ?? [])
       excludes.set(facetKey(ref.key, ref.value), ref)
   })
 
   return [...excludes.values()]
+}
+
+/**
+ * Record how the hiding leaves one work: gone from the results, and whether it
+ * is gone because the view's own filter was handed the reason — which tells
+ * HideWorks that a work of this kind is on screen only because the reader lifted
+ * that exclusion, so it collapses rather than leaving a blank slot.
+ *
+ * Always both fields, never just the one that changed: the same works are
+ * re-stamped on every load, and a view reopened from memory is handed the very
+ * objects the last one stamped, so anything left unwritten would outlive the
+ * options that wrote it. A node not built yet takes the stamp from the work when
+ * it is.
+ */
+function stamp(work: Work, hidden: boolean, filtered: boolean): void {
+  work.hidden = hidden
+  work.filtered = filtered
+  if (!hasNode(work))
+    return
+  if (filtered)
+    work.el.dataset.ao3eFiltered = ''
+  else
+    delete work.el.dataset.ao3eFiltered
 }
 
 /**

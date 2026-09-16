@@ -52,9 +52,15 @@ function runUnit(U: typeof Unit, options: Options, root: ParentNode): void {
 /**
  * Apply the per-blurb enhancements to one freshly mounted blurb. Called the first
  * time a blurb is shown, so a large list only decorates what's actually viewed.
+ *
+ * `hidesNothing` leaves HideWorks out: a list the reader built themselves is
+ * shown as they built it, and nothing in it is collapsed to a reason line. The
+ * other half of that decision — the works a rule would have taken away outright
+ * — is {@link file://./hidden.ts}, which has to run over the whole set.
  */
-export function decorateBlurb(blurb: HTMLElement, options: Options): void {
-  for (const U of BLURB_UNITS)
+export function decorateBlurb(blurb: HTMLElement, options: Options, opts: { hidesNothing?: boolean } = {}): void {
+  const units = opts.hidesNothing ? BLURB_UNITS.filter(U => U !== HideWorks) : BLURB_UNITS
+  for (const U of units)
     runUnit(U, options, blurb)
 }
 

@@ -199,6 +199,11 @@ export class SearchReadWorks extends Unit {
       // refresh reuses it — so a running tally of what is left to find would be
       // empty by the second scrape and stop it on its first page.
       satisfied: ids => [...wanted].every(id => ids.has(id)),
+      // Nothing here is hidden: every work is one the reader marked themselves,
+      // and the whole point of the list is to look back over what they marked —
+      // a verdict set to hide its works would otherwise empty the very list that
+      // exists to show them.
+      hidesNothing: true,
       // Whichever of the two listings this page is showing, plus its pagination
       // — and the heading and subnav item that say which list that is, which
       // `mount` stands in for.
