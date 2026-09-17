@@ -151,8 +151,7 @@ describe('options UI — rules search', { skip }, () => {
   test('the count shows how much of the list is showing', async () => {
     await search('slow')
     const count = await page.evaluate(() =>
-      [...document.querySelectorAll('span')].map(s => s.textContent.trim())
-        .find(t => /^\d+ of \d+$/.test(t)) ?? null)
+      [...document.querySelectorAll('span')].map(s => s.textContent.trim()).find(t => /^\d+ of \d+$/.test(t)) ?? null)
     await search('')
     assert.equal(count, `2 of ${RULES.length}`)
   })

@@ -215,7 +215,14 @@ export interface Options {
    */
   collapsibleDashboard: boolean
   showStatsColumns: boolean
-  forceAlignment: null | 'start' | 'end' | 'justified'
+  /**
+   * The `text-align` keyword to force on the work text, or `null` to leave AO3's
+   * own alignment alone. These are CSS keywords, not names of our own —
+   * `StyleTweaks` interpolates the stored value straight into a rule — so
+   * `'justify'` is spelled the way CSS spells it, which is also what the options
+   * page has always written.
+   */
+  forceAlignment: null | 'start' | 'end' | 'justify'
   /** Hide the "muted author" notices that appear where works are hidden because of a muted author. */
   hideMutedAuthorNotices: boolean
   /**

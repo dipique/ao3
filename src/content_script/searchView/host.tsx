@@ -15,7 +15,7 @@ import type { SearchViewPrefs } from './prefs.ts'
 import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
 
-import { pristineBlurb, readSnapshot, writeSnapshot } from './cache.ts'
+import { pristineBlurb, readSnapshot, snapshotSize, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
 import { applyHidden } from './hidden.ts'
@@ -692,6 +692,16 @@ async function refresh(
     if (own.signal.aborted)
       return
     const works = applyLimit(renumber(completed.works), budget.limit)
+    // The same refusal the options-page refresh makes — see `NotWritten` in
+    // {@link file://./refresh.ts} for the reasoning and for why it is the
+    // *listing* being empty that counts, not the finished list. Writing an
+    // empty scrape over a stored list would take the list, its side table, and
+    // the blurbs and cached text of every work in it; keeping the stored copy on
+    // screen is always recoverable.
+    if (result.works.length === 0 && works.length === 0 && await snapshotSize(source.cacheKey) > 0) {
+      toast(`AO3 returned this list with no works in it, so it wasn't refreshed. It is still showing what was stored.`, { type: 'error' })
+      return
+    }
     await persist(source, works, { listing: topUp ? undefined : result.works })
     view.update(works, prepare(source, works, options, true))
     const now = Date.now()

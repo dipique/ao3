@@ -37,9 +37,9 @@ function seed() {
           hideSearchResult: false,
           items: packIds(['1', '2', '3']),
           progress: packProgress([
-            ['1', { chapter: 4 }],                      // behind, no date -> ready
+            ['1', { chapter: 4 }], // behind, no date -> ready
             ['2', { chapter: 4, waitUntil: today + 30 }], // behind, parked -> waiting
-            ['3', { chapter: 9 }],                      // level with published -> caught up
+            ['3', { chapter: 9 }], // level with published -> caught up
           ]),
         },
         saved: { icon: 'saved', label: 'Marked for later', color: '#2f8f4e' },

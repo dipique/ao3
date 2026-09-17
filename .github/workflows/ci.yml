@@ -1,0 +1,43 @@
+name: CI
+
+# The gates, on every push and every pull request. `build-extension.yml` calls
+# this workflow too, so a tag can't ship past a red typecheck — which is what
+# used to happen, since nothing ran on anything but a tag.
+on:
+  # `branches` on its own already excludes tag pushes, which reach these gates
+  # through `workflow_call` from the release workflow instead.
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_call:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install
+
+      # Separate steps rather than `pnpm run verify`, so a failure names itself
+      # in the job summary instead of being one red line at the end.
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Lint
+        run: pnpm run lint
+      # Unit tests only. The e2e suite is green, but it drives a real Chrome and
+      # leans on 170-odd fixed sleeps, which is a flake risk on a shared runner —
+      # see the `tests:e2e` script to run it locally.
+      - name: Unit tests
+        run: pnpm run tests:unit

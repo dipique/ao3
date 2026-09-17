@@ -79,6 +79,24 @@ describe('ruleMatchesTag', () => {
     assert.ok(!ruleMatchesTag(rule({ value: '([', matcher: 'regex' }), tag))
   })
 
+  test('a regex keeps its negated classes', () => {
+    // Case-insensitivity comes from the `i` flag. Lower-casing the pattern
+    // instead rewrote every negated class into its opposite, so each of these
+    // matched exactly the set the reader had written it to skip. Each pair is
+    // the escape and its negation, and they must disagree.
+    assert.ok(!ruleMatchesTag(rule({ value: 'Slow\\S*Burn', matcher: 'regex' }), tag))
+    assert.ok(ruleMatchesTag(rule({ value: 'Slow\\s*Burn', matcher: 'regex' }), tag))
+
+    assert.ok(ruleMatchesTag(rule({ value: 'Slow\\WBurn', matcher: 'regex' }), tag))
+    assert.ok(!ruleMatchesTag(rule({ value: 'Slow\\wBurn', matcher: 'regex' }), tag))
+
+    assert.ok(ruleMatchesTag(rule({ value: '\\D{4}', matcher: 'regex' }), tag))
+    assert.ok(!ruleMatchesTag(rule({ value: '\\d{4}', matcher: 'regex' }), tag))
+
+    assert.ok(ruleMatchesTag(rule({ value: '\\Bl', matcher: 'regex' }), tag))
+    assert.ok(!ruleMatchesTag(rule({ value: '\\bl', matcher: 'regex' }), tag))
+  })
+
   test('non-tag targets never match a tag', () => {
     assert.ok(!ruleMatchesTag(rule({ target: 'author', value: 'Slow Burn' }), tag))
     assert.ok(!isTagTarget('work'))

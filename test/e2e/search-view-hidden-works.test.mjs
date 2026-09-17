@@ -225,14 +225,16 @@ describe('hidden works in the search view', { skip }, () => {
     assert.equal(await shown(), 'none')
     await page.evaluate(() => {
       [...document.querySelectorAll('.AO3E--filter-toolbar--button')]
-        .find(b => /filtered work/.test(b.textContent)).click()
+        .find(b => /filtered work/.test(b.textContent))
+        .click()
     })
     await sleep(200)
     assert.equal(await shown(), 'block')
     assert.equal(await peekPill(), 'Hide 2 filtered works')
     await page.evaluate(() => {
       [...document.querySelectorAll('.AO3E--filter-toolbar--button')]
-        .find(b => /filtered work/.test(b.textContent)).click()
+        .find(b => /filtered work/.test(b.textContent))
+        .click()
     })
     await sleep(200)
     assert.equal(await shown(), 'none')

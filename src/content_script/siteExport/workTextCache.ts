@@ -1,6 +1,6 @@
 import type { CachedWork, OrphanPlan, WorkTextFailure, WorkTextIndex, WorkTextMeta, WorkTextUsage } from './workText.ts'
 
-import { planOrphanDiscard, summarizeWorkText, WORK_TEXT_VERSION } from './workText.ts'
+import { planOrphanDiscard, summarizeWorkText, WORK_TEXT_INDEX_KEY, WORK_TEXT_PREFIX, WORK_TEXT_VERSION } from './workText.ts'
 
 /**
  * Where cached work text lives: `browser.storage.local`, one key per work, plus
@@ -30,11 +30,9 @@ import { planOrphanDiscard, summarizeWorkText, WORK_TEXT_VERSION } from './workT
  * dedicated IndexedDB store behind these same functions.
  */
 
-/** Prefix for the per-work text blobs. Nothing else may use it. */
-const TEXT_PREFIX = 'workText.'
-
-/** The one key holding every work's metadata ({@link WorkTextIndex}). */
-const INDEX_KEY = 'workTextIndex'
+/** Prefix for the per-work text blobs, and the one key holding every work's metadata ({@link WorkTextIndex}). */
+const TEXT_PREFIX = WORK_TEXT_PREFIX
+const INDEX_KEY = WORK_TEXT_INDEX_KEY
 
 /** What a per-work key holds. Just the text — everything else is in the index. */
 interface StoredText {

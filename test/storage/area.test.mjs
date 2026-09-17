@@ -11,7 +11,10 @@ function installMock() {
     get: (keys) => {
       const out = {}
       const ks = toArr(keys) ?? Object.keys(stores[name])
-      for (const k of ks) if (k in stores[name]) out[k] = stores[name][k]
+      for (const k of ks) {
+        if (k in stores[name])
+          out[k] = stores[name][k]
+      }
       return Promise.resolve(out)
     },
     set: (items) => {
@@ -23,8 +26,15 @@ function installMock() {
       listeners.forEach(l => l(changes, name))
       return Promise.resolve()
     },
-    remove: (keys) => { (toArr(keys) || []).forEach(k => delete stores[name][k]); return Promise.resolve() },
-    clear: () => { stores[name] = {}; return Promise.resolve() },
+    remove: (keys) => {
+      for (const k of toArr(keys) || [])
+        delete stores[name][k]
+      return Promise.resolve()
+    },
+    clear: () => {
+      stores[name] = {}
+      return Promise.resolve()
+    },
   })
   const browser = {
     // Present in every live extension context. storage.ts reads it to tell a
@@ -71,17 +81,35 @@ describe('createStorage honors the configured area', () => {
     assert.deepEqual(all, { a: 7, b: 'x' }, 'present key from sync, missing key from defaults')
   })
 
+  test('get() hands out a copy of a default, not the default itself', async () => {
+    // A key that was never written answers from `defaults`. Handing the entry
+    // itself back means a caller that edits what it got — the first rule added
+    // from the right-click menu, before `option.rules` has ever been stored —
+    // is editing the defaults every later reader in this context sees, including
+    // the copy the sync codec prunes against.
+    const defaults = { list: [{ a: 1 }], flag: false }
+    const store = createStorage({ area: 'sync', name: 'T', prefix: 'c.', defaults })
+
+    const first = await store.get('list')
+    first.push({ a: 2 })
+    first[0].a = 99
+
+    assert.deepEqual(defaults.list, [{ a: 1 }], 'the defaults must be untouched')
+    assert.deepEqual(await store.get('list'), [{ a: 1 }], 'a later read must not see the edit')
+    assert.equal(await store.get('flag'), false, 'primitives still come back as themselves')
+  })
+
   test('the change listener fires only for the matching area', async () => {
     const store = createStorage({ area: 'sync', name: 'T', prefix: 't.', defaults: { a: 1 } })
     const seen = []
     store.addListener(change => seen.push(change))
 
     // A write to a DIFFERENT area must be ignored.
-    await browser.storage.local.set({ 't.a': 100 })
+    await globalThis.browser.storage.local.set({ 't.a': 100 })
     assert.deepEqual(seen, [], 'local change must not notify a sync-area store')
 
     // A write to the configured area must be delivered.
-    await browser.storage.sync.set({ 't.a': 200 })
+    await globalThis.browser.storage.sync.set({ 't.a': 200 })
     assert.deepEqual(seen, [{ a: 200 }], 'sync change must notify a sync-area store')
 
     store.removeListener(() => {})

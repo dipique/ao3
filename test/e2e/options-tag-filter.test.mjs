@@ -40,8 +40,10 @@ describe('options UI — rules dialog', { skip }, () => {
         const d = document.querySelector('[role="dialog"]')
         return !!(d && d.querySelector('[i-codicon-regex]') && d.querySelector('[i-codicon-whole-word]'))
       })
-      if (isRule) return true
-      await page.keyboard.press('Escape'); await sleep(200)
+      if (isRule)
+        return true
+      await page.keyboard.press('Escape')
+      await sleep(200)
     }
     return false
   }
@@ -49,26 +51,35 @@ describe('options UI — rules dialog', { skip }, () => {
     for (const e of await page.$$('[i-codicon-edit]')) {
       await e.evaluate(el => (el.closest('button,a,[role="button"]') || el).click())
       await sleep(400)
-      if (await page.$('[role="dialog"]')) return true
+      if (await page.$('[role="dialog"]'))
+        return true
     }
     return false
   }
   const clickInDialog = sel => page.evaluate((s) => {
     const el = document.querySelector('[role="dialog"]')?.querySelector(s)
-    if (!el) return false
-    ;(el.closest('button,a,[role="button"]') || el).click(); return true
+    if (!el)
+      return false
+    const target = el.closest('button,a,[role="button"]') || el
+    target.click()
+    return true
   }, sel)
   const saveDialog = () => page.evaluate(() => {
     const d = document.querySelector('[role="dialog"]')
     const b = [...(d?.querySelectorAll('button') || [])].find(x => x.textContent.trim() === 'Save')
-    if (!b) return false
-    b.click(); return true
+    if (!b)
+      return false
+    b.click()
+    return true
   })
   const lastRules = () => page.evaluate(() => {
     const w = window.__writes.filter(x => 'option.rules' in x).map(x => x['option.rules'])
     return w.at(-1) ?? null
   })
-  const closeDialog = async () => { await page.keyboard.press('Escape'); await sleep(250) }
+  const closeDialog = async () => {
+    await page.keyboard.press('Escape')
+    await sleep(250)
+  }
 
   test('matcher icons render (codicon collection loaded)', async () => {
     assert.ok(await openAddRuleDialog(), 'the Add-rule dialog should open')
@@ -76,7 +87,8 @@ describe('options UI — rules dialog', { skip }, () => {
       const d = document.querySelector('[role="dialog"]')
       const read = (sel) => {
         const el = d.querySelector(sel)
-        if (!el) return null
+        if (!el)
+          return null
         const s = getComputedStyle(el)
         return { mask: s.maskImage || s.webkitMaskImage || '', bg: s.backgroundImage || '' }
       }

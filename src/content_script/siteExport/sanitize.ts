@@ -126,25 +126,48 @@ function scrubAttributes(root: Element): void {
 }
 
 /**
+ * The only schemes an exported link may end up with. An allowlist rather than a
+ * list of the dangerous ones, because the dangerous ones cannot be enumerated
+ * from a string — see {@link resolveUrl}.
+ */
+const ALLOWED_PROTOCOLS = new Set(['https:', 'http:', 'mailto:'])
+
+/**
  * Resolve one URL attribute against AO3, or null if it has no business being in
  * the export (a `javascript:` link, a `data:` payload somewhere that isn't an
- * image, anything unparseable).
+ * image, anything unparseable or in a scheme we don't ship).
+ *
+ * **The scheme is read off the parsed URL, never off the raw string.** Testing
+ * the string first and parsing afterwards is the classic way to let one through:
+ * the URL parser strips every ASCII tab and newline out of its input before it
+ * looks at anything, so `java&#10;script:alert(1)` — which the HTML parser has
+ * already decoded to `java\nscript:…` by the time it reaches here — matches no
+ * pattern for `javascript:` and then becomes exactly that on the way out. What
+ * is written back is what `new URL` produced, so what is checked is what
+ * `new URL` produced.
+ *
+ * This is the export's only barrier: an exported file assigns its blurb and work
+ * HTML through `innerHTML`, and its origin holds the shared `ao3e-site`
+ * IndexedDB — marks, journal and options for every export the reader opens.
  */
 function resolveUrl(raw: string, allowData: boolean): string | null {
   const value = raw.trim()
   if (!value || value.startsWith('#'))
     return raw
 
-  if (/^data:/i.test(value))
-    return allowData && /^data:image\//i.test(value) ? value : null
-
-  if (/^(?:javascript|vbscript|blob|file):/i.test(value))
-    return null
-
+  let url: URL
   try {
-    return new URL(value, ARCHIVE_BASE).href
+    url = new URL(value, ARCHIVE_BASE)
   }
   catch {
     return null
   }
+
+  // Inline images, where the attribute is one that may carry them. Matched on
+  // the parsed href for the same reason as everything else here: `dat&#9;a:…`
+  // is not a `data:` URL to a regex and is one to the parser.
+  if (url.protocol === 'data:')
+    return allowData && /^data:image\//i.test(url.href) ? url.href : null
+
+  return ALLOWED_PROTOCOLS.has(url.protocol) ? url.href : null
 }

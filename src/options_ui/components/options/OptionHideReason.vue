@@ -11,9 +11,11 @@ const [DefineBox, Box] = createReusableTemplate<{ value: string, label: string }
 </script>
 
 <template>
-  <DefineBox v-slot="{ $slots, value, label }">
+  <!-- `boxValue`, not `value`: the script already has a `value` computed, and the
+       shadowing made the two look like one thing in the template below. -->
+  <DefineBox v-slot="{ $slots, value: boxValue, label }">
     <RadioBoxItem
-      :value="value"
+      :value="boxValue"
       :label="label"
       h-12
       text="xs"

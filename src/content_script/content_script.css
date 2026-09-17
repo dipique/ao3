@@ -89,7 +89,7 @@
 /* The visible affordance: a grip dot in the centre, with two smaller dots above
    and below it so the cluster reads as a draggable grip. */
 .AO3E--reader-handle::before {
-  content: "";
+  content: '';
   position: absolute;
   top: 50%;
   left: 50%;
@@ -101,13 +101,15 @@
   /* A soft neutral halo keeps the dot visible over text of any colour. */
   box-shadow: 0 0 0 4px rgba(128, 128, 128, 0.15);
   opacity: 0.35;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 /* The two smaller dots — drawn as box-shadow copies of a transparent centre box
    offset above and below the main dot. */
 .AO3E--reader-handle::after {
-  content: "";
+  content: '';
   position: absolute;
   top: 50%;
   left: 50%;
@@ -116,9 +118,13 @@
   transform: translate(-50%, -50%);
   border-radius: 50%;
   background: transparent;
-  box-shadow: 0 -14px 0 currentColor, 0 14px 0 currentColor;
+  box-shadow:
+    0 -14px 0 currentColor,
+    0 14px 0 currentColor;
   opacity: 0.35;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 .AO3E--reader-handle:hover::before,
@@ -333,7 +339,10 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   opacity: 0;
   visibility: hidden;
   transform: translateY(0.5em);
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0.15s;
   pointer-events: none;
 }
 
@@ -401,7 +410,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   border-color: var(--ao3e-field-border) !important;
 }
 
-.AO3E--filter-toolbar--button[aria-pressed="true"] {
+.AO3E--filter-toolbar--button[aria-pressed='true'] {
   background: #2f8f4e !important;
   border-color: #2f8f4e !important;
   color: #fff !important;
@@ -409,7 +418,7 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 /* The "disable menus" pill reads as an override when pressed (menus off), so it
    gets its own amber pressed colour rather than the green of the peek pill. */
-.AO3E--filter-toolbar--menus[aria-pressed="true"] {
+.AO3E--filter-toolbar--menus[aria-pressed='true'] {
   background: #a8560c !important;
   border-color: #a8560c !important;
   color: #fff !important;
@@ -423,7 +432,6 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--filter-toolbar--icon > svg {
   transform: translateY(-2px);
 }
-
 
 /* ===========================================================================
    Context menus, popovers and indicators.
@@ -1255,7 +1263,9 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 }
 
 @keyframes AO3E--refresh-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .AO3E--search-view--refresh-spinning svg {

@@ -343,11 +343,27 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
   // Nothing was written, so the stored list and any queue planned against it are
   // still good; the step stays in place and Continue picks it up where it left
   // off, exactly as a rate-limited caching run does.
-  if (result.blocked) {
+  if (result.notWritten === 'blocked') {
     job.blocked = 'rate-limited'
     await persist(job)
     publish()
     return
+  }
+
+  // The other two refusals are not going to resolve themselves by being retried
+  // on a timer, so they stop the run and say what to do. The stored list is
+  // untouched in both cases.
+  if (result.notWritten === 'logged-out') {
+    throw new Error(
+      'AO3 served the signed-out view, and this list is only visible to your own account. '
+      + 'Sign in to AO3 and try again — your stored copy of the list has been left as it was.',
+    )
+  }
+  if (result.notWritten === 'emptied') {
+    throw new Error(
+      'AO3 returned this list with no works in it, so it was left as it was rather than emptied. '
+      + 'Open the list on AO3 to check it, then try again.',
+    )
   }
 
   // The list has been replaced, so any queue planned against the old one is void.
@@ -363,7 +379,9 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
     warn(`${result.fetchedPages - result.loadedPages} of ${result.fetchedPages} list pages could not be fetched, so the list may be incomplete.`)
 
   // Read off the listing itself rather than the AO3 homepage, which Cloudflare
-  // serves from cache and can hand a logged-out copy to a signed-in reader.
+  // serves from cache and can hand a logged-out copy to a signed-in reader. A
+  // private list never reaches here signed out — `requireLogin` turned that into
+  // the refusal above — so this is a public listing missing its restricted works.
   if (!result.loggedIn) {
     if (job.steps.length > 1) {
       throw new Error(
@@ -558,12 +576,24 @@ function sideTableWriter(descriptor: SnapshotDescriptor): ((works: Work[]) => Pr
 }
 
 /**
- * The stored lists whose works are *chosen from* a listing rather than being it,
- * mirroring `SearchSource.select` on the live path.
+ * Sources whose listing AO3 only shows to the reader's own account: their
+ * history, and their Marked for Later shelf. Fetched without a session those
+ * URLs are not a shorter list but a sign-in page, which scrapes as no works at
+ * all — see {@link RefreshOptions.requireLogin}. Named by `sourceId` for the
+ * same reason {@link selectionFor} names the read list that way.
+ */
+const PRIVATE_SOURCES = new Set(['read-works', 'marked-for-later'])
+
+/**
+ * The per-source half of a refresh: whether the listing is private
+ * ({@link PRIVATE_SOURCES}), and — for the one list whose works are *chosen
+ * from* a listing rather than being it — how to choose them, mirroring
+ * `SearchSource.select` on the live path.
  *
- * Only the read list is one: it reads the reader's AO3 history looking for the
- * works they have marked, so refreshing it without this would replace the list
- * with their whole browsing history — and the next export would be of that.
+ * Only the read list needs choosing: it reads the reader's AO3 history looking
+ * for the works they have marked, so refreshing it without this would replace
+ * the list with their whole browsing history — and the next export would be of
+ * that.
  * Recognised from the descriptor's `sourceId`, since the source's module is
  * content-script-only and importing it here would drag every Unit in with it;
  * the question it asks is of the mark table, which is shared
@@ -572,11 +602,12 @@ function sideTableWriter(descriptor: SnapshotDescriptor): ((works: Work[]) => Pr
 async function selectionFor(
   descriptor: SnapshotDescriptor,
   cacheKey: string,
-): Promise<Pick<RefreshOptions, 'select' | 'satisfied' | 'recover'>> {
+): Promise<Pick<RefreshOptions, 'select' | 'satisfied' | 'recover' | 'requireLogin'>> {
   if (descriptor.sourceId !== 'read-works')
-    return {}
+    return { requireLogin: PRIVATE_SOURCES.has(descriptor.sourceId) }
   const wanted = readWorkIds(await options.get('workMarks'))
   return {
+    requireLogin: true,
     select: works => works.filter(work => wanted.has(work.workId)),
     satisfied: ids => [...wanted].every(id => ids.has(id)),
     // Works in no history come from their own pages, as on the live path. A

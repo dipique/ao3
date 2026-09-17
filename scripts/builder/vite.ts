@@ -74,7 +74,7 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
     write: false,
     resolve: { alias: ALIAS(asset) },
     // esbuild is still used by vite for pre-checks
-    esbuild: {... ESBUILD(asset), jsx: 'preserve' },
+    esbuild: { ...ESBUILD(asset), jsx: 'preserve' },
     oxc: { target: ESBUILD_TARGET(asset), jsx: { runtime: 'classic' } },
     define: {
       ...DEFINE(asset),
@@ -115,7 +115,7 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
             },
             compress: true,
             mangle: MINIFY,
-          }
+          },
         },
       },
     },

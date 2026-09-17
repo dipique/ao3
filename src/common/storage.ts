@@ -80,12 +80,28 @@ export function createStorage<Shape extends StorageShape>(details: StorageDetail
     // Map back to the original key names, and apply defaults
     const response = request.map((key) => {
       const id = key.substring(prefix.length) as StorageId<Shape>
-      return [id, rawResponse[key] ?? defaults[id]] as [StorageId<Shape>, unknown]
+      return [id, rawResponse[key] ?? defaultFor(id)] as [StorageId<Shape>, unknown]
     })
 
     logger.debug(response)
 
     return (ids === undefined || Array.isArray(ids)) ? Object.fromEntries(response) : response[0]![1]
+  }
+
+  /**
+   * The default for a key that has never been written — a **copy** of it, where
+   * it is an object.
+   *
+   * Handing the `defaults` entry itself out is how the defaults get edited. A
+   * caller that pushes onto the list it was given (the first rule added from the
+   * right-click menu, on a profile where `option.rules` has never been written)
+   * is then editing what every later reader in that context sees, including the
+   * copy the sync codec prunes against — at which point turning that feature off
+   * can prune the key out of the payload and reset it on every other device.
+   */
+  function defaultFor(id: StorageId<Shape>): unknown {
+    const value = defaults[id]
+    return (value !== null && typeof value === 'object') ? structuredClone(value) : value
   }
 
   /** Read raw items, answering `{}` (so callers fall back to defaults) once orphaned. */

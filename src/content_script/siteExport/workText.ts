@@ -27,6 +27,19 @@ export const WORK_TEXT_VERSION = 1
  */
 export const WORK_TEXT_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
+/**
+ * Prefix for the per-work text blobs, and the one key holding their metadata.
+ * Nothing else may use either.
+ *
+ * They live here rather than beside the reads and writes in
+ * {@link file://./workTextCache.ts} because the other thing that has to name
+ * them is the settings exporter, which excludes them — megabytes of other
+ * people's fic have no business in a settings file — and which has no reason to
+ * pull a module full of `browser.storage` calls in to learn two strings.
+ */
+export const WORK_TEXT_PREFIX = 'workText.'
+export const WORK_TEXT_INDEX_KEY = 'workTextIndex'
+
 /** First retry of a failed fetch, doubling per consecutive failure. */
 export const FAILURE_BACKOFF_BASE_MS = 60 * 60 * 1000
 

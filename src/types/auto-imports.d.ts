@@ -6,14 +6,12 @@
 // biome-ignore lint: disable
 export {}
 declare global {
-  const Binding: typeof import('../options_ui/directives/vLayoutVar').Binding
   const EffectScope: typeof import('vue').EffectScope
   const NO_DESCRIPTOR_NOTE: typeof import('../options_ui/composables/useSiteExport').NO_DESCRIPTOR_NOTE
   const OptionCategoryName: typeof import('../options_ui/composables/context').OptionCategoryName
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
-  const ago: typeof import('../options_ui/composables/useSiteExport').ago
   const anchorSlug: typeof import('../options_ui/composables/useAnchors').anchorSlug
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
@@ -331,7 +329,6 @@ declare global {
   const watchTriggerable: typeof import('@vueuse/core').watchTriggerable
   const watchWithFilter: typeof import('@vueuse/core').watchWithFilter
   const whenever: typeof import('@vueuse/core').whenever
-  const writableToRef: typeof import('../options_ui/composables/writableToRef')['writableToRef']
 }
 // for type re-export
 declare global {

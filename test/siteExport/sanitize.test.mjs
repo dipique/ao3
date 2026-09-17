@@ -58,6 +58,8 @@ const PAGE = `<!DOCTYPE html><html><head>
           <p>First chapter. <a href="#chapter-2">Skip ahead</a>, or see <a href="/works/99">that other work</a>.</p>
           <p onclick="alert(1)">Clicky.</p>
           <p><a href="javascript:alert(2)">Do not</a></p>
+          <p><a href="java&#10;script:alert(3)">Nor this</a></p>
+          <p><a href="&#9;VBScript:alert(4)">Nor this either</a></p>
           <img src="/images/skins/thing.png" alt="a thing">
         </div>
       </div>
@@ -132,6 +134,18 @@ describe('sanitizeWorkPage', { skip: skipWithoutChrome }, () => {
     const html = await sanitize(PAGE)
     assert.ok(!html.includes('javascript:'), 'expected the javascript: href to be dropped')
     assert.match(html, /Do not<\/a>/)
+  })
+
+  test('a scheme split by a tab or a newline is still that scheme', async () => {
+    // The HTML parser decodes the entity, so what reaches the sanitizer is
+    // `java\nscript:alert(3)` — which matches no pattern for `javascript:` and
+    // which the URL parser, stripping tabs and newlines before it parses,
+    // turns straight back into one. Hence: decide on the parsed URL.
+    const html = await sanitize(PAGE)
+    assert.ok(!/javascript:/i.test(html), 'expected the split javascript: href to be dropped')
+    assert.ok(!/vbscript:/i.test(html), 'expected the split vbscript: href to be dropped')
+    assert.match(html, /Nor this<\/a>/)
+    assert.match(html, /Nor this either<\/a>/)
   })
 
   test('returns null when the page holds no work text', async () => {

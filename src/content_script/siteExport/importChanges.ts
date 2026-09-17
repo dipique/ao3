@@ -1,5 +1,5 @@
 import { cache, options, packIds, unpackIds } from '#common'
-import { MarkRequestError, submitMark, submitMarkViaTab } from '#content_script/markForLater.js'
+import { MarkRequestError, NOT_SIGNED_IN, submitMark, submitMarkViaTab } from '#content_script/markForLater.js'
 
 import type { ArchiveAct, ReplaySkip } from './replay.ts'
 
@@ -238,9 +238,13 @@ async function takeOffList(workId: string, delegating: boolean): Promise<boolean
  * AO3: a refusal it can explain (403, 422) because the POST arrived without an
  * `Origin`, and a request that never got an answer at all, which is what an
  * extension origin losing its privilege would look like from in here.
+ *
+ * The third is {@link NOT_SIGNED_IN}, and it is not worth delegating either:
+ * every AO3 tab in this browser shares the session that isn't there, so asking
+ * one would spend a tab to be told the same thing.
  */
 function worthDelegating(error: unknown): boolean {
   if (error instanceof MarkRequestError)
-    return error.status !== 429 && error.status < 500
+    return error.status !== 429 && error.status !== NOT_SIGNED_IN && error.status < 500
   return true
 }

@@ -43,11 +43,18 @@ export default function (): PartialDeep<browser._manifest.WebExtensionManifest> 
         run_at: 'document_start',
       },
     ],
+    // What an AO3 page may reach. `options_ui.html` used to be here and has been
+    // taken out: nothing on an archive page opens it (the toolbar and the menus
+    // go through `runtime.openOptionsPage()`), so listing it only let any script
+    // on the archive fetch or iframe the page that holds every setting.
+    //
+    // `icon.svg` stays, and not only because an icon is nothing to protect: this
+    // listing is also what makes the builder emit it, and the options page's
+    // `<link rel="icon">` points at it.
     web_accessible_resources: [
       {
         resources: [
           './icons/icon.svg',
-          './options_ui/options_ui.html',
           './data/fandom-index.json',
         ],
         matches: ['*://*.archiveofourown.org/*'],

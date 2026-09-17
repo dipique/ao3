@@ -271,6 +271,11 @@ export class HideWorks extends Unit {
       const parent = wrapper.parentNode! as HTMLLIElement
       delete parent.dataset.ao3eHidden
       delete parent.dataset.ao3eHiddenBy
+      // `hide` mode put this on the <li> itself, and the page sweep only removes
+      // `.AO3E` nodes — so without this a work stays invisible until the page is
+      // reloaded, however the rule that hid it was cleared. {@link file://../searchView/pristine.ts}
+      // undoes the same thing when a blurb goes back to the store.
+      parent.hidden = false
       wrapper.parentNode!.append(...wrapper.childNodes)
       wrapper.remove()
     }

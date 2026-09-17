@@ -3,7 +3,15 @@ import { Unit } from '#content_script/Unit.js'
 
 export class StyleTweaks extends Unit {
   override get name() { return 'StyleTweaks' }
-  override get enabled() { return this.options.styleWidthEnabled || this.options.showStatsColumns || this.options.hideMutedAuthorNotices }
+  // Every tweak this unit draws has to be named here, `forceAlignment` included:
+  // a reader whose only change is the alignment would otherwise have the unit
+  // filtered out before `ready()` ran, and nothing would be applied at all.
+  override get enabled() {
+    return this.options.styleWidthEnabled
+      || this.options.showStatsColumns
+      || this.options.forceAlignment !== null
+      || this.options.hideMutedAuthorNotices
+  }
 
   override async ready(): Promise<void> {
     const styleTag = document.createElement('style')

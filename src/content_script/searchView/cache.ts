@@ -204,6 +204,22 @@ export async function snapshotWorkIds(): Promise<Set<string>> {
   return listedIds(lists, legacy)
 }
 
+/**
+ * How many works a stored list holds, without reading one blurb.
+ *
+ * The list entry is ids and nothing else, so this is one small read — which is
+ * the point: it answers "is there anything here to lose?" for a caller that is
+ * about to overwrite the list ({@link file://./refresh.ts}) and must not pay the
+ * cost of loading it to find out.
+ */
+export async function snapshotSize(key: string): Promise<number> {
+  const list = (await cache.get('searchLists'))[key]
+  if (list && typeof list.ids === 'string')
+    return unpackOrderedIds(list.ids).length
+  const entry = (await readLegacy())[key]
+  return entry?.blurbsHtml?.length ?? 0
+}
+
 // ---------------------------------------------------------------------------
 // Writing.
 // ---------------------------------------------------------------------------

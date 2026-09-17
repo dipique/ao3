@@ -59,6 +59,15 @@ export interface ViewState {
   facetQueries: Partial<Record<FacetKey, string>>
   /** Facet groups the user had collapsed (the rest default open). */
   collapsedFacets: FacetKey[]
+  /**
+   * Rule-implied exclusions the reader has lifted by hand, as `key:value`.
+   *
+   * Part of the state rather than of the view, because a view is torn down and
+   * rebuilt on every options change — which is every mark click — and a lifted
+   * exclusion that lived only in the old view's closure came straight back each
+   * time, against what {@link SearchViewConfig.autoExcludes} promises.
+   */
+  releasedAutoExcludes: string[]
 }
 
 export interface SearchView {
@@ -251,7 +260,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // them, and only a deliberate un-exclude takes one off again.
   let autoExcludes: FacetValueRef[] = config.autoExcludes ?? []
   let autoKeys = new Set(autoExcludes.map(({ key, value }) => `${key}:${value}`))
-  const released = new Set<string>()
+  // Seeded from the snapshot, so a view reopened after a re-run does not re-impose
+  // what the reader lifted before it. See `ViewState.releasedAutoExcludes`.
+  const released = new Set<string>(config.initialState?.releasedAutoExcludes ?? [])
   // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
   // start blank. cloneFilterState so we never mutate the caller's snapshot.
   const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
@@ -1244,7 +1255,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       if (!(group.details as HTMLDetailsElement).open)
         collapsedFacets.push(group.key)
     }
-    return { filter: cloneFilterState(state), pageIndex, facetQueries, collapsedFacets }
+    return { filter: cloneFilterState(state), pageIndex, facetQueries, collapsedFacets, releasedAutoExcludes: [...released] }
   }
 
   // --- Assemble -------------------------------------------------------------

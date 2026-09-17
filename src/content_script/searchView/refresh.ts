@@ -6,7 +6,7 @@ import { PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 
 import type { Recovered } from './workPageBlurb.tsx'
 
-import { readSnapshot, writeSnapshot } from './cache.ts'
+import { readSnapshot, snapshotSize, writeSnapshot } from './cache.ts'
 import { detectPageCount, fetchPageDoc, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 
 /**
@@ -70,6 +70,16 @@ export interface RefreshOptions {
    * mirroring `SearchSource.recover` on the live path.
    */
   recover?: (works: Work[], signal?: AbortSignal) => Promise<Recovered>
+  /**
+   * This listing is only visible to the reader's own account, so a signed-out
+   * scrape of it is not a shorter list — it is a different page entirely, and
+   * writing what it holds would replace the list with nothing.
+   *
+   * Set by the caller, because which listings are private is a property of the
+   * source and this module only knows the descriptor. A public listing leaves it
+   * off: a signed-out scrape of one is perfectly good, minus restricted works.
+   */
+  requireLogin?: boolean
 }
 
 export interface RefreshResult {
@@ -99,11 +109,48 @@ export interface RefreshResult {
   /**
    * Page 1 came back with `body.logged-in`. False means AO3 served the signed-out
    * view, and what was scraped is at best partial: no restricted works, no
-   * private listing at all. The caller reports it; the snapshot is still written,
-   * because a signed-out scrape of a public listing is perfectly good.
+   * private listing at all. The caller reports it; for a public listing the
+   * snapshot is still written, because a signed-out scrape of one is perfectly
+   * good. For a private one see {@link RefreshOptions.requireLogin}.
    */
   loggedIn: boolean
+  /**
+   * Whether the stored list was actually replaced. The works came back either
+   * way — the caller can still show them — but a false here means what is in
+   * storage is still the old list, so anything planned against it (an export
+   * queue, a side table) is still valid.
+   */
+  written: boolean
+  /** Why {@link written} is false. */
+  notWritten?: NotWritten
 }
+
+/**
+ * Why a refresh declined to store what it scraped.
+ *
+ * - `blocked` — AO3 kept refusing; see {@link RefreshResult.blocked}.
+ * - `logged-out` — a private listing ({@link RefreshOptions.requireLogin})
+ *   fetched without a session. What came back is somebody else's view of that
+ *   URL, usually empty.
+ * - `emptied` — the *listing* turned up no blurbs at all, and nothing else
+ *   rescued any, where the stored list has works. That is a 200 with nothing in
+ *   it: a Cloudflare-cached signed-out copy, a listing AO3 briefly served wrong,
+ *   a selector that stopped matching. None of them are "the reader's list is
+ *   empty now", and all of them would take the blurbs and the cached text of
+ *   every work down with them.
+ *
+ *   Read off the listing rather than off the finished list on purpose: a list
+ *   that *selects* from its listing (the read list) can legitimately come out
+ *   empty — the reader unmarked everything — while the listing itself was
+ *   fetched perfectly well, and that case must still be stored.
+ *
+ *   What this can't tell apart is a listing AO3 served empty because the reader
+ *   really did empty it. Distinguishing the two needs the scrape to report
+ *   whether the results container was on the page at all, which it doesn't yet;
+ *   until then this errs towards keeping a list, since a list kept by mistake is
+ *   one the reader can delete and a list emptied by mistake is gone.
+ */
+export type NotWritten = 'blocked' | 'logged-out' | 'emptied'
 
 /**
  * Fetch the listing named by `descriptor` and rewrite its snapshot.
@@ -165,9 +212,20 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
   if (works.length > ceiling)
     works.length = ceiling
 
-  // See `RefreshResult.blocked`: what we have is not the list, so it does not
-  // become the stored one.
-  if (!blocked) {
+  // Three ways what we have is not the list, and so does not become the stored
+  // one (see `NotWritten`). Checked before the write rather than reported after
+  // it, because the write is what there is no undo for: it replaces the list,
+  // takes whatever side table the source keeps with it, and leaves every blurb
+  // and every cached work text an orphan the tidy-up offers to delete.
+  const notWritten: NotWritten | undefined = blocked
+    ? 'blocked'
+    : opts.requireLogin && !loggedIn
+      ? 'logged-out'
+      : scraped.length === 0 && works.length === 0 && await snapshotSize(cacheKey) > 0
+        ? 'emptied'
+        : undefined
+
+  if (!notWritten) {
     await writeSnapshot(cacheKey, works, descriptor)
     await onPersist?.(works)
   }
@@ -181,5 +239,7 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     recoveryBlocked,
     truncated: fetchedPages < totalPages,
     loggedIn,
+    written: !notWritten,
+    notWritten,
   }
 }

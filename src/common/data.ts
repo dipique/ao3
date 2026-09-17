@@ -391,7 +391,11 @@ function matchesValue(rule: Rule, subject: string): boolean {
 
   if (rule.matcher === 'regex') {
     try {
-      return new RegExp(rule.value.toLowerCase()).test(subject.toLowerCase())
+      // Case-insensitivity is the `i` flag's job, not `toLowerCase()`'s: lowering
+      // the *pattern* rewrites every negated class into its opposite (`\S`→`\s`,
+      // `\D`→`\d`, `\W`→`\w`, `\B`→`\b`), so `omega\S+verse` used to match the
+      // one set of tags the reader meant to exclude.
+      return new RegExp(rule.value, 'i').test(subject)
     }
     catch {
       // An invalid regex matches nothing rather than throwing mid-render.

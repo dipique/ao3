@@ -33,6 +33,16 @@ function pageToken(): string | null {
 }
 
 /**
+ * Stands for "AO3 answered, but it answered the signed-out way".
+ *
+ * Not a status AO3 sends: a signed-out mark request is a 302 to the sign-in
+ * page, which renders a 200. This is the one refusal that is about *us* rather
+ * than about the request, so it is the one refusal a second origin cannot get
+ * past — every AO3 tab in this browser shares the session that is missing.
+ */
+export const NOT_SIGNED_IN = 401
+
+/**
  * A request the archive answered, and refused.
  *
  * The status is kept rather than only formatted into the message because one
@@ -40,11 +50,13 @@ function pageToken(): string | null {
  * another origin could get past ({@link file://./siteExport/importChanges.ts}).
  */
 export class MarkRequestError extends Error {
-  /** What AO3 answered with. */
+  /** What AO3 answered with, or {@link NOT_SIGNED_IN}. */
   readonly status: number
 
   constructor(status: number) {
-    super(`Mark request failed (${status})`)
+    super(status === NOT_SIGNED_IN
+      ? 'AO3 answered as though you are signed out — sign in to AO3 and try again'
+      : `Mark request failed (${status})`)
     this.name = 'MarkRequestError'
     this.status = status
   }
@@ -65,14 +77,45 @@ export async function submitMark(workId: string, save: boolean): Promise<void> {
   const res = await fetch(getArchiveLink(`/works/${workId}/${action}`), {
     method: 'POST',
     credentials: 'same-origin',
-    // The action finishes by redirecting back to the listing. Keep the redirect
-    // opaque (we don't want that page) and read it as success.
-    redirect: 'manual',
+    // The action finishes by redirecting, and where it redirects *to* is the only
+    // thing separating "saved" from "you are signed out": both are a 302, and
+    // under `redirect: 'manual'` both arrive as an indistinguishable
+    // `opaqueredirect` whose headers can't be read either. So the redirect is
+    // followed and the URL it settles on is read — which is what the archive's
+    // own button does, one request further on than we used to go.
+    redirect: 'follow',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
     body: new URLSearchParams({ _method: 'patch', authenticity_token: token }).toString(),
   })
-  if (res.type !== 'opaqueredirect' && !res.ok)
+  // `fetch` settles on the headers, so the page the redirect landed on has not
+  // been downloaded yet and never needs to be. Dropping it keeps this to roughly
+  // what it cost before: the answer is in the URL, not in the HTML.
+  void res.body?.cancel().catch(() => {})
+  if (!res.ok)
     throw new MarkRequestError(res.status)
+  if (isLoginUrl(res.url))
+    throw new MarkRequestError(NOT_SIGNED_IN)
+}
+
+/**
+ * Whether a response settled on AO3's sign-in page.
+ *
+ * A signed-out request for one of these actions is answered with a 302 to
+ * `/users/login`, which then renders a perfectly successful 200. Taken at face
+ * value that reads as "saved": the toast says so, the saved-work index is
+ * rewritten around a work that was never saved, and a change file imported out
+ * of a site export ledgers the op as applied — so the work stays on Marked for
+ * Later for good, because nothing will ever try it again.
+ *
+ * {@link file://./siteExport/fetchWorkText.ts} makes the same check on its GETs.
+ */
+function isLoginUrl(url: string): boolean {
+  try {
+    return new URL(url, getArchiveLink('/')).pathname.startsWith('/users/login')
+  }
+  catch {
+    return false
+  }
 }
 
 /** Where the content script runs, which is the same thing as where this can be delegated. */

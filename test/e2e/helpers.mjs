@@ -1,7 +1,7 @@
-import http from 'node:http'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import http from 'node:http'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -202,9 +202,16 @@ export function installMock(seed) {
     get: keys => Promise.resolve((() => {
       const out = {}
       const ks = toArr(keys) ?? Object.keys(store)
-      for (const k of ks) if (k in store) out[k] = store[k]
-      if (keys && !Array.isArray(keys) && typeof keys === 'object')
-        for (const k of Object.keys(keys)) if (!(k in out)) out[k] = keys[k]
+      for (const k of ks) {
+        if (k in store)
+          out[k] = store[k]
+      }
+      if (keys && !Array.isArray(keys) && typeof keys === 'object') {
+        for (const k of Object.keys(keys)) {
+          if (!(k in out))
+            out[k] = keys[k]
+        }
+      }
       return out
     })()),
     set: (items) => {
@@ -215,8 +222,16 @@ export function installMock(seed) {
       listeners.forEach(l => l(changes, name))
       return Promise.resolve()
     },
-    remove: (keys) => { (toArr(keys) || []).forEach(k => delete store[k]); return Promise.resolve() },
-    clear: () => { Object.keys(store).forEach(k => delete store[k]); return Promise.resolve() },
+    remove: (keys) => {
+      for (const k of toArr(keys) || [])
+        delete store[k]
+      return Promise.resolve()
+    },
+    clear: () => {
+      for (const k of Object.keys(store))
+        delete store[k]
+      return Promise.resolve()
+    },
   })
   const onChanged = { addListener: l => listeners.add(l), removeListener: l => listeners.delete(l), hasListener: l => listeners.has(l) }
   const storage = { local: area('local'), sync: area('sync'), session: area('session'), managed: area('managed'), onChanged }
