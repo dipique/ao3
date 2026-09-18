@@ -4,6 +4,7 @@ import { ADDON_CLASS, api, isExtensionContextValid, logBanner, logger, options, 
 
 import { setMenusEnabled } from './contextTrigger.tsx'
 import { serveMarkRequests } from './markForLater.ts'
+import { captureSearchBaseline, installPendingSearch } from './pendingSearch.ts'
 import { applySurfaceTheme } from './theme.ts'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
@@ -61,6 +62,10 @@ async function run() {
   // run: at `document_start` there is no body to sample.
   applySurfaceTheme(opts.theme?.chosen)
 
+  // Before any unit fills the filter form in: what it says now is the search the
+  // listing on screen came from. A no-op on every run after the first.
+  captureSearchBaseline()
+
   await Promise.all(enabled.map(u => u.ready()))
 }
 
@@ -95,6 +100,9 @@ api.toast.addListener(async (...args) => {
 // POST that arrives with no `Origin` and no `Referer`. See
 // {@link file://./markForLater.ts} for who asks and when.
 serveMarkRequests()
+
+// The "your search filters changed" prompt and its Ctrl/⌘+Enter shortcut.
+installPendingSearch()
 
 run().catch((err) => {
   logger.error(err)

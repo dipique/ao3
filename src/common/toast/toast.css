@@ -51,6 +51,29 @@
         margin-right: 10px;
       }
 
+      .text {
+        flex: 1;
+      }
+
+      .close {
+        align-self: flex-start;
+        margin: -4px -4px 0 8px;
+        padding: 0 4px;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        opacity: 0.6;
+
+        &:hover,
+        &:focus-visible {
+          opacity: 1;
+        }
+      }
+
       .action {
         display: block;
         margin-top: 8px;

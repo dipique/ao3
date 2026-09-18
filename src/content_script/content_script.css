@@ -1564,6 +1564,58 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   overflow-y: auto;
 }
 
+/* A group's selected values, one collapsible section per direction, above the
+   rest. Excluded values start shut: rule-implied exclusions can pile up. */
+.AO3E--search-view--sel {
+  margin-bottom: 0.2em;
+  border-bottom: 1px dashed rgba(128, 128, 128, 0.3);
+}
+
+.AO3E--search-view--sel-head {
+  display: flex !important;
+  align-items: center;
+  gap: 0.3em;
+  width: 100%;
+  padding: 0.1em 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  color: inherit;
+  font-size: 0.9em;
+  text-align: left;
+}
+
+.AO3E--search-view--sel-chevron {
+  transition: transform 0.15s;
+  transform: rotate(-90deg);
+}
+
+.AO3E--search-view--sel-open .AO3E--search-view--sel-chevron {
+  transform: none;
+}
+
+.AO3E--search-view--sel-label {
+  font-weight: 600;
+}
+
+.AO3E--search-view--sel-require .AO3E--search-view--sel-label {
+  color: #0a5ad6;
+}
+
+.AO3E--search-view--sel-include .AO3E--search-view--sel-label {
+  color: #0a7a0a;
+}
+
+.AO3E--search-view--sel-exclude .AO3E--search-view--sel-label {
+  color: var(--ao3e-surface-danger);
+}
+
+.AO3E--search-view--sel-count {
+  opacity: 0.6;
+}
+
 .AO3E--search-view--row {
   display: flex;
   align-items: center;

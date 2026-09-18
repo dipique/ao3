@@ -6,10 +6,21 @@ import React from '#dom'
 import style from './toast.css?inline'
 
 export interface ToastOptions {
+  /** Milliseconds before it goes. `0` keeps it up until it is closed or {@link ToastHandle.hide}den. */
   timeout?: number
   type?: 'success' | 'error'
   /** A button under the message; clicking it runs `onClick` and dismisses the toast. */
   action?: { label: string, onClick: () => void }
+  /** Called once when it goes, however it goes — timed out, closed, its action, or {@link ToastHandle.hide}. */
+  onHide?: () => void
+}
+
+/** What {@link toast} hands back, for a caller that needs to change or withdraw it. */
+export interface ToastHandle {
+  /** Replace the message, leaving the icon and action as they are. */
+  setMessage: (message: string) => void
+  /** Take it down now. Safe to call more than once. */
+  hide: () => void
 }
 
 let toastContainer: HTMLElement | null = null
@@ -52,8 +63,10 @@ class Toast {
   private readonly timeout: number
   private readonly type: ToastOptions['type']
   private timeoutId: number | null = null
+  private hidden = false
+  private readonly onHide: ToastOptions['onHide']
 
-  constructor(message: string, { timeout = 5000, type, action }: ToastOptions = {}) {
+  constructor(message: string, { timeout = 5000, type, action, onHide }: ToastOptions = {}) {
     this.el = (
       <div
         class="toast"
@@ -71,7 +84,7 @@ class Toast {
             )
           }
           <div class="text">
-            {message}
+            <span class="message">{message}</span>
             {
               action && (
                 <button
@@ -87,11 +100,18 @@ class Toast {
               )
             }
           </div>
+          {
+            // A toast that never times out has to be closable by hand.
+            timeout === 0 && (
+              <button type="button" class="close" aria-label="Dismiss" onClick={() => this.hide()}>×</button>
+            )
+          }
         </div>
       </div>
     )
     this.timeout = timeout
     this.type = type
+    this.onHide = onHide
 
     instances.add(this)
   }
@@ -104,10 +124,18 @@ class Toast {
     setTimeout(sortToast, 50)
   }
 
+  setMessage(message: string): void {
+    const span = this.el.querySelector('.message')
+    if (span)
+      span.textContent = message
+  }
+
   hide(): void {
     const { el } = this
-    if (!el)
+    if (!el || this.hidden)
       return
+    this.hidden = true
+    this.onHide?.()
 
     el.style.opacity = '0'
     el.style.visibility = 'hidden'
@@ -128,12 +156,17 @@ class Toast {
   }
 
   start() {
+    if (this.timeout === 0 || this.hidden)
+      return
+    this.stop()
     this.timeoutId = globalThis.setTimeout(() => this.hide(), this.timeout) as unknown as number
   }
 }
 
-export function toast(message: string, options?: ToastOptions) {
-  new Toast(message, options).show()
+export function toast(message: string, options?: ToastOptions): ToastHandle {
+  const instance = new Toast(message, options)
+  instance.show()
+  return instance
 }
 
 function sortToast(): void {

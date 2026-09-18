@@ -1,9 +1,10 @@
 import type { Tag } from '#common'
 
-import { TagType, toast } from '#common'
+import { TagType } from '#common'
 import { getBlurb } from '#content_script/blurb.js'
 import { hasFilterSidebar, loadFandomIdLookup, resolveFandomIdSync } from '#content_script/filterSidebar.js'
 import { nativeTargetForTag } from '#content_script/filterTarget.js'
+import { searchFilterChanged } from '#content_script/pendingSearch.js'
 import { findFacetBridge } from '#content_script/searchView/facetBridge.js'
 import { Unit } from '#content_script/Unit.js'
 
@@ -58,9 +59,10 @@ const handled = new Set<string>()
  * - A value the reader is filtering *for* is never excluded.
  * - The sidebar has to be able to say it — see {@link canExclude}.
  *
- * Nothing is submitted. The sidebar is filled in and the reader presses Sort and
- * Filter when they're ready — the toast says so, since a filled-in form in a
- * collapsed sidebar is otherwise invisible.
+ * Nothing is submitted. The sidebar is filled in and the reader runs the search
+ * when they're ready — the pending-search prompt says so (see
+ * {@link searchFilterChanged}), since a filled-in form in a collapsed sidebar is
+ * otherwise invisible.
  *
  * Inside one of our own search views this unit does nothing: the view weighs
  * every work it holds, not just the page on screen, so its exclusions are worked
@@ -149,10 +151,7 @@ export class AutoExcludeHidden extends Unit {
 
     if (applied > 0) {
       this.logger.debug(`Excluded ${applied} value(s) hidden by rules from the filter.`)
-      toast(
-        `Excluded ${applied} hidden ${applied === 1 ? 'value' : 'values'} from the filter. Re-run the search to apply.`,
-        { type: 'success' },
-      )
+      searchFilterChanged(`Excluded ${applied} hidden ${applied === 1 ? 'value' : 'values'} from the filter.`)
     }
   }
 }

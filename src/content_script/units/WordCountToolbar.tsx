@@ -8,6 +8,7 @@ import type { MenuItem } from '#content_script/contextMenu.js'
 
 import { ADDON_CLASS, formatBoundPick, formatWordCountRange, isValidRange, sameRange, uniqueBounds, withBound } from '#common'
 import { attachMenuTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
+import { searchFilterChanged } from '#content_script/pendingSearch.js'
 import { findFacetBridge } from '#content_script/searchView/facetBridge.ts'
 import { Unit } from '#content_script/Unit.js'
 import { getWordCountRange, hasWordCountFields, setWordCountRange } from '#content_script/wordCountFilter.js'
@@ -23,7 +24,8 @@ import React from '#dom'
  * in-memory search views it drives that view's own word-count filter (via
  * {@link findFacetBridge}); on a native listing it fills AO3's Word Count filter
  * and stops there, like every other pick that lands in the sidebar — the reader
- * may have more to change, and runs the search when they're ready.
+ * may have more to change, and runs the search when they're ready (the
+ * pending-search prompt offers to, see {@link searchFilterChanged}).
  *
  * Both the "Words:" label and the number are wired, since either is a natural
  * thing to aim at.
@@ -55,7 +57,13 @@ function targetFor(el: Element): WordCountTarget | null {
   if (hasWordCountFields()) {
     return {
       current: () => getWordCountRange(),
-      apply: range => void setWordCountRange(range),
+      apply: (range) => {
+        if (!setWordCountRange(range))
+          return
+        searchFilterChanged(range
+          ? `Word count filter set to ${formatWordCountRange(range)} words.`
+          : 'Word count filter cleared.')
+      },
     }
   }
   return null

@@ -1,5 +1,6 @@
 import type { Language, Options } from '#common'
 
+import { searchFilterChanged } from '#content_script/pendingSearch.js'
 import { Unit } from '#content_script/Unit.js'
 
 /**
@@ -13,7 +14,8 @@ import { Unit } from '#content_script/Unit.js'
  *
  * Only a dropdown still on "any language" is filled in, so a language already
  * chosen (e.g. carried in the page URL) is left untouched. We only set the
- * control's value; the user still submits the filter form as normal.
+ * control's value and say so ({@link searchFilterChanged}); the reader runs the
+ * search.
  */
 const LANGUAGE_SELECT_SELECTOR = 'select[name$="[language_id]"]'
 
@@ -89,7 +91,9 @@ export class DefaultSearchLanguage extends Unit {
       applied++
     }
 
-    if (applied > 0)
+    if (applied > 0) {
       this.logger.debug(`Defaulted ${applied} language dropdown(s) to "${language.label}".`)
+      searchFilterChanged(`Language filter set to ${language.label}.`)
+    }
   }
 }

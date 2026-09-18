@@ -1,6 +1,7 @@
 import type { Options, WordCountRange } from '#common'
 
-import { isValidRange } from '#common'
+import { formatWordCountRange, isValidRange } from '#common'
+import { searchFilterChanged } from '#content_script/pendingSearch.js'
 import { Unit } from '#content_script/Unit.js'
 import { getWordCountRange, setWordCountRange, wordCountControl } from '#content_script/wordCountFilter.js'
 
@@ -12,8 +13,8 @@ import { getWordCountRange, setWordCountRange, wordCountControl } from '#content
  * the same deal: it runs at the same point (page ready), fills the same Sort &
  * Filter sidebar (plus the advanced search page's single `word_count` field),
  * and only when nothing is set yet — so a range already chosen, or one carried
- * in the page URL, is left alone. We only set the controls; the user still
- * submits the filter form as normal.
+ * in the page URL, is left alone. We only set the controls and say so; the
+ * reader runs the search.
  */
 
 /** The default range, or null when the setting is off or its bounds are unusable. */
@@ -56,7 +57,9 @@ export class DefaultSearchWordCount extends Unit {
     if (getWordCountRange(this.root) !== null)
       return
 
-    if (setWordCountRange(range, this.root))
+    if (setWordCountRange(range, this.root)) {
       this.logger.debug('Defaulted the word count filter.', range)
+      searchFilterChanged(`Word count filter set to ${formatWordCountRange(range)} words.`)
+    }
   }
 }

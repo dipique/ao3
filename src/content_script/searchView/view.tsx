@@ -68,6 +68,13 @@ export interface ViewState {
    * time, against what {@link SearchViewConfig.autoExcludes} promises.
    */
   releasedAutoExcludes: string[]
+  /**
+   * The selection sections (a group's required / included / excluded values) the
+   * reader has opened or shut by hand, keyed `key:dir`. The rest sit at their
+   * default — open, except the excluded ones, which rule-implied exclusions can
+   * fill faster than anyone wants to scroll past.
+   */
+  openSelections: Record<string, boolean>
 }
 
 export interface SearchView {
@@ -263,6 +270,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // Seeded from the snapshot, so a view reopened after a re-run does not re-impose
   // what the reader lifted before it. See `ViewState.releasedAutoExcludes`.
   const released = new Set<string>(config.initialState?.releasedAutoExcludes ?? [])
+  // Selection sections opened or shut by hand; see `ViewState.openSelections`.
+  // Kept per view rather than per group, so a facet rebuild (a refresh) keeps them.
+  const openSelections = new Map<string, boolean>(Object.entries(config.initialState?.openSelections ?? {}))
   // Restore a prior snapshot (e.g. after a global re-run reopened the view), else
   // start blank. cloneFilterState so we never mutate the caller's snapshot.
   const state: FilterState = config.initialState ? cloneFilterState(config.initialState.filter) : emptyFilterState()
@@ -328,6 +338,15 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     requireBtn: HTMLButtonElement
     buttons: { dir: FacetDir, btn: HTMLButtonElement }[]
   }
+  /** One collapsible run of a group's selected values, all in one direction. */
+  interface SelectionSectionRef {
+    dir: FacetDir
+    el: HTMLElement
+    head: HTMLButtonElement
+    countEl: HTMLElement
+    /** Where this direction's selected rows are moved to by applyRowOrder(). */
+    body: HTMLElement
+  }
   interface FacetGroupRef {
     key: FacetKey
     details: HTMLElement
@@ -345,6 +364,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     valueSortDir: 'asc' | 'desc'
     /** Last row order applied to the DOM, to skip churn when it's unchanged. */
     rowOrder: FacetRowRef[]
+    /** The section each row of {@link rowOrder} was put in (`null`: unselected). */
+    rowDirs: (FacetDir | null)[]
+    /** The selected values, by direction, above the unselected rows. */
+    sections: SelectionSectionRef[]
     /** The reorder arrows, disabled at the ends of the list. */
     upBtn: HTMLButtonElement
     downBtn: HTMLButtonElement
@@ -654,6 +677,43 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       persist()
   }
 
+  const SECTION_LABELS: Record<FacetDir, string> = { require: 'Required', include: 'Included', exclude: 'Excluded' }
+
+  /** The one direction a value is selected in, if any (they're exclusive). */
+  function selectedDir(key: FacetKey, value: string): FacetDir | null {
+    return FACET_DIRS.find(dir => state.facets[key][dir].has(value)) ?? null
+  }
+
+  function isSectionOpen(key: FacetKey, dir: FacetDir): boolean {
+    return openSelections.get(`${key}:${dir}`) ?? dir !== 'exclude'
+  }
+
+  function selectionSection(key: FacetKey, dir: FacetDir): SelectionSectionRef {
+    const countEl = (<span class={cx('sel-count')} />) as HTMLElement
+    const head = (
+      <button type="button" class={cx('sel-head')}>
+        <MdiChevronDown class={cx('sel-chevron')} />
+        <span class={cx('sel-label')}>{SECTION_LABELS[dir]}</span>
+        {countEl}
+      </button>
+    ) as HTMLElement as HTMLButtonElement
+    const body = (<div class={cx('sel-body')} />) as HTMLElement
+    const el = (
+      <div class={`${cx('sel')}  ${cx(`sel-${dir}`)}`}>
+        {head}
+        {body}
+      </div>
+    ) as HTMLElement
+    const section: SelectionSectionRef = { dir, el, head, countEl, body }
+    head.addEventListener('click', () => {
+      openSelections.set(`${key}:${dir}`, !isSectionOpen(key, dir))
+      const group = facetGroups.find(g => g.key === key)
+      if (group)
+        applyGroupVisibility(group)
+    })
+    return section
+  }
+
   function facetRow(key: FacetKey, { value, count }: FacetValueCount): FacetRowRef {
     const require = (
       <button type="button" class={`${cx('toggle')}  ${cx('toggle-require')}`} aria-pressed="false" title={`Require "${value}" — every shown work must have this tag`}>
@@ -782,7 +842,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       }
       upBtn.addEventListener('click', onMove(-1))
       downBtn.addEventListener('click', onMove(1))
-      const bodyEl = (<div class={cx('group-body')}>{rows.map(r => r.row)}</div>) as HTMLElement
+      const sections = FACET_DIRS.map(dir => selectionSection(key, dir))
+      const bodyEl = (
+        <div class={cx('group-body')}>
+          {sections.map(s => s.el)}
+          {rows.map(r => r.row)}
+        </div>
+      ) as HTMLElement
       const group = (
         <details class={cx('group')} open={!collapsed}>
           <summary class={cx('group-title')}>
@@ -811,6 +877,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         valueSort: 'count',
         valueSortDir: 'desc',
         rowOrder: rows,
+        rowDirs: rows.map(() => null),
+        sections,
         upBtn,
         downBtn,
       }
@@ -891,6 +959,23 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     }
     group.countEl.textContent = String(shown)
     group.details.classList.toggle(HIDDEN_CLASS, relevant === 0)
+    // A section shows when it has a row to show, and opens when the reader has
+    // it open — or while they're typing in the filter box, so a match isn't
+    // found only to sit inside a shut section.
+    for (const section of group.sections) {
+      let count = 0
+      for (const row of section.body.children) {
+        if (!row.classList.contains(HIDDEN_CLASS))
+          count++
+      }
+      section.el.classList.toggle(HIDDEN_CLASS, count === 0)
+      section.countEl.textContent = String(count)
+      const open = q !== '' || isSectionOpen(group.key, section.dir)
+      section.el.classList.toggle(cx('sel-open'), open)
+      section.body.classList.toggle(HIDDEN_CLASS, !open)
+      section.head.setAttribute('aria-expanded', String(open))
+      section.head.title = `${open ? 'Hide' : 'Show'} ${SECTION_LABELS[section.dir].toLowerCase()} ${FACET_LABELS[group.key].toLowerCase()}`
+    }
   }
 
   /**
@@ -918,21 +1003,29 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   /**
    * Re-sort a group's value rows in the DOM (selection-first, then by the chosen
-   * count) and mark which count column is active. The row nodes are only moved
-   * when the order actually changed, so a render that doesn't disturb the order
-   * touches no DOM.
+   * count) and mark which count column is active. Selected rows go into their
+   * direction's section, the rest follow the sections. The row nodes are only
+   * moved when the order or a selection actually changed, so a render that
+   * disturbs neither touches no DOM.
    */
   function applyRowOrder(group: FacetGroupRef): void {
     group.body.classList.toggle(cx('sort-by-result'), group.valueSort === 'result')
     group.body.classList.toggle(cx('sort-by-count'), group.valueSort === 'count')
     group.body.classList.toggle(cx('sort-by-name'), group.valueSort === 'name')
     const ordered = orderedRows(group)
+    const dirs = ordered.map(r => selectedDir(group.key, r.value))
     const unchanged = ordered.length === group.rowOrder.length
-      && ordered.every((r, i) => group.rowOrder[i] === r)
+      && ordered.every((r, i) => group.rowOrder[i] === r && group.rowDirs[i] === dirs[i])
     if (unchanged)
       return
     group.rowOrder = ordered
-    group.body.replaceChildren(...ordered.map(r => r.row))
+    group.rowDirs = dirs
+    for (const section of group.sections)
+      section.body.replaceChildren(...ordered.filter((_, i) => dirs[i] === section.dir).map(r => r.row))
+    group.body.replaceChildren(
+      ...group.sections.map(s => s.el),
+      ...ordered.filter((_, i) => dirs[i] === null).map(r => r.row),
+    )
   }
 
   /**
@@ -1255,7 +1348,14 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       if (!(group.details as HTMLDetailsElement).open)
         collapsedFacets.push(group.key)
     }
-    return { filter: cloneFilterState(state), pageIndex, facetQueries, collapsedFacets, releasedAutoExcludes: [...released] }
+    return {
+      filter: cloneFilterState(state),
+      pageIndex,
+      facetQueries,
+      collapsedFacets,
+      releasedAutoExcludes: [...released],
+      openSelections: Object.fromEntries(openSelections),
+    }
   }
 
   // --- Assemble -------------------------------------------------------------

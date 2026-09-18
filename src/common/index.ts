@@ -36,6 +36,7 @@ export * from './syncMessages.ts'
 export { syncMeta } from './syncMeta.ts'
 export type { SyncMeta, SyncPause } from './syncMeta.ts'
 
+export type { ToastHandle, ToastOptions } from './toast/toast.tsx'
 export { toast } from './toast/toast.tsx'
 
 export * from './utils.ts'

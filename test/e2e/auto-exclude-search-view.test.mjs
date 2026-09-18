@@ -166,6 +166,31 @@ describe('auto-excluding what the rules hide, in a search view', { skip }, () =>
     assert.deepEqual(await facetRow('Gone'), { shown: true, excluded: true })
   })
 
+  /** The Additional Tags group's excluded section: whether it's open, and what it holds. */
+  const excludedSection = () => page.evaluate(() => {
+    const section = [...document.querySelectorAll('.AO3E--search-view--sel-exclude')]
+      .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent.trim() === 'Gone')
+    if (!section)
+      return null
+    const body = section.querySelector('.AO3E--search-view--sel-body')
+    return {
+      shown: !section.classList.contains('AO3E--search-view--hidden'),
+      expanded: section.querySelector('.AO3E--search-view--sel-head').getAttribute('aria-expanded') === 'true',
+      bodyShown: !body.classList.contains('AO3E--search-view--hidden'),
+      count: section.querySelector('.AO3E--search-view--sel-count').textContent,
+    }
+  })
+
+  test('the excluded tags sit in their own section, shut until the reader opens it', async () => {
+    assert.deepEqual(await excludedSection(), { shown: true, expanded: false, bodyShown: false, count: '1' })
+    await page.evaluate(() => {
+      const section = [...document.querySelectorAll('.AO3E--search-view--sel-exclude')]
+        .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent.trim() === 'Gone')
+      section.querySelector('.AO3E--search-view--sel-head').click()
+    })
+    assert.deepEqual(await excludedSection(), { shown: true, expanded: true, bodyShown: true, count: '1' })
+  })
+
   test('a hide no filter can express still just takes the work away', async () => {
     const titles = await visibleTitles()
     assert.ok(!titles.includes('A Spanish one'))

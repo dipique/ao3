@@ -73,7 +73,7 @@ export interface Options {
    * becomes a facet exclusion instead, which the view applies as it goes.
    *
    * The controls are only filled in; nothing is submitted, so a native listing
-   * takes effect the next time the reader presses Sort and Filter.
+   * takes effect when the reader runs the search — which a prompt offers to do.
    */
   autoExcludeHidden: boolean
   /**
