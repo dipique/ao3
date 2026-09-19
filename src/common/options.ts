@@ -193,6 +193,14 @@ export interface Options {
    * range.
    */
   searchWordCount: { enabled: boolean, from: number | null, to: number | null }
+  /**
+   * Click a work's chapter total (or the "Chapters:" label) on a listing for a
+   * menu narrowing it to complete works or works in progress. Drives AO3's own
+   * Completion Status filter on native listings, and the in-memory Completion
+   * Status facet inside our search views — the same split as
+   * {@link Options.wordCountToolbar}.
+   */
+  completionToolbar: boolean
 
   styleWidthEnabled: boolean
   styleWidth: number

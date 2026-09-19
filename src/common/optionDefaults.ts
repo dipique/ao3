@@ -53,6 +53,7 @@ export const OPTION_DEFAULTS: Options = {
   searchLanguage: { enabled: false, language: null },
   wordCountToolbar: { enabled: false, ranges: DEFAULT_WORD_COUNT_RANGES.map(range => ({ ...range })) },
   searchWordCount: { enabled: false, from: null, to: null },
+  completionToolbar: false,
 
   styleWidthEnabled: true,
   styleWidth: 40,

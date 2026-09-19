@@ -8,6 +8,8 @@ import {
   buildFacets,
   buildFilteredFacets,
   cloneFilterState,
+  completionOf,
+  completionValue,
   computeView,
   emptyFilterState,
   facetValues,
@@ -290,5 +292,30 @@ describe('the completion facet', () => {
   test('reads the work’s own complete flag', () => {
     assert.deepEqual(facetValues(work(), 'completion'), ['Complete'])
     assert.deepEqual(facetValues(work({ complete: false }), 'completion'), ['Work in Progress'])
+  })
+
+  /** A completion selection from `{ include, exclude, require }` value lists. */
+  const sel = ({ include = [], exclude = [], require = [] } = {}) =>
+    ({ include: new Set(include), exclude: new Set(exclude), require: new Set(require) })
+
+  test('an empty selection shows both sides', () => {
+    assert.equal(completionOf(sel()), null)
+  })
+
+  test('including one side, or excluding the other, narrows to it', () => {
+    assert.equal(completionOf(sel({ include: ['Complete'] })), 'complete')
+    assert.equal(completionOf(sel({ exclude: ['Work in Progress'] })), 'complete')
+    assert.equal(completionOf(sel({ require: ['Work in Progress'] })), 'incomplete')
+    assert.equal(completionOf(sel({ exclude: ['Complete'] })), 'incomplete')
+  })
+
+  test('a selection admitting both sides, or neither, is no single choice', () => {
+    assert.equal(completionOf(sel({ include: ['Complete', 'Work in Progress'] })), null)
+    assert.equal(completionOf(sel({ exclude: ['Complete', 'Work in Progress'] })), null)
+  })
+
+  test('each choice writes the value that reads back as it', () => {
+    for (const choice of ['complete', 'incomplete'])
+      assert.equal(completionOf(sel({ include: [completionValue(choice)] })), choice)
   })
 })

@@ -2,10 +2,15 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
+import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
+
+/** This build's sync version, and a newer build's. */
+const V = SYNC_SCHEMA_VERSION
+const NEWER = V + 1
 
 const HELD = {
   reason: 'held',
@@ -72,14 +77,14 @@ describe('options UI — sync safety', { skip }, () => {
   })
 
   test('turning sync on against a newer sync version is refused, and the switch goes back off', async () => {
-    const page = await open({}, { setSyncEnabled: { ok: false, reason: 'newer-version', remoteVersion: 3, version: 2 } })
+    const page = await open({}, { setSyncEnabled: { ok: false, reason: 'newer-version', remoteVersion: NEWER, version: V } })
     try {
       const toggle = await syncSwitch(page)
       assert.ok(await toggle.evaluate(el => !!el), 'the sync switch is on the page')
       await toggle.evaluate(el => el.click())
       await sleep(400)
 
-      assert.match(await text(page, '[data-sync-refusal]') ?? '', /^Can't turn on sync: .*sync version 3; this browser has 2\)/)
+      assert.match(await text(page, '[data-sync-refusal]') ?? '', new RegExp(`^Can't turn on sync: .*sync version ${NEWER}; this browser has ${V}\\)`))
       assert.equal(await toggle.evaluate(el => el.getAttribute('aria-checked')), 'false')
       assert.deepEqual(await page.evaluate(() => window.__sent.filter(m => m.name === 'setSyncEnabled').map(m => m.args)), [[true]])
     }
@@ -108,9 +113,9 @@ describe('options UI — sync safety', { skip }, () => {
   })
 
   test('a version pause explains itself without offering answers', async () => {
-    const page = await open({ 'sync.enabled': true, 'sync.pause': { reason: 'newer-version', remoteVersion: 3 } })
+    const page = await open({ 'sync.enabled': true, 'sync.pause': { reason: 'newer-version', remoteVersion: NEWER } })
     try {
-      assert.match(await text(page, '[data-sync-pause="newer-version"] p') ?? '', /^Sync is paused: .*sync version 3; this browser has 2\)/)
+      assert.match(await text(page, '[data-sync-pause="newer-version"] p') ?? '', new RegExp(`^Sync is paused: .*sync version ${NEWER}; this browser has ${V}\\)`))
       assert.equal(await page.$('[data-sync-keep]'), null)
     }
     finally {
@@ -129,7 +134,7 @@ describe('options UI — sync safety', { skip }, () => {
   })
 
   test('a background answering with another build is called out of date', async () => {
-    const page = await open({ 'sync.enabled': true }, { getBuildInfo: { buildId: 'some-other-build', syncVersion: 2 } })
+    const page = await open({ 'sync.enabled': true }, { getBuildInfo: { buildId: 'some-other-build', syncVersion: V } })
     try {
       assert.match(await text(page, '[data-sync-stale]') ?? '', /Sync may not work until then\.$/)
     }

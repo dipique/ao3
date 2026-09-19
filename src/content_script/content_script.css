@@ -459,10 +459,13 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 
 /*
  * The word count in a blurb's stats, once WordCountToolbar has wired it to the
- * range menu. A dotted underline is the only hint that it does something —
- * anything stronger would read as a link, which it isn't.
+ * range menu — and likewise the chapter total and its label, once
+ * CompletionToolbar has wired them to the completion menu. A dotted underline
+ * is the only hint that it does something — anything stronger would read as a
+ * link, which it isn't.
  */
-.AO3E--word-count {
+.AO3E--word-count,
+.AO3E--completion {
   cursor: pointer;
   text-decoration: underline dotted;
   text-decoration-thickness: 1px;

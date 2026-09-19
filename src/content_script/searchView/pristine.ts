@@ -28,7 +28,8 @@ const STYLE_PREFIX = '--ao3e-'
  * do their `data-ao3e-*` attributes and `--ao3e-*` colours. The exceptions are
  * undone by name — HideWorks' wrapper around a hidden work's children and the
  * `hidden` it sets on the `<li>`, Stats' unmarked `<div>` around each `dt`/`dd`
- * pair and the reformatted numbers it stashes the originals of.
+ * pair and the reformatted numbers it stashes the originals of, and the span the
+ * completion menu wraps around a chapter total, whose text is AO3's.
  */
 export function pristineBlurb<T extends Element>(blurb: T, { inPlace = false } = {}): T {
   const li = inPlace ? blurb : blurb.cloneNode(true) as T
@@ -37,6 +38,9 @@ export function pristineBlurb<T extends Element>(blurb: T, { inPlace = false } =
   }
 
   li.querySelectorAll(`.${ADDON_CLASS}--hide-works--wrapper`).forEach(unwrap)
+  // The completion menu's span around a chapter total (the `dt` it marks keeps
+  // its node, and loses the class below).
+  li.querySelectorAll(`span.${ADDON_CLASS}--completion`).forEach(unwrap)
   li.removeAttribute('hidden')
   // AO3's own stats list holds nothing but `dt`/`dd` pairs.
   li.querySelectorAll('dl.stats > div').forEach(unwrap)

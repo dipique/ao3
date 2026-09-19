@@ -3,6 +3,7 @@ import type { Unit } from '#content_script/Unit.js'
 import { AutoExcludeHidden } from './AutoExcludeHidden.ts'
 import { CaptureMarkButtons } from './CaptureMarkButtons.ts'
 import { CollapsibleDashboard } from './CollapsibleDashboard.ts'
+import { CompletionToolbar } from './CompletionToolbar.tsx'
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { DefaultSearchLanguage } from './DefaultSearchLanguage.ts'
 import { DefaultSearchWordCount } from './DefaultSearchWordCount.ts'
@@ -68,6 +69,7 @@ export const UNITS = [
   FilterWorkToolbar,
   FilterSeriesToolbar,
   WordCountToolbar,
+  CompletionToolbar,
   SearchMarkedForLater,
   // After SearchMarkedForLater, whose button its own sits next to.
   SearchReadWorks,

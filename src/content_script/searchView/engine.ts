@@ -1,4 +1,5 @@
 import type { Work } from '#content_script/blurb.js'
+import type { Completion } from '#content_script/completionFilter.js'
 
 /**
  * DOM-free filter/sort/facet engine for the in-memory search view. Operates on
@@ -71,6 +72,10 @@ export const SORT_LABELS: Record<SortKey, string> = {
   bookmarks: 'Bookmarks',
 }
 
+/** The two values of the `completion` facet group. */
+export const COMPLETE_VALUE = 'Complete'
+export const WIP_VALUE = 'Work in Progress'
+
 export function facetValues(work: Work, key: FacetKey): string[] {
   switch (key) {
     // Precomputed by the host, not derived here: a work's statuses depend on the
@@ -87,8 +92,37 @@ export function facetValues(work: Work, key: FacetKey): string[] {
     case 'characters': return work.characters
     case 'freeforms': return work.freeforms
     case 'language': return work.language ? [work.language] : []
-    case 'completion': return [work.complete ? 'Complete' : 'Work in Progress']
+    case 'completion': return [work.complete ? COMPLETE_VALUE : WIP_VALUE]
   }
+}
+
+/** Whether a completion selection lets works carrying `value` through. */
+function completionAdmits(sel: FacetSelection, value: string): boolean {
+  if (sel.exclude.has(value))
+    return false
+  if (sel.include.size > 0 && !sel.include.has(value))
+    return false
+  // A work carries exactly one completion value, so requiring any other
+  // shuts it out.
+  return [...sel.require].every(required => required === value)
+}
+
+/**
+ * Read a `completion` facet selection as the one choice AO3's own filter offers:
+ * complete works only, works in progress only, or (null) either. Any spelling
+ * that narrows to one side counts — including one, or excluding the other.
+ */
+export function completionOf(sel: FacetSelection): Completion | null {
+  const complete = completionAdmits(sel, COMPLETE_VALUE)
+  const wip = completionAdmits(sel, WIP_VALUE)
+  if (complete === wip)
+    return null
+  return complete ? 'complete' : 'incomplete'
+}
+
+/** The facet value that stands for `completion`, for writing it into the group. */
+export function completionValue(completion: Completion): string {
+  return completion === 'complete' ? COMPLETE_VALUE : WIP_VALUE
 }
 
 /**

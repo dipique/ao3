@@ -80,6 +80,13 @@
       <OptionRowSearchWordCount />
       <OptionDivider />
       <OptionRowWordCountRanges />
+      <OptionDivider />
+      <OptionRow
+        title="Completion menu"
+        subtitle="Click a work’s chapter total in a listing — the 5 of 1/5, or the ? of 1/? — or the “Chapters:” label for a menu offering completed works only or incomplete works only. On a normal listing your pick sets AO3's own Completion Status filter, ready for you to run the search; inside an instant search view it filters the loaded list instead."
+      >
+        <OptionSwitch option-id="completionToolbar" />
+      </OptionRow>
     </OptionSubsection>
 
     <OptionSubsection

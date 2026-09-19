@@ -1,4 +1,5 @@
 import type { WordCountRange } from '#common'
+import type { Completion } from '#content_script/completionFilter.js'
 
 import type { FacetDir, FacetKey } from './engine.ts'
 
@@ -30,6 +31,10 @@ export interface FacetBridge {
   getWordCount: () => WordCountRange | null
   /** Replace those bounds (null clears them) and re-run the filter. */
   setWordCount: (range: WordCountRange | null) => void
+  /** Which side of completion the view narrows to, or null when it shows both. */
+  getCompletion: () => Completion | null
+  /** Narrow to one side (null shows both) and re-run the filter. */
+  setCompletion: (completion: Completion | null) => void
 }
 
 /** Results container → its bridge. At most a handful of entries (one per open view). */

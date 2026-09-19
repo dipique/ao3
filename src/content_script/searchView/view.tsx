@@ -18,6 +18,8 @@ import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
 import {
   buildFacets,
   cloneFilterState,
+  completionOf,
+  completionValue,
   computeView,
   emptyFilterState,
   FACET_KEYS,
@@ -1382,6 +1384,23 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       minInput.value = state.wordsMin != null ? String(state.wordsMin) : ''
       maxInput.value = state.wordsMax != null ? String(state.wordsMax) : ''
       filterChanged()
+    },
+    getCompletion: () => completionOf(state.facets.completion),
+    setCompletion: (completion) => {
+      // AO3's filter is one choice of three, so the pick replaces whatever the
+      // group held rather than adding to it — the facet rows then show it as
+      // one included value.
+      const sel = state.facets.completion
+      for (const value of sel.exclude) {
+        if (autoKeys.has(`completion:${value}`))
+          released.add(`completion:${value}`)
+      }
+      for (const dir of FACET_DIRS)
+        sel[dir].clear()
+      if (completion)
+        sel.include.add(completionValue(completion))
+      filterChanged()
+      notifyFacetChange()
     },
   })
 

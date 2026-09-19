@@ -45,22 +45,30 @@ export class Stats extends Unit {
 
       // Get stat values as numbers if they are numbers
       // Make sure to split on / so we get both chapter counts
-      const statNumericValues: [boolean, string][] = statValueElement
+      const hasNumber = statValueElement
         .textContent!
         .replace(/,/g, '')
         .split('/')
-        .map(val => [!Number.isNaN(+val), val])
-      if (!statNumericValues.some(([isNum]) => isNum))
+        .some(val => !Number.isNaN(+val))
+      if (!hasNumber)
         continue
       statValueElement.dataset.ao3eOriginal = statValueElement.textContent!
-      statValueElement.textContent = statNumericValues
-        .map(([isNum, val]) => {
-          if (isNum)
-            return val.replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009')
-          else
-            return val
-        })
-        .join('/')
+      // Text node by text node rather than through `textContent`, so markup
+      // another unit put inside the value survives \u2014 the completion menu wraps
+      // a chapter total in a span of its own. A number never straddles two
+      // nodes, so formatting each alone gives what formatting the whole would.
+      const walker = document.createTreeWalker(statValueElement, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode())
+        (node as Text).data = withThousandsSeparators((node as Text).data)
     }
   }
+}
+
+/** `12,345/100000` \u2192 `12 345/100 000` (thin spaces); anything not a number (`?`) passes through. */
+function withThousandsSeparators(text: string): string {
+  return text
+    .replace(/,/g, '')
+    .split('/')
+    .map(val => Number.isNaN(+val) ? val : val.replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009'))
+    .join('/')
 }

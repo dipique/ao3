@@ -4,6 +4,7 @@ import type { Unit } from '#content_script/Unit.js'
 import { ruleMatchesTag } from '#common'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { FACET_TAG_TYPES } from '#content_script/filterTarget.js'
+import { CompletionToolbar } from '#content_script/units/CompletionToolbar.tsx'
 import { FandomToolbar } from '#content_script/units/FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from '#content_script/units/FilterEntityToolbars.tsx'
 import { HideAuthorToolbar } from '#content_script/units/HideAuthorToolbar.tsx'
@@ -41,7 +42,7 @@ const BLURB_UNITS = [HideWorks, Stats, HighlightTags, HideFilters, HighlightAuth
  * run once over the whole results container, not per blurb. Their menus open on
  * right-click / long-press (and the indicators they add open on click).
  */
-const CONTAINER_UNITS = [TagToolbar, RequiredTagsToolbar, FandomToolbar, HideAuthorToolbar, FilterWorkToolbar, FilterSeriesToolbar, WordCountToolbar] as typeof Unit[]
+const CONTAINER_UNITS = [TagToolbar, RequiredTagsToolbar, FandomToolbar, HideAuthorToolbar, FilterWorkToolbar, FilterSeriesToolbar, WordCountToolbar, CompletionToolbar] as typeof Unit[]
 
 function runUnit(U: typeof Unit, options: Options, root: ParentNode): void {
   const unit = new U(options, root)

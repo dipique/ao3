@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixture, range, rulesFixture, textReplacementsFixture } from './harness.mjs'
 
 /** The options the first sync build knew: everything but what came later. */
@@ -86,6 +87,10 @@ describe('sync scenarios', () => {
   })
 
   describe('sync versions', () => {
+    // The build under test speaks the current version; `V + 1` stands for a
+    // newer build, and version 1 for the stale build the legacy device mimics.
+    const V = SYNC_SCHEMA_VERSION
+
     test('rollout: an older build\'s copy is waited on, not adopted, until an updated browser replaces it', async () => {
       const cloud = createCloud()
       const laptop = mainBrowser(cloud, 'laptop', { version: 1 })
@@ -107,10 +112,10 @@ describe('sync scenarios', () => {
 
       // The laptop is updated, and moves the cloud to the new version.
       const pushes = legacy.pushes
-      await laptop.restart({ version: 2, init: true })
+      await laptop.restart({ version: V, init: true })
       await cloud.run()
 
-      assert.equal(cloud.manifest().v, 2)
+      assert.equal(cloud.manifest().v, V)
       assert.equal(legacy.pushes, pushes, 'the stale build went quiet')
       assert.equal(fresh.meta.pause, null)
       assert.equal(fresh.options.rules.filters.length, 40)
@@ -130,26 +135,26 @@ describe('sync scenarios', () => {
       await cloud.run()
 
       // The laptop is updated to a build with a higher sync version.
-      await laptop.restart({ version: 3, init: true })
+      await laptop.restart({ version: V + 1, init: true })
       await cloud.run()
-      assert.equal(cloud.manifest().v, 3)
+      assert.equal(cloud.manifest().v, V + 1)
 
       assert.equal(desktop.meta.pause?.reason, 'newer-version')
-      assert.equal(desktop.meta.pause.remoteVersion, 3)
+      assert.equal(desktop.meta.pause.remoteVersion, V + 1)
       await desktop.edit({ wordsPerMinute: 123 })
       await cloud.run()
       assert.equal(desktop.meta.dirty, false, 'edits on the outdated build aren\'t queued to sync')
-      assert.equal(cloud.manifest().v, 3)
+      assert.equal(cloud.manifest().v, V + 1)
 
       // A browser on the old build can't turn sync on at all.
       const fresh = createDevice(cloud, 'fresh')
       const result = await fresh.enableSync()
-      assert.deepEqual(result, { ok: false, reason: 'newer-version', remoteVersion: 3, version: 2 })
+      assert.deepEqual(result, { ok: false, reason: 'newer-version', remoteVersion: V + 1, version: V })
       assert.equal(fresh.meta.enabled, false)
 
       await laptop.edit({ wordsPerMinute: 321 })
       await cloud.run()
-      await desktop.restart({ version: 3, init: true })
+      await desktop.restart({ version: V + 1, init: true })
       await cloud.run()
       assert.equal(desktop.meta.pause, null)
       assert.equal(desktop.options.wordsPerMinute, 321, 'the update adopted the newer copy')
@@ -168,7 +173,7 @@ describe('sync scenarios', () => {
       await legacy.overwrite()
       await cloud.run()
 
-      assert.equal(cloud.manifest().v, 2, 'the current version is back')
+      assert.equal(cloud.manifest().v, V, 'the current version is back')
       for (const browser of [laptop, desktop]) {
         assert.equal(browser.options.rules.filters.length, 40, `${browser.name} kept its rules`)
         assert.equal(markedWorks(browser.options).size, 60, `${browser.name} kept its marks`)
