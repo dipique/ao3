@@ -1,4 +1,5 @@
 import type { Language, Rule, RuleColors, TextReplacement } from './data.ts'
+import type { TrackedListsOption } from './trackedLists.ts'
 import type { WordCountRange } from './wordCount.ts'
 import type { WorkMarks } from './workMarks.ts'
 
@@ -201,6 +202,28 @@ export interface Options {
    * {@link Options.wordCountToolbar}.
    */
   completionToolbar: boolean
+  /**
+   * Tracked lists: saved queries — a works search, one of the archive's own
+   * filtered works listings, an uncommon tag's works, a series — whose new and
+   * updated works are gathered into one review stream. The reader looks through a
+   * range of days of that stream, marks whatever deserves marking, and then marks
+   * the *range* reviewed; nothing is ever marked reviewed one work at a time.
+   *
+   * `lists` is **data, not code** — each entry is a query plus what the reader
+   * decided about it, so adding, renaming, pausing or dropping one is an options
+   * edit rather than a code change. Entries are created from the page itself (the
+   * floating toolbar's "Track this search") or from a stored list in the options,
+   * and an entry whose `tracked` is off is kept exactly as it was, alias and all,
+   * and simply isn't reviewed. See {@link file://./trackedLists.ts} for what each
+   * field of an entry means.
+   *
+   * `reviewedThrough` is the entire review state: the last day marked reviewed,
+   * as a UTC day number, so the next window starts the day after it. `0` means
+   * nothing has been reviewed yet. It's one number, and reviewing on one browser
+   * should count on the others, which is why it syncs along with the aliases and
+   * the tracked/paused state.
+   */
+  trackedLists: TrackedListsOption
 
   styleWidthEnabled: boolean
   styleWidth: number

@@ -12,9 +12,11 @@ declare global {
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
+  const TRACKABLE_SOURCE_IDS: typeof import('../options_ui/composables/useSiteExport').TRACKABLE_SOURCE_IDS
   const anchorSlug: typeof import('../options_ui/composables/useAnchors').anchorSlug
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
+  const canTrack: typeof import('../options_ui/composables/useSiteExport').canTrack
   const computed: typeof import('vue').computed
   const computedAsync: typeof import('@vueuse/core').computedAsync
   const computedEager: typeof import('@vueuse/core').computedEager
@@ -59,6 +61,7 @@ declare global {
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
   const jumpToHash: typeof import('../options_ui/composables/useHashNav').jumpToHash
+  const listName: typeof import('../options_ui/composables/useSiteExport').listName
   const makeDestructurable: typeof import('@vueuse/core').makeDestructurable
   const markRaw: typeof import('vue').markRaw
   const nextTick: typeof import('vue').nextTick
@@ -118,6 +121,7 @@ declare global {
   const toRef: typeof import('vue').toRef
   const toRefs: typeof import('vue').toRefs
   const toValue: typeof import('vue').toValue
+  const trackedEntryFor: typeof import('../options_ui/composables/useSiteExport').trackedEntryFor
   const triggerRef: typeof import('vue').triggerRef
   const tryOnBeforeMount: typeof import('@vueuse/core').tryOnBeforeMount
   const tryOnBeforeUnmount: typeof import('@vueuse/core').tryOnBeforeUnmount

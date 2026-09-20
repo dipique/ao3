@@ -48,6 +48,7 @@ declare module 'vue' {
     OptionRowSearchLanguage: typeof import('./../options_ui/components/option_rows/OptionRowSearchLanguage.vue')['default']
     OptionRowSearchWordCount: typeof import('./../options_ui/components/option_rows/OptionRowSearchWordCount.vue')['default']
     OptionRowTextReplacements: typeof import('./../options_ui/components/option_rows/OptionRowTextReplacements.vue')['default']
+    OptionRowTrackedLists: typeof import('./../options_ui/components/option_rows/OptionRowTrackedLists.vue')['default']
     OptionRowWordCountRanges: typeof import('./../options_ui/components/option_rows/OptionRowWordCountRanges.vue')['default']
     OptionRowWorkMarks: typeof import('./../options_ui/components/option_rows/OptionRowWorkMarks.vue')['default']
     OptionSearchLanguage: typeof import('./../options_ui/components/options/OptionSearchLanguage.vue')['default']

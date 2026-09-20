@@ -1,9 +1,9 @@
-import type { SnapshotDescriptor } from '#common'
+import type { SnapshotDescriptor, TrackedList } from '#common'
 import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { getArchiveLink, toast } from '#common'
+import { getArchiveLink, normalizeTrackedUrl, toast, trackedKey, today as utcToday } from '#common'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
@@ -84,6 +84,62 @@ const status = shallowRef<JobStatus>(jobStatus())
  */
 const changeReport = shallowRef<ChangeImportReport | null>(null)
 const importingChanges = ref(false)
+
+/**
+ * The tracked lists, read here so a stored list can say whether it is one of
+ * them. Taken once, like the state above: the refs read through to the options
+ * page's own reactive copy, so a rename made in Search → Tracked lists shows up
+ * on these rows without a reload.
+ */
+const { lists: trackedEntries } = useOption('trackedLists')
+
+/**
+ * Stored lists that can become tracked. Marked for Later and the read list can't:
+ * their works are the reader's own choices, so "what's new since I last looked?"
+ * isn't a question about them.
+ */
+export const TRACKABLE_SOURCE_IDS: readonly string[] = ['text-search', 'tag-works', 'series-works']
+
+/**
+ * The tracked-list entry this stored list is, if any.
+ *
+ * Matched on the entry's key and nothing else — never by comparing the two
+ * addresses — so the options page and the content script agree about what counts
+ * as the same list however the reader reached it (a different parameter order, a
+ * different sort).
+ */
+export function trackedEntryFor(row: SiteExportListRow): TrackedList | undefined {
+  const key = row.descriptor?.listUrl ? normalizeTrackedUrl(row.descriptor.listUrl)?.key : undefined
+  if (!key)
+    return undefined
+  return trackedEntries.value.find(entry => trackedKey(entry) === key)
+}
+
+/** A stored list's name: the alias its tracked entry carries, else the list's own label. */
+export function listName(row: SiteExportListRow): string {
+  return trackedEntryFor(row)?.alias.trim() || row.label
+}
+
+/** Whether offering **Track** on this row makes sense at all. */
+export function canTrack(row: SiteExportListRow): boolean {
+  return !!row.descriptor
+    && TRACKABLE_SOURCE_IDS.includes(row.descriptor.sourceId)
+    && !!normalizeTrackedUrl(row.descriptor.listUrl)
+}
+
+/**
+ * A permanent short id for a new entry. Random rather than derived from the
+ * address, because the address is editable and the id is what the review's facet
+ * values and cached window are filed under.
+ */
+function newTrackedListId(): string {
+  const taken = new Set(trackedEntries.value.map(entry => entry.id))
+  let id = ''
+  do
+    id = Math.random().toString(36).slice(2, 10)
+  while (!id || taken.has(id))
+  return id
+}
 
 subscribeJob((next) => {
   status.value = next
@@ -300,7 +356,38 @@ export function useSiteExport() {
     async deleteList(row: SiteExportListRow) {
       await deleteSnapshot(row.key)
       await reload()
-      toast(`Removed “${row.label}”. The cached work text is still here.`, { type: 'success' })
+      toast(`Removed “${listName(row)}”. The cached work text is still here.`, { type: 'success' })
+    },
+
+    /**
+     * Start tracking this list, so its new and updated works turn up in the
+     * review stream. This is how a list the reader already has becomes tracked
+     * without going back to AO3 to press a pill.
+     *
+     * The stored snapshot is left exactly as it is. Tracking reads the archive by
+     * date from today onwards, so however many years of works the snapshot holds,
+     * none of them reaches the review — the two are separate things. The entry's
+     * name starts as the list's own, which is a name the reader has already seen.
+     */
+    track(row: SiteExportListRow) {
+      if (!canTrack(row)) {
+        toast('This list can\'t be tracked.', { type: 'error' })
+        return
+      }
+      const normalized = normalizeTrackedUrl(row.descriptor!.listUrl)!
+      if (trackedEntries.value.some(entry => trackedKey(entry) === normalized.key)) {
+        toast(`“${listName(row)}” is already tracked.`)
+        return
+      }
+      trackedEntries.value.push({
+        id: newTrackedListId(),
+        kind: normalized.kind,
+        url: normalized.url,
+        alias: row.label,
+        tracked: true,
+        since: utcToday(),
+      })
+      toast(`Tracking “${row.label}”. Works added or updated from today on will turn up in your review.`, { type: 'success' })
     },
 
     /**

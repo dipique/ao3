@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 
-// Named rather than left to the auto-import: both are read from the template,
+// Named rather than left to the auto-import: these are read from the template,
 // and auto-imports only reach `<script setup>`.
-import { formatBytes, NO_DESCRIPTOR_NOTE } from '../../composables/useSiteExport.ts'
+import { canTrack, formatBytes, listName, NO_DESCRIPTOR_NOTE, trackedEntryFor } from '../../composables/useSiteExport.ts'
 
 /**
  * One stored works list, as a row in Advanced → Site export.
@@ -33,7 +33,21 @@ const {
   stop,
   resume,
   discard,
+  track,
 } = useSiteExport()
+
+/**
+ * What to call this list. A tracked list's alias is the reader's own name for it
+ * — the one the review's "List source" filter uses — so once there is one, it is
+ * the name here too rather than a second name for the same thing.
+ */
+const name = computed(() => listName(props.row))
+
+/** The tracked entry this list is, when it is one. */
+const tracked = computed(() => trackedEntryFor(props.row))
+
+/** Offered only on a list that isn't already an entry — one entry per list. */
+const trackable = computed(() => canTrack(props.row) && !tracked.value)
 
 /** The job belongs to this list. Another list's job only greys this row out. */
 const mine = computed(() => status.value.job?.cacheKey === props.row.key)
@@ -71,7 +85,7 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
 </script>
 
 <template>
-  <OptionRow :title="row.label" :subtitle="row.summary" stacked control-width="24rem">
+  <OptionRow :title="name" :subtitle="row.summary" stacked control-width="24rem">
     <!--
       Where the list actually is. A row can be refreshed from here only after the
       view has scraped it once, so "go and open it" is a real instruction — and
@@ -81,7 +95,7 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
       <ArchiveLink
         v-if="row.listUrl"
         :href="row.listUrl"
-        :aria-label="`Open ${row.label} on AO3`"
+        :aria-label="`Open ${name} on AO3`"
         text-sm
       >
         (link)
@@ -119,7 +133,7 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
           <Button
             variant="outline"
             :class="JOINED"
-            :title="`Refresh the list of works in ${row.label}`"
+            :title="`Refresh the list of works in ${name}`"
             :disabled="!row.descriptor || busy"
             @click.prevent="refreshList(row)"
           >
@@ -212,6 +226,21 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
       </template>
 
       <!--
+        Tracking is about the list, not about the export, so it is offered
+        whatever the job runner is doing — it writes an option and asks AO3 for
+        nothing.
+      -->
+      <Button
+        v-if="trackable"
+        variant="outline"
+        :class="TIGHT"
+        title="Review this list's new and updated works"
+        @click.prevent="track(row)"
+      >
+        Track
+      </Button>
+
+      <!--
         Offered even on a list that can't be refreshed — that is the one row for
         which removing it is the only thing left to do.
       -->
@@ -222,13 +251,24 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
         :disabled="running"
         @click.prevent="confirmingDelete = true"
       >
-        <Icon i-mdi-trash-can-outline :label="`Remove ${row.label}`" />
+        <Icon i-mdi-trash-can-outline :label="`Remove ${name}`" />
       </Button>
     </div>
 
     <template #extra>
       <p v-if="!row.descriptor" text="sm muted-fg" pt-1>
         {{ NO_DESCRIPTOR_NOTE }}
+      </p>
+      <!--
+        Said here rather than as a switch, because pausing, renaming and dropping
+        an entry all belong together in one place — this row's job is only to say
+        that the list has one.
+      -->
+      <p v-if="tracked" text="sm muted-fg" pt-1>
+        {{ tracked.tracked
+          ? 'Tracked — its new and updated works turn up in your review.'
+          : 'Tracked, but paused — nothing from it is being reviewed.' }}
+        Rename, pause or drop it under Search &rarr; Tracked lists. This stored list is untouched either way.
       </p>
       <SiteExportProgress v-if="mine" />
     </template>
@@ -240,7 +280,7 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
         Remove this list?
       </DialogTitle>
       <DialogDescription pt-2>
-        <strong>{{ row.label }}</strong> is forgotten here, along with the
+        <strong>{{ name }}</strong> is forgotten here, along with the
         {{ row.count.toLocaleString() }} {{ row.count === 1 ? 'blurb' : 'blurbs' }} saved for it.
         Opening the list on AO3 again brings it straight back &mdash; one scrape, not a re-fetch of
         the works.

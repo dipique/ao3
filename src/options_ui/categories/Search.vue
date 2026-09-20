@@ -69,6 +69,8 @@
       >
         <OptionSearchPerPage />
       </OptionRow>
+      <OptionDivider />
+      <OptionRowTrackedLists />
     </OptionSubsection>
 
     <OptionSubsection
