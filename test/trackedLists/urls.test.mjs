@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { dayOf, normalizeTrackedUrl, pageUrl, sourceLabel, trackedKey } from '../../src/common/trackedLists.ts'
+import { dayOf, normalizeTrackedUrl, pageUrl, sourceLabel, tagSearchUrl, trackedKey } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
 
@@ -31,6 +31,7 @@ describe('normalizeTrackedUrl — kinds', () => {
       kind: 'text-search',
       url: '/works/search?work_search[query]=coffee',
       key: 'text-search:/works/search?work_search[query]=coffee',
+      relativeDate: null,
     })
   })
 
@@ -39,6 +40,7 @@ describe('normalizeTrackedUrl — kinds', () => {
       kind: 'tag-works',
       url: '/tags/marriage%20problems',
       key: 'tag-works:/tags/marriage%20problems',
+      relativeDate: null,
     })
   })
 
@@ -47,6 +49,7 @@ describe('normalizeTrackedUrl — kinds', () => {
       kind: 'series-works',
       url: '/series/4232377',
       key: 'series-works:/series/4232377',
+      relativeDate: null,
     })
   })
 
@@ -108,6 +111,65 @@ describe('normalizeTrackedUrl — parameters', () => {
       '/works?work_search[sort_column]=title&include_work_search[freeform_ids][]=3&include_work_search[freeform_ids][]=7&tag_id=Bees&work_search[complete]=T&page=9',
     ].map(path => normalizeTrackedUrl(`${AO3}${path}`).key)
     assert.equal(new Set(keys).size, 1)
+  })
+
+  test('a tag\'s listing keys the same reached by path or by tag_id', () => {
+    // The Sort & Filter sidebar on /tags/NAME/works submits to /works with
+    // tag_id=NAME, so one submit moves the reader between these two spellings of
+    // the same works. `tag_id` carries the name already escaped the way a tag's
+    // path spells it, so the two only differ in the URL layer.
+    for (const [path, query] of [
+      ['/tags/Bees/works', '/works?tag_id=Bees'],
+      ['/tags/Baldur\'s%20Gate%20(Video%20Games)/works', '/works?tag_id=Baldur%27s+Gate+%28Video+Games%29'],
+      ['/tags/*a*%20Juliet%20-%20Martin*s*West%20Read/works', '/works?tag_id=*a*+Juliet+-+Martin*s*West+Read'],
+      ['/tags/Michael%20J*d*%20Himes/works', '/works?tag_id=Michael+J*d*+Himes'],
+      ['/tags/100%25%20Done/works', '/works?tag_id=100%25+Done'],
+    ]) {
+      assert.equal(normalizeTrackedUrl(`${AO3}${query}`).key, normalizeTrackedUrl(`${AO3}${path}`).key, query)
+    }
+  })
+
+  test('the same, with the rest of the filters along for the ride', () => {
+    const a = normalizeTrackedUrl(`${AO3}/works?tag_id=Bees&work_search[complete]=T&work_search[language_id]=en`)
+    const b = normalizeTrackedUrl(`${AO3}/tags/Bees/works?work_search[language_id]=en&work_search[complete]=T`)
+    assert.equal(a.key, b.key)
+    assert.equal(a.key, 'works-filter:/tags/Bees/works?work_search[complete]=T&work_search[language_id]=en')
+  })
+
+  test('folding tag_id into the key leaves the stored URL as the reader had it', () => {
+    // "Open on the archive" should show the page they were looking at, and both
+    // spellings are pages the archive serves.
+    const entry = normalizeTrackedUrl(`${AO3}/works?tag_id=Bees&work_search[complete]=T`)
+    assert.equal(entry.url, '/works?tag_id=Bees&work_search[complete]=T')
+  })
+
+  test('two different tags still key apart', () => {
+    assert.notEqual(
+      normalizeTrackedUrl(`${AO3}/works?tag_id=Bees`).key,
+      normalizeTrackedUrl(`${AO3}/works?tag_id=Wasps`).key,
+    )
+  })
+
+  test('only tag_id folds: a user\'s or a collection\'s stays where it is', () => {
+    assert.equal(normalizeTrackedUrl(`${AO3}/works?user_id=someone`).key, 'works-filter:/works?user_id=someone')
+    assert.notEqual(
+      normalizeTrackedUrl(`${AO3}/works?user_id=someone`).key,
+      normalizeTrackedUrl(`${AO3}/users/someone/works`).key,
+    )
+  })
+
+  test('keeps the relative date bound in the URL, out of the key, and reports it', () => {
+    // "< 2 weeks" means something different every day it is read, and a review
+    // supplies its own absolute bound — so it can't be part of what a list is.
+    const entry = normalizeTrackedUrl(`${AO3}/works/search?work_search[query]=bees&work_search[revised_at]=%3C+2+weeks`)
+    assert.equal(paramsOf(entry.url).get('work_search[revised_at]'), '< 2 weeks')
+    assert.equal(entry.key, 'text-search:/works/search?work_search[query]=bees')
+    assert.equal(entry.relativeDate, '< 2 weeks')
+    assert.equal(normalizeTrackedUrl(`${AO3}/works/search?work_search[query]=bees`).relativeDate, null)
+  })
+
+  test('a search whose only criterion was a relative date is no query at all', () => {
+    assert.equal(normalizeTrackedUrl(`${AO3}/works/search?work_search[revised_at]=%3C+2+weeks`), null)
   })
 
   test('a different criterion is a different key', () => {
@@ -242,6 +304,24 @@ describe('sourceLabel', () => {
   })
 })
 
+describe('tagSearchUrl', () => {
+  test('searches the tag\'s name with no date bound, for the count check', () => {
+    const url = tagSearchUrl({ kind: 'tag-works', url: '/tags/*a*%20Juliet%20-%20Martin*s*West%20Read' })
+    assert.ok(url.startsWith('/works/search?'))
+    const params = paramsOf(url)
+    assert.equal(params.get('work_search[other_tag_names]'), '& Juliet - Martin/West Read')
+    // No bound of any kind: the count has to cover every work the tag holds.
+    assert.equal(params.has('work_search[date_from]'), false)
+    assert.equal(params.has('page'), false)
+  })
+
+  test('is null for any other kind of entry', () => {
+    assert.equal(tagSearchUrl({ kind: 'series-works', url: '/series/1' }), null)
+    assert.equal(tagSearchUrl({ kind: 'tag-works', url: '/series/1' }), null)
+    assert.equal(tagSearchUrl({ kind: 'tag-works', url: 'https://example.com/tags/Bees' }), null)
+  })
+})
+
 describe('pageUrl', () => {
   const FROM = dayOf('1 Sep 2026')
 
@@ -281,6 +361,14 @@ describe('pageUrl', () => {
     assert.equal(params.get('work_search[sort_direction]'), 'asc')
     assert.equal(params.get('work_search[date_from]'), '2026-09-01')
     assert.equal(params.get('page'), '2')
+  })
+
+  test('leaves the relative date bound off the page it fetches', () => {
+    // Combined with the review's own date_from, "< 2 weeks" would quietly empty
+    // the window of a reader further behind than that.
+    const url = pageUrl({ kind: 'text-search', url: '/works/search?work_search[query]=bees&work_search[revised_at]=%3C+2+weeks' }, FROM, 1)
+    assert.equal(paramsOf(url).has('work_search[revised_at]'), false)
+    assert.equal(paramsOf(url).get('work_search[date_from]'), '2026-09-01')
   })
 
   test('reads a tag marked scan from its own page, undated', () => {

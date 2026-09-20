@@ -48,6 +48,23 @@ const MAX_REFUSED_ROUNDS = 6
  */
 export const MAX_SCANNED_PAGES = 500
 
+/**
+ * The number in a works search's "427,247 Found" heading, or null when the page
+ * printed none. The archive counts exactly what the query matched, date bounds
+ * included, so this also answers "how many works does this search find from day
+ * X on?" from page 1 alone.
+ */
+export function detectFoundCount(doc: Document | Element): number | null {
+  for (const h3 of doc.querySelectorAll('#main.works-search h3.heading')) {
+    const match = h3.textContent?.match(/(\d[\d,.]*)\s+Found\b/)
+    if (!match)
+      continue
+    const count = Number(match[1]!.replace(/\D/g, ''))
+    return Number.isFinite(count) ? count : null
+  }
+  return null
+}
+
 /** Highest page number from a `pagy`/AO3 pagination block in a listing document. */
 export function detectPageCount(doc: Document | Element): number {
   const pagination = doc.querySelector('ol.pagination.pagy, ol.pagination.actions')

@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 
 // Node strips the TS types on import; trackedLists.ts imports nothing at all,
 // so it loads without a build, a DOM, or the extension APIs.
-import { dayOf, formatDay, isoDay, today } from '../../src/common/trackedLists.ts'
+import { dayOf, formatDay, isoDay, utcToday } from '../../src/common/trackedLists.ts'
 
 const MS_PER_DAY = 86_400_000
 
@@ -36,21 +36,21 @@ describe('dayOf', () => {
   })
 })
 
-describe('today', () => {
+describe('utcToday', () => {
   test('is the UTC calendar day, changing exactly at UTC midnight', () => {
     const midnight = Date.UTC(2026, 8, 19)
-    assert.equal(today(midnight - 1), dayOf('18 Sep 2026'))
-    assert.equal(today(midnight), dayOf('19 Sep 2026'))
-    assert.equal(today(midnight + MS_PER_DAY - 1), dayOf('19 Sep 2026'))
+    assert.equal(utcToday(midnight - 1), dayOf('18 Sep 2026'))
+    assert.equal(utcToday(midnight), dayOf('19 Sep 2026'))
+    assert.equal(utcToday(midnight + MS_PER_DAY - 1), dayOf('19 Sep 2026'))
   })
 
   test('takes a Date as well as epoch milliseconds', () => {
-    assert.equal(today(new Date(Date.UTC(2026, 8, 19, 23, 59))), dayOf('19 Sep 2026'))
+    assert.equal(utcToday(new Date(Date.UTC(2026, 8, 19, 23, 59))), dayOf('19 Sep 2026'))
   })
 
   test('defaults to now', () => {
     const before = Math.floor(Date.now() / MS_PER_DAY)
-    const now = today()
+    const now = utcToday()
     const after = Math.floor(Date.now() / MS_PER_DAY)
     assert.ok(now === before || now === after)
   })

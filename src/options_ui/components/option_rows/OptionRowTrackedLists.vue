@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TrackedKind, TrackedList } from '#common'
 
-import { formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, sourceLabel, toEpochDays, today as utcToday } from '#common'
+import { formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, sourceLabel, toEpochDays, utcToday } from '#common'
 
 /**
  * Tracked lists: the saved queries whose new and updated works are gathered into
@@ -109,8 +109,12 @@ const rows = computed(() => lists.value.map((entry) => {
   const normalized = normalizeTrackedUrl(entry.url)
   return {
     entry,
-    /** What the review's "List source" facet will call it, for labels and prompts. */
-    label: sourceLabel(entry),
+    /**
+     * What the review's "List source" facet will call it, for labels and prompts
+     * — disambiguated against every other entry, so a name two lists share reads
+     * here exactly as it will there, ` (2)` and all.
+     */
+    label: sourceLabel(entry, lists.value),
     /** The tail of the URL — what the facet falls back to when there's no alias. */
     placeholder: sourceLabel({ id: entry.id, alias: '', url: entry.url }),
     kind: KIND_LABELS[entry.kind] ?? entry.kind,

@@ -3,7 +3,7 @@ import type { ViewState } from '#content_script/searchView/view.tsx'
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
-import { detectPageCount } from '#content_script/searchView/scrape.ts'
+import { detectFoundCount, detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -32,14 +32,7 @@ function resultsList(): HTMLOListElement | null {
  * bounded by the page count.
  */
 function foundCount(): number | null {
-  for (const h3 of document.querySelectorAll('#main.works-search h3.heading')) {
-    const match = h3.textContent?.match(/(\d[\d,.]*)\s+Found\b/)
-    if (!match)
-      continue
-    const count = Number(match[1]!.replace(/\D/g, ''))
-    return Number.isFinite(count) ? count : null
-  }
-  return null
+  return detectFoundCount(document)
 }
 
 /**

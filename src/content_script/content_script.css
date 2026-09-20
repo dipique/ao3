@@ -424,6 +424,84 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: #fff !important;
 }
 
+/* The tracking control: a pill with a box that drops out of it, for naming a new
+   list or for the two things left to do with an existing one. One panel child, so
+   the pill keeps its place in the stack however tall the box gets. Click-through
+   like the panel above it — each control opts back in. */
+.AO3E--filter-toolbar--track {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+/* Same surface as the pills, squared off: it's a small panel, not a button, and
+   sized to the pill above rather than to its own contents. */
+.AO3E--filter-toolbar--track--box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  width: 16em;
+  max-width: 70vw;
+  padding: 0.5em 0.6em !important;
+  border: 1px solid var(--ao3e-surface-border);
+  border-radius: 0.6em;
+  background: var(--ao3e-surface-bg);
+  color: var(--ao3e-surface-fg);
+  box-shadow: var(--ao3e-surface-shadow);
+  pointer-events: auto;
+}
+
+.AO3E--filter-toolbar--track--box[hidden] {
+  display: none;
+}
+
+/* Why a filter the page carried won't be part of the list. */
+.AO3E--filter-toolbar--track--note {
+  margin: 0 !important;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  opacity: 0.85;
+}
+
+.AO3E--filter-toolbar--track--alias {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 0.35em 0.5em !important;
+  border: 1px solid var(--ao3e-field-border) !important;
+  border-radius: 0.4em !important;
+  background: var(--ao3e-field-bg) !important;
+  color: var(--ao3e-surface-fg) !important;
+  font-family: inherit;
+  font-size: 0.8125rem;
+}
+
+.AO3E--filter-toolbar--track--row {
+  display: flex;
+  gap: 0.4em;
+  justify-content: flex-end;
+}
+
+/* The box's own buttons: the pill shape at a smaller size, so the box reads as
+   part of the same control without competing with the pill that opened it. */
+.AO3E--filter-toolbar--track--minor {
+  padding: 0.3em 0.7em !important;
+  font-size: 0.8125rem;
+  text-decoration: none !important;
+}
+
+/* The pill names the list, and a reader's name for one can be long. */
+.AO3E--filter-toolbar--track--text {
+  display: inline-block;
+  overflow: hidden;
+  max-width: 14em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .AO3E--filter-toolbar--icon {
   display: inline-flex;
   align-items: center;

@@ -119,6 +119,23 @@ export interface TrackedListsOption {
   lists: TrackedList[]
 }
 
+/**
+ * A permanent short id for a new entry, unique among `existing`. Random rather
+ * than derived from the address, because the address is editable while the id is
+ * what the review's facet values and cached window are filed under.
+ *
+ * Every creator goes through this — the toolbar's pill and the options page
+ * alike — so two entries made in two places can't collide.
+ */
+export function newTrackedListId(existing: readonly Pick<TrackedList, 'id'>[] = []): string {
+  const taken = new Set(existing.map(entry => entry.id))
+  let id = ''
+  do
+    id = Math.random().toString(36).slice(2, 10)
+  while (!id || taken.has(id))
+  return id
+}
+
 // ---------------------------------------------------------------------------
 // Days
 // ---------------------------------------------------------------------------
@@ -157,8 +174,14 @@ export function dayOf(dateText: string): Day | null {
   return ms / MS_PER_DAY
 }
 
-/** The current UTC calendar day. `now` is an epoch-milliseconds time or a Date. */
-export function today(now: number | Date = Date.now()): Day {
+/**
+ * The current **UTC** calendar day. `now` is an epoch-milliseconds time or a
+ * Date. Spelled `utcToday` rather than `today` because it isn't the reader's
+ * today: the archive's date filters work in UTC days, so a review's days are UTC
+ * days, while the reader's own calendar (what `todayEpochDays` answers) can be
+ * a day either side of it.
+ */
+export function utcToday(now: number | Date = Date.now()): Day {
   const ms = typeof now === 'number' ? now : now.getTime()
   return Math.floor(ms / MS_PER_DAY)
 }
@@ -199,6 +222,13 @@ export interface NormalizedTrackedUrl {
   url: string
   /** Kind, path and criteria in one canonical order, sort left out. See {@link trackedKey}. */
   key: string
+  /**
+   * The relative date bound the page carried, as the reader's query spelled it
+   * (`< 2 weeks`), or null for none. It stays in {@link url} but is out of the
+   * key and off every fetched page ({@link RELATIVE_DATE_PARAM}) — so a caller
+   * creating a list from this page should say that it dropped it.
+   */
+  relativeDate: string | null
 }
 
 const ARCHIVE_HOST = 'archiveofourown.org'
@@ -224,6 +254,28 @@ const DROPPED_PARAMS = new Set([
 
 /** Kept in the stored URL, left out of the key, and overridden at fetch time. */
 const SORT_PARAMS = new Set(['work_search[sort_column]', 'work_search[sort_direction]'])
+
+/**
+ * The search form's own date field. Its values are *relative* — `< 2 weeks`,
+ * `> 1 year` — so it means something different on every day it's read.
+ *
+ * A review supplies the date bound itself, always as an absolute day, and one of
+ * these on top of it would silently empty the window of any reader further behind
+ * than it reaches: "updated in the last 2 weeks" and "updated on or after three
+ * weeks ago" have nothing in common. So it's kept in the stored URL (it's part of
+ * the query the reader saved, and "open on the archive" should show it) but left
+ * out of the key and dropped from every page a review fetches. A pill that drops
+ * one says so, since the list it creates won't behave like the page it was made
+ * from.
+ */
+const RELATIVE_DATE_PARAM = 'work_search[revised_at]'
+
+/**
+ * Parameters kept in the stored URL but left out of the key and off every
+ * fetched page — the sort, which never changes *which* works a query matches,
+ * and the relative date bound, which the review replaces with its own.
+ */
+const OVERRIDDEN_PARAMS = new Set([...SORT_PARAMS, RELATIVE_DATE_PARAM])
 
 /**
  * Query parameters that make `/works` somebody's listing — a tag's, a user's or
@@ -270,16 +322,44 @@ export function normalizeTrackedUrl(href: string): NormalizedTrackedUrl | null {
   const params = kind === 'works-filter' || kind === 'text-search'
     ? [...url.searchParams].filter(([name, value]) => !DROPPED_PARAMS.has(name) && value.trim() !== '')
     : []
-  const criteria = params.filter(([name]) => !SORT_PARAMS.has(name))
+  const criteria = params.filter(([name]) => !OVERRIDDEN_PARAMS.has(name))
+  // The key puts a tag's listing under its path form however the reader reached
+  // it, so the sidebar can't move them onto a second key for the same works.
+  const keyPath = ownerPath(path, criteria) ?? path
+  const keyCriteria = keyPath === path ? criteria : criteria.filter(([name]) => name !== 'tag_id')
   if (kind === 'text-search' && criteria.length === 0)
     return null
 
-  const canonical = [...new Set(criteria.map(serializeParam))].sort(compareStrings)
+  const canonical = [...new Set(keyCriteria.map(serializeParam))].sort(compareStrings)
   return {
     kind,
     url: withQuery(path, params.map(serializeParam)),
-    key: `${kind}:${withQuery(path, canonical)}`,
+    key: `${kind}:${withQuery(keyPath, canonical)}`,
+    relativeDate: params.find(([name]) => name === RELATIVE_DATE_PARAM)?.[1] ?? null,
   }
+}
+
+/**
+ * The path form of a listing that names its owner in the query instead: the
+ * Sort & Filter sidebar on `/tags/NAME/works` submits to `/works` with
+ * `tag_id=NAME`, so one submit moves the reader from the path form to the query
+ * form for the very same works. Null when the path is already the canonical one.
+ *
+ * `tag_id` carries the name in exactly the spelling a tag's path uses — the
+ * archive's escapes for the characters a path segment can't hold already applied
+ * (`*s*` for `/`, `*a*` for `&`, `*d*` for `.`, `*q*` for `?`, `*h*` for `#`),
+ * and only the URL layer left to add. So the path segment is just the value
+ * percent-encoded, and the lookup is by name either way.
+ *
+ * Only `tag_id` is folded. The other owners (`user_id`, `collection_id`) have no
+ * sidebar that swaps a path for a parameter the way a tag's does, so folding them
+ * would be guessing at a page the archive may never serve.
+ */
+function ownerPath(path: string, criteria: readonly [string, string][]): string | null {
+  if (path !== '/works')
+    return null
+  const tag = criteria.find(([name]) => name === 'tag_id')?.[1]?.trim()
+  return tag ? `/tags/${encodeURIComponent(tag)}/works` : null
 }
 
 /**
@@ -478,6 +558,11 @@ export const PAGE_SIZE = 20
  * The path and query of one page of a list's fetch; the caller makes it
  * absolute against the archive.
  *
+ * The entry's own sort and its relative date bound are left off every page
+ * ({@link OVERRIDDEN_PARAMS}): the review sets the sort it needs, and a bound
+ * like `< 2 weeks` on top of the review's own `date_from` would empty the window
+ * of any reader further behind than it reaches.
+ *
  * A dated list (`works-filter`, `text-search`, `tag-works`) is read **oldest
  * first from `from`**: `work_search[sort_column]=revised_at`,
  * `work_search[sort_direction]=asc` and `work_search[date_from]=from`, whatever
@@ -521,10 +606,32 @@ export function pageUrl(entry: Pick<TrackedList, 'kind' | 'url' | 'scan'>, from:
         return `${path}?page=${page}`
       return datedUrl('/works/search', [['work_search[other_tag_names]', tagName(path)]], from, page)
     default: {
-      const params = [...new URLSearchParams(query)].filter(([name]) => !SORT_PARAMS.has(name) && !DROPPED_PARAMS.has(name))
+      const params = [...new URLSearchParams(query)].filter(([name]) => !OVERRIDDEN_PARAMS.has(name) && !DROPPED_PARAMS.has(name))
       return datedUrl(path, params, from, page)
     }
   }
+}
+
+/**
+ * Page 1 of the works search a `tag-works` entry is read through, with **no date
+ * bound at all** — so its heading count is every work the tag holds.
+ *
+ * That count is what a new entry is checked with: the archive's own tag page
+ * lists the tag's works by work id, and if searching by the tag's name finds the
+ * same number of works, the search can stand in for the page (which is the only
+ * way to read the tag by date, and the only way to catch an *old* work that has
+ * just been updated). If the two disagree, the search isn't the same list and the
+ * entry is marked {@link TrackedList.scan} instead.
+ *
+ * Null for anything but a `tag-works` entry naming a tag page on the archive.
+ */
+export function tagSearchUrl(entry: Pick<TrackedList, 'kind' | 'url'>): string | null {
+  const normalized = normalizeTrackedUrl(entry.url)
+  if (entry.kind !== 'tag-works' || !normalized || normalized.kind !== 'tag-works')
+    return null
+  const at = normalized.url.indexOf('?')
+  const path = at === -1 ? normalized.url : normalized.url.slice(0, at)
+  return withQuery('/works/search', [serializeParam(['work_search[other_tag_names]', tagName(path)])])
 }
 
 function datedUrl(path: string, params: [string, string][], from: Day, page: number): string {

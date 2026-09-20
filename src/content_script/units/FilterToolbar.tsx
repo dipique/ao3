@@ -5,12 +5,19 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiFindReplace from '~icons/mdi/find-replace.jsx'
 import MdiGestureTapHold from '~icons/mdi/gesture-tap-hold.jsx'
+import MdiPlaylistCheck from '~icons/mdi/playlist-check.jsx'
+import MdiPlaylistPlay from '~icons/mdi/playlist-play.jsx'
+import MdiPlaylistPlus from '~icons/mdi/playlist-plus.jsx'
 
-import { ADDON_CLASS, api, marksHideAnything, options } from '#common'
+import type { TrackedList } from '#common'
+import type { TrackablePage } from '#content_script/tracked/createList.ts'
+
+import { ADDON_CLASS, api, getArchiveLink, marksHideAnything, options, parseUser, sourceLabel, toast, trackedKey, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { findWorkText } from '#content_script/textReplaceScope.ts'
+import { needsScan, newEntry, trackablePage } from '#content_script/tracked/createList.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -19,6 +26,14 @@ const PANEL_CLASS = `${ADDON_CLASS}--filter-toolbar--panel`
 const FAB_CLASS = `${ADDON_CLASS}--filter-toolbar--fab`
 const OPEN_CLASS = `${ADDON_CLASS}--filter-toolbar--open`
 const BUTTON_CLASS = `${ADDON_CLASS}--filter-toolbar--button`
+
+/** The tracking pill and the box it grows — see {@link FilterToolbar.buildTrackButton}. */
+const TRACK_CLASS = `${ADDON_CLASS}--filter-toolbar--track`
+const TRACK_BOX_CLASS = `${TRACK_CLASS}--box`
+const TRACK_NOTE_CLASS = `${TRACK_CLASS}--note`
+const TRACK_INPUT_CLASS = `${TRACK_CLASS}--alias`
+const TRACK_ROW_CLASS = `${TRACK_CLASS}--row`
+const TRACK_MINOR_CLASS = `${TRACK_CLASS}--minor`
 
 /** Toggled on <body> to temporarily reveal works hidden by any filter (see CSS). */
 const PEEK_CLASS = `${ADDON_CLASS}--peek-hidden`
@@ -106,6 +121,10 @@ function detachOutsideHandler(): void {
  *   toggles `textReplacements.tools`: the underlines under replaced text, and
  *   the button that turns a selection into a rule. The same switch the options
  *   page carries, put where a reader notices they want it.
+ * - **Track this search** — on any page that is a query the review can read (a
+ *   works search, a filtered listing, an uncommon tag's works, a series), offers
+ *   to save it as a tracked list, and once it is one, says so and offers to stop
+ *   or to go and review. See {@link buildTrackButton}.
  * - **Options** — opens the extension's options page. Always present, which is
  *   also why the toolbar itself now always is.
  *
@@ -164,14 +183,19 @@ export class FilterToolbar extends Unit {
     // The replacement pill goes wherever replacements themselves apply, which is
     // a little wider than `#workskin` — see `textReplaceScope`.
     const showReplace = this.options.textReplacements.enabled && findWorkText() !== null
+    // Whether this page is a query a review could read — a DOM question as well
+    // as a URL one for an uncommon tag, so it can only be asked now.
+    const trackable = this.options.trackedLists.enabled ? trackablePage() : null
 
-    document.body.append(this.buildToolbar(showPeek, showMenus, showReader, showReplace))
-    this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}, reader: ${showReader}, replace tools: ${showReplace}).`)
+    document.body.append(this.buildToolbar(showPeek, showMenus, showReader, showReplace, trackable))
+    this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}, reader: ${showReader}, replace tools: ${showReplace}, trackable: ${trackable?.normalized.kind ?? 'no'}).`)
   }
 
-  buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean, showReplace: boolean): HTMLElement {
+  buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean, showReplace: boolean, trackable: TrackablePage | null): HTMLElement {
     const panel = <div class={PANEL_CLASS} role="group" />
     panel.append(this.buildOptionsButton())
+    if (trackable)
+      panel.append(this.buildTrackButton(trackable))
     if (showReplace)
       panel.append(this.buildReplaceToolsButton())
     if (showReader)
@@ -391,6 +415,189 @@ export class FilterToolbar extends Unit {
     sync()
 
     return button
+  }
+
+  /**
+   * The tracking control, in whichever of its three states this page is in.
+   *
+   * It writes the `trackedLists` option and stops there. The write re-runs every
+   * unit, which rebuilds this toolbar from the saved value — so what the pill
+   * says next came out of storage, and a page that is already tracked can never
+   * disagree with the options about it. (The reader-mode pill works the same way.)
+   *
+   * - **not tracked** — the pill grows a box with the name the list will carry,
+   *   already filled in from the page. Naming it now is the point: a review's
+   *   "List source" facet is a list of these names, and a query string makes a
+   *   poor one.
+   * - **tracked** — it says so, and offers the two things left to do with it.
+   * - **paused** — one click starts it again. Tracking restarts from today, so
+   *   the stretch the reader chose to skip isn't poured back in.
+   */
+  buildTrackButton(page: TrackablePage): HTMLElement {
+    const lists = this.options.trackedLists.lists
+    const entry = lists.find(one => trackedKey(one) === page.normalized.key)
+    const group: HTMLElement = <div class={TRACK_CLASS} />
+
+    const icon = entry
+      ? (entry.tracked ? <MdiPlaylistCheck /> : <MdiPlaylistPlay />)
+      : <MdiPlaylistPlus />
+    const label = entry ? sourceLabel(entry, lists) : ''
+    const text = entry
+      ? (entry.tracked ? `Tracked as “${label}”` : `Resume tracking “${label}”`)
+      : 'Track this search'
+    const title = entry
+      ? (entry.tracked
+          ? 'This page is a tracked list. Its new and updated works turn up in your review.'
+          : 'Tracking is paused for this page. Starting again picks up from today — nothing from the gap is filled in.')
+      : 'Track this search, so works added or updated from now on turn up in one review stream.'
+
+    const button: HTMLButtonElement = (
+      <button type="button" class={BUTTON_CLASS} title={title} aria-label={title} aria-pressed="false">
+        <span class={`${ADDON_CLASS}--filter-toolbar--icon`}>{icon}</span>
+        <span class={`${TRACK_CLASS}--text`}>{text}</span>
+      </button>
+    ) as HTMLElement as HTMLButtonElement
+    // Set rather than written into the JSX: a boolean there is rendered as a bare
+    // attribute (`aria-pressed=""`), which is not one of the values it may take.
+    button.setAttribute('aria-pressed', String(!!entry?.tracked))
+    group.append(button)
+
+    // Paused is the one state whose click needs nothing from the reader.
+    if (entry && !entry.tracked) {
+      button.addEventListener('click', () => {
+        void this.writeLists(lists.map(one => (one.id === entry.id ? { ...one, tracked: true, since: utcToday() } : one)))
+        toast(`Tracking “${label}” again, from today on.`, { type: 'success' })
+      })
+      return group
+    }
+
+    // The other two grow a box under the pill. Built up front and revealed on
+    // click, so the reader's typing survives a re-render of nothing else.
+    const box: HTMLElement = <div class={TRACK_BOX_CLASS} hidden />
+    group.append(box)
+    let open = false
+    const setOpen = (next: boolean): void => {
+      open = next
+      box.hidden = !open
+      button.setAttribute('aria-expanded', String(open))
+    }
+    setOpen(false)
+    button.addEventListener('click', () => setOpen(!open))
+
+    if (entry)
+      this.fillTrackedBox(box, entry, lists, label)
+    else
+      this.fillNewListBox(box, page, lists, () => setOpen(false))
+    return group
+  }
+
+  /** What a tracked list offers: stop, or go and look at the review. */
+  private fillTrackedBox(box: HTMLElement, entry: TrackedList, lists: readonly TrackedList[], label: string): void {
+    const stop: HTMLButtonElement = (
+      <button type="button" class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`} title="Stop tracking this page. The list is kept, so its name and its place come back if you resume.">
+        Stop tracking
+      </button>
+    ) as HTMLElement as HTMLButtonElement
+    stop.addEventListener('click', () => {
+      void this.writeLists(lists.map(one => (one.id === entry.id ? { ...one, tracked: false } : one)))
+      toast(`Stopped tracking “${label}”. The list is kept — resume it any time.`, { type: 'success' })
+    })
+
+    const row: HTMLElement = <div class={TRACK_ROW_CLASS}>{stop}</div>
+    // The review lives on the reader's own readings page, so it takes a session.
+    const userId = parseUser(document)?.userId
+    if (userId) {
+      const href = getArchiveLink(`/users/${encodeURIComponent(userId)}/readings#ao3e-tracked`)
+      row.append(
+        <a class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`} href={href} title="Open your review of everything your tracked lists have turned up.">
+          Review…
+        </a>,
+      )
+    }
+    box.append(row)
+  }
+
+  /** The box that names a new list, and the one write that creates it. */
+  private fillNewListBox(box: HTMLElement, page: TrackablePage, lists: readonly TrackedList[], close: () => void): void {
+    // A relative date bound can't come along: it means a different span of days
+    // every day it's read, and the review sets its own. Said here rather than
+    // afterwards, because it changes what the reader is about to create.
+    if (page.normalized.relativeDate) {
+      box.append(
+        <p class={TRACK_NOTE_CLASS}>
+          {`The “${page.normalized.relativeDate}” date filter is left out — tracking follows your review's own dates instead.`}
+        </p>,
+      )
+    }
+
+    const input: HTMLInputElement = (
+      <input type="text" class={TRACK_INPUT_CLASS} value={page.alias} aria-label="Name for this list" placeholder="Name for this list" />
+    ) as HTMLElement as HTMLInputElement
+
+    const track: HTMLButtonElement = (
+      <button type="button" class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`}>Track</button>
+    ) as HTMLElement as HTMLButtonElement
+    const cancel: HTMLButtonElement = (
+      <button type="button" class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`}>Cancel</button>
+    ) as HTMLElement as HTMLButtonElement
+
+    let saving = false
+    const save = async (): Promise<void> => {
+      if (saving || !extensionAlive())
+        return
+      saving = true
+      track.disabled = true
+      const alias = input.value.trim()
+      try {
+        // An uncommon tag costs one request here (see `needsScan`) — long enough
+        // to be worth saying something about.
+        if (page.normalized.kind === 'tag-works')
+          track.textContent = 'Checking…'
+        const scan = await needsScan(page)
+        const entry = newEntry(page, alias, lists, scan)
+        // The write re-runs every unit and rebuilds this toolbar, so nothing here
+        // has to put the box back into its "tracked" state by hand.
+        await this.writeLists([...lists, entry])
+        toast(
+          `Tracking “${alias || sourceLabel(entry, [...lists, entry])}”. Works added or updated from today on will turn up in your review.${
+            scan ? ' This tag is read from its own page, so an update to an older work may be missed.' : ''}`,
+          { type: 'success' },
+        )
+      }
+      catch (err) {
+        // The rebuild that would have replaced this box never came, so the box has
+        // to be usable again.
+        this.logger.error('Could not save the tracked list.', err)
+        toast('Could not save this list. Please try again.', { type: 'error' })
+        saving = false
+        track.disabled = false
+        track.textContent = 'Track'
+      }
+    }
+
+    track.addEventListener('click', () => void save())
+    cancel.addEventListener('click', close)
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        void save()
+      }
+      else if (e.key === 'Escape') {
+        e.preventDefault()
+        close()
+      }
+    })
+
+    const row: HTMLElement = <div class={TRACK_ROW_CLASS} />
+    row.append(track, cancel)
+    box.append(input, row)
+  }
+
+  /** Save the list table, leaving the rest of the option as it is. */
+  private writeLists(lists: readonly TrackedList[]): Promise<void> {
+    if (!extensionAlive())
+      return Promise.resolve()
+    return options.set({ trackedLists: { ...this.options.trackedLists, lists: [...lists] } })
   }
 
   buildOptionsButton(): HTMLElement {

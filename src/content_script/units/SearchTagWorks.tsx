@@ -5,6 +5,7 @@ import { ADDON_CLASS, getArchiveLink } from '#common'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
+import { TAG_BLURB_SELECTOR as BLURB_SELECTOR, tagPageName, uncommonTagPage } from '#content_script/tagPage.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -16,28 +17,6 @@ const LINK_CLASS = `${FEATURE}--link`
  * the same columns and sort every time they search a tag, whichever tag it is.
  */
 const SOURCE_ID = 'tag-works'
-
-/** Where a tag page keeps its works, as opposed to the bookmarks listed below them. */
-const LISTBOX_SELECTOR = 'div.work.listbox'
-const BLURB_SELECTOR = `${LISTBOX_SELECTOR} ul.index.group > li.blurb`
-
-/** The tag profile block on `/tags/NAME`, or null if this isn't such a page. */
-function tagProfile(): HTMLElement | null {
-  // Only the bare tag URL. `/tags/NAME/works` is the filterable listing, which
-  // AO3 only serves for canonical tags and which needs nothing from us.
-  if (!/^\/tags\/[^/]+\/?$/.test(location.pathname))
-    return null
-  return document.querySelector<HTMLElement>('#main div.tag.profile')
-}
-
-/**
- * Whether AO3 has marked this tag common (canonical). Its description paragraphs
- * are the only tell on the bare tag URL: a canonical tag's says it is one and
- * links to the filterable listing, a non-canonical tag's doesn't.
- */
-function isCanonical(profile: HTMLElement): boolean {
-  return Array.from(profile.querySelectorAll(':scope > p')).some(p => p.innerHTML.includes('canonical'))
-}
 
 /**
  * A non-canonical (uncommon) tag can't be filtered on: AO3 gives its page a
@@ -59,13 +38,10 @@ export class SearchTagWorks extends Unit {
   }
 
   override async ready(): Promise<void> {
-    const profile = tagProfile()
-    if (!profile || isCanonical(profile))
+    const page = uncommonTagPage()
+    if (!page)
       return
-    const listbox = profile.querySelector<HTMLElement>(`:scope > ${LISTBOX_SELECTOR}`)
-    // No works listed under this tag — nothing to search.
-    if (!listbox || !listbox.querySelector('li.blurb'))
-      return
+    const { profile, listbox } = page
     if (profile.querySelector(`.${LINK_CLASS}`))
       return
 
@@ -115,7 +91,7 @@ export class SearchTagWorks extends Unit {
       cacheKey: snapshotKey(),
       descriptor: () => ({
         sourceId: SOURCE_ID,
-        label: `Tag: ${tagName()}`,
+        label: `Tag: ${tagPageName()}`,
         listUrl: getArchiveLink(location.pathname),
         // A tag page lists bookmarks below the works in a second `ul.index.group`,
         // so a refresh has to be scoped the same way this scrape is.
@@ -154,17 +130,4 @@ export class SearchTagWorks extends Unit {
  */
 function snapshotKey(): string {
   return `${SOURCE_ID}:${location.pathname.replace(/^\/tags\/|\/$/g, '')}`
-}
-
-/** The tag as a reader would write it, for the snapshot's label. */
-function tagName(): string {
-  const raw = location.pathname.replace(/^\/tags\/|\/$/g, '')
-  try {
-    // AO3 percent-encodes `/` as `*s*` and friends in tag paths; decoding only
-    // undoes the URL layer, which is the part that looks like noise in a list.
-    return decodeURIComponent(raw)
-  }
-  catch {
-    return raw
-  }
 }

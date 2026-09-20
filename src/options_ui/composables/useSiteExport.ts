@@ -3,7 +3,7 @@ import type { ChangeImportReport } from '#content_script/siteExport/importChange
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { getArchiveLink, normalizeTrackedUrl, toast, trackedKey, today as utcToday } from '#common'
+import { getArchiveLink, newTrackedListId, normalizeTrackedUrl, toast, trackedKey, utcToday } from '#common'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
@@ -125,20 +125,6 @@ export function canTrack(row: SiteExportListRow): boolean {
   return !!row.descriptor
     && TRACKABLE_SOURCE_IDS.includes(row.descriptor.sourceId)
     && !!normalizeTrackedUrl(row.descriptor.listUrl)
-}
-
-/**
- * A permanent short id for a new entry. Random rather than derived from the
- * address, because the address is editable and the id is what the review's facet
- * values and cached window are filed under.
- */
-function newTrackedListId(): string {
-  const taken = new Set(trackedEntries.value.map(entry => entry.id))
-  let id = ''
-  do
-    id = Math.random().toString(36).slice(2, 10)
-  while (!id || taken.has(id))
-  return id
 }
 
 subscribeJob((next) => {
@@ -380,7 +366,7 @@ export function useSiteExport() {
         return
       }
       trackedEntries.value.push({
-        id: newTrackedListId(),
+        id: newTrackedListId(trackedEntries.value),
         kind: normalized.kind,
         url: normalized.url,
         alias: row.label,
