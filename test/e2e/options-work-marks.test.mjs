@@ -309,6 +309,49 @@ describe('options UI — work marks', { skip }, () => {
     )
   })
 
+  /**
+   * The two settings that speak for every hiding mark rather than one. Found by
+   * the label they sit under, since the options page has other number boxes and
+   * other selects on it.
+   */
+  const hideSettings = () => page.evaluate(() => {
+    const labelled = text => [...document.querySelectorAll('label')]
+      .find(l => l.firstElementChild?.textContent.trim() === text)
+    return {
+      mode: labelled('When a mark hides a work')?.querySelector('[role="combobox"]')?.textContent.trim() ?? null,
+      priority: labelled('Priority')?.querySelector('input')?.value ?? null,
+    }
+  })
+
+  test('the mode and priority fall back to their defaults on a table that predates them', async () => {
+    // SEED stores neither field, which is every table written before they
+    // existed — the row has to answer with the shipped defaults rather than
+    // with nothing.
+    const got = await hideSettings()
+    assert.match(got.mode, /^Collapse/, 'collapsed to a reason line')
+    assert.equal(got.priority, '9', 'above an "always show" rule at its own default of 4')
+  })
+
+  test('typing a priority stores it against the whole table, not one mark', async () => {
+    await page.evaluate(() => {
+      const box = [...document.querySelectorAll('label')]
+        .find(l => l.firstElementChild?.textContent.trim() === 'Priority')
+        .querySelector('input')
+      box.focus()
+      box.select()
+    })
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type('3')
+    await sleep(1000)
+
+    const stored = await storedMarks()
+    assert.equal(stored?.hidePriority, 3)
+    // The page edits a clone of the defaults and writes the option whole, so
+    // the mode is written too — as the default it was already showing.
+    assert.equal(stored?.hideMode, 'collapse')
+    assert.ok(stored?.marks?.read, 'and the marks themselves came along unharmed')
+  })
+
   test('renders without console errors', () => {
     const errors = consoleMsgs.filter(m => m.type === 'pageerror' || m.type === 'error')
     assert.deepEqual(errors, [])

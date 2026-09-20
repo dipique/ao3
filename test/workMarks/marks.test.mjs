@@ -10,6 +10,8 @@ import {
   localMarkIds,
   markClears,
   markGroup,
+  markHideMode,
+  markHidePriority,
   markHidesResults,
   markIds,
   markIsExclusive,
@@ -283,5 +285,29 @@ describe('which marks can sit on one work together', () => {
     assert.ok(!markClears(marks, 'hot', 'good'))
     assert.ok(!markClears(marks, 'hot', 'hot'), 'a mark never clears itself')
     assert.ok(!markClears(marks, 'hot', SAVED_MARK), 'Marked for Later is not in the group')
+  })
+})
+
+describe('how mark-hiding weighs against the rules', () => {
+  test('an option that says nothing collapses, at the top of the priority scale', () => {
+    const marks = { enabled: true, marks: createDefaultMarks() }
+    assert.equal(markHideMode(marks), 'collapse')
+    assert.equal(markHidePriority(marks), 9, 'high enough to beat an "always show" rule at its own default of 4')
+  })
+
+  test('an answer the reader gave is taken as given', () => {
+    assert.equal(markHideMode({ hideMode: 'hide' }), 'hide')
+    assert.equal(markHideMode({ hideMode: 'collapse' }), 'collapse')
+    assert.equal(markHidePriority({ hidePriority: 0 }), 0)
+    assert.equal(markHidePriority({ hidePriority: 3 }), 3)
+  })
+
+  test('a value nothing could honour falls back or is clamped', () => {
+    assert.equal(markHideMode({ hideMode: 'sometimes' }), 'collapse', 'a mode from a build we do not know')
+    assert.equal(markHidePriority({ hidePriority: 99 }), 9)
+    assert.equal(markHidePriority({ hidePriority: -4 }), 0)
+    assert.equal(markHidePriority({ hidePriority: 2.7 }), 2, 'truncated onto the scale, as a rule priority is')
+    assert.equal(markHidePriority({ hidePriority: Number.NaN }), 9)
+    assert.equal(markHidePriority({ hidePriority: '5' }), 9, 'not a number at all')
   })
 })

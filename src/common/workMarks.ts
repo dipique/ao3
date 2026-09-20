@@ -33,6 +33,9 @@
  * pure icon-name list) so it can be unit-tested headlessly with `node --test`.
  */
 
+import type { HideMode } from './data.ts'
+
+import { MAX_PRIORITY, MIN_PRIORITY } from './data.ts'
 import { DEFAULT_MARK_ICON } from './markIcons.ts'
 
 /** A mark's id — the key it lives under in {@link WorkMarks.marks}. */
@@ -127,6 +130,31 @@ export interface WorkMarks {
   /** Every mark, keyed by id. {@link MarkConfig.order} is menu/indicator order. */
   marks: Record<MarkId, MarkConfig>
   /**
+   * How a mark takes a work out of a listing: `'collapse'` squeezes it down to
+   * the reason line with a "Show" button, `'hide'` drops it from the listing
+   * entirely (and out of a search view's results, so a page still fills with the
+   * number of works asked for).
+   *
+   * One answer for every mark that hides, because the marks are one decision
+   * said more or less precisely — whether a work you're done with should still
+   * take up a line is a question about being done with it, not about which
+   * verdict you reached. Which marks hide at all is still per-mark, through
+   * {@link MarkConfig.hideSearchResult}.
+   *
+   * Absent means {@link DEFAULT_MARK_HIDE_MODE}; read it through
+   * {@link markHideMode}.
+   */
+  hideMode?: HideMode
+  /**
+   * How strongly mark-hiding asserts itself, on the same 0-9 scale a rule's
+   * priority is on and weighed in the same contest — so a rule only overrules a
+   * mark by outranking it.
+   *
+   * Absent means {@link DEFAULT_MARK_HIDE_PRIORITY}; read it through
+   * {@link markHidePriority}.
+   */
+  hidePriority?: number
+  /**
    * Which shape {@link marks} was written in — {@link MARKS_VERSION} once the
    * table is the reader's own. Absent means a table written before the mark
    * list was editable, which is the one and only time the upgrade path is
@@ -148,6 +176,46 @@ export interface WorkMarks {
  * rewritten under them.
  */
 export const MARKS_VERSION = 1
+
+/**
+ * How mark-hiding takes a work out of a listing when {@link WorkMarks.hideMode}
+ * doesn't say. Collapsing, because a mark is the reader's own bookkeeping
+ * rather than a judgement on the work: the reason line names the mark that did
+ * it and offers the work back, which is what you want in front of you on a work
+ * you put down yourself.
+ */
+export const DEFAULT_MARK_HIDE_MODE: HideMode = 'collapse'
+
+/**
+ * The priority mark-hiding carries when {@link WorkMarks.hidePriority} doesn't
+ * say: the top of the scale, so it outranks every rule except a force-show of
+ * equal strength (a tie goes to the force-show).
+ *
+ * High on purpose. "You have already read this" isn't an opinion about the
+ * work, so it shouldn't lose to one: a force-show rule says a tag is worth
+ * reading, not that it is worth reading twice. A reader who disagrees — who
+ * wants a favourite author's works on the page however often they have read
+ * them — drops this below that rule's priority instead.
+ */
+export const DEFAULT_MARK_HIDE_PRIORITY = MAX_PRIORITY
+
+/** How mark-hiding takes a work out of a listing. */
+export function markHideMode(workMarks: Pick<WorkMarks, 'hideMode'>): HideMode {
+  const own = workMarks.hideMode
+  return own === 'hide' || own === 'collapse' ? own : DEFAULT_MARK_HIDE_MODE
+}
+
+/**
+ * Mark-hiding's effective priority, clamped to the rule scale — the same
+ * treatment `rulePriority` ({@link file://./data.ts}) gives a rule's own, since
+ * the two numbers are weighed against each other.
+ */
+export function markHidePriority(workMarks: Pick<WorkMarks, 'hidePriority'>): number {
+  const own = workMarks.hidePriority
+  if (typeof own === 'number' && Number.isFinite(own))
+    return Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.trunc(own)))
+  return DEFAULT_MARK_HIDE_PRIORITY
+}
 
 /**
  * The mark whose group means "done with this work". The one piece of behaviour

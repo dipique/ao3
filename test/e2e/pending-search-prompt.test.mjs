@@ -153,7 +153,9 @@ describe('the pending-search prompt', { skip }, () => {
   })
 
   test('the prompt\'s own button runs the search too', async () => {
-    await pick('Include')
+    // "Require", not "Include": this is AO3's own sidebar, which ANDs the tags
+    // it is told to include.
+    await pick('Require')
     assert.ok(await prompt())
     await page.evaluate(() => {
       for (const el of document.body.children)

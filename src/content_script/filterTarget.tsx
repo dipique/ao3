@@ -41,11 +41,13 @@ import { findFacetBridge, onFacetChange } from './searchView/facetBridge.ts'
  * acts on — the view wins when the element is inside one — and speaks to that.
  *
  * The two differ in what they can express, which is why a target carries its own
- * {@link FilterTarget.dirs}: the engine understands `require` (AND within a
- * facet group) and the sidebar doesn't, so only a bridged menu offers that row.
+ * {@link FilterTarget.dirs}: the engine separates `include` (OR within a facet
+ * group) from `require` (AND), and the sidebar doesn't — it only ANDs, so a
+ * native target has two directions where a bridged one has three. Which is also
+ * why the two label the same direction differently; see {@link presentDir}.
  */
 
-/** A direction a value can be selected in. `require` is search-view only. */
+/** A direction a value can be selected in. */
 export type FilterDir = FacetDir
 
 /** Everything AO3's sidebar can express. */
@@ -229,15 +231,32 @@ export function nativeTargetForTag(tag: Tag, href?: string): FilterTarget | null
  * it to.
  */
 export function activeFilterDirs(filter: FilterTarget | null, value: string): FilterDir[] {
-  return filter ? filter.dirs.filter(dir => filter.isSelected(dir, value)) : []
+  return filter
+    ? filter.dirs.filter(dir => filter.isSelected(dir, value)).map(dir => presentDir(filter, dir))
+    : []
 }
 
-/** How each direction presents itself in a context menu. */
+/** How each direction presents itself in a context menu and as an indicator. */
 const DIR_ITEMS: Record<FilterDir, { icon: () => Node, label: (suffix: string) => string }> = {
   include: { icon: () => <MdiPlusCircle />, label: suffix => `Include${suffix} in filter` },
   exclude: { icon: () => <MdiMinusCircle />, label: suffix => `Exclude${suffix} from filter` },
-  // Search-view only — AO3's sidebar has no "every result must have this" filter.
   require: { icon: () => <MdiCheckCircle />, label: suffix => `Require${suffix} in filter` },
+}
+
+/**
+ * Which direction's wording and icon to show for one of a target's directions.
+ *
+ * They differ for exactly one case: AO3's sidebar ANDs the tags it is told to
+ * include — a work has to carry every one of them to survive the filter — so on
+ * a native listing "include" *is* the engine's "require", and calling it
+ * "Include" promises an OR the archive will never honour. A search view has both
+ * and keeps them apart, so nothing is renamed there.
+ *
+ * Presentation only: the direction a row *toggles* is always the target's own,
+ * since a native target ignores `require` outright.
+ */
+function presentDir(filter: FilterTarget, dir: FilterDir): FilterDir {
+  return filter.kind === 'native' && dir === 'include' ? 'require' : dir
 }
 
 /**
@@ -249,13 +268,16 @@ const DIR_ITEMS: Record<FilterDir, { icon: () => Node, label: (suffix: string) =
 export function filterMenuItems(filter: FilterTarget | null, value: string, suffix = ''): MenuItem[] {
   if (!filter)
     return []
-  return filter.dirs.map(dir => ({
-    icon: DIR_ITEMS[dir].icon,
-    label: DIR_ITEMS[dir].label(suffix),
-    scope: 'search' as const,
-    active: filter.isSelected(dir, value),
-    onSelect: () => filter.toggle(dir, value),
-  }))
+  return filter.dirs.map((dir) => {
+    const shown = DIR_ITEMS[presentDir(filter, dir)]
+    return {
+      icon: shown.icon,
+      label: shown.label(suffix),
+      scope: 'search' as const,
+      active: filter.isSelected(dir, value),
+      onSelect: () => filter.toggle(dir, value),
+    }
+  })
 }
 
 /**

@@ -449,9 +449,10 @@ const FILTER_ICONS: Record<FilterState, () => Node> = {
 
 /** Hover text, so an icon's meaning doesn't depend on recognising it. */
 const FILTER_LABELS: Record<FilterState, string> = {
-  // Search-view only: AO3's own sidebar has no "every shown work must have this"
-  // filter, so this one can never light up on a native listing.
   require: 'Required in the filter',
+  // Search-view only: AO3's sidebar ANDs the tags it is told to include, so on a
+  // native listing that selection shows as `require` instead — see `presentDir`
+  // in {@link file://./filterTarget.tsx}.
   include: 'Included in the filter',
   exclude: 'Excluded from the filter',
   hide: 'Hidden',

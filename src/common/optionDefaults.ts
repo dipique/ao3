@@ -1,7 +1,7 @@
 import type { Options } from './options.ts'
 
 import { DEFAULT_WORD_COUNT_RANGES } from './wordCount.ts'
-import { createDefaultMarks, MARKS_VERSION } from './workMarks.ts'
+import { createDefaultMarks, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, MARKS_VERSION } from './workMarks.ts'
 
 /**
  * Every option's default value — what a fresh install starts with, and what a
@@ -28,7 +28,13 @@ export const OPTION_DEFAULTS: Options = {
   hideLanguages: { enabled: false, show: [], applyToSearch: false },
   rules: { enabled: false, filters: [], colors: {} },
   autoExcludeHidden: false,
-  workMarks: { enabled: false, marks: createDefaultMarks(), version: MARKS_VERSION },
+  workMarks: {
+    enabled: false,
+    marks: createDefaultMarks(),
+    hideMode: DEFAULT_MARK_HIDE_MODE,
+    hidePriority: DEFAULT_MARK_HIDE_PRIORITY,
+    version: MARKS_VERSION,
+  },
 
   pruneOrphanedBlurbs: false,
 

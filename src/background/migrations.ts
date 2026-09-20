@@ -158,6 +158,7 @@ export async function migrate() {
 
   await migrateRules()
   await migrateWorkMarks()
+  await migrateMarkHideMode()
   await migrateSearchSnapshots()
 }
 
@@ -286,6 +287,31 @@ async function migrateWorkMarks(): Promise<void> {
   marks.favorite!.items = packIds(favorites)
 
   await browser.storage.local.set({ [key]: { enabled: !!stored.enabled, marks, version: MARKS_VERSION } })
+}
+
+/**
+ * Mark-hiding grew a `hideMode` of its own. Before it had one, a hiding mark
+ * collapsed or hid according to `hideShowReason` — the switch that still covers
+ * the crossover and language filters — so a reader who turned that off asked
+ * for marked works to be gone outright, and the new default (collapse) would
+ * quietly put them back on the page.
+ *
+ * Only ever writes when the old switch disagrees with that default and the
+ * table has no answer of its own: a fresh install has neither key stored, and a
+ * reader who has since picked a mode owns it. Nothing carries across for
+ * `hidePriority`, which has no older setting to inherit from — the point of it
+ * is that mark-hiding now outranks the rules by default.
+ */
+async function migrateMarkHideMode(): Promise<void> {
+  const key = 'option.workMarks'
+  const showReason = 'option.hideShowReason'
+  const stored = await browser.storage.local.get([key, showReason])
+  const marks = stored[key] as Record<string, any> | undefined
+  if (!marks || typeof marks !== 'object' || marks.hideMode !== undefined)
+    return
+  if (stored[showReason] !== false)
+    return
+  await browser.storage.local.set({ [key]: { ...marks, hideMode: 'hide' } })
 }
 
 /**

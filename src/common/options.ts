@@ -22,13 +22,14 @@ export interface Options {
   showKudosHitsRatio: boolean
 
   /**
-   * How the hides that *aren't* rules — work marks, the crossover filter and the
-   * language filter — take a work out of a listing: `true` collapses it to a
-   * reason line with a "Show" button, `false` hides it outright.
+   * How the crossover and language filters take a work out of a listing:
+   * `true` collapses it to a reason line with a "Show" button, `false` hides it
+   * outright.
    *
    * Rules answer this for themselves, through their `'collapse'` / `'hide'`
-   * {@link Rule.behavior}; this switch used to speak for them too, which is why
-   * it reads as a general "collapse or hide" rather than naming these three.
+   * {@link Rule.behavior}, and work marks through their own `hideMode`; this
+   * switch used to speak for all of them, which is why it reads as a general
+   * "collapse or hide" rather than naming the two it still covers.
    */
   hideShowReason: boolean
   hideShowMatchedValues: boolean

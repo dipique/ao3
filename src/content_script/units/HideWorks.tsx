@@ -6,7 +6,7 @@ import type { HideMode, MarkId, Options, ProgressSource, Rule } from '#common'
 import type { FilterTarget } from '#content_script/filterTarget.js'
 import type { FacetKey } from '#content_script/searchView/engine.ts'
 
-import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
+import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHideMode, markHidePriority, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb, knownBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -90,12 +90,17 @@ interface HideCandidate {
    * from one it can only apply itself.
    */
   rule?: Rule
-  /** The rule's effective priority; non-rule hides (language, crossover, marks) sit at 0. */
+  /**
+   * The rule's effective priority. The hides that aren't rules sit at 0 —
+   * language and crossovers, which are settings about the listing rather than
+   * claims about the work — except mark-hiding, which carries
+   * {@link WorkMarks.hidePriority} so it can be weighed against the rules.
+   */
   priority: number
   /**
    * What this reason asks for: the work gone, or collapsed to its reason line.
-   * A rule says so itself; the hides that aren't rules all take it from
-   * {@link Options.hideShowReason}.
+   * A rule says so itself, mark-hiding from {@link WorkMarks.hideMode}, and the
+   * rest from {@link Options.hideShowReason}.
    */
   mode: HideMode
 }
@@ -202,6 +207,9 @@ interface RunState {
   progress: ProgressSource[]
   today: number
   rules: Rule[]
+  /** How mark-hiding takes a work out of the listing, and how strongly it asks. */
+  markMode: HideMode
+  markPriority: number
 }
 
 const runStates = new WeakMap<Options, RunState>()
@@ -222,6 +230,8 @@ function runState(options: Options): RunState {
     // Presentational rules are handled elsewhere (HighlightTags colours the tag,
     // HideFilters hides it) and never hide or force-show, so they're dropped here.
     rules: options.rules.enabled ? options.rules.filters.filter(ruleAffectsWorks) : [],
+    markMode: markHideMode(workMarks),
+    markPriority: markHidePriority(workMarks),
   }
   runStates.set(options, state)
   return state
@@ -333,25 +343,28 @@ export class HideWorks extends Unit {
    * bar survive. A tie goes to the force-show — "always show" is a promise, and
    * matching a hide rule of equal strength shouldn't quietly break it. With
    * everything at its default that reproduces the old behaviour exactly
-   * (force-show at 4, everything else at 0), while leaving a hide rule at 5+ able
+   * (force-show at 4, every other rule at 0), while leaving a hide rule at 5+ able
    * to win, and a force-show dropped below 4 able to lose.
    *
-   * Hides that aren't rules at all — language, crossover, and marks — weigh 0, so
-   * an "always show" still overrules them.
+   * Language and crossover hiding aren't rules at all and weigh 0, so an "always
+   * show" still overrules them. Mark-hiding is weighed too, but at
+   * {@link WorkMarks.hidePriority} (9 by default): having read a work already
+   * isn't an opinion about it, so a rule saying the work is worth reading has to
+   * outrank the mark before it puts one back on the page.
    *
    * What survives then decides *how* the work goes: the strongest surviving
    * reason picks between collapsing the work and taking it away entirely, and a
    * tie goes to hiding — the reader who wrote a hide rule that strong asked for
    * the work gone, and a collapse rule of merely equal strength shouldn't quietly
-   * put it back on the page. The hides that aren't rules all speak with
-   * {@link Options.hideShowReason}'s voice.
+   * put it back on the page. Mark-hiding says so with {@link WorkMarks.hideMode};
+   * language and crossover hiding with {@link Options.hideShowReason}.
    */
   processBlurb(blurb: Blurb): HideVerdict {
     const { options: { hideLanguages, hideCrossovers, workMarks, hideShowReason } } = this
-    const { hiddenMarks, progress, today, rules } = this.run
+    const { hiddenMarks, progress, today, rules, markMode, markPriority } = this.run
     const reasons: HideReasons = {}
     const kinds = new Set<HideKind>()
-    /** What the hides that aren't rules ask for; a rule always says for itself. */
+    /** What the language and crossover hides ask for; a rule always says for itself. */
     const plainMode: HideMode = hideShowReason ? 'collapse' : 'hide'
 
     const hides: HideCandidate[] = []
@@ -406,8 +419,8 @@ export class HideWorks extends Unit {
       hides.push({
         label: config?.label || markId,
         kind: 'marks',
-        priority: 0,
-        mode: plainMode,
+        priority: markPriority,
+        mode: markMode,
         item: {
           value: blurb.work!.name,
           rule: `You marked this work as ${(config?.label || markId).toLowerCase()}`,
@@ -418,8 +431,8 @@ export class HideWorks extends Unit {
 
     // An ongoing work is collapsed only while it isn't worth opening — there's
     // nothing new since the reader stopped, or a wait-until date they set hasn't
-    // come round yet. Weighed at 0 like every other non-rule hide, so an "always
-    // show" rule still overrules it.
+    // come round yet. Weighed like any other mark hide: same priority, same
+    // choice between collapsing and hiding.
     const ongoing = blurb.work ? findProgress(progress, blurb.work.id) : null
     if (ongoing) {
       const published = blurb.chapters?.written ?? null
@@ -429,8 +442,8 @@ export class HideWorks extends Unit {
         hides.push({
           label: hiddenLabel(state, config?.label || ongoing.id),
           kind: 'marks',
-          priority: 0,
-          mode: plainMode,
+          priority: markPriority,
+          mode: markMode,
           item: {
             value: blurb.work!.name,
             rule: describeProgress(ongoing.progress, published, today),

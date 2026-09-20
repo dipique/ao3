@@ -1,13 +1,43 @@
 <script setup lang="ts">
 import type { ComponentInstance, GlobalComponents } from 'vue'
 
-import type { MarkId } from '#common'
+import type { HideMode, MarkId } from '#common'
 
-import { addMark, countIds, DEFAULT_MARK_ICON, localMarkIds, MARK_ICON_NAMES, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
+import { addMark, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, localMarkIds, MARK_ICON_NAMES, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
 
 import { markIconClass } from '../../markIcons.ts'
 
-const { enabled, marks } = useOption('workMarks')
+const { enabled, marks, hideMode, hidePriority } = useOption('workMarks')
+
+/**
+ * The two settings that apply to every mark that hides, rather than to one:
+ * *how* a marked work leaves a listing, and how strongly that beats the rules.
+ *
+ * Both are optional on the stored option — a table written before they existed
+ * has neither — and `toRefs` carries that optionality onto the refs. This page
+ * reads from a clone of the defaults, where both are always present, so the
+ * refs are there; a value that isn't still falls back to the shipped default,
+ * which is what a table synced in from an older build hands over.
+ */
+const mode = computed({
+  get: () => hideMode!.value ?? DEFAULT_MARK_HIDE_MODE,
+  set: (v: HideMode) => { hideMode!.value = v },
+})
+
+/**
+ * Kept inside the rule scale on the way in, so a typed-over or emptied box
+ * can't store a priority no contest would honour. An empty number input hands
+ * back `null`, which reads as the default rather than as zero — zero is the one
+ * value that would silently switch mark-hiding off against every rule.
+ */
+const priority = computed({
+  get: () => hidePriority!.value ?? DEFAULT_MARK_HIDE_PRIORITY,
+  set: (v: number | null) => {
+    hidePriority!.value = typeof v === 'number' && Number.isFinite(v)
+      ? Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.trunc(v)))
+      : DEFAULT_MARK_HIDE_PRIORITY
+  },
+})
 
 /** The marks that hold their own work ids, in table order. */
 const local = computed(() => localMarkIds(marks.value))
@@ -239,8 +269,8 @@ function save() {
     <div flex="~ col gap-3" mt-2>
       <p text="sm muted-fg">
         A work carries one mark at a time: the finer verdicts all mean "read", so choosing one replaces whatever the
-        work had. They take it off your Marked for Later list and — where "hide in listings" is on — collapse it out of
-        results. An "always show" rule still wins.
+        work had. They take it off your Marked for Later list and — where "hide in listings" is on — take it out of
+        results the way the two settings below say.
       </p>
 
       <p text="sm muted-fg">
@@ -260,6 +290,42 @@ function save() {
         when you mark a work, while every work already carrying it keeps it. Marks aren't deleted — the works filed
         under one would have nowhere to go.
       </p>
+
+      <div flex="~ col gap-4 sm:row" border-t pt-3>
+        <label flex="~ col gap-1" grow>
+          <span text="sm muted-fg">When a mark hides a work</span>
+          <Select v-model="mode" h-10 w-full>
+            <SelectItem value="collapse">
+              Collapse it to a line saying which mark hid it
+            </SelectItem>
+            <SelectItem value="hide">
+              Take it out of the listing completely
+            </SelectItem>
+          </Select>
+          <p v-if="mode === 'collapse'" text="xs muted-fg" pl-1>
+            The work keeps its place, squeezed down to its mark and a button to show it — and keeps its slot in a
+            custom search view's results.
+          </p>
+          <p v-else text="xs muted-fg" pl-1>
+            The work is gone. In a custom search view it is dropped from the results altogether, so a page still fills
+            with the number of works you asked for.
+          </p>
+        </label>
+
+        <label flex="~ col gap-1" w="full sm:40">
+          <span text="sm muted-fg">Priority</span>
+          <Input
+            v-model.number="priority"
+            type="number"
+            :min="MIN_PRIORITY"
+            :max="MAX_PRIORITY"
+            text="base" h-10 w-full py-2 pl-2
+          />
+          <p text="xs muted-fg" pl-1>
+            {{ MIN_PRIORITY }}–{{ MAX_PRIORITY }}, vs. rule priorities
+          </p>
+        </label>
+      </div>
 
       <div flex="~ col gap-2" text="sm" border-t pt-3>
         <div grid="~ cols-[min-content_1fr_min-content_min-content_min-content]" items-center gap-x-4 gap-y-2>

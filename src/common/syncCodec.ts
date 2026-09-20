@@ -36,7 +36,7 @@ import type { Options } from './options.ts'
  * meaning that keeps the same shape, or a new field on list entries that no
  * default shows (a new optional field on a rule, say) — bump for those by hand.
  */
-export const SYNC_SCHEMA_VERSION = 4
+export const SYNC_SCHEMA_VERSION = 5
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400

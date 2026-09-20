@@ -16,6 +16,16 @@ import React from '#dom'
 
 export type Direction = 'include' | 'exclude'
 
+/**
+ * The other direction. Selecting a value in one clears it in the other: the two
+ * are contradictory (AO3 drops a work that carries an excluded tag whatever else
+ * asked for it), and leaving the old box ticked would quietly narrow the next
+ * search to nothing. The in-memory engine's facets keep the same rule — see
+ * {@link file://./searchView/view.tsx}'s `toggleSelection` — so a value behaves
+ * the same whichever filter is behind the menu the reader used.
+ */
+const OPPOSITE: Record<Direction, Direction> = { include: 'exclude', exclude: 'include' }
+
 // ---------------------------------------------------------------------------
 // Change notification. Any control that mutates the filter calls
 // notifyFilterChange() so every other decorated control re-syncs its state
@@ -231,21 +241,41 @@ export function isTagSelected(direction: Direction, name: string): boolean {
  * target. Notifies listeners on success.
  */
 export function toggleTagFilter(direction: Direction, name: string): boolean {
+  let selected: boolean
   const checkbox = findTagCheckbox(direction, name)
   if (checkbox) {
-    checkbox.checked = !checkbox.checked
+    selected = checkbox.checked = !checkbox.checked
   }
   else {
     const filterField = getFilterField(TAG_DIRECTIONS[direction].fieldId)
     if (!filterField)
       return false
-    if (isListed(filterField, name))
-      removeTagFromField(filterField, name)
-    else
+    selected = !isListed(filterField, name)
+    if (selected)
       addTagToField(filterField, name)
+    else
+      removeTagFromField(filterField, name)
   }
+  if (selected)
+    clearTagFilter(OPPOSITE[direction], name)
   notifyFilterChange()
   return true
+}
+
+/**
+ * Drop a tag from one direction without touching the other or notifying — the
+ * half of a toggle that undoes the contradicting selection. A no-op when the tag
+ * isn't selected there, or when the page has no field for that direction.
+ */
+function clearTagFilter(direction: Direction, name: string): void {
+  const checkbox = findTagCheckbox(direction, name)
+  if (checkbox) {
+    checkbox.checked = false
+    return
+  }
+  const filterField = getFilterField(TAG_DIRECTIONS[direction].fieldId)
+  if (filterField)
+    removeTagFromField(filterField, name)
 }
 
 // ===========================================================================
@@ -507,13 +537,24 @@ export function isFandomSelected(direction: Direction, id: number): boolean {
 export function toggleFandomFilter(direction: Direction, id: number, name: string): void {
   const index = getFandomCheckboxIndex()[direction]
   const existing = index.get(id)
+  let selected = false
   if (existing) {
-    existing.checked = !existing.checked
+    selected = existing.checked = !existing.checked
   }
   else {
     const injected = injectCheckbox(direction, id, name)
-    if (injected)
+    if (injected) {
       index.set(id, injected)
+      // Injected boxes arrive ticked; see injectCheckbox.
+      selected = injected.checked
+    }
+  }
+  // Only an existing box can hold the contradicting selection: nothing injects
+  // one unticked, so there is never a box to clear on the other side.
+  if (selected) {
+    const other = getFandomCheckboxIndex()[OPPOSITE[direction]].get(id)
+    if (other)
+      other.checked = false
   }
   notifyFilterChange()
 }
@@ -588,6 +629,11 @@ export function toggleCheckboxGroupFilter(direction: Direction, group: CheckboxG
   if (!checkbox)
     return false
   checkbox.checked = !checkbox.checked
+  if (checkbox.checked) {
+    const other = findGroupCheckbox(OPPOSITE[direction], group, name)
+    if (other)
+      other.checked = false
+  }
   notifyFilterChange()
   return true
 }
