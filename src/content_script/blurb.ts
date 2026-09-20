@@ -198,6 +198,18 @@ export interface Work {
    */
   statuses?: string[]
   /**
+   * Which of the reader's own saved queries turned this work up — the "List
+   * source" facet's values, for a view whose works were merged from several
+   * queries rather than read off one listing. One work can carry more than one.
+   *
+   * Stamped by the host in the same post-pass as {@link Work.statuses}, and for
+   * the same reason: it says nothing about the work, only about the reader's
+   * configuration, which can be renamed or deleted between one visit and the
+   * next. {@link parseWork} never sets it, so the stored blurbs are unaffected
+   * by it and the store's parse version has nothing to answer for.
+   */
+  sources?: string[]
+  /**
    * The reader's rules take this work out of the listing outright (as opposed to
    * collapsing it, which the view leaves to HideWorks to draw on the blurb). Such
    * a work is dropped from the results altogether — out of the facet counts, the

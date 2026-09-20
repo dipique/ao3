@@ -11,9 +11,29 @@
 
   --toast-width: 320px;
   position: fixed;
-  bottom: calc(var(--safe-area-gap, 0px) + 20px);
+
+  /* The bottom-right corner is shared. Anything else parked there publishes how
+     much of it it occupies as `--ao3e-corner-reserve` on <html> — the content
+     script's floating toolbar does — and the stack sits above that rather than
+     on top of it. Without it a toast raised by one of the toolbar's own buttons
+     covers the launcher and the rest of the buttons for as long as it is up,
+     and no amount of pointer-event trickery helps: the card is opaque and
+     directly over them. Capped, because a toast pushed off the top of the
+     screen would be worse than one that overlaps. Nothing sets the property on
+     the options page, where the fallback keeps the old position. */
+  bottom: calc(var(--safe-area-gap, 0px) + 20px + min(var(--ao3e-corner-reserve, 0px), 45vh));
   right: 20px;
   z-index: 5000;
+
+  /* Follows the toolbar as it opens and closes, over the same 0.15s its panel
+     animates in. */
+  transition: bottom 0.15s ease;
+
+  /* The container's own box is empty — every toast in it is absolutely
+     positioned — but it outranks the whole page on z-index, so anything of it
+     that hit-tests is a hole in that corner. Only the cards take clicks; see
+     `.toast` below. */
+  pointer-events: none;
 
   font-size: 14px;
 
@@ -29,6 +49,11 @@
     bottom: 0;
     right: 0;
     width: var(--toast-width);
+
+    /* Opts back in — the container above is click-through. This is the card's
+       own box (plus the bridge below it), which is all of the corner a toast is
+       entitled to. */
+    pointer-events: auto;
     transition: all 0.4s ease;
     transform: translate(0, 20px);
     opacity: 0;
@@ -87,6 +112,11 @@
       }
     }
 
+    /* Bridges the gap under each card, so running the pointer up an expanded
+       stack doesn't fall between two of them and collapse it again. Exactly the
+       gap the hover transform opens, and no more: it used to run 1000px down,
+       which claimed the whole corner below the stack — every click there
+       landed on a transparent pseudo-element belonging to the toast. */
     &:after {
       content: '';
       position: absolute;
@@ -94,7 +124,7 @@
       right: 0;
       top: 100%;
       width: 100%;
-      height: 1000px;
+      height: var(--stack-gap);
       background: transparent;
     }
 

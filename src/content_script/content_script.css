@@ -314,6 +314,13 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   right: 1em;
   bottom: 1em;
   z-index: 1000;
+
+  /* How much of the corner this ends up taking is published as
+     `--ao3e-corner-reserve` (see `units/FilterToolbar.tsx`), because the toast
+     stack is fixed to the same corner at a z-index this can't argue with and
+     steps above it. Measured from the live box, so moving the toolbar or
+     resizing anything in it needs nothing here. */
+
   display: flex;
   flex-direction: column;
   gap: 0.6em;

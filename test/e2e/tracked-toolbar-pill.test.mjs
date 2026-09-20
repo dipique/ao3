@@ -72,6 +72,12 @@ const LATER_PAGE = `<!doctype html>
  * re-runs every unit, which rebuilds the toolbar — so this drives it the way a
  * reader would, a click at a time, and checks both what was stored and what the
  * rebuilt pill then says.
+ *
+ * Real pointer clicks throughout, including the ones that land while the toast
+ * raised by the previous write is still up: the toast shares this corner with
+ * the toolbar, and pressing the next pill without waiting for it to go is the
+ * ordinary case. That the two can share the corner is pinned down in
+ * `filter-toolbar-hit-area`.
  */
 describe('the toolbar\'s tracked-list pill', { skip }, () => {
   let browser
@@ -110,24 +116,9 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     return tab
   }
 
-  /**
-   * A click dispatched on the element itself rather than at its coordinates.
-   *
-   * Every write puts a toast up, and a toast is fixed to the bottom-right corner
-   * over the toolbar that is also there — so a real pointer click lands on the
-   * toast for as long as it is up. That the toolbar's own controls are reachable
-   * by pointer is what `filter-toolbar-hit-area` is for; this file is about which
-   * state the pill is in, and it drives the states from the first click after
-   * each write rather than waiting seconds for a toast to expire.
-   */
-  const clickEl = (tab, selector) => tab.$eval(selector, el => el.click())
-
   /** Open the collapsed toolbar. Every re-run rebuilds it shut. */
-  const openPanel = async (tab, real = false) => {
-    if (real)
-      await tab.click('.AO3E--filter-toolbar--fab')
-    else
-      await clickEl(tab, '.AO3E--filter-toolbar--fab')
+  const openPanel = async (tab) => {
+    await tab.click('.AO3E--filter-toolbar--fab')
     await sleep(300)
   }
 
@@ -147,8 +138,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   test('a works search offers to be tracked', async () => {
     tab = await load(SEARCH_URL, SEARCH_PAGE)
-    // A real pointer click, since nothing is covering the toolbar yet.
-    await openPanel(tab, true)
+    await openPanel(tab)
     assert.equal(await pillText(tab), 'Track this search')
     // Nothing is written until the reader says so.
     assert.equal(await savedOption(tab), null)
@@ -156,7 +146,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   test('the pill grows a name box, filled in from the page', async () => {
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), true, 'the box starts closed')
-    await clickEl(tab, TRACK_PILL)
+    await tab.click(TRACK_PILL)
     await sleep(200)
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), false)
     // The words the reader searched for — a name they have just seen.
@@ -164,12 +154,12 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
   })
 
   test('Cancel closes it again, having written nothing', async () => {
-    await clickEl(tab, `${TRACK_BOX} button:last-of-type`)
+    await tab.click(`${TRACK_BOX} button:last-of-type`)
     await sleep(200)
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), true)
     assert.equal(await savedOption(tab), null)
     // …and it reopens with the name still there.
-    await clickEl(tab, TRACK_PILL)
+    await tab.click(TRACK_PILL)
     await sleep(200)
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), false)
   })
@@ -178,7 +168,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     await tab.$eval(ALIAS_INPUT, (el) => {
       el.value = 'Coffee shop AUs'
     })
-    await clickEl(tab, `${TRACK_BOX} button:first-of-type`)
+    await tab.click(`${TRACK_BOX} button:first-of-type`)
     await sleep(1500)
 
     const saved = await savedOption(tab)
@@ -207,7 +197,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
   })
 
   test('it offers a way to stop, and a way through to the review', async () => {
-    await clickEl(tab, TRACK_PILL)
+    await tab.click(TRACK_PILL)
     await sleep(200)
     const actions = await tab.$$eval(`${TRACK_BOX} a, ${TRACK_BOX} button`, els =>
       els.map(el => ({ text: el.textContent.trim(), href: el.getAttribute('href') })))
@@ -217,7 +207,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
   })
 
   test('Stop tracking pauses the list without losing it', async () => {
-    await clickEl(tab, `${TRACK_BOX} button`)
+    await tab.click(`${TRACK_BOX} button`)
     await sleep(1500)
     const saved = await savedOption(tab)
     assert.equal(saved.lists.length, 1, 'the entry is kept, not removed')
@@ -232,7 +222,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     // No box: resuming needs nothing from the reader.
     assert.equal(await tab.$(TRACK_BOX), null)
 
-    await clickEl(tab, TRACK_PILL)
+    await tab.click(TRACK_PILL)
     await sleep(1500)
     const saved = await savedOption(tab)
     assert.equal(saved.lists[0].tracked, true)

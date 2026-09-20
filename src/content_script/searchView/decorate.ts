@@ -9,7 +9,7 @@ import { FandomToolbar } from '#content_script/units/FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from '#content_script/units/FilterEntityToolbars.tsx'
 import { HideAuthorToolbar } from '#content_script/units/HideAuthorToolbar.tsx'
 import { HideFilters } from '#content_script/units/HideFilters.ts'
-import { HideWorks } from '#content_script/units/HideWorks.tsx'
+import { collapseBlurb, HideWorks } from '#content_script/units/HideWorks.tsx'
 import { HighlightAuthors } from '#content_script/units/HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from '#content_script/units/HighlightEntities.ts'
 import { HighlightTags } from '#content_script/units/HighlightTags.ts'
@@ -74,6 +74,19 @@ export function decorateContainer(root: HTMLElement, options: Options): void {
   pruneDetachedTriggers()
   for (const U of CONTAINER_UNITS)
     runUnit(U, options, root)
+}
+
+/**
+ * Draw one blurb as a work that is only holding its slot: the reason line and
+ * "Show" button a rule-hidden work gets, over the same markup and the same
+ * styles, so a frozen page layout ({@link file://./view.tsx}'s `stablePages`)
+ * doesn't introduce a second way for a work to look set aside.
+ *
+ * Here rather than in the view because the markup belongs to HideWorks, and the
+ * view is meant to know nothing about the units decorating its blurbs.
+ */
+export function collapseWork(blurb: HTMLElement, reason: string): void {
+  collapseBlurb(blurb, reason)
 }
 
 /**

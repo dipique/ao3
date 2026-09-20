@@ -554,64 +554,18 @@ export class HideWorks extends Unit {
     this.logger.debug('Hiding:', blurb)
     if (blurb instanceof HTMLElement && kinds.size > 0)
       blurb.dataset.ao3eHiddenBy = [...kinds].join(' ')
-    const wrapper = (
-      <div class={BLURB_WRAPPER_CLASS} data-ao3e-hidden></div>
-    )
-    wrapper.append(...blurb.childNodes)
-    blurb.append(wrapper)
 
     // Nothing to explain on a work that isn't there: hide the whole <li>. The
-    // wrapper above still went on, so `clean()` and the peek CSS find it.
+    // wrapper still goes on, so `clean()` and the peek CSS find it.
     if (mode === 'hide') {
-      (blurb as HTMLLIElement).hidden = true
+      wrapBlurbBody(blurb)
+      ;(blurb as HTMLLIElement).hidden = true
       return false
     }
 
     const showValues = this.options.hideShowMatchedValues
     const reasonsNode = this.buildReasons(blurb, reasons, showValues)
-
-    const isHiddenSpan: HTMLSpanElement = <span title="This work is hidden."><MdiEyeOff /></span>
-    const wasHiddenSpan: HTMLSpanElement = <span title="This work was hidden."><MdiEye /></span>
-    const showButtonSpan: HTMLSpanElement = (
-      <span>
-        <MdiEye />
-        {' '}
-        Show
-      </span>
-    )
-    const hideButtonSpan: HTMLSpanElement = (
-      <span>
-        <MdiEyeOff />
-        {' '}
-        Hide
-      </span>
-    )
-    const toggleButton = <button>{showButtonSpan}</button>
-    const msg = (
-      <div class={`${ADDON_CLASS}  ${ADDON_CLASS}--hide-works--msg`}>
-        <div class={`${ADDON_CLASS}--hide-works--reason-line`}>
-          {isHiddenSpan}
-          {reasonsNode.node}
-        </div>
-        <div class="actions">{toggleButton}</div>
-      </div>
-    )
-
-    toggleButton.addEventListener('click', (e: MouseEvent) => {
-      e.preventDefault()
-      if (wrapper.dataset.ao3eHidden !== undefined) {
-        isHiddenSpan.parentNode!.replaceChild(wasHiddenSpan, isHiddenSpan)
-        toggleButton!.replaceChild(hideButtonSpan, showButtonSpan)
-        delete wrapper.dataset.ao3eHidden
-      }
-      else {
-        wasHiddenSpan.parentNode!.replaceChild(isHiddenSpan, wasHiddenSpan)
-        toggleButton!.replaceChild(showButtonSpan, hideButtonSpan)
-        wrapper.dataset.ao3eHidden = ''
-      }
-    })
-
-    blurb.insertBefore(msg, blurb.childNodes[0]!)
+    collapseBlurb(blurb, reasonsNode.node)
     return reasonsNode.usedFandomExclude
   }
 
@@ -693,6 +647,88 @@ export class HideWorks extends Unit {
     excludeButtons.push(entry)
     return entry
   }
+}
+
+/**
+ * Move a blurb's contents into the element that hiding toggles, and return it.
+ *
+ * Everything the reader would have seen goes inside, so showing the work again
+ * is one attribute, and `clean()` and the peek CSS have one node to look for
+ * however the work was taken away.
+ */
+function wrapBlurbBody(blurb: Element): HTMLElement {
+  const wrapper = (
+    <div class={BLURB_WRAPPER_CLASS} data-ao3e-hidden></div>
+  ) as HTMLElement
+  wrapper.append(...blurb.childNodes)
+  blurb.append(wrapper)
+  return wrapper
+}
+
+/**
+ * Squeeze a blurb down to a line saying why, with a button that brings it back:
+ * the shape a rule-hidden work takes when the reader would rather be told than
+ * left wondering what went missing.
+ *
+ * Exported because it isn't only rules that need it. A view that pages the works
+ * itself can be holding a slot for a work that has stopped qualifying — keeping
+ * the reader's place is worth more than the slot — and such a work has to read
+ * as the same kind of thing, not as a second invention. `reason` is the line's
+ * own wording: for a rule, the nodes naming what it matched; for anything else,
+ * a sentence, which is wrapped in the same emphasis the rules' reasons use.
+ */
+export function collapseBlurb(blurb: Element, reason: Node | string): void {
+  // Already set aside, by a rule or by whoever asked first. A second pass would
+  // bury the first reason line inside the second's wrapper, and the reader would
+  // have two "Show" buttons to press before seeing anything.
+  if (blurb.querySelector(`:scope > .${BLURB_WRAPPER_CLASS}`))
+    return
+  const wrapper = wrapBlurbBody(blurb)
+  const reasonNode = typeof reason === 'string'
+    ? (<em class={REASONS_CLASS}>{reason}</em>) as HTMLElement
+    : reason
+  const isHiddenSpan: HTMLSpanElement = <span title="This work is hidden."><MdiEyeOff /></span>
+  const wasHiddenSpan: HTMLSpanElement = <span title="This work was hidden."><MdiEye /></span>
+  const showButtonSpan: HTMLSpanElement = (
+    <span>
+      <MdiEye />
+      {' '}
+      Show
+    </span>
+  )
+  const hideButtonSpan: HTMLSpanElement = (
+    <span>
+      <MdiEyeOff />
+      {' '}
+      Hide
+    </span>
+  )
+  const toggleButton = <button>{showButtonSpan}</button>
+  const msg = (
+    <div class={`${ADDON_CLASS}  ${ADDON_CLASS}--hide-works--msg`}>
+      <div class={`${ADDON_CLASS}--hide-works--reason-line`}>
+        {isHiddenSpan}
+        {reasonNode}
+      </div>
+      <div class="actions">{toggleButton}</div>
+    </div>
+  )
+
+  toggleButton.addEventListener('click', (e: MouseEvent) => {
+    e.preventDefault()
+    if (wrapper.dataset.ao3eHidden !== undefined) {
+      isHiddenSpan.parentNode!.replaceChild(wasHiddenSpan, isHiddenSpan)
+      toggleButton!.replaceChild(hideButtonSpan, showButtonSpan)
+      delete wrapper.dataset.ao3eHidden
+    }
+    else {
+      wasHiddenSpan.parentNode!.replaceChild(isHiddenSpan, wasHiddenSpan)
+      toggleButton!.replaceChild(showButtonSpan, hideButtonSpan)
+      wrapper.dataset.ao3eHidden = ''
+    }
+  })
+
+  blurb.insertBefore(msg, blurb.childNodes[0]!)
 }
 
 /**

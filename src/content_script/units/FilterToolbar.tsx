@@ -89,6 +89,30 @@ export function refreshFilterToolbar(): void {
 }
 
 /**
+ * How much of the bottom-right corner this toolbar is occupying, published on
+ * `<html>` for anything else that parks itself there. The toast stack is the
+ * one thing that does (see {@link file://../../common/toast/toast.css}) and it
+ * offsets itself by this, so a toast raised by one of the pills below sits
+ * above the toolbar instead of over it — until this existed, saving anything
+ * from a pill made the whole toolbar unreachable for as long as the toast was
+ * up, the launcher included.
+ *
+ * Deliberately survives `clean()`: a pill's write re-runs every unit, and the
+ * toast it raised is *not* ours to remove (it has no `ADDON_CLASS`, so it rides
+ * out the rebuild). Dropping the property in between would drop that toast onto
+ * the corner and lift it again a moment later. `ready()` always mounts a
+ * toolbar — the unit is always enabled — so it is always rewritten.
+ */
+const RESERVE_PROP = '--ao3e-corner-reserve'
+
+/**
+ * Watches the mounted toolbar's box, so the reserve follows a pill appearing or
+ * the tracking box growing out of one. Module scope for the same reason as the
+ * outside-click handler below: one per mounted toolbar, detached by `clean()`.
+ */
+let reserveObserver: ResizeObserver | null = null
+
+/**
  * Document listener that collapses the panel on an outside click. Kept at module
  * scope (not per-instance) so each run's `clean()` can detach the previous one
  * before `ready()` mounts a fresh toolbar — otherwise re-runs would leak listeners.
@@ -99,6 +123,11 @@ function detachOutsideHandler(): void {
     document.removeEventListener('pointerdown', outsideHandler, true)
     outsideHandler = null
   }
+}
+
+function detachReserveObserver(): void {
+  reserveObserver?.disconnect()
+  reserveObserver = null
 }
 
 /**
@@ -168,6 +197,7 @@ export class FilterToolbar extends Unit {
 
   static override async clean(): Promise<void> {
     detachOutsideHandler()
+    detachReserveObserver()
     syncPeek = null
     document.body.classList.remove(PEEK_CLASS)
   }
@@ -222,6 +252,27 @@ export class FilterToolbar extends Unit {
       </div>
     )
 
+    let open = false
+
+    // Say how much of the corner this is taking, for whatever else is in it —
+    // see RESERVE_PROP. Measured from the live box rather than worked out from
+    // the stylesheet, so the reader's font size, however many pills this page
+    // has and the tracking box growing out of one are all in it. Collapsed, only
+    // the circle counts: the panel keeps its layout box while it is hidden, and
+    // reserving that would hold every toast a couple of hundred pixels off the
+    // bottom of the page for nothing.
+    const syncReserve = (): void => {
+      // Nothing is published until the toolbar has a box — `ready()` appends it
+      // after this runs. Leaving the property as it was until then is the point:
+      // a toast raised by a pill outlives the rebuild that pill's write sets
+      // off, and must not drop onto the corner and rise again in between.
+      if (!container.isConnected)
+        return
+      const measured = container.hidden ? null : (open ? container : fab).getBoundingClientRect()
+      const reserved = measured ? Math.max(0, Math.round(window.innerHeight - measured.top)) : 0
+      document.documentElement.style.setProperty(RESERVE_PROP, `${reserved}px`)
+    }
+
     // The peek pill comes and goes with the count, and with nothing left in the
     // panel there is nothing for the fab to open — so the whole toolbar steps
     // out of the corner rather than leaving a button that opens an empty box.
@@ -239,12 +290,18 @@ export class FilterToolbar extends Unit {
         }
       }
       container.hidden = panel.children.length === 0
+      syncReserve()
     }
     if (peek)
       syncPeek = syncVisible
     syncVisible()
 
-    let open = false
+    // Everything that changes the box: the toolbar being appended (the first
+    // real measurement), a pill arriving or leaving, the tracking box opening.
+    detachReserveObserver()
+    reserveObserver = new ResizeObserver(() => syncReserve())
+    reserveObserver.observe(container)
+
     const setOpen = (next: boolean): void => {
       open = next
       container.classList.toggle(OPEN_CLASS, open)
@@ -252,6 +309,9 @@ export class FilterToolbar extends Unit {
       const label = open ? 'Hide extension controls' : 'Show extension controls'
       fab.title = label
       fab.setAttribute('aria-label', label)
+      // Opening changes what counts as taken without changing the box the
+      // observer above is watching, so it has nothing to say about this one.
+      syncReserve()
     }
     setOpen(false)
 

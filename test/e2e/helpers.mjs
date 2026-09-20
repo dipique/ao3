@@ -192,6 +192,11 @@ export const serveDist = () => serveDir(DIST)
  * and records every storage.local.set into window.__writes.
  *
  * `seed` is a JSON-serialisable object of initial prefixed storage entries.
+ *
+ * Also leaves `window.__message(msg)` behind, which delivers `msg` to whatever
+ * the page registered with `runtime.onMessage` — standing in for the background
+ * half of `api.ts`. `__message({ toast: ['Saved.', { timeout: 0 }] })` is the
+ * short way to a real toast.
  */
 export function installMock(seed) {
   window.__writes = []
@@ -245,6 +250,7 @@ export function installMock(seed) {
     removeListener: l => msgListeners.delete(l),
     hasListener: l => msgListeners.has(l),
   }
+  window.__message = msg => msgListeners.forEach(l => l(msg, { id: 'mock' }, () => {}))
   const base = {
     storage,
     runtime: { id: 'mock', getURL: p => p, sendMessage: () => Promise.resolve(), connect: () => ({ onMessage: { addListener: noop }, postMessage: noop, onDisconnect: { addListener: noop } }), onMessage, getManifest: () => ({ version: '0.0.0', short_name: 'AO3E' }) },

@@ -12,12 +12,12 @@ import React from '#dom'
 import type { WriteSnapshotOptions } from './cache.ts'
 import type { FacetValueRef } from './engine.ts'
 import type { SearchViewPrefs } from './prefs.ts'
-import type { SearchView, SearchViewConfig, ViewState } from './view.tsx'
+import type { DeferredUpdate, SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
 
 import { pristineBlurb, readSnapshot, snapshotSize, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
-import { decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
+import { collapseWork, decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
 import { applyHidden } from './hidden.ts'
 import { loadPrefs, savePrefs } from './prefs.ts'
 import { isArchiveBusy, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
@@ -134,6 +134,38 @@ export interface SearchSource {
    * straight through to the scraper, which is where it is explained.
    */
   satisfied?: (ids: ReadonlySet<string>) => boolean
+  /**
+   * Produce this source's works some other way than by reading one listing page
+   * by page. Set, it replaces the whole scrape — the budget, the pages, the
+   * limit gate, the recovery — on the first load and on every refresh alike, so
+   * {@link pageCount}, {@link pageUrl}, {@link select}, {@link satisfied} and
+   * {@link recover} have nothing left to say and should be left off.
+   *
+   * For a view whose works aren't a listing at all: several saved queries read
+   * over a date range and merged into one stream, where "which page of which
+   * listing" has no single answer. Hence the free-text progress line rather than
+   * the page counter — and hence no works ceiling applied afterwards either: the
+   * limit exists to stop an open-ended listing being fetched forever, and a
+   * source that decides for itself how much to read has already answered that.
+   * Trimming its answer would take works out of a range it means to be complete.
+   *
+   * `full` distinguishes the reader asking from an automatic reload, exactly as
+   * it does for {@link recover}. `blocked` means AO3 refused partway and what
+   * came back is not to be trusted: the stored copy stays, on screen and on
+   * disk. {@link belongs} still applies to what comes out.
+   */
+  load?: (opts: LoadOptions) => Promise<LoadResult>
+  /**
+   * Build a strip of this source's own controls, mounted above the view's
+   * toolbar on every open and taken down with it.
+   *
+   * For a source whose view needs more than filtering: something with a range to
+   * move, a total to report, an action that changes what the list even is. `ctl`
+   * is the view seen from outside — enough to put a new set of works on screen,
+   * to say that something is loading, and to ask for a reload — so the strip can
+   * do its work without the source reaching into the host.
+   */
+  header?: (ctl: SearchHeaderControl) => HTMLElement
   /** The native elements hidden while the view is up, restored when it closes. */
   nativeElements: () => Iterable<Element>
   /**
@@ -214,6 +246,63 @@ export interface SearchSource {
   errorMessage: string
 }
 
+/** What the host tells a {@link SearchSource.load} about the load it wants. */
+export interface LoadOptions {
+  /** Aborted when the view is replaced, closed, or refreshed again. */
+  signal: AbortSignal
+  /**
+   * Say what is being done and how far along it is. The text is the whole
+   * progress line, because the page counter the scrape shows ("Loaded 3 of 8
+   * pages") asks a question a merged load has no one answer to. `total` of 0
+   * leaves the bar where it is, for a step whose length isn't known yet.
+   *
+   * Only wired up for the load a reader is waiting on. A background reload has
+   * no panel to write to — its progress belongs in the source's own
+   * {@link SearchSource.header}, which is still on screen.
+   */
+  onProgress: (text: string, done: number, total: number) => void
+  /** False for an automatic reload, as in {@link SearchSource.recover}. */
+  full: boolean
+}
+
+/** What a {@link SearchSource.load} comes back with. */
+export interface LoadResult {
+  /** The works, in the order the view should list them. */
+  works: Work[]
+  /**
+   * AO3 refused before the load was finished, so this is not an answer about
+   * what the list holds. The stored copy is kept instead — see the refusal
+   * handling in {@link refresh}.
+   */
+  blocked: boolean
+}
+
+/**
+ * The view, as a {@link SearchSource.header} sees it. Every method is a no-op
+ * once the view this control belongs to has been replaced, so a strip that
+ * outlives an abort can't write into someone else's view.
+ */
+export interface SearchHeaderControl {
+  /**
+   * Put `works` on screen in place of what the view holds: the host's own
+   * preparation (statuses, the hide pass), the snapshot write, and the swap.
+   * Unlike a background reload this is not deferred — the source is saying the
+   * list *is* this now.
+   */
+  show: (works: Work[]) => void
+  /** Toggle the view's "updating in the background" indicator. */
+  setUpdating: (on: boolean) => void
+  /** Reload from the source, exactly as the view's own Refresh button does. */
+  refresh: () => void
+  /**
+   * Ask to hear about a reload a {@link SearchViewConfig.stablePages} view
+   * declined to swap in, so the strip can offer it instead of the reader losing
+   * their place. One listener; `null` stops listening, and while there is none
+   * such a reload simply goes in.
+   */
+  onUpdateDeferred: (listener: ((update: DeferredUpdate) => void) | null) => void
+}
+
 /** What a {@link SearchSource.topUp} goes looking for. */
 export interface TopUp {
   /** Whether the scrape has found everything it came for (see `ScrapeOptions.satisfied`). */
@@ -266,6 +355,17 @@ async function budgetFor(source: SearchSource, options: Options): Promise<Budget
 function selected(source: SearchSource, works: Work[]): Work[] {
   const chosen = source.select ? source.select(works) : works
   return source.belongs ? chosen.filter(source.belongs) : chosen
+}
+
+/**
+ * The works a {@link SearchSource.load} produced, less any the source says no
+ * longer belong. {@link SearchSource.select} has nothing to do here — a load
+ * chose its own works rather than picking them out of a listing — but
+ * {@link SearchSource.belongs} is about what the reader has done since, which a
+ * load knows no more about than a scrape does.
+ */
+function belonging(source: SearchSource, works: Work[]): Work[] {
+  return source.belongs ? works.filter(source.belongs) : works
 }
 
 /**
@@ -523,6 +623,12 @@ interface ProgressPanel {
   onProgress: (done: number, total: number) => void
   /** Fetching works one page each, after the listing (see `SearchSource.recover`). */
   onRecover: (done: number, total: number) => void
+  /**
+   * A load that says in its own words what it is doing (see
+   * {@link LoadOptions.onProgress}), because the page counter above assumes one
+   * listing being read from the front.
+   */
+  onLoad: (text: string, done: number, total: number) => void
   /** Stop watching for pauses. The panel itself goes with whatever replaces it. */
   dispose: () => void
 }
@@ -586,6 +692,14 @@ function mountProgress(container: HTMLElement): ProgressPanel {
       fill.style.width = `${total ? Math.round((done / total) * 100) : 0}%`
       draw()
     },
+    onLoad: (text, done, total) => {
+      progressText = text
+      // A step of unknown length leaves the bar where it was rather than
+      // snapping it back to nothing: the work already done wasn't undone.
+      if (total > 0)
+        fill.style.width = `${Math.round((Math.min(done, total) / total) * 100)}%`
+      draw()
+    },
     dispose: () => {
       unwatch()
       clearInterval(ticker)
@@ -645,6 +759,53 @@ function mountLimitGate(
 }
 
 /**
+ * The background half of {@link SearchSource.load}: ask the source for the list
+ * again and feed the answer into the live view and the cache.
+ *
+ * The same two refusals the scrape path makes, for the same reasons. A load that
+ * was cut short says nothing about what the list holds, so the stored copy is
+ * left alone — on screen and on disk — rather than being written over with
+ * whatever arrived before AO3 stopped answering. And a load that comes back
+ * empty over a list that *has* a stored copy is treated the same way: dropping
+ * every work, every side record and every cached blurb on one bad minute is not
+ * recoverable, and keeping yesterday's copy up always is.
+ *
+ * Whether the fresh works reach the screen is the view's decision, not this
+ * one's: a view holding its page layout hands them to the source to offer
+ * instead (see {@link SearchViewConfig.stablePages}). They are written and
+ * timestamped either way, because they were fetched either way — the next open
+ * should show them without asking again.
+ */
+async function reload(
+  source: SearchSource,
+  view: SearchView,
+  options: Options,
+  signal: AbortSignal,
+  full: boolean,
+): Promise<void> {
+  const loaded = await source.load!({ signal, onProgress: () => {}, full })
+  if (signal.aborted)
+    return
+  if (loaded.blocked) {
+    toast(`AO3 asked us to slow down, so the list wasn't refreshed. It is still showing what was stored. Try again in a few minutes.`, { type: 'error' })
+    return
+  }
+  const works = renumber(belonging(source, loaded.works))
+  if (works.length === 0 && await snapshotSize(source.cacheKey) > 0) {
+    toast(`This list came back with no works in it, so it wasn't refreshed. It is still showing what was stored.`, { type: 'error' })
+    return
+  }
+  if (signal.aborted)
+    return
+  await persist(source, works)
+  view.update(works, prepare(source, works, options, true))
+  const now = Date.now()
+  view.setRefreshedAt(now)
+  if (active?.view === view)
+    active.scrapedAt = now
+}
+
+/**
  * Re-scrape in the background and feed the result into the live view + cache.
  * With `topUp`, only look for what the stored works lack, and add it to them.
  */
@@ -658,6 +819,10 @@ async function refresh(
   const own = new AbortController()
   controller = own
   try {
+    if (source.load) {
+      await reload(source, view, options, own.signal, !topUp)
+      return
+    }
     // Re-budgeted rather than reused: the reader may have changed the ceiling,
     // and the listing may have grown, since the view was opened.
     const budget = await budgetFor(source, options)
@@ -730,6 +895,20 @@ export interface OpenOptions {
   initialState?: ViewState
   /** Skip the background re-scrape, when the cache is known to be fresh. */
   refresh?: boolean
+  /**
+   * Whether a reopen may show the works the closed view was holding. True by
+   * default, and right for nearly every reopen: a mark click closes and reopens
+   * the view within one re-run, and the works it was showing are the works it
+   * should show — going back to storage for them would cost a read and a reparse
+   * to arrive at the same list.
+   *
+   * `false` is for the case where the source itself has moved the list on in the
+   * meantime, and the works in hand are the *old* answer. The reader's filters,
+   * sort and layout still come across; the works are read from storage, where
+   * the source has just written the new ones. The frozen page layout is dropped
+   * with them (see {@link ViewState.order}) — it describes a set that has gone.
+   */
+  reuseWorks?: boolean
 }
 
 /**
@@ -771,6 +950,14 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     let prefs = carried ? carried.prefs : await loadPrefs(source.id)
     if (stale())
       return
+    /**
+     * The source's own strip, built once for this open and kept across the
+     * renders inside it, and the one listener it may register for reloads the
+     * view would rather not spring on the reader.
+     */
+    let headerEl: HTMLElement | null = null
+    let onDeferred: ((update: DeferredUpdate) => void) | null = null
+    const reusingWorks = opts.reuseWorks !== false
     const config: SearchViewConfig = {
       perPage: options.searchPerPage,
       decorateBlurb: blurb => decorateBlurb(blurb, options, { hidesNothing: source.hidesNothing }),
@@ -778,7 +965,20 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       onRendered: refreshFilterToolbar,
       hideFacetValue: makeFacetHider(options),
       ...source.viewConfig,
-      initialState: opts.initialState,
+      initialState: reusingWorks || !opts.initialState
+        ? opts.initialState
+        : { ...opts.initialState, order: undefined },
+      // How a work that has to keep a slot it no longer earns is drawn. Only a
+      // view holding its page layout ever asks.
+      collapseWork,
+      onUpdateDeferred: (update) => {
+        // Nothing on screen to offer it with, so a frozen layout is not worth
+        // losing a reload over: it goes in as it would in any other view.
+        if (onDeferred)
+          onDeferred(update)
+        else
+          update.apply()
+      },
       prefs,
       onPrefsChange: (next) => {
         prefs = next
@@ -801,6 +1001,27 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         void refresh(source, view, options).finally(() => view.setUpdating(false))
       },
     }
+    // Everything a source's own strip can ask of the view. Each call checks that
+    // the view it was made for is still the one on screen: a strip built during
+    // an open that another open replaced must not write into the replacement.
+    const headerCtl: SearchHeaderControl = {
+      show: (works) => {
+        if (active?.source !== source)
+          return
+        const next = renumber(belonging(source, works))
+        void persist(source, next).catch(err => log.error(`Failed to persist the search-view snapshot for ${source.id}`, err))
+        // Forced: the source is not reporting a change, it is making one.
+        active.view.update(next, prepare(source, next, options, true), { force: true })
+      },
+      setUpdating: (on) => {
+        if (active?.source === source)
+          active.view.setUpdating(on)
+      },
+      refresh: () => handlers.onRefresh(),
+      onUpdateDeferred: (listener) => {
+        onDeferred = listener
+      },
+    }
 
     // Set for the one call that follows a scrape; a cached render is not fresh.
     let fresh = false
@@ -808,11 +1029,16 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       const autoExcludes = prepare(source, works, options, fresh)
       const view = createSearchView(works, handlers, { ...config, autoExcludes, refreshedAt })
       active = { source, view, scrapedAt: refreshedAt, prefs }
-      container.replaceChildren(view.el)
+      // After `active`, so a strip that starts work the moment it is built can
+      // already reach the view. Built once per open and kept, since nothing in
+      // an open shows twice and a rebuild would throw away whatever the reader
+      // had set on it.
+      headerEl ??= source.header?.(headerCtl) ?? null
+      container.replaceChildren(...(headerEl ? [headerEl, view.el] : [view.el]))
       return view
     }
 
-    const cached = carried
+    const cached = carried && reusingWorks
       ? { works: undecorated(carried.works), scrapedAt: carried.scrapedAt, missing: 0 }
       : await readSnapshot(source.cacheKey)
     if (stale())
@@ -873,6 +1099,36 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     // — goes up before the count rather than after it.
     let progress = mountProgress(container)
     try {
+      if (source.load) {
+        // A source that produces its own works has no listing to budget, no
+        // pages to count and nothing for the limit gate to ask about — it has
+        // already decided how much to read. What follows the load is the same as
+        // what follows a scrape: the refusal and empty guards, the write, the
+        // view.
+        const loaded = await source.load({ signal: own.signal, onProgress: progress.onLoad, full: true })
+        if (stale())
+          return
+        const works = renumber(belonging(source, loaded.works))
+        // Not written when AO3 refused us outright and gave us nothing: an empty
+        // load would otherwise overwrite a perfectly good stored list, and "AO3
+        // said no" is not news about what is on the reader's list.
+        if (!loaded.blocked || works.length)
+          await persist(source, works)
+        if (stale())
+          return
+        if (!works.length) {
+          // An empty list is a fact about the reader; a refusal is a fact about
+          // this minute. Telling them apart is the whole point of `blocked`.
+          toast(loaded.blocked ? RATE_LIMITED : source.emptyMessage, { type: 'error' })
+          closeSearchView()
+          return
+        }
+        fresh = true
+        show(works, Date.now())
+        if (loaded.blocked)
+          toast('AO3 asked us to slow down before the whole list could be loaded. The rest will be tried again next time.', { type: 'error' })
+        return
+      }
       const budget = await budgetFor(source, options)
       if (stale())
         return

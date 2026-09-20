@@ -9,9 +9,10 @@ import MdiRefresh from '~icons/mdi/refresh.jsx'
 import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS } from '#common'
+import { hasNode } from '#content_script/blurb.js'
 import React from '#dom'
 
-import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FacetValueRef, FilterState, SortKey } from './engine.ts'
+import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FacetValueRef, FilterState, SortKey, StableDrop } from './engine.ts'
 import type { SearchViewPrefs } from './prefs.ts'
 
 import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
@@ -25,11 +26,13 @@ import {
   FACET_KEYS,
   FACET_LABELS,
   facetValues,
+  layoutStablePages,
   SORT_LABELS,
   sortWorks,
 } from './engine.ts'
 import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
 import { DEFAULT_STATUS, SIDEBAR_WIDTH } from './prefs.ts'
+import { pristineBlurb } from './pristine.ts'
 
 const ROOT = VIEW_ROOT
 /** Body class while the filter column is being dragged — see ReaderMode, same idea. */
@@ -77,6 +80,29 @@ export interface ViewState {
    * fill faster than anyone wants to scroll past.
    */
   openSelections: Record<string, boolean>
+  /**
+   * The ids of every work the pages were cut from, in page order, as of the last
+   * time the reader said what they wanted — only recorded, and only honoured, by
+   * a view built with {@link SearchViewConfig.stablePages}.
+   *
+   * It is what lets a view be torn down and rebuilt — which happens on every
+   * options change, so on every mark click — and come back holding the same works
+   * on the same page, instead of closing the gap left by whatever the reader just
+   * did and sliding a work off the next page onto one they have already read.
+   */
+  order?: string[]
+}
+
+/**
+ * Fresh works a {@link SearchViewConfig.stablePages} view declined to swap in,
+ * handed to the host so it can offer them rather than reshuffle a list the
+ * reader is part-way through.
+ */
+export interface DeferredUpdate {
+  /** The works as loaded, for the offer to describe ("+3 −1"). */
+  works: Work[]
+  /** Swap them in after all: the view takes them on and goes back to page 1. */
+  apply: () => void
 }
 
 export interface SearchView {
@@ -86,8 +112,14 @@ export interface SearchView {
    * Swap in freshly scraped works (e.g. after a background refresh), keeping
    * filters. `autoExcludes` re-states the exclusions the reader's hide rules
    * imply over the new set; omit it to keep the ones the view already has.
+   *
+   * A {@link SearchViewConfig.stablePages} view refuses: swapping the list jumps
+   * to page 1 over a different set of works, which is the one thing a frozen
+   * layout exists to prevent. It hands the works to
+   * {@link SearchViewConfig.onUpdateDeferred} instead, for whoever can ask the
+   * reader. `force` overrides that, for a caller who *is* the reader's answer.
    */
-  update: (works: Work[], autoExcludes?: FacetValueRef[]) => void
+  update: (works: Work[], autoExcludes?: FacetValueRef[], opts?: { force?: boolean }) => void
   /** Toggle the subtle "updating in the background" indicator. */
   setUpdating: (updating: boolean) => void
   /** Record when the works were last fetched, for the Refresh button to say. */
@@ -186,9 +218,54 @@ export interface SearchViewConfig {
    * hosts that aren't triaging pass `[]`.
    */
   defaultStatus?: string[]
+  /**
+   * Freeze which works sit on which page, so that nothing but the reader can
+   * move one.
+   *
+   * For a list meant to be *worked through* rather than browsed, where the reader
+   * pages from the first work to the last and acts on what they find. Every such
+   * action — a mark, a rule added from a context menu — re-runs the page and
+   * rebuilds this view, with the hide pass and the facet filters applied afresh;
+   * anything that drops a work at that point shortens the list and slides every
+   * work after it back a slot, so the work that headed the next page lands on the
+   * page just read and is never seen again. A frozen layout keeps the slot and
+   * draws the work collapsed instead ({@link collapseWork}).
+   *
+   * What the reader dials in themselves — the filter, the sort, the search text,
+   * the word count — recomputes the layout and goes back to page 1, since a
+   * reshuffle they asked for is no surprise. Facet counts are live throughout;
+   * the freeze is only over the page each work sits on.
+   *
+   * The frozen layout travels in {@link ViewState.order}, which is what carries
+   * it across the teardown and rebuild.
+   */
+  stablePages?: boolean
+  /**
+   * Draw one blurb as a work holding a slot it no longer earns: a line saying
+   * what happened and a button to show it anyway. Only ever called for a
+   * {@link stablePages} view. Absent leaves such a work drawn as it was, which
+   * for a work a rule now hides means an empty slot.
+   */
+  collapseWork?: (blurb: HTMLElement, reason: string) => void
+  /**
+   * Take the fresh works a {@link stablePages} view would not swap in, so they
+   * can be offered to the reader instead. Without it, `update` swaps as usual —
+   * a frozen layout is worth less than works that never appear.
+   */
+  onUpdateDeferred?: (update: DeferredUpdate) => void
 }
 
 const DEFAULT_PER_PAGE = 50
+
+/**
+ * What a work holding a slot it no longer earns is told it is doing there —
+ * deliberately about the *kind* of thing that happened rather than the specific
+ * rule, which the hiding decoration says better wherever it can say it at all.
+ */
+const DROP_REASONS: Record<StableDrop, string> = {
+  hidden: 'Now hidden by your rules or marks',
+  filtered: 'No longer matches your filters',
+}
 
 /**
  * The works that count as results: everything the reader's rules haven't taken
@@ -309,6 +386,20 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   const perPage = Math.max(1, config.perPage ?? DEFAULT_PER_PAGE)
   // Current page (0-based). Sorted full set is cached; filtering never reorders.
   let pageIndex = config.initialState?.pageIndex ?? 0
+  const stablePages = config.stablePages === true
+  /**
+   * The page layout this view is holding to, as work ids in page order — see
+   * {@link SearchViewConfig.stablePages}. Null means the next render lays the
+   * pages out from what passes the filter and freezes *that*, which is how the
+   * view opens and what every change the reader dials in goes back to.
+   */
+  let frozenOrder: string[] | null = stablePages ? (config.initialState?.order ?? null) : null
+  /**
+   * Works this view has drawn collapsed in a slot they no longer earn. Kept so a
+   * swap that does happen can take the collapse back off: the same work can be a
+   * proper result in the next set, and its blurb node comes along with it.
+   */
+  const collapsedInPlace = new Set<Work>()
   let sortedWorks: Work[] = works
   // Blurbs already run through config.decorateBlurb, so each is decorated at most
   // once (and only when first shown). A WeakSet so replaced works are forgotten.
@@ -523,8 +614,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   sortSelect.value = state.sort
   sortSelect.addEventListener('change', () => {
     state.sort = sortSelect.value as SortKey
-    render()
-    persist()
+    sortChanged()
   })
 
   const dirBtn = (<button type="button" class={cx('dir')} />) as HTMLElement as HTMLButtonElement
@@ -535,8 +625,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   dirBtn.addEventListener('click', () => {
     state.dir = state.dir === 'asc' ? 'desc' : 'asc'
     syncDir()
-    render()
-    persist()
+    sortChanged()
   })
   syncDir()
 
@@ -1155,10 +1244,32 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     config.onWorksChanged?.(works)
   }
 
-  /** A filter (not sort/page) changed: jump back to the first page, then render. */
+  /**
+   * A filter (not sort/page) changed: jump back to the first page, then render.
+   *
+   * The reader asked for this, so a {@link SearchViewConfig.stablePages} view
+   * lets go of its frozen layout here and lays the pages out afresh. Every
+   * reshuffle a reader can see is one they started.
+   */
   function filterChanged(): void {
     pageIndex = 0
+    frozenOrder = null
     render()
+  }
+
+  /**
+   * The sort or its direction changed. Ordinarily the page number is kept —
+   * the reader is looking at the same results from another angle — but a frozen
+   * layout is a *page* order, and there is nothing left of it once the sort
+   * moves, so a stable-paged view treats it like any other thing the reader
+   * dialled in.
+   */
+  function sortChanged(): void {
+    if (stablePages)
+      filterChanged()
+    else
+      render()
+    persist()
   }
 
   /** Page numbers to show around the current one; `null` marks an elided gap. */
@@ -1228,8 +1339,14 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       sortSig = orderSig
     }
 
-    // Visible works in sort order, then the current page's slice.
-    const ordered = sortedWorks.filter(w => visible.has(w))
+    // Visible works in sort order — or, for a view holding its layout, the works
+    // its frozen order puts in each slot, some of them only holding the place.
+    // Whatever this render lays out is then what the *next* one holds to, so a
+    // collapsed work keeps its slot for as long as the reader stays put.
+    const layout = frozenOrder === null ? null : layoutStablePages(frozenOrder, sortedWorks, visible)
+    const ordered = layout ? layout.ordered : sortedWorks.filter(w => visible.has(w))
+    if (stablePages)
+      frozenOrder = ordered.map(work => work.workId)
     const total = ordered.length
     const pageCount = Math.max(1, Math.ceil(total / perPage))
     pageIndex = Math.min(Math.max(pageIndex, 0), pageCount - 1)
@@ -1273,7 +1390,22 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       if (decorated.has(work.el))
         continue
       decorated.add(work.el)
+      const drop = layout?.dropped.get(work)
+      // Left to itself, the hiding decoration would take a work the rules now
+      // cover off the page altogether, and the slot kept for it would be blank.
+      // The stamp that says a search filter has taken the reason over is also
+      // what asks it to collapse the work instead, to a line naming the rule or
+      // mark responsible — better than anything this view could word.
+      if (drop === 'hidden')
+        work.el.dataset.ao3eFiltered = ''
       config.decorateBlurb?.(work.el)
+      if (drop) {
+        collapsedInPlace.add(work)
+        // A no-op when the hiding decoration has already drawn its own line, so
+        // this covers the reasons it has nothing to say about: a filter that
+        // stopped admitting the work, and a rule while hiding is switched off.
+        config.collapseWork?.(work.el, DROP_REASONS[drop])
+      }
       if (config.blurbAction)
         injectBlurbAction(work, config.blurbAction)
     }
@@ -1304,9 +1436,31 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     sortSig = '' // new works; force a re-sort.
   }
 
-  function update(nextWorks: Work[], nextAutoExcludes?: FacetValueRef[]): void {
+  function update(nextWorks: Work[], nextAutoExcludes?: FacetValueRef[], opts: { force?: boolean } = {}): void {
+    // A frozen layout and a fresh list are the same question asked twice: the
+    // swap goes to page 1 over works the reader has not been through, which is
+    // exactly the place they were keeping. So it is offered rather than taken —
+    // but only to a host that can do the offering, and only when the swap isn't
+    // the reader's own answer coming back.
+    if (stablePages && !opts.force && config.onUpdateDeferred) {
+      config.onUpdateDeferred({
+        works: nextWorks,
+        apply: () => update(nextWorks, nextAutoExcludes, { force: true }),
+      })
+      return
+    }
     works = nextWorks
     pool = results(works)
+    // The same work can be a proper result in the new set, and it brings the
+    // blurb this view collapsed along with it. Take it back to the markup the
+    // store keeps, so the decoration below runs over it again from scratch.
+    for (const work of collapsedInPlace) {
+      if (hasNode(work)) {
+        pristineBlurb(work.el, { inPlace: true })
+        decorated.delete(work.el)
+      }
+    }
+    collapsedInPlace.clear()
     if (nextAutoExcludes)
       setAutoExcludes(nextAutoExcludes)
     // Drop selections for values that no longer exist so the UI stays honest.
@@ -1324,6 +1478,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // still holds, so nothing here drops them, but the order says which wins.
     applyAutoExcludes()
     pageIndex = 0 // fresh data — start at the first page
+    // …and a new layout, since the old one was about works that have gone.
+    frozenOrder = null
     mountResults()
     renderFacets()
     render()
@@ -1357,6 +1513,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       collapsedFacets,
       releasedAutoExcludes: [...released],
       openSelections: Object.fromEntries(openSelections),
+      // Only a view that holds its layout has one to hand on; for anything else
+      // recording it would be an invitation to honour it later.
+      ...(frozenOrder ? { order: [...frozenOrder] } : {}),
     }
   }
 

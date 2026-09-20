@@ -10,6 +10,7 @@ import type { Completion } from '#content_script/completionFilter.js'
 /** A facetable field. Each maps a work to zero or more string values. */
 export type FacetKey
   = | 'status'
+    | 'source'
     | 'rating'
     | 'warnings'
     | 'categories'
@@ -23,6 +24,7 @@ export type FacetKey
 /** Facet groups in sidebar display order. */
 export const FACET_KEYS: FacetKey[] = [
   'status',
+  'source',
   'rating',
   'warnings',
   'categories',
@@ -36,6 +38,7 @@ export const FACET_KEYS: FacetKey[] = [
 
 export const FACET_LABELS: Record<FacetKey, string> = {
   status: 'Status',
+  source: 'List source',
   rating: 'Rating',
   warnings: 'Archive Warnings',
   categories: 'Categories',
@@ -84,6 +87,10 @@ export function facetValues(work: Work, key: FacetKey): string[] {
     // to Ready — an untracked work on your to-read list is exactly that, with
     // nothing standing between you and reading it.
     case 'status': return work.statuses ?? ['Ready']
+    // Which of the reader's own lists turned this work up — stamped by the host
+    // for a view assembled from several queries at once, and absent everywhere
+    // else, so the group has no values and the sidebar leaves it out.
+    case 'source': return work.sources ?? []
     case 'rating': return work.rating ? [work.rating] : []
     case 'warnings': return work.warnings
     case 'categories': return work.categories
@@ -406,4 +413,79 @@ export function computeView(works: Work[], f: FilterState): ViewComputation {
   }
 
   return { visible, facetCounts, resultCounts }
+}
+
+/** Why a work kept a slot it no longer earns — what its reason line has to say. */
+export type StableDrop
+  /** The reader's rules or marks now take it out of the listing. */
+  = | 'hidden'
+    /** It still is a result, but the filter as it stands no longer passes it. */
+    | 'filtered'
+
+/** Where every work sits, and which of them are only holding their place. */
+export interface StableLayout {
+  /** The works to page over, in the order the pages are cut from. */
+  ordered: Work[]
+  /** Those of {@link ordered} that are drawn collapsed, and why. */
+  dropped: Map<Work, StableDrop>
+}
+
+/**
+ * Lay the pages out from a remembered order instead of from what passes the
+ * filter right now, so that nothing the reader is part-way through paging can
+ * move under them.
+ *
+ * Recomputing the layout is the obvious thing and the wrong one for a list being
+ * worked through item by item. Anything that takes one work out of the results
+ * mid-pass — a mark that hides works, a rule added from a context menu, a status
+ * a live facet filter no longer admits — shortens the list, and every work after
+ * it slides back a slot. The work that was first on the next page lands on the
+ * page just read, and is never seen. Freezing the order costs a stale slot;
+ * recomputing it costs works.
+ *
+ * `order` names works by id, in page order, as they stood when the reader last
+ * said what they wanted. Given today's `visible` set and every work in today's
+ * sort order:
+ *
+ * - a work named by `order` keeps its slot, whether or not it still passes — one
+ *   that doesn't is reported in {@link StableLayout.dropped} for the caller to
+ *   draw collapsed, with the reason taken from {@link Work.hidden} /
+ *   {@link Work.filtered} (a rule or a mark) or, failing those, the filter;
+ * - an id `order` names that no work answers to any more is simply gone: its
+ *   slot goes with it, since there is nothing left to hold it;
+ * - a work that passes now and `order` has never heard of goes on the end, in
+ *   sort order. Nothing should reach here while the order is frozen — fresh
+ *   works are held back rather than swapped in — but losing a work outright
+ *   would be far worse than showing it late.
+ */
+export function layoutStablePages(
+  order: readonly string[],
+  sorted: readonly Work[],
+  visible: ReadonlySet<Work>,
+): StableLayout {
+  const byId = new Map<string, Work>()
+  for (const work of sorted) {
+    if (!byId.has(work.workId))
+      byId.set(work.workId, work)
+  }
+  const ordered: Work[] = []
+  const dropped = new Map<Work, StableDrop>()
+  const placed = new Set<Work>()
+  for (const id of order) {
+    const work = byId.get(id)
+    // A repeated id claims one slot, not two.
+    if (!work || placed.has(work))
+      continue
+    placed.add(work)
+    ordered.push(work)
+    if (!visible.has(work))
+      dropped.set(work, work.hidden || work.filtered ? 'hidden' : 'filtered')
+  }
+  for (const work of sorted) {
+    if (visible.has(work) && !placed.has(work)) {
+      placed.add(work)
+      ordered.push(work)
+    }
+  }
+  return { ordered, dropped }
 }

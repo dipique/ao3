@@ -13,6 +13,7 @@ import {
   computeView,
   emptyFilterState,
   facetValues,
+  layoutStablePages,
   matches,
   sortWorks,
 } from '../../src/content_script/searchView/engine.ts'
@@ -317,5 +318,101 @@ describe('the completion facet', () => {
   test('each choice writes the value that reads back as it', () => {
     for (const choice of ['complete', 'incomplete'])
       assert.equal(completionOf(sel({ include: [completionValue(choice)] })), choice)
+  })
+})
+
+describe('the list-source facet', () => {
+  test('reads the sources the host stamped, and is empty without them', () => {
+    assert.deepEqual(facetValues(work({ sources: ['Hurt/comfort', 'coffee'] }), 'source'), ['Hurt/comfort', 'coffee'])
+    // Every view but a merged one leaves it unset, which is what keeps the group
+    // out of the sidebar there: no values, no group.
+    assert.deepEqual(facetValues(work(), 'source'), [])
+    assert.deepEqual(buildFacets([work(), work()]).source, [])
+  })
+})
+
+describe('a frozen page layout', () => {
+  /** `layoutStablePages` over `sorted`, with `visible` named by work id. */
+  const lay = (order, sorted, visibleIds) =>
+    layoutStablePages(order, sorted, new Set(sorted.filter(w => visibleIds.includes(w.workId))))
+
+  const five = ['1', '2', '3', '4', '5'].map(workId => work({ workId }))
+
+  test('with everything still passing, it is the order itself', () => {
+    const { ordered, dropped } = lay(['1', '2', '3', '4', '5'], five, ['1', '2', '3', '4', '5'])
+    assert.deepEqual(ordered.map(w => w.workId), ['1', '2', '3', '4', '5'])
+    assert.equal(dropped.size, 0)
+  })
+
+  test('a work that stopped passing keeps its slot instead of letting the rest slide back', () => {
+    // The point of the whole exercise: without the freeze, 4 and 5 move up a
+    // place each and whatever was first on the next page lands on the last one.
+    const { ordered, dropped } = lay(['1', '2', '3', '4', '5'], five, ['1', '2', '4', '5'])
+    assert.deepEqual(ordered.map(w => w.workId), ['1', '2', '3', '4', '5'])
+    assert.deepEqual([...dropped.keys()].map(w => w.workId), ['3'])
+  })
+
+  test('the reason separates the reader’s rules from the reader’s filter', () => {
+    const hidden = work({ workId: 'h', hidden: true })
+    const handed = work({ workId: 'f', filtered: true })
+    const unmatched = work({ workId: 'u' })
+    const { dropped } = lay(['h', 'f', 'u'], [hidden, handed, unmatched], [])
+    assert.equal(dropped.get(hidden), 'hidden')
+    // Handed to the view's own filter by the hide pass is still a rule hiding it.
+    assert.equal(dropped.get(handed), 'hidden')
+    assert.equal(dropped.get(unmatched), 'filtered')
+  })
+
+  test('an id nothing answers to any more takes its slot with it', () => {
+    const { ordered, dropped } = lay(['1', 'gone', '2'], [five[0], five[1]], ['1', '2'])
+    assert.deepEqual(ordered.map(w => w.workId), ['1', '2'])
+    assert.equal(dropped.size, 0)
+  })
+
+  test('a repeated id claims one slot', () => {
+    const { ordered } = lay(['1', '1', '2'], five, ['1', '2', '3', '4', '5'])
+    // 3–5 are newcomers as far as this order is concerned, so they follow.
+    assert.deepEqual(ordered.map(w => w.workId), ['1', '2', '3', '4', '5'])
+  })
+
+  test('a work the order never heard of goes on the end, in sort order', () => {
+    const { ordered, dropped } = lay(['5', '3'], five, ['1', '2', '3', '4', '5'])
+    assert.deepEqual(ordered.map(w => w.workId), ['5', '3', '1', '2', '4'])
+    assert.equal(dropped.size, 0)
+  })
+
+  test('a newcomer that does not pass is not added at all', () => {
+    // Only the frozen slots are held open; nothing earns one by failing.
+    const { ordered } = lay(['1'], five, ['1', '2'])
+    assert.deepEqual(ordered.map(w => w.workId), ['1', '2'])
+  })
+
+  test('an empty order lays out exactly what passes', () => {
+    const { ordered, dropped } = lay([], five, ['2', '4'])
+    assert.deepEqual(ordered.map(w => w.workId), ['2', '4'])
+    assert.equal(dropped.size, 0)
+  })
+
+  test('it agrees with the plain layout the view would otherwise compute', () => {
+    const state = emptyFilterState()
+    state.facets.fandoms.include.add('Naruto')
+    const { visible } = computeView(works, state)
+    const plain = sortWorks(works, state.sort, state.dir).filter(w => visible.has(w))
+    const { ordered, dropped } = layoutStablePages([], sortWorks(works, state.sort, state.dir), visible)
+    assert.deepEqual(ordered, plain)
+    assert.equal(dropped.size, 0)
+  })
+
+  test('holding the layout across a filter that narrows it keeps every slot', () => {
+    const state = emptyFilterState()
+    const before = computeView(works, state)
+    const order = sortWorks(works, state.sort, state.dir).filter(w => before.visible.has(w)).map(w => w.workId)
+    state.facets.fandoms.include.add('Naruto')
+    const after = computeView(works, state)
+    const { ordered, dropped } = layoutStablePages(order, sortWorks(works, state.sort, state.dir), after.visible)
+    assert.deepEqual(ordered.map(w => w.workId), order)
+    // "charlie" is Bleach only, so it is the one the new filter drops.
+    assert.deepEqual([...dropped.keys()].map(w => w.workId), ['3'])
+    assert.deepEqual([...dropped.values()], ['filtered'])
   })
 })

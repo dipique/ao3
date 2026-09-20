@@ -138,3 +138,162 @@ describe('floating toolbar — collapsed hit area', { skip }, () => {
     assert.ok(ok.ok, `an expanded pill must receive clicks (hit ${ok.why})`)
   })
 })
+
+/**
+ * The same corner, with a toast in it.
+ *
+ * Saving anything from one of the toolbar's own pills raises a toast, and a
+ * toast is fixed to the bottom-right too — so it used to come down squarely on
+ * top of the launcher and the lowest pills, at a z-index the toolbar can't
+ * argue with. The reader had pressed a button and lost the toolbar for as long
+ * as the message about it was up. The toast now steps above whatever the
+ * content script has parked in that corner (`--ao3e-corner-reserve`), and stops
+ * hit-testing outside its own card.
+ */
+describe('floating toolbar — while a toast is up', { skip }, () => {
+  let browser
+  let page
+
+  before(async () => {
+    ensureBuilt()
+    const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
+    const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
+
+    browser = await puppeteer.launch({
+      executablePath: chromePath,
+      headless: 'new',
+      args: ['--no-first-run', '--no-default-browser-check'],
+    })
+    page = await browser.newPage()
+    await page.setViewport({ width: 1024, height: 768 })
+    await page.goto('about:blank')
+    await page.evaluate(installMock, SEED)
+    await page.evaluate(() => {
+      document.body.innerHTML = ''
+    })
+    await page.addStyleTag({ content: css })
+    await page.addScriptTag({ content: js })
+    await sleep(1500)
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  /**
+   * Put a toast up the way the background does — one that never times out, so
+   * the state under test doesn't expire halfway through the file.
+   */
+  const raiseToast = async (message = 'Saved.') => {
+    await page.evaluate(m => window.__message({ toast: [m, { type: 'success', timeout: 0 }] }), message)
+    // Past the toast's own entrance transition.
+    await sleep(600)
+  }
+
+  /**
+   * Where everything in the corner is, and what a pointer put in the middle of
+   * each of them would actually hit. `elementFromPoint` reports the shadow
+   * host for a point over the toast, which is exactly the answer we're after:
+   * "something that isn't the toolbar is in the way".
+   */
+  const corner = () => page.evaluate(() => {
+    const toolbar = document.querySelector('.AO3E--filter-toolbar')
+    const fab = document.querySelector('.AO3E--filter-toolbar--fab')
+    if (!toolbar || !fab)
+      return null
+    const pills = [...document.querySelectorAll('.AO3E--filter-toolbar--button')]
+    let card = null
+    for (const el of document.body.children) {
+      const found = [...el.shadowRoot?.querySelectorAll('.toast') ?? []]
+        .find(t => t.style.visibility !== 'hidden')
+      if (found) {
+        card = found
+        break
+      }
+    }
+
+    const at = (el) => {
+      const r = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2))
+      return {
+        top: Math.round(r.top),
+        bottom: Math.round(r.bottom),
+        inToolbar: !!hit && !!toolbar && toolbar.contains(hit),
+        isToast: !!hit && hit.shadowRoot?.contains(card ?? null) === true,
+        hit: hit ? (hit.className || hit.tagName) : null,
+      }
+    }
+
+    return {
+      open: toolbar?.classList.contains('AO3E--filter-toolbar--open') ?? false,
+      reserve: document.documentElement.style.getPropertyValue('--ao3e-corner-reserve'),
+      fab: at(fab),
+      // Bottom-up: the pill nearest the corner is the one a toast used to bury.
+      pills: pills.map(at).reverse(),
+      toast: card ? at(card.querySelector('.inner')) : null,
+    }
+  })
+
+  test('the toast sits above the collapsed launcher, not over it', async () => {
+    await raiseToast()
+    const state = await corner()
+    assert.ok(state, 'the floating toolbar should have rendered')
+    assert.ok(state.toast, 'the toast should be up')
+    assert.equal(state.open, false, 'the toolbar starts collapsed')
+    // Collapsed, only the circle is really in the corner — the panel keeps its
+    // layout box but is invisible, so the reserve is the circle's height plus
+    // its offset, not the whole container's.
+    assert.match(state.reserve, /^\d+px$/, 'the toolbar should publish what it takes')
+    assert.ok(
+      state.toast.bottom <= state.fab.top,
+      `the toast (bottom ${state.toast.bottom}) should clear the launcher (top ${state.fab.top})`,
+    )
+  })
+
+  test('a pointer in the middle of the launcher lands on the launcher', async () => {
+    const state = await corner()
+    assert.ok(state.fab.inToolbar, `the launcher's own centre hit ${state.fab.hit}`)
+    assert.equal(state.fab.isToast, false, 'and it is not the toast')
+  })
+
+  test('the toast still takes its own clicks', async () => {
+    const state = await corner()
+    assert.ok(state.toast.isToast, `the toast's own card hit ${state.toast.hit}`)
+  })
+
+  test('a real click on the launcher opens the panel', async () => {
+    await page.click('.AO3E--filter-toolbar--fab')
+    await sleep(400)
+    const state = await corner()
+    assert.equal(state.open, true, 'the click should have reached the launcher')
+    assert.ok(state.pills.length > 0, 'the panel should have pills in it')
+  })
+
+  test('the toast steps up again for the expanded panel', async () => {
+    const state = await corner()
+    assert.ok(
+      state.toast.bottom <= state.pills[0].top,
+      `the toast (bottom ${state.toast.bottom}) should clear the lowest pill (top ${state.pills[0].top})`,
+    )
+    for (const [i, pill] of state.pills.entries())
+      assert.ok(pill.inToolbar, `pill ${i} counting up from the corner was covered by ${pill.hit}`)
+  })
+
+  test('a real click on a pill still does what it says', async () => {
+    await page.click('.AO3E--filter-toolbar--menus')
+    // The write re-runs every unit, which rebuilds the toolbar — collapsed, and
+    // measured afresh. The toast is not ours to remove, so it rides that out.
+    await sleep(1500)
+    const wrote = await page.evaluate(() =>
+      (window.__writes ?? []).some(w => 'option.contextMenusEnabled' in w))
+    assert.ok(wrote, 'the click should have reached the pill and saved the setting')
+  })
+
+  test('and the rebuilt toolbar is still reachable under the same toast', async () => {
+    const state = await corner()
+    assert.ok(state.toast, 'the toast should have outlived the rebuild')
+    assert.equal(state.open, false, 'the rebuilt toolbar is collapsed')
+    assert.ok(state.toast.bottom <= state.fab.top, 'and the toast is back above the collapsed launcher')
+    assert.ok(state.fab.inToolbar, `the rebuilt launcher's centre hit ${state.fab.hit}`)
+  })
+})
