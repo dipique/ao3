@@ -1896,3 +1896,156 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
 .AO3E--dashboard-rail:focus-visible::before {
   opacity: 1;
 }
+
+/* ---------------------------------------------------------------------------
+   The tracked-lists review. A subnav item on the reader's own readings pages
+   opens the search view over a window of days gathered from their tracked
+   lists, with a toolbar above it that moves the range and marks it reviewed.
+   Colours lean on currentColor and translucent greys, like the view itself, so
+   they sit on any AO3 skin.
+   --------------------------------------------------------------------------- */
+.AO3E--tracked-review--button {
+  cursor: pointer;
+}
+
+/* The same float that the two other readings-page views have to get out from
+   under: AO3 pins this subnav right, and the view contains its own layout, so
+   it would otherwise give up the width of the whole subnav for the length of
+   the page. See the rule for those views above. */
+#main:has(.AO3E--tracked-review) {
+  position: relative;
+}
+
+#main:has(.AO3E--tracked-review) > ul.navigation.actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 20;
+}
+
+.AO3E--tracked-review--bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  margin-bottom: 1em;
+  padding: 0.75em 1em;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 6px;
+}
+
+.AO3E--tracked-review--bar--headline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6em;
+}
+
+.AO3E--tracked-review--bar--range {
+  font-weight: 600;
+}
+
+.AO3E--tracked-review--bar--meta {
+  opacity: 0.75;
+  font-size: 0.9em;
+}
+
+/* The toolbar's own, because the host's progress panel is only up for the first
+   load — a range moved by a day afterwards has nowhere else to say so. */
+.AO3E--tracked-review--bar--spinner {
+  display: none;
+  line-height: 0;
+}
+
+.AO3E--tracked-review--bar--busy .AO3E--tracked-review--bar--spinner {
+  display: inline-flex;
+}
+
+.AO3E--tracked-review--bar--spinner svg {
+  width: 1em;
+  height: 1em;
+  animation: AO3E--refresh-spin 0.8s linear infinite;
+}
+
+.AO3E--tracked-review--bar--controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6em;
+}
+
+.AO3E--tracked-review--bar--off {
+  display: none;
+}
+
+.AO3E--tracked-review--bar--step,
+.AO3E--tracked-review--bar--mark,
+.AO3E--tracked-review--bar--confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  cursor: pointer;
+}
+
+.AO3E--tracked-review--bar--step[disabled],
+.AO3E--tracked-review--bar--mark[disabled] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.AO3E--tracked-review--bar--step svg,
+.AO3E--tracked-review--bar--mark svg {
+  width: 1em;
+  height: 1em;
+}
+
+/* The shape of the range at a glance: one bar a day, tallest for the busiest,
+   and a sliver for a day with nothing on it so a quiet stretch reads as a
+   stretch rather than as a gap. */
+.AO3E--tracked-review--bar--strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 1.6em;
+}
+
+.AO3E--tracked-review--bar--day {
+  width: 0.5em;
+  min-height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.AO3E--tracked-review--bar--day:hover {
+  opacity: 0.9;
+}
+
+.AO3E--tracked-review--bar--hint {
+  opacity: 0.75;
+  font-size: 0.9em;
+  /* Pushes whatever follows — the one button that finishes the range — to the
+     far end of the row, away from the two that only nudge it. */
+  margin-right: auto;
+}
+
+.AO3E--tracked-review--bar--notes {
+  opacity: 0.75;
+  font-size: 0.9em;
+}
+
+.AO3E--tracked-review--bar--warning {
+  font-size: 0.9em;
+}
+
+.AO3E--tracked-review--bar--warning::before {
+  content: '⚠ ';
+}
+
+.AO3E--tracked-review--bar--prompt-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  padding-top: 0.4em;
+  border-top: 1px solid rgba(128, 128, 128, 0.3);
+}

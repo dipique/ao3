@@ -65,6 +65,40 @@ export function detectFoundCount(doc: Document | Element): number | null {
   return null
 }
 
+/**
+ * The number a listing's own heading prints — `1 - 20 of 54,490 Works in …`, or
+ * the bare `0 Works in …` of a query that matched nothing. Null when the page
+ * printed no such heading.
+ */
+function detectListedCount(doc: Document | Element): number | null {
+  for (const h2 of doc.querySelectorAll('#main h2.heading')) {
+    // Anchored on the `of`, when there is one, so the range's own numbers can't
+    // be mistaken for the total: `20 Works` never follows `1 - 20`.
+    const match = /(?:of\s+)?(\d[\d,.]*)\s+Works\b/i.exec(h2.textContent ?? '')
+    if (!match)
+      continue
+    const count = Number(match[1]!.replace(/\D/g, ''))
+    return Number.isFinite(count) ? count : null
+  }
+  return null
+}
+
+/**
+ * How many works a fetched page says its query matches, whichever kind of page
+ * it is: a works search counts them as `427,247 Found`, every other listing as
+ * `1 - 20 of 54,490 Works in …`. Null when neither heading is there.
+ *
+ * One reader for both spellings because the callers that care don't get to
+ * choose which they're handed — a tracked list may be a search on one entry and
+ * a filtered listing on the next, and both count **exactly what the query
+ * matched, date bounds included**. That is what makes "how many of this query's
+ * works were filed before day X?" answerable from page 1 alone, without reading
+ * to the end of anything.
+ */
+export function detectResultCount(doc: Document | Element): number | null {
+  return detectFoundCount(doc) ?? detectListedCount(doc)
+}
+
 /** Highest page number from a `pagy`/AO3 pagination block in a listing document. */
 export function detectPageCount(doc: Document | Element): number {
   const pagination = doc.querySelector('ol.pagination.pagy, ol.pagination.actions')

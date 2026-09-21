@@ -104,6 +104,68 @@ export interface MarkedForLaterIndex {
   ids: string
 }
 
+/**
+ * The facts about the review window a tracked-lists review is showing, beside
+ * the window's works — which are an ordinary stored list, under one key, like
+ * any other ({@link StoredList}).
+ *
+ * It exists because the works alone don't say what range they are, which lists
+ * they came from, or whether the window can still be trusted. A review is
+ * recomputed whenever the reader's watermark or their set of tracked lists has
+ * moved since it was worked out, and those two facts are recorded here so that
+ * question can be answered without fetching anything.
+ *
+ * Local, never synced: it's a cache of what the archive said, and every browser
+ * works it out for itself from the synced watermark and list set.
+ */
+export interface TrackedReviewCache {
+  /** First day of the window (a UTC day number). */
+  start: number
+  /** Last day of the window, inclusive. */
+  end: number
+  /** Epoch ms the window was computed, for the refresh interval. */
+  computedAt: number
+  /**
+   * The watermark this was computed against. A window whose start no longer
+   * follows the reader's `reviewedThrough` describes a range they have since
+   * dealt with — on this browser or another — and is recomputed rather than shown.
+   */
+  reviewedThrough: number
+  /**
+   * The tracked lists this was computed against — their ids, addresses and
+   * tracking dates, in one string. A list added, removed, paused, resumed or
+   * re-addressed changes which works belong in the window, so a mismatch means
+   * the same thing a stale watermark does.
+   */
+  listsSig: string
+  /**
+   * Short work id → the tracked lists that turned that work up, comma-joined:
+   * the List source facet's values before they're turned into the lists' current
+   * names. Ids rather than names, because a list can be renamed between the
+   * window being computed and being shown.
+   */
+  sources: { [sid: string]: string }
+  /**
+   * How many works the reader actually sees on each day of the window, keyed by
+   * day number — the review toolbar's day strip. Every day of the window is
+   * here, empty ones included.
+   */
+  days: { [day: string]: number }
+  /**
+   * Tracked lists that couldn't be read while this window was computed. Their
+   * works are missing from it, so the range can't simply be marked reviewed:
+   * doing so would bury works that were never shown.
+   */
+  failed: string[]
+  /**
+   * Works earlier windows held and this one doesn't (`packIds`), waiting for
+   * their blurbs to be discarded. A reviewed window is disposable by
+   * construction, but a blurb fetched moments ago is spared by the store's grace
+   * period, so the ids it couldn't take yet wait here for the next write.
+   */
+  retired: string
+}
+
 export interface Cache {
   chapterDates: { [workId: string]: string[] }
   /**
@@ -139,6 +201,8 @@ export interface Cache {
    * only — an op's contents are in the file the reader keeps.
    */
   appliedChangeOps: string[]
+  /** The review window the tracked lists were last gathered into (see {@link TrackedReviewCache}). */
+  trackedReview: TrackedReviewCache
 }
 
 export const cache = createStorage<Cache>({
@@ -152,6 +216,9 @@ export const cache = createStorage<Cache>({
     searchMisses: {},
     markedForLater: { userId: '', updatedAt: 0, ids: '' },
     appliedChangeOps: [],
+    // An empty range nothing was computed for: `computedAt: 0` and a start past
+    // its end say "no window yet" without a second flag to keep in step.
+    trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', sources: {}, days: {}, failed: [], retired: '' },
   },
 })
 

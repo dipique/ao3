@@ -7,7 +7,7 @@ export * from './blurbRecord.ts'
 
 export { cache } from './cache.ts'
 
-export type { Cache, LegacySearchSnapshot, MarkedForLaterIndex, SearchViewPrefs, SnapshotDescriptor, StoredList } from './cache.ts'
+export type { Cache, LegacySearchSnapshot, MarkedForLaterIndex, SearchViewPrefs, SnapshotDescriptor, StoredList, TrackedReviewCache } from './cache.ts'
 export { ADDON_CLASS } from './constants.ts'
 export * from './data.ts'
 export { isContextInvalidatedError, isExtensionContextValid } from './extensionContext.ts'
