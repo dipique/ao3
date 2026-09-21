@@ -263,6 +263,18 @@ export interface LoadOptions {
   onProgress: (text: string, done: number, total: number) => void
   /** False for an automatic reload, as in {@link SearchSource.recover}. */
   full: boolean
+  /**
+   * Whether what this load brings back goes on screen the moment it is done.
+   *
+   * False only for a background reload of a view holding its page layout
+   * ({@link SearchViewConfig.stablePages}), which offers the new works instead
+   * of springing them on a reader part-way through the pages. A source whose
+   * {@link SearchSource.header} describes the list it just loaded has to hold
+   * that description back for exactly as long: the reader is still looking at
+   * the works it replaces. A reload the reader asked for is applied at once and
+   * says so here.
+   */
+  applied: boolean
 }
 
 /** What a {@link SearchSource.load} comes back with. */
@@ -774,7 +786,9 @@ function mountLimitGate(
  * one's: a view holding its page layout hands them to the source to offer
  * instead (see {@link SearchViewConfig.stablePages}). They are written and
  * timestamped either way, because they were fetched either way — the next open
- * should show them without asking again.
+ * should show them without asking again. `force` is the one exception, and
+ * means the reader pressed Refresh: they are waiting for this list, so it goes
+ * in rather than being offered back to them.
  */
 async function reload(
   source: SearchSource,
@@ -782,8 +796,10 @@ async function reload(
   options: Options,
   signal: AbortSignal,
   full: boolean,
+  force: boolean,
 ): Promise<void> {
-  const loaded = await source.load!({ signal, onProgress: () => {}, full })
+  const applied = force || source.viewConfig?.stablePages !== true
+  const loaded = await source.load!({ signal, onProgress: () => {}, full, applied })
   if (signal.aborted)
     return
   if (loaded.blocked) {
@@ -798,7 +814,7 @@ async function reload(
   if (signal.aborted)
     return
   await persist(source, works)
-  view.update(works, prepare(source, works, options, true))
+  view.update(works, prepare(source, works, options, true), { force })
   const now = Date.now()
   view.setRefreshedAt(now)
   if (active?.view === view)
@@ -808,19 +824,25 @@ async function reload(
 /**
  * Re-scrape in the background and feed the result into the live view + cache.
  * With `topUp`, only look for what the stored works lack, and add it to them.
+ *
+ * `force` says the reader pressed Refresh. It only matters to a view holding
+ * its page layout, which otherwise offers a reload rather than swapping it in —
+ * right for one that arrives on its own, and wrong for the button the reader is
+ * waiting on, which would answer them with a second thing to click.
  */
 async function refresh(
   source: SearchSource,
   view: SearchView,
   options: Options,
   topUp?: { plan: TopUp, stored: Work[] },
+  force = false,
 ): Promise<void> {
   controller?.abort()
   const own = new AbortController()
   controller = own
   try {
     if (source.load) {
-      await reload(source, view, options, own.signal, !topUp)
+      await reload(source, view, options, own.signal, !topUp, force)
       return
     }
     // Re-budgeted rather than reused: the reader may have changed the ceiling,
@@ -868,7 +890,7 @@ async function refresh(
       return
     }
     await persist(source, works, { listing: topUp ? undefined : result.works })
-    view.update(works, prepare(source, works, options, true))
+    view.update(works, prepare(source, works, options, true), { force })
     const now = Date.now()
     view.setRefreshedAt(now)
     if (active?.view === view)
@@ -998,7 +1020,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
           return
         const { view } = active
         view.setUpdating(true)
-        void refresh(source, view, options).finally(() => view.setUpdating(false))
+        // Forced: this is the reader asking, not a reload arriving.
+        void refresh(source, view, options, undefined, true).finally(() => view.setUpdating(false))
       },
     }
     // Everything a source's own strip can ask of the view. Each call checks that
@@ -1105,7 +1128,9 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         // already decided how much to read. What follows the load is the same as
         // what follows a scrape: the refusal and empty guards, the write, the
         // view.
-        const loaded = await source.load({ signal: own.signal, onProgress: progress.onLoad, full: true })
+        // `applied`: there is nothing on screen yet for these works to
+        // interrupt, so the view they open is the works they brought.
+        const loaded = await source.load({ signal: own.signal, onProgress: progress.onLoad, full: true, applied: true })
         if (stale())
           return
         const works = renumber(belonging(source, loaded.works))

@@ -8,7 +8,7 @@ import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
-import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixture, range, rulesFixture, textReplacementsFixture } from './harness.mjs'
+import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixture, range, rulesFixture, textReplacementsFixture, trackedListsFixture } from './harness.mjs'
 
 /** The options the first sync build knew: everything but what came later. */
 const LEGACY_KNOWN = Object.keys(OPTION_DEFAULTS).filter(key => !['rules', 'workMarks', 'pruneOrphanedBlurbs'].includes(key))
@@ -18,7 +18,7 @@ const LEGACY_ONLY = { hideTags: { enabled: true, filters: [{ name: 'An old tag',
 /** A browser with a reader's worth of data in it. */
 function mainBrowser(cloud, name = 'laptop', settings = {}) {
   return createDevice(cloud, name, {
-    options: { rules: rulesFixture(40), workMarks: marksFixture(range(1000, 60)), textReplacements: textReplacementsFixture(10) },
+    options: { rules: rulesFixture(40), workMarks: marksFixture(range(1000, 60)), textReplacements: textReplacementsFixture(10), trackedLists: trackedListsFixture(12) },
     ...settings,
   })
 }
@@ -240,6 +240,57 @@ describe('sync scenarios', () => {
 
       assert.equal(laptop.meta.pause, null)
       assert.equal(laptop.options.rules.filters.length, 38)
+    })
+
+    /**
+     * Tracked lists are as losable as the rest: each one is a query the reader
+     * built by hand, and a browser that arrives with an empty list looks exactly
+     * like a reader who deleted them all.
+     */
+    test('the tracked lists get the same check', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.options.trackedLists.lists.length, 12)
+
+      await desktop.edit({ trackedLists: trackedListsFixture(2) })
+      await cloud.run()
+
+      assert.equal(laptop.options.trackedLists.lists.length, 12, 'not applied')
+      assert.equal(laptop.meta.pause?.reason, 'held')
+      assert.deepEqual(laptop.meta.pause.loss.trackedLists, { removed: 10, of: 12 })
+
+      assert.equal(await laptop.resolveHeld('accept'), true)
+      await cloud.run()
+      assert.equal(laptop.meta.pause, null)
+      assert.equal(laptop.options.trackedLists.lists.length, 2)
+    })
+
+    /** Renaming and pausing every list is an edit, and passes straight through. */
+    test('renaming and pausing them all is not a loss', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+
+      const edited = trackedListsFixture(12, { reviewedThrough: 20100 })
+      for (const entry of edited.lists) {
+        entry.alias = `${entry.alias} — renamed`
+        entry.tracked = false
+      }
+      await desktop.edit({ trackedLists: edited })
+      await cloud.run()
+
+      assert.equal(laptop.meta.pause, null)
+      assert.equal(laptop.options.trackedLists.reviewedThrough, 20100)
+      assert.equal(laptop.options.trackedLists.lists.every(entry => !entry.tracked), true)
     })
   })
 

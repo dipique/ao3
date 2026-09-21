@@ -98,6 +98,15 @@ let lastDiff = { added: 0, removed: 0 }
 let extras: { backlog: number, capped: CappedDay[], nextDayCount: number } | null = null
 /** Set by Mark reviewed, read by the reopen its option write causes. */
 let advanced = false
+/**
+ * Redraw the toolbar this open built, if it has built one.
+ *
+ * The toolbar reads {@link facts}, so a load that moves the window has to tell
+ * it — but only when those works are going on screen. A background reload is
+ * offered rather than applied, and until the reader takes it the toolbar is
+ * still describing the works they are looking at.
+ */
+let redrawBar: (() => void) | null = null
 /** The window the last load settled on, when it held no works at all. */
 let emptyWindow: QuietWindow | null = null
 
@@ -339,6 +348,11 @@ export class ReviewTrackedLists extends Unit {
     // window stays exactly as it was.
     if (!result.blocked || result.works.length)
       await this.commit(result, userId, { reviewedThrough: option.reviewedThrough, lists: option.lists })
+    // These works are going straight on screen (a first load, or the reader's
+    // own Refresh), so the toolbar has to describe the window they came from.
+    // A reload that is only being offered leaves it alone — see {@link redrawBar}.
+    if (opts.applied)
+      redrawBar?.()
     emptyWindow = result.works.length ? null : result.window
     return { works: result.works, blocked: result.blocked }
   }
@@ -684,6 +698,9 @@ export class ReviewTrackedLists extends Unit {
       ))
     })
 
+    // This open's toolbar is the one a load writes to. Set last, so a half-built
+    // strip is never the one asked to redraw itself.
+    redrawBar = redraw
     redraw()
     return el
   }

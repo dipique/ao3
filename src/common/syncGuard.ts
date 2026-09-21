@@ -1,6 +1,7 @@
 import type { Options } from './options.ts'
 
 import { canonicalStringify } from './syncCodec.ts'
+import { trackedKey } from './trackedLists.ts'
 import { countIds, localMarkIds, markItems } from './workMarks.ts'
 
 /**
@@ -33,6 +34,7 @@ export interface PullLoss {
   rules: CollectionLoss
   markedWorks: CollectionLoss
   textReplacements: CollectionLoss
+  trackedLists: CollectionLoss
   /**
    * Labels of marks that hold works here and don't exist in the update. A mark
    * is never deleted by the reader, so losing one is always suspect.
@@ -46,9 +48,10 @@ export function assessPull(current: Options, incoming: Options): PullLoss | null
     rules: lossOf(ruleKeys(current), ruleKeys(incoming)),
     markedWorks: lossOf(markedWorkIds(current), markedWorkIds(incoming)),
     textReplacements: lossOf(replacementKeys(current), replacementKeys(incoming)),
+    trackedLists: lossOf(trackedListKeys(current), trackedListKeys(incoming)),
     marks: lostMarks(current, incoming),
   }
-  const tripped = [loss.rules, loss.markedWorks, loss.textReplacements].some(isLarge) || loss.marks.length > 0
+  const tripped = [loss.rules, loss.markedWorks, loss.textReplacements, loss.trackedLists].some(isLarge) || loss.marks.length > 0
   return tripped ? loss : null
 }
 
@@ -75,6 +78,15 @@ function replacementKeys(options: Options): Set<string> {
   return new Set((options.textReplacements?.rules ?? []).map(rule => rule.find))
 }
 
+/**
+ * A tracked list is the query it watches; its name, its tracking date and
+ * whether it is paused are edits to it. Entries whose address doesn't read as a
+ * query at all fall back to their id, so two broken ones never count as one.
+ */
+function trackedListKeys(options: Options): Set<string> {
+  return new Set((options.trackedLists?.lists ?? []).map(entry => trackedKey(entry) ?? `#${entry.id}`))
+}
+
 function markedWorkIds(options: Options): Set<string> {
   const marks = options.workMarks?.marks ?? {}
   const ids = new Set<string>()
@@ -97,16 +109,20 @@ function lostMarks(current: Options, incoming: Options): string[] {
  * The loss in words, for the options page and the page notice: "348 of your
  * 348 rules and 267 of your 282 marked works". Collections the update leaves
  * alone aren't mentioned.
+ *
+ * A held pause is stored, so a loss written by an older build can be missing a
+ * collection this one weighs; a missing one is simply not mentioned.
  */
 export function describePullLoss(loss: PullLoss): string {
   const parts: string[] = []
-  const count = ({ removed, of }: CollectionLoss, noun: string) => {
-    if (removed > 0)
-      parts.push(`${removed.toLocaleString()} of your ${of.toLocaleString()} ${noun}`)
+  const count = (collection: CollectionLoss | undefined, noun: string) => {
+    if (collection && collection.removed > 0)
+      parts.push(`${collection.removed.toLocaleString()} of your ${collection.of.toLocaleString()} ${noun}`)
   }
   count(loss.rules, 'rules')
   count(loss.markedWorks, 'marked works')
   count(loss.textReplacements, 'text replacements')
+  count(loss.trackedLists, 'tracked lists')
   if (loss.marks.length)
     parts.push(`${loss.marks.length === 1 ? 'the mark' : 'the marks'} ${loss.marks.map(label => `“${label}”`).join(', ')}`)
   if (parts.length <= 1)

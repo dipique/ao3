@@ -356,6 +356,27 @@ export function textReplacementsFixture(count) {
   }
 }
 
+/**
+ * `count` tracked lists, each a works search for a different word — different
+ * queries, so each one is its own entry as far as the guard is concerned.
+ */
+export function trackedListsFixture(count, over = {}) {
+  return {
+    enabled: true,
+    target: 40,
+    reviewedThrough: 0,
+    lists: Array.from({ length: count }, (_, i) => ({
+      id: `l${i}`,
+      kind: 'text-search',
+      url: `/works/search?work_search%5Bquery%5D=word+${i}`,
+      alias: `Search ${i}`,
+      tracked: true,
+      since: 20000,
+    })),
+    ...over,
+  }
+}
+
 /** Every work id carrying any mark. */
 export function markedWorks(options) {
   const ids = new Set()

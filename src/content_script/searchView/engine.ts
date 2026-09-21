@@ -50,6 +50,44 @@ export const FACET_LABELS: Record<FacetKey, string> = {
   completion: 'Completion Status',
 }
 
+/**
+ * The facet keys in the reader's saved order, with any key that order doesn't
+ * name put back at its **default** position — so a saved order stays valid as
+ * facet keys are added or removed across versions.
+ *
+ * Default position, not the end: a key added to {@link FACET_KEYS} in the middle
+ * belongs in the middle for everyone, and a reader who once dragged a group
+ * around should not be the only one who finds the new group at the bottom. A
+ * missing key goes after the last of its default predecessors the saved order
+ * still holds, and at the front when it holds none of them.
+ */
+export function orderFacetKeys(saved: readonly string[] | undefined): FacetKey[] {
+  if (!saved || saved.length === 0)
+    return [...FACET_KEYS]
+  const known = new Set<string>(FACET_KEYS)
+  const seen = new Set<FacetKey>()
+  const ordered: FacetKey[] = []
+  for (const key of saved) {
+    if (known.has(key) && !seen.has(key as FacetKey)) {
+      ordered.push(key as FacetKey)
+      seen.add(key as FacetKey)
+    }
+  }
+  for (const [at, key] of FACET_KEYS.entries()) {
+    if (seen.has(key))
+      continue
+    let insertAt = 0
+    for (const before of FACET_KEYS.slice(0, at)) {
+      const found = ordered.indexOf(before)
+      if (found !== -1)
+        insertAt = Math.max(insertAt, found + 1)
+    }
+    ordered.splice(insertAt, 0, key)
+    seen.add(key)
+  }
+  return ordered
+}
+
 export type SortKey
   = | 'marked'
     | 'title'

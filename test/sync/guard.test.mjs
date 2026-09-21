@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { assessPull, describePullLoss, GUARD_MIN_REMOVED } from '../../src/common/syncGuard.ts'
 import { createDefaultMarks, packIds } from '../../src/common/workMarks.ts'
-import { marksFixture, range, rulesFixture, textReplacementsFixture } from './harness.mjs'
+import { marksFixture, range, rulesFixture, textReplacementsFixture, trackedListsFixture } from './harness.mjs'
 
 const withOptions = update => ({ ...structuredClone(OPTION_DEFAULTS), ...structuredClone(update) })
 const rules = (from, count) => ({ ...rulesFixture(0), filters: rulesFixture(from + count).filters.slice(from) })
@@ -70,6 +70,22 @@ describe('assessPull', () => {
     assert.deepEqual(loss?.textReplacements, { removed: 12, of: 12 })
   })
 
+  test('tracked lists are held like the other lists', () => {
+    const loss = assessPull(withOptions({ trackedLists: trackedListsFixture(12) }), withOptions({}))
+    assert.deepEqual(loss?.trackedLists, { removed: 12, of: 12 })
+  })
+
+  test('a tracked list is the query it watches: renaming or pausing one removes nothing', () => {
+    const current = withOptions({ trackedLists: trackedListsFixture(20) })
+    const edited = trackedListsFixture(20, { reviewedThrough: 20100 })
+    for (const entry of edited.lists) {
+      entry.alias = `${entry.alias} (renamed)`
+      entry.tracked = false
+      entry.since = 20050
+    }
+    assert.equal(assessPull(current, withOptions({ trackedLists: edited })), null)
+  })
+
   test('a mark holding works that disappears from the table is always held', () => {
     const marks = { ...createDefaultMarks(), cute: { icon: 'mdi/heart', label: 'Cute/Sweet', color: '#f0f', triggerAlias: 'read', items: packIds(['7']) } }
     const current = withOptions({ workMarks: { enabled: true, marks, version: 1 } })
@@ -88,16 +104,25 @@ describe('describePullLoss', () => {
 
   test('lists only what would be removed', () => {
     assert.equal(
-      describePullLoss({ rules: { removed: 348, of: 348 }, markedWorks: { removed: 267, of: 282 }, textReplacements: none, marks: [] }),
+      describePullLoss({ rules: { removed: 348, of: 348 }, markedWorks: { removed: 267, of: 282 }, textReplacements: none, trackedLists: none, marks: [] }),
       '348 of your 348 rules and 267 of your 282 marked works',
     )
   })
 
   test('one item stands alone; marks are named', () => {
-    assert.equal(describePullLoss({ rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, marks: [] }), '9 of your 12 text replacements')
+    assert.equal(describePullLoss({ rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, trackedLists: none, marks: [] }), '9 of your 12 text replacements')
     assert.equal(
-      describePullLoss({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, marks: ['Cute/Sweet', 'meh'] }),
-      '5 of your 20 rules and the marks “Cute/Sweet”, “meh”',
+      describePullLoss({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, trackedLists: { removed: 6, of: 7 }, marks: ['Cute/Sweet', 'meh'] }),
+      '5 of your 20 rules, 6 of your 7 tracked lists and the marks “Cute/Sweet”, “meh”',
+    )
+  })
+
+  test('a loss stored by a build that weighed fewer collections still reads', () => {
+    // `pause.loss` is stored, so an upgrade can find one with no `trackedLists`
+    // in it. What it doesn't name, it doesn't mention.
+    assert.equal(
+      describePullLoss({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, marks: [] }),
+      '5 of your 20 rules',
     )
   })
 })

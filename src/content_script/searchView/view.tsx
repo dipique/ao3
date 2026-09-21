@@ -27,6 +27,7 @@ import {
   FACET_LABELS,
   facetValues,
   layoutStablePages,
+  orderFacetKeys,
   SORT_LABELS,
   sortWorks,
 } from './engine.ts'
@@ -300,30 +301,6 @@ function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (.
 function parseBound(value: string): number | null {
   const digits = value.replace(/\D/g, '')
   return value.trim() === '' || digits === '' ? null : Number(digits)
-}
-
-/**
- * The facet keys in the user's saved order, with any keys missing from it
- * appended in their default position — so a saved order stays valid even as facet
- * keys are added or removed across versions.
- */
-function orderFacetKeys(saved: readonly string[] | undefined): FacetKey[] {
-  if (!saved || saved.length === 0)
-    return [...FACET_KEYS]
-  const known = new Set<string>(FACET_KEYS)
-  const seen = new Set<FacetKey>()
-  const ordered: FacetKey[] = []
-  for (const key of saved) {
-    if (known.has(key) && !seen.has(key as FacetKey)) {
-      ordered.push(key as FacetKey)
-      seen.add(key as FacetKey)
-    }
-  }
-  for (const key of FACET_KEYS) {
-    if (!seen.has(key))
-      ordered.push(key)
-  }
-  return ordered
 }
 
 /**

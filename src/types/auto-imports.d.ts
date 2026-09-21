@@ -12,10 +12,13 @@ declare global {
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
+  const REVIEW_SOURCE_ID: typeof import('../options_ui/composables/useSiteExport').REVIEW_SOURCE_ID
+  const REVIEW_WINDOW_NOTE: typeof import('../options_ui/composables/useSiteExport').REVIEW_WINDOW_NOTE
   const TRACKABLE_SOURCE_IDS: typeof import('../options_ui/composables/useSiteExport').TRACKABLE_SOURCE_IDS
   const anchorSlug: typeof import('../options_ui/composables/useAnchors').anchorSlug
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
+  const canRefresh: typeof import('../options_ui/composables/useSiteExport').canRefresh
   const canTrack: typeof import('../options_ui/composables/useSiteExport').canTrack
   const computed: typeof import('vue').computed
   const computedAsync: typeof import('@vueuse/core').computedAsync
@@ -59,6 +62,7 @@ declare global {
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
   const isRef: typeof import('vue').isRef
+  const isReviewWindow: typeof import('../options_ui/composables/useSiteExport').isReviewWindow
   const isShallow: typeof import('vue').isShallow
   const jumpToHash: typeof import('../options_ui/composables/useHashNav').jumpToHash
   const listName: typeof import('../options_ui/composables/useSiteExport').listName

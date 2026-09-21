@@ -135,10 +135,30 @@ describe('tracked review: works already dealt with', { skip }, () => {
   test('and only drops out when the range is reloaded — which the reader asks for', async () => {
     await tab.click('.AO3E--search-view--refresh')
     await sleep(3500)
-    // A review holds its page layout, so even a reload the reader asked for is
-    // offered rather than swapped in under them.
-    assert.equal(await barText('--prompt'), 'Range updated (−1).Show')
-    assert.equal((await shownIds()).length, 5, 'nothing has moved yet')
+    // A review holds its page layout, so a reload that arrives on its own is
+    // offered rather than swapped in. This one is the reader's own Refresh, and
+    // answering the button they pressed with a second button to press isn't an
+    // answer — it goes in at once.
+    assert.equal(await barText('--prompt'), '')
+    const shown = await shownIds()
+    assert.ok(!shown.includes(plain.id))
+    assert.equal(shown.length, 4)
+    // And the toolbar describes the window that is now on screen, not the one
+    // it replaced.
+    assert.equal(await barText('--meta'), '2 days · 4 works (target 6)')
+  })
+
+  test('a reload nobody asked for is offered rather than swapped in', async () => {
+    // Everything the first page wrote, so this one opens on the stored window
+    // instead of gathering one — a cached render is what a background reload
+    // has to interrupt, and a zero refresh interval is what sends one.
+    const stored = await tab.evaluate(() => Object.assign({}, ...window.__writes))
+    await tab.close()
+    tab = await open({ ...SEED, ...stored, 'option.searchProfileListsRefreshHours': 0 })
+    await sleep(2500)
+
+    assert.equal(await barText('--prompt'), 'Range updated.Show')
+    assert.equal((await shownIds()).length, 4, 'the reader keeps the works they were looking at')
 
     await tab.evaluate(() => {
       [...document.querySelectorAll('.AO3E--tracked-review--bar--confirm')]
@@ -146,9 +166,8 @@ describe('tracked review: works already dealt with', { skip }, () => {
         .click()
     })
     await sleep(800)
-    const shown = await shownIds()
-    assert.ok(!shown.includes(plain.id))
-    assert.equal(shown.length, 4)
+    assert.equal(await barText('--prompt'), '')
+    assert.equal((await shownIds()).length, 4)
     await tab.close()
     tab = null
   })

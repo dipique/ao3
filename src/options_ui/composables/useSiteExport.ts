@@ -101,6 +101,37 @@ const { lists: trackedEntries } = useOption('trackedLists')
 export const TRACKABLE_SOURCE_IDS: readonly string[] = ['text-search', 'tag-works', 'series-works']
 
 /**
+ * The source id of the tracked-lists review's own stored window, which is a
+ * stored list like any other and the one that can't be re-read from here.
+ */
+export const REVIEW_SOURCE_ID = 'tracked-review'
+
+/** Whether this row is that window. */
+export function isReviewWindow(row: SiteExportListRow): boolean {
+  return row.descriptor?.sourceId === REVIEW_SOURCE_ID
+}
+
+/**
+ * Whether this list can be read from AO3 again from this page.
+ *
+ * Every other row is one listing, and refreshing it means walking that
+ * listing's pages. The review's window is not: it is gathered from every
+ * tracked list at once, by date, and the address it carries is the page the
+ * review opens on. Refreshing it from here would scrape the reader's readings
+ * list over the window and store an answer the next review discards — so the
+ * button is off, and opening the review is what brings the window up to date.
+ */
+export function canRefresh(row: SiteExportListRow): boolean {
+  return !!row.descriptor && !isReviewWindow(row)
+}
+
+/** Why the review's row has no refresh, said where the missing buttons were. */
+export const REVIEW_WINDOW_NOTE
+  = 'The range your tracked lists are being reviewed over, stored like any other list. It is gathered from all of '
+    + 'them at once rather than from one listing, so there is nothing to refresh here — open the review to bring it '
+    + 'up to date, and marking the range reviewed replaces it with the next one.'
+
+/**
  * The tracked-list entry this stored list is, if any.
  *
  * Matched on the entry's key and nothing else — never by comparing the two
@@ -117,6 +148,10 @@ export function trackedEntryFor(row: SiteExportListRow): TrackedList | undefined
 
 /** A stored list's name: the alias its tracked entry carries, else the list's own label. */
 export function listName(row: SiteExportListRow): string {
+  // Not one of the tracked lists but the review over all of them, and a name
+  // that says which of the two it is.
+  if (isReviewWindow(row))
+    return 'Tracked review window'
   return trackedEntryFor(row)?.alias.trim() || row.label
 }
 
@@ -227,9 +262,14 @@ function listUrlFor(key: string, descriptor?: SnapshotDescriptor): string | unde
 
 function summarize(row: SiteExportListRow): string {
   const parts = [
+    // "as of" is when the list was last read; for the review that is when the
+    // window was last gathered, which is the same fact about a different shape
+    // of list — so it is said the same way, after what the row is.
     `${row.count.toLocaleString()} ${row.count === 1 ? 'work' : 'works'} as of ${ago(row.scrapedAt)}`,
     `${(row.cached || 0).toLocaleString()} cached (${formatBytes(row.bytes)})`,
   ]
+  if (isReviewWindow(row))
+    parts.unshift('The range you are reviewing now')
   if (row.uncached)
     parts.push(`${row.uncached.toLocaleString()} uncached`)
   if (row.failed)
@@ -287,6 +327,10 @@ export function useSiteExport() {
 
     /** Re-scrape a list, without touching the work text. */
     refreshList(row: SiteExportListRow) {
+      if (!canRefresh(row)) {
+        toast('This list isn\'t read from one listing, so there is nothing to refresh.', { type: 'error' })
+        return
+      }
       return startFor(row, ['refreshing'])
     },
 
@@ -302,15 +346,23 @@ export function useSiteExport() {
 
     /** Refresh the list, then cache against it — the two steps as one job. */
     refreshAndCache(row: SiteExportListRow) {
+      if (!canRefresh(row)) {
+        toast('This list isn\'t read from one listing, so there is nothing to refresh.', { type: 'error' })
+        return
+      }
       return startFor(row, ['refreshing', 'caching'])
     },
 
     /**
      * The one-button path: refresh the list, fetch whatever the cache is
      * missing, then write the zip. Long, and the progress bar says so.
+     *
+     * A list that can't be re-read from here is exported from the works it
+     * already holds — the step is left out rather than the button.
      */
     downloadSite(row: SiteExportListRow) {
-      return startFor(row, ['refreshing', 'caching', 'exporting'])
+      const steps: ExportJobPhase[] = canRefresh(row) ? ['refreshing', 'caching', 'exporting'] : ['caching', 'exporting']
+      return startFor(row, steps)
     },
 
     /**

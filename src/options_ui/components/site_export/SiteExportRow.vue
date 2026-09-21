@@ -3,7 +3,7 @@ import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 
 // Named rather than left to the auto-import: these are read from the template,
 // and auto-imports only reach `<script setup>`.
-import { canTrack, formatBytes, listName, NO_DESCRIPTOR_NOTE, trackedEntryFor } from '../../composables/useSiteExport.ts'
+import { canTrack, formatBytes, isReviewWindow, listName, NO_DESCRIPTOR_NOTE, REVIEW_WINDOW_NOTE, trackedEntryFor } from '../../composables/useSiteExport.ts'
 
 /**
  * One stored works list, as a row in Advanced → Site export.
@@ -49,6 +49,19 @@ const tracked = computed(() => trackedEntryFor(props.row))
 /** Offered only on a list that isn't already an entry — one entry per list. */
 const trackable = computed(() => canTrack(props.row) && !tracked.value)
 
+/** The tracked review's own window, which is not read from a listing. */
+const review = computed(() => isReviewWindow(props.row))
+
+/**
+ * Whether there is a listing behind this row to walk at all — which is the
+ * question of whether the refresh buttons belong here, and a different one from
+ * whether they would work right now (no descriptor disables them, and the note
+ * under the row says how to fix that). The review's window is gathered from
+ * every tracked list at once, so refreshing it from here is meaningless work,
+ * and its buttons are left out rather than sitting there offering it.
+ */
+const refreshable = computed(() => !review.value)
+
 /** The job belongs to this list. Another list's job only greys this row out. */
 const mine = computed(() => status.value.job?.cacheKey === props.row.key)
 const running = computed(() => status.value.running && mine.value)
@@ -58,6 +71,13 @@ const busy = computed(() => status.value.running && !mine.value)
 const paused = computed(() => mine.value && resumable.value)
 
 const cacheLabel = computed(() => (props.row.cached ? 'Update the cached works' : 'Cache this list\'s works'))
+
+/** The menu has nothing in it for a list that can't be refreshed and hasn't failed. */
+const hasMenu = computed(() => refreshable.value || props.row.failed > 0)
+
+const downloadLabel = computed(() => (refreshable.value
+  ? 'Refresh, cache, then save this list as one HTML file'
+  : 'Cache this list\'s works, then save it as one HTML file'))
 
 /** Deleting a list is cheap to undo only by re-scraping it, so it asks first. */
 const confirmingDelete = ref(false)
@@ -121,34 +141,40 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
           Refresh: the list, the works, or the menu. The cap is the verb and is
           not a button — there is nothing sensible for "refresh, unspecified" to
           do — so each button below carries the whole phrase as its own label.
+
+          A list with no listing behind it (the tracked review's window) keeps
+          only the half that is about the works, and loses the cap with the half
+          that is about the listing.
         -->
         <div flex="~ row items-center">
-          <div
-            aria-hidden="true"
-            flex="~ items-center justify-center"
-            h-10 w-10 border-1 border-input rounded-l-md bg-default text-muted-fg
-          >
-            <Icon i-mdi-refresh />
-          </div>
+          <template v-if="refreshable">
+            <div
+              aria-hidden="true"
+              flex="~ items-center justify-center"
+              h-10 w-10 border-1 border-input rounded-l-md bg-default text-muted-fg
+            >
+              <Icon i-mdi-refresh />
+            </div>
+            <Button
+              variant="outline"
+              :class="JOINED"
+              :title="`Refresh the list of works in ${name}`"
+              :disabled="!row.descriptor || busy"
+              @click.prevent="refreshList(row)"
+            >
+              List
+            </Button>
+          </template>
           <Button
             variant="outline"
-            :class="JOINED"
-            :title="`Refresh the list of works in ${name}`"
-            :disabled="!row.descriptor || busy"
-            @click.prevent="refreshList(row)"
-          >
-            List
-          </Button>
-          <Button
-            variant="outline"
-            :class="JOINED"
+            :class="refreshable ? JOINED : (hasMenu ? `${TIGHT} !rounded-r-none` : TIGHT)"
             :title="cacheLabel"
             :disabled="!row.descriptor || busy"
             @click.prevent="cacheWorks(row)"
           >
             Works
           </Button>
-          <DropdownMenu :modal="false">
+          <DropdownMenu v-if="hasMenu" :modal="false">
             <DropdownMenuTrigger>
               <Button
                 variant="outline"
@@ -161,6 +187,7 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
             </DropdownMenuTrigger>
             <DropdownMenuContent>
               <DropdownMenuItem
+                v-if="refreshable"
                 flex="~ col items-start gap-1" px-4 py-3
                 @click="refreshAndCache(row)"
               >
@@ -192,7 +219,7 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
         <div flex="~ row items-center">
           <Button
             :class="row.cached ? `${TIGHT} !rounded-r-none` : TIGHT"
-            title="Refresh, cache, then save this list as one HTML file"
+            :title="downloadLabel"
             :disabled="!row.descriptor || busy"
             @click.prevent="downloadSite(row)"
           >
@@ -258,6 +285,10 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
     <template #extra>
       <p v-if="!row.descriptor" text="sm muted-fg" pt-1>
         {{ NO_DESCRIPTOR_NOTE }}
+      </p>
+      <!-- Said where the refresh buttons would have been, since it is about them. -->
+      <p v-if="review" text="sm muted-fg" pt-1>
+        {{ REVIEW_WINDOW_NOTE }}
       </p>
       <!--
         Said here rather than as a switch, because pausing, renaming and dropping

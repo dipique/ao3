@@ -12,9 +12,11 @@ import {
   completionValue,
   computeView,
   emptyFilterState,
+  FACET_KEYS,
   facetValues,
   layoutStablePages,
   matches,
+  orderFacetKeys,
   sortWorks,
 } from '../../src/content_script/searchView/engine.ts'
 
@@ -328,6 +330,42 @@ describe('the list-source facet', () => {
     // out of the sidebar there: no values, no group.
     assert.deepEqual(facetValues(work(), 'source'), [])
     assert.deepEqual(buildFacets([work(), work()]).source, [])
+  })
+})
+
+describe('the saved facet order', () => {
+  test('no saved order is the default one', () => {
+    assert.deepEqual(orderFacetKeys(undefined), FACET_KEYS)
+    assert.deepEqual(orderFacetKeys([]), FACET_KEYS)
+  })
+
+  test('a saved order is kept, and unknown keys in it are dropped', () => {
+    const saved = [...FACET_KEYS].reverse()
+    assert.deepEqual(orderFacetKeys([...saved, 'kudos-per-word']), saved)
+  })
+
+  test('a key the saved order never heard of lands at its default position', () => {
+    // What a reader who reordered their groups before `source` existed has
+    // stored. It belongs between status and rating, as it does for everyone
+    // else — not at the bottom, under Completion Status.
+    const saved = FACET_KEYS.filter(key => key !== 'source')
+    assert.deepEqual(orderFacetKeys(saved), FACET_KEYS)
+
+    // And relative to where its predecessors actually are now, not to where
+    // they started: status has been dragged to the end, so source follows it.
+    const moved = [...saved.filter(key => key !== 'status'), 'status']
+    assert.deepEqual(orderFacetKeys(moved), [...moved, 'source'])
+  })
+
+  test('a key with none of its predecessors saved goes to the front', () => {
+    assert.deepEqual(orderFacetKeys(['language']), ['status', 'source', 'rating', 'warnings', 'categories', 'fandoms', 'relationships', 'characters', 'freeforms', 'language', 'completion'])
+  })
+
+  test('every key comes back exactly once, whatever the saved order says', () => {
+    for (const saved of [['completion', 'completion', 'status'], ['freeforms'], [...FACET_KEYS].reverse()]) {
+      const ordered = orderFacetKeys(saved)
+      assert.deepEqual([...ordered].sort(), [...FACET_KEYS].sort())
+    }
   })
 })
 
