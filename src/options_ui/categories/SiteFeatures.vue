@@ -82,8 +82,8 @@
       subtitle="Controls the extension adds to the page itself, for things you want one tap away."
     >
       <OptionRow
-        title="Floating toolbar"
-        subtitle="A small button in the bottom-right corner of AO3 pages. It can reveal works your filters hid without changing the filters, switch the right-click menus off, and toggle reader mode on a work page. It appears only when one of those applies."
+        title="Reveal filtered works"
+        subtitle="Adds “Show N filtered works” to the floating toolbar in the bottom-right corner, which reveals what your filters hid without changing them. It appears only where something is hidden; the toolbar itself is always there for its other quick actions."
       >
         <OptionSwitch option-id="filterToolbar" />
       </OptionRow>

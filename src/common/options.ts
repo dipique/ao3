@@ -98,7 +98,11 @@ export interface Options {
   tagToolbar: boolean
   fandomToolbar: boolean
   markForLaterToolbar: boolean
-  /** Floating control on listings to temporarily reveal works hidden by any filter. */
+  /**
+   * Add the "Show N filtered works" pill to the floating toolbar, which
+   * temporarily reveals works any filter hid. Only that pill: the toolbar
+   * itself is always there, because its options pill applies on every page.
+   */
   filterToolbar: boolean
   hideAuthorToolbar: boolean
   subscribeAuthorToolbar: boolean
