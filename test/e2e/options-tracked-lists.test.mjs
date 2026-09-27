@@ -99,13 +99,13 @@ describe('options UI — tracked lists', { skip }, () => {
 
   const storedOption = () => lastWrite('option.trackedLists')
 
-  /** One row per entry: the name field, what it says under it, and the switch. */
-  const rows = () => page.evaluate(() => [...document.querySelectorAll('input[aria-label^="Name for "]')].map((input) => {
+  /** One row per entry: the title field, what it says under it, and the switch. */
+  const rows = () => page.evaluate(() => [...document.querySelectorAll('input[aria-label^="Title for "]')].map((input) => {
     const cell = input.closest('span')
     const toggle = [...document.querySelectorAll('[role="switch"]')]
-      .find(s => s.getAttribute('aria-label') === `Track ${input.getAttribute('aria-label').slice('Name for '.length)}`)
+      .find(s => s.getAttribute('aria-label') === `Track ${input.getAttribute('aria-label').slice('Title for '.length)}`)
     return {
-      label: input.getAttribute('aria-label').slice('Name for '.length),
+      label: input.getAttribute('aria-label').slice('Title for '.length),
       alias: input.value,
       placeholder: input.placeholder,
       // The cell holds the field and, under it, the line that says what kind of
@@ -163,8 +163,8 @@ describe('options UI — tracked lists', { skip }, () => {
     // The field's own label is the name it is showing, so the element is taken
     // once and then typed over: emptying it first would rename the row out from
     // under the selector.
-    const input = await page.$('input[aria-label="Name for Coffee shop AUs"]')
-    assert.ok(input, 'the name field is there to type into')
+    const input = await page.$('input[aria-label="Title for Coffee shop AUs"]')
+    assert.ok(input, 'the title field is there to type into')
     await input.click({ clickCount: 3 })
     await input.type('Caffeine')
     await sleep(1200)
@@ -219,7 +219,10 @@ describe('options UI — tracked lists', { skip }, () => {
     const added = stored.lists.at(-1)
     assert.equal(added.kind, 'text-search')
     assert.equal(added.url, '/works/search?work_search[query]=tea', 'stored as a path, normalized')
-    assert.equal(added.alias, 'Works search — tea', 'named after the list the reader already knows')
+    // Titled the way a list tracked from its own page is.
+    assert.equal(added.alias, 'Search: tea')
+    assert.equal(added.type, 'search')
+    assert.equal(added.entity, 'tea')
     assert.equal(added.tracked, true)
     assert.equal(added.since, TODAY)
     assert.notEqual(added.id, 'c0ffee')
@@ -227,8 +230,8 @@ describe('options UI — tracked lists', { skip }, () => {
     // The entry and the stored list are now the same list, so the row says so
     // and stops offering to track it a second time.
     await sleep(500)
-    assert.equal((await rowButtons('Works search — tea')).includes('Track'), false)
-    assert.match(await rowText('Works search — tea'), /Tracked/)
+    assert.equal((await rowButtons('Search: tea')).includes('Track'), false)
+    assert.match(await rowText('Search: tea'), /Tracked/)
   })
 
   test('the review\'s own window is a stored list that can\'t be refreshed', async () => {
@@ -243,6 +246,127 @@ describe('options UI — tracked lists', { skip }, () => {
     assert.match(text, /The range you are reviewing now/)
     assert.match(text, /2 works as of/)
     assert.match(text, /nothing to refresh here/)
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(problems, [])
+  })
+})
+
+/**
+ * Four lists, three of them titled, two of those alike but for case — the pair a
+ * sync can bring together from two browsers.
+ */
+const DRACO = { id: 'dr4c0', kind: 'works-filter', url: '/tags/Draco%20Malfoy/works', alias: 'Character: Draco Malfoy', type: 'character', entity: 'Draco Malfoy', tracked: true, since: TODAY - 2 }
+const LATTE = { id: 'l4tte', kind: 'text-search', url: '/works/search?work_search[query]=latte', alias: 'coffee shop', tracked: true, since: TODAY - 2 }
+const TWIN = { id: 'tw1n', kind: 'series-works', url: '/series/9991', alias: 'character: draco malfoy', type: 'series', entity: 'The Long Way Round', tracked: true, since: TODAY - 2 }
+const UNTITLED = { id: 'unt1t', kind: 'tag-works', url: '/tags/marriage%20problems', alias: '', tracked: false, since: TODAY - 2 }
+
+/**
+ * What the row says about each list beyond its title — a badge for what it is,
+ * however it's titled — and the rules titles keep: sorted by, unique, and a
+ * pair that already shares one pointed out. And the row's link, which is where
+ * refining a list starts.
+ */
+describe('options UI — tracked lists\' titles, badges and links', { skip }, () => {
+  let server
+  let browser
+  let page
+  const problems = []
+
+  before(async () => {
+    ensureBuilt()
+    server = await serveDist()
+    browser = await puppeteer.launch({ executablePath: chromePath, headless: 'new', args: ['--no-first-run', '--no-default-browser-check'] })
+    page = await browser.newPage()
+    await page.evaluateOnNewDocument(installMock, {
+      'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [DRACO, LATTE, TWIN, UNTITLED] },
+    })
+    page.on('console', m => m.type() === 'error' && problems.push(m.text()))
+    page.on('pageerror', e => problems.push(e.message))
+    await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
+    await sleep(1500)
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+    await server?.close()
+  })
+
+  const storedLists = () => page.evaluate(() => window.__writes.filter(w => 'option.trackedLists' in w).at(-1)?.['option.trackedLists']?.lists ?? null)
+
+  /** Each row, top to bottom: its title field and everything the row says under it. */
+  const rows = () => page.evaluate(() => [...document.querySelectorAll('input[aria-label^="Title for "]')].map((input) => {
+    const cell = input.closest('span')
+    const link = cell.querySelector('a[href]')
+    return {
+      title: input.value,
+      badge: [...cell.querySelectorAll('span[title]')].map(el => el.textContent.trim())[0] ?? null,
+      badgeTitle: [...cell.querySelectorAll('span[title]')].map(el => el.getAttribute('title'))[0] ?? null,
+      text: cell.textContent.replace(/\s+/g, ' ').trim(),
+      alert: cell.querySelector('[role="alert"]')?.textContent.replace(/\s+/g, ' ').trim() ?? null,
+      href: link?.getAttribute('href') ?? null,
+      linkTitle: link?.getAttribute('title') ?? null,
+    }
+  }))
+
+  test('rows sort by title, and a list with none goes last', async () => {
+    assert.deepEqual((await rows()).map(r => r.title), ['Character: Draco Malfoy', 'character: draco malfoy', 'coffee shop', ''])
+  })
+
+  test('each carries a badge for what it is, whatever it\'s titled', async () => {
+    const got = await rows()
+    assert.deepEqual(got.map(r => r.badge), ['Character', 'Series', 'Search', 'Tag'])
+    // The badge's tooltip is the whole of it.
+    assert.deepEqual(got.map(r => r.badgeTitle), ['Character: Draco Malfoy', 'Series: The Long Way Round', 'Search: latte', 'Tag: marriage problems'])
+  })
+
+  test('the two that share a title are pointed out, and only they are', async () => {
+    const got = await rows()
+    const marked = got.map(r => /Another list has this title too/.test(r.text))
+    assert.deepEqual(marked, [true, true, false, false])
+  })
+
+  test('each links to its own search on AO3, marked as being refined', async () => {
+    const got = await rows()
+    assert.equal(got[0].href, 'https://archiveofourown.org/tags/Draco%20Malfoy/works#ao3e-list=dr4c0')
+    assert.equal(got[2].href, 'https://archiveofourown.org/works/search?work_search[query]=latte#ao3e-list=l4tte')
+    assert.equal(got[3].href, 'https://archiveofourown.org/tags/marriage%20problems#ao3e-list=unt1t')
+    assert.equal(got[0].linkTitle, 'Open this list\'s search to refine it')
+  })
+
+  test('a title another list has is refused, and the row says which list has it', async () => {
+    // All at once, the way a paste arrives.
+    await page.evaluate(() => {
+      const input = document.querySelector('input[aria-label="Title for coffee shop"]')
+      input.value = '  CHARACTER: Draco Malfoy '
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await sleep(800)
+    // Nothing may have been written at all, which is as good.
+    const stored = await storedLists()
+    assert.equal(stored?.find(l => l.id === 'l4tte')?.alias ?? LATTE.alias, 'coffee shop', 'nothing is saved')
+    const row = (await rows()).find(r => r.badge === 'Search')
+    assert.equal(row.title, '  CHARACTER: Draco Malfoy ', 'the field keeps what was typed')
+    assert.match(row.alert, /Another list is already called “Character: Draco Malfoy”/)
+    assert.match(row.alert, /isn't saved/)
+  })
+
+  test('a free title is saved, and the rows hold still until the field is left', async () => {
+    const input = await page.$('input[aria-label="Title for coffee shop"]')
+    await input.click({ clickCount: 3 })
+    await input.type('Aardvark AUs')
+    await sleep(1000)
+    const stored = await storedLists()
+    assert.equal(stored.find(l => l.id === 'l4tte').alias, 'Aardvark AUs')
+    // Still in its old place while it's being typed in…
+    assert.deepEqual((await rows()).map(r => r.title), ['Character: Draco Malfoy', 'character: draco malfoy', 'Aardvark AUs', ''])
+    assert.equal((await rows())[2].alert, null, 'and the refusal is gone')
+
+    // …and sorted once it isn't.
+    await page.evaluate(() => document.activeElement.blur())
+    await sleep(500)
+    assert.deepEqual((await rows()).map(r => r.title), ['Aardvark AUs', 'Character: Draco Malfoy', 'character: draco malfoy', ''])
   })
 
   test('nothing threw along the way', () => {

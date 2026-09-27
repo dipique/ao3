@@ -144,13 +144,14 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     assert.equal(await savedOption(tab), null)
   })
 
-  test('the pill grows a name box, filled in from the page', async () => {
+  test('the pill grows a title box, filled in from the page', async () => {
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), true, 'the box starts closed')
     await tab.click(TRACK_PILL)
     await sleep(200)
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), false)
-    // The words the reader searched for — a name they have just seen.
-    assert.equal(await tab.$eval(ALIAS_INPUT, el => el.value), 'coffee')
+    // What kind of list it is, and the words the reader searched for — a name
+    // they have just seen.
+    assert.equal(await tab.$eval(ALIAS_INPUT, el => el.value), 'Search: coffee')
   })
 
   test('Cancel closes it again, having written nothing', async () => {
@@ -177,6 +178,9 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     const entry = saved.lists[0]
     assert.equal(entry.kind, 'text-search')
     assert.equal(entry.alias, 'Coffee shop AUs')
+    // What it is is kept apart from what the reader calls it.
+    assert.equal(entry.type, 'search')
+    assert.equal(entry.entity, 'coffee')
     assert.equal(entry.tracked, true)
     // The stored address is the query alone: `page` is not part of what a list is.
     assert.equal(entry.url, '/works/search?work_search[query]=coffee')

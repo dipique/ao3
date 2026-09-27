@@ -1,9 +1,9 @@
-import type { SnapshotDescriptor, TrackedList } from '#common'
+import type { SnapshotDescriptor, TrackedList, TrackedMeta } from '#common'
 import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { getArchiveLink, newTrackedListId, normalizeTrackedUrl, toast, trackedKey, utcToday } from '#common'
+import { defaultTitle, fillMeta, getArchiveLink, newTrackedListId, normalizeTrackedUrl, toast, trackedKey, trackedMeta, uniqueTitle, utcToday } from '#common'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
@@ -153,6 +153,18 @@ export function listName(row: SiteExportListRow): string {
   if (isReviewWindow(row))
     return 'Tracked review window'
   return trackedEntryFor(row)?.alias.trim() || row.label
+}
+
+/**
+ * What a stored list is, for the tracked list made from it: what its address
+ * says, plus a series' title, which a stored series' own label carries
+ * ("Series: …") and its address can't.
+ */
+function storedListMeta(url: string, label: string): TrackedMeta {
+  const meta = trackedMeta({ url })!
+  const title = meta.type === 'series' ? /^Series: (.+)$/.exec(label.trim())?.[1] : undefined
+  const filled = title ? fillMeta({ url }, { type: 'series', entity: title }) : null
+  return filled ? { type: filled.type ?? meta.type, entity: filled.entity ?? meta.entity } : meta
 }
 
 /** Whether offering **Track** on this row makes sense at all. */
@@ -404,8 +416,10 @@ export function useSiteExport() {
      *
      * The stored snapshot is left exactly as it is. Tracking reads the archive by
      * date from today onwards, so however many years of works the snapshot holds,
-     * none of them reaches the review — the two are separate things. The entry's
-     * name starts as the list's own, which is a name the reader has already seen.
+     * none of them reaches the review — the two are separate things. The entry is
+     * titled the way a list tracked from its page is — "Type: entity", made
+     * unique — so the two ways in agree. A stored list has no view state, so the
+     * entry has no view filter.
      */
     track(row: SiteExportListRow) {
       if (!canTrack(row)) {
@@ -417,15 +431,19 @@ export function useSiteExport() {
         toast(`“${listName(row)}” is already tracked.`)
         return
       }
+      const meta = storedListMeta(normalized.url, row.descriptor!.label)
+      const alias = uniqueTitle(defaultTitle(meta), trackedEntries.value)
       trackedEntries.value.push({
         id: newTrackedListId(trackedEntries.value),
         kind: normalized.kind,
         url: normalized.url,
-        alias: row.label,
+        alias,
+        type: meta.type,
+        ...(meta.entity ? { entity: meta.entity } : {}),
         tracked: true,
         since: utcToday(),
       })
-      toast(`Tracking “${row.label}”. Works added or updated from today on will turn up in your review.`, { type: 'success' })
+      toast(`Tracking “${alias}”. Works added or updated from today on will turn up in your review.`, { type: 'success' })
     },
 
     /**

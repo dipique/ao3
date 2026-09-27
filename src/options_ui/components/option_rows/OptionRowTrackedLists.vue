@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TrackedKind, TrackedList } from '#common'
 
-import { formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, sourceLabel, toEpochDays, utcToday } from '#common'
+import { defaultTitle, formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, refineLink, sourceLabel, titleTakenBy, toEpochDays, TRACKED_TYPE_LABELS, trackedMeta, utcToday } from '#common'
 
 /**
  * Tracked lists: the saved queries whose new and updated works are gathered into
@@ -11,7 +11,9 @@ import { formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, sourceLabel, to
  * Entries aren't created here. A list becomes tracked from the page it is (the
  * floating toolbar's "Track this search") or from a stored list further down the
  * options, because both of those know the address the review has to fetch; this
- * row is where one is renamed, paused, and dropped.
+ * row is where one is retitled, paused, and dropped — and where refining one
+ * starts: each row links to the list's own page, marked as being refined
+ * ({@link refineLink}), and the floating toolbar there offers to update it.
  */
 const { enabled, target, reviewedThrough, lists } = useOption('trackedLists')
 
@@ -97,32 +99,134 @@ function commitDate() {
 // The lists
 // ---------------------------------------------------------------------------
 
-const rows = computed(() => lists.value.map((entry) => {
-  /**
-   * Null for an entry whose address no longer reads as a page on the archive —
-   * one that arrived through sync or an import from a build that knew a shape
-   * this one doesn't, or that names another host entirely. Such a row is
-   * flagged rather than linked, and the link is built from *this* rather than
-   * from the stored text: a review carries the reader's session, so a link out
-   * of the archive is the one thing this row must never offer.
-   */
-  const normalized = normalizeTrackedUrl(entry.url)
-  return {
-    entry,
-    /**
-     * What the review's "List source" facet will call it, for labels and prompts
-     * — disambiguated against every other entry, so a name two lists share reads
-     * here exactly as it will there, ` (2)` and all.
-     */
-    label: sourceLabel(entry, lists.value),
-    /** The tail of the URL — what the facet falls back to when there's no alias. */
-    placeholder: sourceLabel({ id: entry.id, alias: '', url: entry.url }),
-    kind: KIND_LABELS[entry.kind] ?? entry.kind,
-    broken: normalized === null,
-    href: normalized ? getArchiveLink(normalized.url) : undefined,
-    state: entry.tracked ? `Tracking since ${formatDay(entry.since)}` : 'Paused',
+/** A title as titles are compared: trimmed, in any case. */
+function titleKey(title: string): string {
+  return typeof title === 'string' ? title.trim().toLowerCase() : ''
+}
+
+/**
+ * Titles typed here that another list already has, by list id. The field keeps
+ * showing what was typed, with the refusal under it, and nothing is saved until
+ * the title is one no other list has.
+ */
+const refusedTitles = ref<Record<string, string>>({})
+
+/** Say which list has the title: by its title, and by what it is when the title doesn't say. */
+function refusal(other: TrackedList | null): string | null {
+  if (!other)
+    return null
+  const meta = trackedMeta(other)
+  const what = meta && titleKey(defaultTitle(meta)) !== titleKey(other.alias) ? ` (${defaultTitle(meta)})` : ''
+  return `Another list is already called “${other.alias.trim()}”${what}, so this title isn't saved. Choose a different one.`
+}
+
+/**
+ * The order the rows were in when a title field took focus. Rows sort by title,
+ * so re-sorting as the reader types would move the field out from under them;
+ * they hold still until focus leaves the titles altogether.
+ */
+const heldOrder = ref<string[] | null>(null)
+
+const rows = computed(() => {
+  const all = lists.value
+  // Sync can bring two lists with one title together (made on two browsers
+  // before they met). Marked, so the reader knows to rename one.
+  const titleCounts = new Map<string, number>()
+  for (const entry of all) {
+    const key = titleKey(entry.alias)
+    if (key)
+      titleCounts.set(key, (titleCounts.get(key) ?? 0) + 1)
   }
-}))
+
+  const built = all.map((entry) => {
+    /**
+     * Null for an entry whose address no longer reads as a page on the archive —
+     * one that arrived through sync or an import from a build that knew a shape
+     * this one doesn't, or that names another host entirely. Such a row is
+     * flagged rather than linked, and the link is built from *this* rather than
+     * from the stored text: a review carries the reader's session, so a link out
+     * of the archive is the one thing this row must never offer.
+     */
+    const normalized = normalizeTrackedUrl(entry.url)
+    /** The list's own page, marked as being refined. Null where the address and the kind disagree. */
+    const link = refineLink(entry)
+    const meta = trackedMeta(entry)
+    const refused = refusedTitles.value[entry.id]
+    return {
+      entry,
+      /**
+       * What the review's "List source" facet will call it, for labels and prompts
+       * — disambiguated against every other entry, so a name two lists share reads
+       * here exactly as it will there, ` (2)` and all.
+       */
+      label: sourceLabel(entry, all),
+      /** The tail of the URL — what the facet falls back to when there's no title. */
+      placeholder: sourceLabel({ id: entry.id, alias: '', url: entry.url }),
+      /** What's in the field: the stored title, or a refused one still being typed. */
+      title: refused ?? entry.alias,
+      refusal: refused === undefined ? null : refusal(titleTakenBy(refused, all, entry.id)),
+      shared: (titleCounts.get(titleKey(entry.alias)) ?? 0) > 1,
+      /** The type badge, so a list retitled to anything still says what it is. */
+      type: meta ? TRACKED_TYPE_LABELS[meta.type] : null,
+      /** The whole of what it is, for the badge's tooltip: "Character: Draco Malfoy". */
+      what: meta ? defaultTitle(meta) : '',
+      kind: KIND_LABELS[entry.kind] ?? entry.kind,
+      broken: normalized === null,
+      href: normalized && link ? getArchiveLink(link) : undefined,
+      state: entry.tracked ? `Tracking since ${formatDay(entry.since)}` : 'Paused',
+    }
+  })
+
+  const held = heldOrder.value
+  if (held) {
+    // A list that arrived while the reader was typing goes at the end.
+    const at = (id: string): number => {
+      const index = held.indexOf(id)
+      return index === -1 ? held.length : index
+    }
+    return built.sort((a, b) => at(a.entry.id) - at(b.entry.id))
+  }
+  // By title, which with the default "Type: …" titles also groups them by type.
+  // Lists with no title of their own go last, under what the facet calls them.
+  return built.sort((a, b) =>
+    Number(!a.entry.alias.trim()) - Number(!b.entry.alias.trim())
+    || a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
+})
+
+/**
+ * A title typed into a row. Written straight through — unless another list has
+ * it, which is refused: it stays in the field, unsaved, with a line saying which
+ * list has it.
+ */
+function retitle(entry: TrackedList, value: string) {
+  const next = { ...refusedTitles.value }
+  if (titleTakenBy(value, lists.value, entry.id)) {
+    next[entry.id] = value
+    refusedTitles.value = next
+    return
+  }
+  delete next[entry.id]
+  refusedTitles.value = next
+  entry.alias = value
+}
+
+function holdOrder() {
+  heldOrder.value ??= rows.value.map(row => row.entry.id)
+}
+
+/**
+ * Focus leaving a title: the rows may sort again, unless it went straight to
+ * another title. A refused title that has since become free — the other list was
+ * renamed meanwhile — is saved on the way out.
+ */
+function releaseOrder(entry: TrackedList, event: FocusEvent) {
+  const refused = refusedTitles.value[entry.id]
+  if (refused !== undefined && !titleTakenBy(refused, lists.value, entry.id))
+    retitle(entry, refused)
+  const next = event.relatedTarget
+  if (!(next instanceof HTMLElement && next.dataset.trackedTitle !== undefined))
+    heldOrder.value = null
+}
 
 /**
  * Resuming restarts the clock. A paused stretch is the reader saying "not these
@@ -227,20 +331,38 @@ function remove() {
           <template v-for="row in rows" :key="row.entry.id">
             <span flex="~ col gap-1" min-w-0>
               <Input
-                v-model="row.entry.alias"
+                :model-value="row.title"
                 type="text"
                 :placeholder="row.placeholder"
-                :aria-label="`Name for ${row.label}`"
+                :aria-label="`Title for ${row.label}`"
+                :aria-invalid="row.refusal ? 'true' : undefined"
+                data-tracked-title
                 text="base" h-9 w-full py-2 pl-2
+                @update:model-value="retitle(row.entry, $event)"
+                @focus="holdOrder"
+                @blur="releaseOrder(row.entry, $event)"
               />
+              <span v-if="row.refusal" text="xs destructive" role="alert">{{ row.refusal }}</span>
+              <span v-else-if="row.shared" text="xs destructive">
+                Another list has this title too. Rename one of them so they can be told apart.
+              </span>
               <span flex="~ gap-1 items-center wrap" text="xs muted-fg">
+                <span
+                  v-if="row.type"
+                  :title="row.what"
+                  border rounded px-1.5 font-medium text="default-fg"
+                >{{ row.type }}</span>
                 <span>{{ row.kind }}</span>
                 <span aria-hidden="true">·</span>
                 <span>{{ row.state }}</span>
-                <template v-if="!row.broken">
+                <template v-if="row.href">
                   <span aria-hidden="true">·</span>
-                  <ArchiveLink :href="row.href" :aria-label="`Open ${row.label} on AO3`">
-                    View on AO3
+                  <ArchiveLink
+                    :href="row.href"
+                    title="Open this list's search to refine it"
+                    :aria-label="`Open the search for ${row.label} on AO3, to refine it`"
+                  >
+                    Refine on AO3
                   </ArchiveLink>
                 </template>
               </span>
@@ -266,9 +388,15 @@ function remove() {
         </div>
 
         <p text="xs muted-fg">
-          The name is yours to set — it is what the review's "List source" filter calls the list. Left empty, the end
-          of the address stands in for it. Switching a list off keeps it, and its name, and simply stops reviewing it;
-          switching it back on starts tracking again from today, so the gap isn't filled in.
+          The title is yours to set — it is what the review's "List source" filter calls the list, so no two lists can
+          share one. A new list starts out named for what it searches, such as "Character: Draco Malfoy". Switching a
+          list off keeps it, and its title, and simply stops reviewing it; switching it back on starts tracking again
+          from today, so the gap isn't filled in.
+        </p>
+        <p text="xs muted-fg">
+          To change what a list searches, use <strong>Refine on AO3</strong>: it opens the list's search, and once you
+          have changed it — the Sort &amp; Filter sidebar, the search form — the floating toolbar there offers to
+          update the list, which keeps its place in your review.
         </p>
       </div>
     </div>
@@ -279,7 +407,7 @@ function remove() {
           Remove this list?
         </DialogTitle>
         <DialogDescription pt-2>
-          <strong>{{ pending?.label }}</strong> stops being tracked, and the name and tracking date you gave it are
+          <strong>{{ pending?.label }}</strong> stops being tracked, and the title and tracking date it had are
           gone. Nothing stored for the list itself is deleted. Tracking it again starts from the day you do that, so
           anything it turns up between now and then is not reviewed.
         </DialogDescription>

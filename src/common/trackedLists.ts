@@ -952,6 +952,62 @@ export function uniqueTitle(title: string, lists: readonly Pick<TrackedList, 'id
   return candidate
 }
 
+/** Each category as a tag's page names it, lower-cased, plus near spellings in case the wording shifts. */
+const TAG_CATEGORIES: Readonly<Record<string, TrackedType>> = {
+  'fandom': 'fandom',
+  'character': 'character',
+  'relationship': 'relationship',
+  'additional tags': 'freeform',
+  'additional tag': 'freeform',
+  'freeform': 'freeform',
+  'rating': 'rating',
+  'archive warning': 'warning',
+  'archive warnings': 'warning',
+  'warning': 'warning',
+  'category': 'category',
+}
+
+/**
+ * A tag's category as its own page states it — "This tag belongs to the
+ * Character Category." — or null for text that doesn't say. Every tag page the
+ * archive serves, common or not, opens its profile with that sentence, so it's
+ * the one place a tag's category can be read without inferring it. Takes the
+ * profile's text as it comes, wrapped and indented.
+ */
+export function tagTypeFromProfile(text: unknown): TrackedType | null {
+  if (typeof text !== 'string')
+    return null
+  const match = /this tag belongs to the (.+?) category/i.exec(collapseSpaces(text))
+  return match ? TAG_CATEGORIES[match[1]!.toLowerCase()] ?? null : null
+}
+
+/**
+ * What a page has learned about a list that the list doesn't say yet: a tag's
+ * category where the list still reads "Tag", a series' title where it still
+ * reads as its id. `known` is what the page says — its type and entity — and
+ * the result is the list's `type` and `entity` with the gap filled, or null when
+ * there's nothing to fill.
+ *
+ * Only placeholders are filled. A category or title the list already has stays,
+ * whatever this page says. And `known` has to describe the list's own root, by
+ * {@link trackedMeta}'s rule, so a page about another tag or series teaches this
+ * list nothing.
+ */
+export function fillMeta(entry: Pick<TrackedList, 'url' | 'type' | 'entity'>, known: TrackedMeta): Pick<TrackedList, 'type' | 'entity'> | null {
+  const current = trackedMeta(entry)
+  const derived = trackedMeta({ url: entry.url })
+  const learned = trackedMeta({ url: entry.url, type: known?.type, entity: known?.entity })
+  if (!current || !derived || !learned)
+    return null
+  const type = current.type === 'tag' ? learned.type : current.type
+  const entity = current.type === 'series' && current.entity === derived.entity && learned.type === 'series'
+    ? learned.entity
+    : current.entity
+  if (type === current.type && entity === current.entity)
+    return null
+  return { type, entity }
+}
+
 // ---------------------------------------------------------------------------
 // View filters
 // ---------------------------------------------------------------------------
@@ -1067,6 +1123,43 @@ export function refiningId(hash: string): string | null {
     return null
   const id = text.slice(prefix.length)
   return LINK_ID_RE.test(id) ? id : null
+}
+
+/**
+ * Where a tab keeps the list it's refining: a key in that tab's
+ * `sessionStorage`. Per tab, so two tabs can refine two lists; and it outlives
+ * navigation within the archive, which a fragment wouldn't — submitting a
+ * listing's Sort & Filter sidebar, the very step refining is made of, loads a
+ * new address without one.
+ */
+export const REFINING_STORAGE_KEY = 'ao3e:refining'
+
+/** Which list a tab is refining ({@link REFINING_STORAGE_KEY}). */
+export interface RefiningMark {
+  /** The list's {@link TrackedList.id}. Whether it still names a list is the reader's to check. */
+  id: string
+  /**
+   * Whether the list's view filter still has to be put back on screen. Set when
+   * the tab arrives by a refining link, and cleared by whatever puts it back, so
+   * that happens once, on arrival, and never over the reader's later changes.
+   */
+  restore: boolean
+}
+
+/** A mark as a tab stored it, or null for anything that isn't one. */
+export function parseRefiningMark(text: unknown): RefiningMark | null {
+  if (typeof text !== 'string')
+    return null
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  }
+  catch {
+    return null
+  }
+  if (!isRecord(value) || typeof value.id !== 'string' || !LINK_ID_RE.test(value.id))
+    return null
+  return { id: value.id, restore: value.restore === true }
 }
 
 // ---------------------------------------------------------------------------
@@ -1365,6 +1458,133 @@ function rangeText(from: number | string | null, to: number | string | null): st
   if (to !== null)
     return `≤ ${show(to)}`
   return 'any'
+}
+
+// ---------------------------------------------------------------------------
+// Updating a list, and taking an update back
+// ---------------------------------------------------------------------------
+
+/** What an update gives a list ({@link planUpdate}). */
+export interface TrackedListChange {
+  /** The page's address, as the reader has it; normalized on the way in. */
+  url: string
+  /** The page's view filter, or none. Stored canonical, and dropped when it filters nothing. */
+  filter?: unknown
+  /** The new title, trimmed on the way in. Left as it was when absent. */
+  alias?: string
+  /**
+   * What the page says the list now is — a tag's category, a series' title —
+   * where it knows. Whatever it doesn't know is kept from the list while that
+   * still fits the new query, and otherwise read off the URL.
+   */
+  meta?: TrackedMeta | null
+  /** A `tag-works` list's {@link TrackedList.scan}, when the page has checked it afresh. Kept when absent. */
+  scan?: boolean
+}
+
+/** An update that can be made — the lists it leaves, and the entry before and after — or why it can't. */
+export type TrackedUpdatePlan
+  = | { ok: true, lists: TrackedList[], before: TrackedList, after: TrackedList }
+    | { ok: false, reason: 'missing' | 'invalid' }
+    | { ok: false, reason: 'duplicate' | 'title', other: TrackedList }
+
+/**
+ * Replace list `id`'s query with the page's, in place.
+ *
+ * An update is the same list searching differently, so what makes it *that*
+ * list stays: its id (what the review files its works and sources under), its
+ * tracking start, and whether it's paused. Its query, view filter and title are
+ * replaced, and its type and entity with them — the query may have moved to
+ * another tag or series, and a list still named for the old one would say the
+ * wrong thing. `scan` stays unless the caller has checked the new tag.
+ *
+ * Refused, with the list responsible, when the result would be the same query as
+ * another list (`duplicate`), or would take a title another list has (`title`).
+ * A title the list already had is never refused, even where sync has since
+ * brought in a namesake: that's for the reader to sort out, and no reason to stop
+ * an update that doesn't touch it. `missing` when the list is gone; `invalid`
+ * when the page isn't trackable at all.
+ */
+export function planUpdate(lists: readonly TrackedList[], id: string, change: TrackedListChange): TrackedUpdatePlan {
+  const before = lists.find(list => list.id === id)
+  if (!before)
+    return { ok: false, reason: 'missing' }
+  const normalized = normalizeTrackedUrl(change.url)
+  if (!normalized)
+    return { ok: false, reason: 'invalid' }
+
+  const filter = canonicalFilter(change.filter)
+  const key = filteredKey(normalized.key, filter)
+  const duplicate = lists.find(list => list.id !== id && trackedKey(list) === key)
+  if (duplicate)
+    return { ok: false, reason: 'duplicate', other: duplicate }
+
+  const alias = typeof change.alias === 'string' ? change.alias.trim() : before.alias
+  if (titleKey(alias) !== titleKey(before.alias)) {
+    const taken = titleTakenBy(alias, lists, id)
+    if (taken)
+      return { ok: false, reason: 'title', other: taken }
+  }
+
+  // What's stored only carries over while the list keeps its root: a series'
+  // title can't be checked against another series' id, so a move drops it.
+  const root = trackedRoot({ url: normalized.url })
+  const kept = root !== null && root === trackedRoot(before)
+    ? trackedMeta({ url: normalized.url, type: before.type, entity: before.entity })!
+    : trackedMeta({ url: normalized.url })!
+  const meta = change.meta ? fillMeta({ url: normalized.url, ...kept }, change.meta) ?? kept : kept
+
+  const after: TrackedList = { ...before, kind: normalized.kind, url: normalized.url, alias, type: meta.type, entity: meta.entity }
+  if (!meta.entity)
+    delete after.entity
+  if (filter)
+    after.filter = filter
+  else
+    delete after.filter
+  if (change.scan === true)
+    after.scan = true
+  else if (change.scan === false)
+    delete after.scan
+  return { ok: true, lists: lists.map(list => (list.id === id ? after : list)), before, after }
+}
+
+/** Whether an update can be taken back — and the lists that does it — or why not. */
+export type TrackedUndoPlan
+  = | { ok: true, lists: TrackedList[] }
+    | { ok: false, reason: 'missing' | 'changed' }
+    | { ok: false, reason: 'duplicate' | 'title', other: TrackedList }
+
+/**
+ * Take back an update {@link planUpdate} made, putting `before` back in place of
+ * `after`: only while the list is still exactly what the update left (`changed`
+ * once it has been paused, renamed or updated again — here, in another tab, or
+ * by a sync) and is there at all (`missing`), and only if that wouldn't now
+ * duplicate a query or a title another list has taken in the meantime.
+ */
+export function planUndo(lists: readonly TrackedList[], before: TrackedList, after: TrackedList): TrackedUndoPlan {
+  const current = lists.find(list => list.id === after.id)
+  if (!current)
+    return { ok: false, reason: 'missing' }
+  if (entrySignature(current) !== entrySignature(after))
+    return { ok: false, reason: 'changed' }
+  const key = trackedKey(before)
+  const duplicate = key === null ? undefined : lists.find(list => list.id !== before.id && trackedKey(list) === key)
+  if (duplicate)
+    return { ok: false, reason: 'duplicate', other: duplicate }
+  if (titleKey(before.alias) !== titleKey(after.alias)) {
+    const taken = titleTakenBy(before.alias, lists, before.id)
+    if (taken)
+      return { ok: false, reason: 'title', other: taken }
+  }
+  return { ok: true, lists: lists.map(list => (list.id === before.id ? before : list)) }
+}
+
+/** An entry as one string, whatever order storage handed its fields back in. */
+function entrySignature(entry: TrackedList): string {
+  const fields = Object.entries(entry)
+    .filter(([, value]) => value !== undefined)
+    .sort(([a], [b]) => compareStrings(a, b))
+  return JSON.stringify(fields)
 }
 
 // ---------------------------------------------------------------------------

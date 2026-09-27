@@ -22,15 +22,15 @@
       </OptionRow>
       <OptionDivider />
       <OptionRow
-        title="Auto-reload frequency for profile search lists"
-        subtitle="Time before the cached list auto-refreshes. Should be set to longer periods if you have many items on the list. Does not restrict manual reloads."
+        title="Reload your own lists"
+        subtitle="How long the Marked for Later and read-works views reuse what they already have. Both can run to thousands of works — dozens of requests to AO3 — so raise this if yours are long; the view's own Refresh button reloads regardless."
       >
         <OptionSearchRefreshHours />
       </OptionRow>
       <OptionDivider />
       <OptionRow
         title="Search the works you've read"
-        subtitle="Adds a “Search read items” button to your History and Marked for Later pages that collects every work you have marked read — or favourite, good, boring, bad, gross — into the same view, with a Status filter to narrow it to one of them. Needs work marks on, and finds each work's details in your AO3 history."
+        subtitle="Adds a “Search read items” button to your History and Marked for Later pages, collecting everything you have marked read — or with any finer verdict — into one view, with a Status filter to narrow it to one of them. Needs work marks on; each work's details come from your AO3 history."
       >
         <OptionSwitch option-id="searchReadWorks" />
       </OptionRow>
@@ -85,7 +85,7 @@
       <OptionDivider />
       <OptionRow
         title="Completion menu"
-        subtitle="Click a work’s chapter total in a listing — the 5 of 1/5, or the ? of 1/? — or the “Chapters:” label for a menu offering completed works only or incomplete works only. On a normal listing your pick sets AO3's own Completion Status filter, ready for you to run the search; inside an instant search view it filters the loaded list instead."
+        subtitle="Click a work’s chapter total in a listing — the 5 of 1/5, or the ? of 1/? — or its “Chapters:” label, for a menu offering completed or incomplete works only. On a normal listing your pick fills AO3's own Completion Status filter; inside an instant search view it filters the loaded list instead."
       >
         <OptionSwitch option-id="completionToolbar" />
       </OptionRow>
@@ -99,7 +99,7 @@
       <OptionDivider />
       <OptionRow
         title="Exclude hidden works from the search"
-        subtitle="When a rule hides a work outright, add what hid it to the search itself — one tag per hidden work, ticked in AO3's own Sort &amp; Filter exclusions or typed in when it isn't listed. Stops a page of twenty arriving with one work left on it. Nothing is submitted for you: press Sort and Filter when you're ready. Values still carried by a work you've told the extension to always show are left alone."
+        subtitle="When a rule hides a work outright, add what hid it to the search itself — ticked in AO3's own Sort &amp; Filter exclusions, or typed in when it isn't listed — so a page of twenty stops arriving with one work left on it. Nothing is submitted for you; press Sort and Filter when you're ready. Anything still carried by a work you always-show is left alone."
       >
         <OptionSwitch option-id="autoExcludeHidden" />
       </OptionRow>

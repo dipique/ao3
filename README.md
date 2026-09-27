@@ -64,7 +64,8 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 ### Tracked lists
 
 - **Tracked lists** gather the new and updated works from saved searches, filtered listings, uncommon tags and series into one review, under a "Tracked" item on your readings page.
-- Add a list with "Track this search" on the floating toolbar, or from a stored list under Site export. Rename, pause or remove lists on the options page.
+- Add a list with "Track this search" on the floating toolbar, or from a stored list under Site export. A new list is titled for what it searches ("Character: Draco Malfoy"), and no two lists share a title. Retitle, pause or remove lists on the options page.
+- To change what a list searches, use "Refine on AO3" on its options row: it opens the list's search, and once you have changed it (the Sort & Filter sidebar, the search form) the floating toolbar offers "Update". The list keeps its place in your review, and the update can be undone. A page that searches what a list does, filtered differently, offers the same through "Track or update…".
 - A review covers a range of days, oldest first. Mark whatever deserves marking, then "Mark reviewed" moves on to the next range. Works you've already marked read or saved for later are left out.
 
 ### Sync and backups
@@ -138,7 +139,7 @@ For development, `pnpm run start:chrome` and `pnpm run start:firefox` launch a b
 
 - **Where it runs:** only on `archiveofourown.org` and its subdomains. That is its one content-script match and its only host permission.
 - **What it sends:** requests go to AO3 and nowhere else. It loads the listing pages, works and chapter indexes its features need (search views, tracked lists, site export, chapter dates), looks up your subscription or Marked for Later state when a menu needs it, and performs the actions you choose from its menus. These requests carry your AO3 login, as your own browsing does. There is no analytics or telemetry.
-- **Where your data lives:** settings, marks and cached lists are kept in the browser's local extension storage. If you turn sync on, settings travel through the browser's own sync service (your Firefox or Google account) and nowhere else. Backups stay on the device. Reader mode's text size and the dashboard sidebar's folded state are kept in AO3's page storage on that device.
+- **Where your data lives:** settings, marks and cached lists are kept in the browser's local extension storage. If you turn sync on, settings travel through the browser's own sync service (your Firefox or Google account) and nowhere else. Backups stay on the device. Reader mode's text size, the dashboard sidebar's folded state and which tracked list a tab is refining are kept in AO3's page storage on that device.
 - **Permissions:** `storage` for settings and cached lists; `unlimitedStorage` because cached lists and exported work text outgrow the default quota; `contextMenus` for the entries in the browser's right-click menu; `alarms` to schedule sync.
 
 ## Developing

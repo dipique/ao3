@@ -1,24 +1,32 @@
-import type { NormalizedTrackedUrl, TrackedList } from '#common'
+import type { NormalizedTrackedUrl, TagType, TrackedList, TrackedMeta, TrackedType } from '#common'
 
-import { getArchiveLink, newTrackedListId, normalizeTrackedUrl, PAGE_SIZE, tagNameFromURL, tagSearchUrl, utcToday } from '#common'
+import { getArchiveLink, newTrackedListId, normalizeTrackedUrl, PAGE_SIZE, tagSearchUrl, tagTypeFromProfile, trackedMeta, trackedRoot, utcToday } from '#common'
+import { getBlurb } from '#content_script/blurb.ts'
+import { checkboxTagName } from '#content_script/filterSidebar.tsx'
 import { detectFoundCount, detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
-import { tagPageName, uncommonTagPage } from '#content_script/tagPage.ts'
+import { uncommonTagPage } from '#content_script/tagPage.ts'
 
 /**
  * Turning the page the reader is on into a tracked list: whether it can be one,
- * what to call it, and the one check a tag needs before it can be read by date.
+ * what it is (a tag's category, a series' title), what its Sort & Filter sidebar
+ * calls the ids in its address, and the one check a tag needs before it can be
+ * read by date.
  *
- * The rules about *what* a trackable query is, and how one is keyed, are pure and
- * live in {@link file://../../common/trackedLists.ts}. This is the half that has
- * to look at the page.
+ * The rules about *what* a trackable query is, how one is keyed and how a list
+ * is named, are pure and live in {@link file://../../common/trackedLists.ts}.
+ * This is the half that has to look at the page.
  */
 
 /** A page the toolbar can offer to track. */
 export interface TrackablePage {
   /** The query, as the stored entry will hold it. */
   normalized: NormalizedTrackedUrl
-  /** The name the alias box starts out with — always something the reader has just seen. */
-  alias: string
+  /**
+   * What the page says the list would be. A tag's category is read off the page
+   * where it can be; where it can't, this still says `tag`, and
+   * {@link resolveMeta} can ask the tag's own page.
+   */
+  meta: TrackedMeta
   /**
    * An uncommon tag's works block, when that is what this page is. It carries the
    * page count {@link needsScan} compares a search against.
@@ -41,30 +49,68 @@ export function trackablePage(): TrackablePage | null {
   if (!normalized)
     return null
   if (normalized.kind !== 'tag-works')
-    return { normalized, alias: generatedAlias(normalized) }
+    return { normalized, meta: pageMeta(normalized) }
   const tag = uncommonTagPage()
-  return tag ? { normalized, alias: generatedAlias(normalized), listbox: tag.listbox } : null
+  return tag ? { normalized, meta: pageMeta(normalized), listbox: tag.listbox } : null
 }
 
 /**
- * A name for a new list, taken from whatever the page itself says it is: the words
- * searched for, the tag, the series' title, or the listing's owner. It goes into
- * the alias box as a starting point, not a decision — the reader edits it there,
- * and can rename it later from the options page.
+ * What this page says the list would be: the URL's type and entity, with what
+ * only the page can supply filled in — a tag's category and a series' title.
+ * Nothing is fetched.
+ *
+ * - An uncommon tag's page states its own category.
+ * - A tag's filtered listing doesn't, but every blurb on it files the tag under
+ *   its category — in its characters, its relationships, its fandom heading, its
+ *   required tags — and the blurb parser the rules use already reads which. The
+ *   first blurb that carries the tag by name settles it. One that carries only a
+ *   synonym of it doesn't, which is when {@link resolveMeta} is needed.
+ * - A series' page is headed by its title.
  */
-function generatedAlias(normalized: NormalizedTrackedUrl): string {
-  switch (normalized.kind) {
-    case 'tag-works':
-      return tagPageName()
-    case 'series-works':
-      return pageHeading() || 'Series'
-    case 'text-search':
-      return searchWords() || 'Works search'
-    case 'works-filter':
-      // The listing's own name plus a word for the rest of the query, since what
-      // makes this list worth tracking is usually the filters, not the listing.
-      return `${listingOwner(normalized) || pageHeading() || 'Works'}, filtered`
+function pageMeta(normalized: NormalizedTrackedUrl): TrackedMeta {
+  const derived = trackedMeta({ url: normalized.url })!
+  if (derived.type === 'tag') {
+    const type = normalized.kind === 'tag-works' ? profileCategory(document) : blurbCategory(derived.entity)
+    return type ? { type, entity: derived.entity } : derived
   }
+  if (derived.type === 'series') {
+    const title = pageHeading()
+    return title ? { type: 'series', entity: title } : derived
+  }
+  return derived
+}
+
+/** Each of the rules' tag types as the list type it is. */
+const TAG_TYPE_OF: Readonly<Record<TagType, TrackedType>> = {
+  r: 'rating',
+  w: 'warning',
+  c: 'category',
+  f: 'fandom',
+  R: 'relationship',
+  C: 'character',
+  F: 'freeform',
+}
+
+/** How two tag names are compared: case and spacing aside. */
+function nameKey(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/** The category of the tag named `name`, from the first blurb on the page that carries it. */
+function blurbCategory(name: string): TrackedType | null {
+  const wanted = nameKey(name)
+  for (const blurb of document.querySelectorAll('#main li.blurb')) {
+    const tag = getBlurb(blurb).tags.find(one => one.type && nameKey(one.name) === wanted)
+    if (tag?.type)
+      return TAG_TYPE_OF[tag.type]
+  }
+  return null
+}
+
+/** The category a tag's own page states, in its profile block. */
+function profileCategory(doc: Document): TrackedType | null {
+  const profile = doc.querySelector('#main div.tag.profile') ?? doc.querySelector('#main')
+  return tagTypeFromProfile(profile?.textContent ?? '')
 }
 
 /** The page's own title, as the archive prints it above the content. */
@@ -72,40 +118,60 @@ function pageHeading(): string {
   return document.querySelector('#main h2.heading')?.textContent?.trim().replace(/\s+/g, ' ') ?? ''
 }
 
-/** What a works search was asked for, when it was asked in words. */
-function searchWords(): string {
-  const params = new URLSearchParams(location.search)
-  for (const field of ['query', 'title', 'creators']) {
-    const value = params.get(`work_search[${field}]`)?.trim().replace(/\s+/g, ' ')
-    if (value)
-      return value
+/**
+ * What a tag's category turned out to be, by the tag's own page — asked at most
+ * once per page load, whoever asks.
+ */
+const categoryRequests = new Map<string, Promise<TrackedType | null>>()
+
+/**
+ * {@link TrackablePage.meta}, with a tag's category settled: when no blurb on a
+ * tag's filtered listing names the tag, this asks the tag's own page, once. Asked
+ * only when a list is about to be named or written — never just because a page
+ * was opened — and never again on this page, whatever the answer.
+ *
+ * Any failure leaves the category unknown (`tag`), which is only a less helpful
+ * name, not a wrong one.
+ */
+export async function resolveMeta(page: TrackablePage): Promise<TrackedMeta> {
+  const path = tagPagePath(page)
+  if (!path)
+    return page.meta
+  let request = categoryRequests.get(path)
+  if (!request) {
+    request = fetchPageDoc(getArchiveLink(path)).then(profileCategory, () => null)
+    categoryRequests.set(path, request)
   }
-  return ''
+  const type = await request
+  return type ? { type, entity: page.meta.entity } : page.meta
+}
+
+/** Whether {@link resolveMeta} would have to ask the archive. */
+export function metaUnsettled(page: TrackablePage): boolean {
+  return tagPagePath(page) !== null
+}
+
+/** The tag's own page, for a tag's filtered listing whose category the page left unknown. */
+function tagPagePath(page: TrackablePage): string | null {
+  if (page.meta.type !== 'tag' || page.normalized.kind !== 'works-filter')
+    return null
+  const listing = trackedRoot({ url: page.normalized.url })?.replace(/^works-filter:/, '') ?? ''
+  return /^\/tags\/[^/]+\/works$/.test(listing) ? listing.replace(/\/works$/, '') : null
 }
 
 /**
- * Whose listing a `works-filter` page is — the tag, user, pseud or collection in
- * its path. Read from the **key**, not the address: a tag's listing reached by
- * submitting the Sort & Filter sidebar names its tag in the query string instead
- * of the path, and the key is where those two spellings have already been made
- * one ({@link normalizeTrackedUrl}).
+ * The label the page's Sort & Filter sidebar gives the checkbox (or radio) with
+ * this `name` and `value` — "Draco Malfoy" for `exclude_work_search[character_ids][]`
+ * and its tag id — without the archive's work count. Null when the sidebar
+ * doesn't list it, so a change to it can only be counted.
  */
-function listingOwner(normalized: NormalizedTrackedUrl): string {
-  const path = normalized.key.replace(/^[^:]*:/, '').split('?')[0] ?? ''
-  const tag = /^\/tags\/([^/]+)\/works$/.exec(path)
-  if (tag)
-    return tagNameFromURL(decodeSegment(tag[1]!))
-  const owner = /^\/(?:users|collections)\/([^/]+)(?:\/pseuds\/([^/]+))?\/works$/.exec(path)
-  return owner ? decodeSegment(owner[2] ?? owner[1]!) : ''
-}
-
-function decodeSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment)
+export function sidebarNameId(param: string, id: string): string | null {
+  const form = document.querySelector('form#work-filters') ?? document
+  for (const input of form.querySelectorAll<HTMLInputElement>('input[name][value]')) {
+    if (input.name === param && input.value === id)
+      return checkboxTagName(input) || null
   }
-  catch {
-    return segment
-  }
+  return null
 }
 
 /**
@@ -142,13 +208,18 @@ export async function needsScan(page: TrackablePage, signal?: AbortSignal): Prom
   }
 }
 
-/** A new entry for this page, tracked from today, with an id no sibling has. */
-export function newEntry(page: TrackablePage, alias: string, existing: readonly TrackedList[], scan: boolean): TrackedList {
+/**
+ * A new entry for this page, tracked from today, with an id no sibling has, the
+ * title given, and what the page says it is.
+ */
+export function newEntry(page: TrackablePage, title: string, existing: readonly TrackedList[], scan: boolean, meta: TrackedMeta = page.meta): TrackedList {
   return {
     id: newTrackedListId(existing),
     kind: page.normalized.kind,
     url: page.normalized.url,
-    alias: alias.trim(),
+    alias: title.trim(),
+    type: meta.type,
+    ...(meta.entity ? { entity: meta.entity } : {}),
     tracked: true,
     since: utcToday(),
     ...(scan ? { scan: true as const } : {}),
