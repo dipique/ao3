@@ -234,7 +234,7 @@ pnpm run dist       # zips them with web-ext, plus a source archive
 pnpm run dist:lint  # runs web-ext lint on the Firefox build
 ```
 
-`pnpm run dist` writes `ao3-enhancements_chrome_<version>.zip` and `ao3-enhancements_firefox_<version>.zip` under `dist/artifacts/`, taking the version from `package.json` and leaving source maps out, plus `ao3-enhancements_source_<version>.zip`, a `git archive` of `HEAD`. It currently fails on Windows, because it passes web-ext's backslashed output path to `mv`. The release workflow runs it on Linux.
+`pnpm run dist` writes `ao3-enhancements_chrome_<version>.zip` and `ao3-enhancements_firefox_<version>.zip` under `dist/artifacts/<browser>/`, taking the version from `package.json` and leaving source maps out, plus `dist/artifacts/source/ao3-enhancements_source_<version>.zip`, a `git archive` of `HEAD`. It runs on Windows as well as Linux; the release workflow runs it on Linux.
 
 ### Project layout
 
