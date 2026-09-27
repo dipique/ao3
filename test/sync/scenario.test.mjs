@@ -292,6 +292,33 @@ describe('sync scenarios', () => {
       assert.equal(laptop.options.trackedLists.reviewedThrough, 20100)
       assert.equal(laptop.options.trackedLists.lists.every(entry => !entry.tracked), true)
     })
+
+    /**
+     * Refining a list replaces its query and view filter and keeps its id, so
+     * refining every one of them on one browser is twelve edits on the other,
+     * not twelve lists lost and twelve new ones.
+     */
+    test('re-filtering them all is not a loss', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+
+      const refined = trackedListsFixture(12)
+      for (const entry of refined.lists) {
+        entry.url = `${entry.url}&work_search%5Bexcluded_tag_names%5D=Angst`
+        entry.filter = { facets: { characters: { ex: ['Draco Malfoy'] } } }
+      }
+      await desktop.edit({ trackedLists: refined })
+      await cloud.run()
+
+      assert.equal(laptop.meta.pause, null)
+      assert.deepEqual(laptop.options.trackedLists.lists.map(entry => entry.id), refined.lists.map(entry => entry.id))
+      assert.equal(laptop.options.trackedLists.lists.every(entry => entry.url.endsWith('=Angst') && entry.filter?.facets?.characters?.ex?.[0] === 'Draco Malfoy'), true)
+    })
   })
 
   test('a browser adopting a copy it can\'t reproduce doesn\'t push it back', async () => {

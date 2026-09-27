@@ -12,6 +12,7 @@ import type { CappedDay, FetchedWindow } from '#content_script/tracked/fetchWind
 import {
   ADDON_CLASS,
   cache,
+  canonicalFilter,
   formatDay,
   fromShortId,
   getArchiveLink,
@@ -853,17 +854,23 @@ function belongsToWindow(work: Work): boolean {
 
 /**
  * What a stored window was computed against: every tracked list's identity,
- * address, tracking date and reading mode. The alias is deliberately not in it —
- * renaming a list relabels its facet on the next re-run and is no reason to read
- * the archive again.
+ * address, view filter, tracking date and reading mode. The alias is
+ * deliberately not in it — renaming a list relabels its facet on the next re-run
+ * and is no reason to read the archive again. A changed filter is: it changes
+ * which of the works read each list wants.
  */
 function listsSig(lists: readonly TrackedList[]): string {
   // Serialized rather than joined on a separator: a URL can hold very nearly
   // any character, and two lists must never be able to spell one signature
-  // between them.
+  // between them. The filter goes on the end only when there is one, so a list
+  // without one signs as it always has and no stored window goes stale over it.
   return JSON.stringify(lists
     .filter(list => list.tracked)
-    .map(list => [list.id, list.kind, list.url, list.since, list.scan ? 1 : 0]))
+    .map((list) => {
+      const sig: unknown[] = [list.id, list.kind, list.url, list.since, list.scan ? 1 : 0]
+      const filter = canonicalFilter(list.filter)
+      return filter ? [...sig, filter] : sig
+    }))
 }
 
 /** How many works the new window gained and lost against the old one. */

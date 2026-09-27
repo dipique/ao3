@@ -150,11 +150,18 @@ describe('normalizeTrackedUrl — parameters', () => {
     )
   })
 
-  test('only tag_id folds: a user\'s or a collection\'s stays where it is', () => {
-    assert.equal(normalizeTrackedUrl(`${AO3}/works?user_id=someone`).key, 'works-filter:/works?user_id=someone')
-    assert.notEqual(
+  test('a user\'s listing folds like a tag\'s; a collection\'s stays where it is', () => {
+    // The sidebar on /users/NAME/works submits user_id=NAME, exactly as a tag's
+    // submits tag_id. A collection's hasn't been seen to, so it isn't folded.
+    assert.equal(normalizeTrackedUrl(`${AO3}/works?user_id=someone`).key, 'works-filter:/users/someone/works')
+    assert.equal(
       normalizeTrackedUrl(`${AO3}/works?user_id=someone`).key,
       normalizeTrackedUrl(`${AO3}/users/someone/works`).key,
+    )
+    assert.equal(normalizeTrackedUrl(`${AO3}/works?collection_id=SomeFest2026`).key, 'works-filter:/works?collection_id=SomeFest2026')
+    assert.notEqual(
+      normalizeTrackedUrl(`${AO3}/works?collection_id=SomeFest2026`).key,
+      normalizeTrackedUrl(`${AO3}/collections/SomeFest2026/works`).key,
     )
   })
 

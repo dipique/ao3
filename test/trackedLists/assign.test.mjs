@@ -101,7 +101,7 @@ describe('mergeItems', () => {
   const list = (id, items, extra = {}) => ({
     id,
     base: START - 1,
-    items: items.map(([sid, day, counts = true]) => ({ sid, day, counts })),
+    items: items.map(([sid, day, counts = true, member]) => ({ sid, day, counts, ...(member === undefined ? {} : { member }) })),
     total: 100,
     bounds: new Map(),
     exhausted: false,
@@ -151,5 +151,27 @@ describe('mergeItems', () => {
   test('a scanned list\'s old works are dropped', () => {
     const merged = mergeItems([list('s', [['old', dayOf('1 Jan 2019')], ['new', START + 1]], { scanned: true })], context)
     assert.deepEqual([...merged.keys()], ['new'])
+  })
+
+  describe('lists with a view filter', () => {
+    test('a work goes under only the lists that want it', () => {
+      const merged = mergeItems([list('a', [['w1', START]]), list('b', [['w1', START, false, false]]), list('c', [['w1', START, true, true]])], context)
+      assert.deepEqual(merged.get('w1'), { day: START, counts: true, lists: ['a', 'c'] })
+    })
+
+    test('a work no list wants is left out, whichever lists returned it', () => {
+      const merged = mergeItems([list('a', [['w1', START, false, false], ['w2', START]]), list('b', [['w1', START + 1, false, false]])], context)
+      assert.deepEqual([...merged.keys()], ['w2'])
+    })
+
+    test('a read by a list that doesn\'t want the work can\'t move it to another day', () => {
+      const merged = mergeItems([list('a', [['w1', START + 1]]), list('b', [['w1', START + 6, false, false]])], context)
+      assert.deepEqual(merged.get('w1'), { day: START + 1, counts: true, lists: ['a'] })
+    })
+
+    test('nor make it count', () => {
+      const merged = mergeItems([list('a', [['w1', START, false]]), list('b', [['w1', START, true, false]])], context)
+      assert.equal(merged.get('w1').counts, false)
+    })
   })
 })

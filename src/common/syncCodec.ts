@@ -35,8 +35,12 @@ import type { Options } from './options.ts'
  * shape against the one recorded for this version. It can't see a change in
  * meaning that keeps the same shape, or a new field on list entries that no
  * default shows (a new optional field on a rule, say) — bump for those by hand.
+ *
+ * 6 was one of those: tracked lists gained `type`, `entity` and a view `filter`,
+ * and the default `lists` is empty, so the recorded shape didn't move. An older
+ * build would read a filtered list as unfiltered.
  */
-export const SYNC_SCHEMA_VERSION = 5
+export const SYNC_SCHEMA_VERSION = 6
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400

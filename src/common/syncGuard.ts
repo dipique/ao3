@@ -79,12 +79,15 @@ function replacementKeys(options: Options): Set<string> {
 }
 
 /**
- * A tracked list is the query it watches; its name, its tracking date and
- * whether it is paused are edits to it. Entries whose address doesn't read as a
- * query at all fall back to their id, so two broken ones never count as one.
+ * A tracked list is its id. Its title, its tracking date, whether it is paused
+ * and even its query are edits to it: refining a list replaces its query and
+ * view filter and keeps its id, so a pull that refined every list has lost
+ * none of them. An entry with no usable id (storage nothing has repaired) falls
+ * back to its query.
  */
 function trackedListKeys(options: Options): Set<string> {
-  return new Set((options.trackedLists?.lists ?? []).map(entry => trackedKey(entry) ?? `#${entry.id}`))
+  return new Set((options.trackedLists?.lists ?? []).map(entry =>
+    typeof entry.id === 'string' && entry.id ? `#${entry.id}` : `@${trackedKey(entry) ?? ''}`))
 }
 
 function markedWorkIds(options: Options): Set<string> {

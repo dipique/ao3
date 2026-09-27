@@ -75,7 +75,7 @@ describe('assessPull', () => {
     assert.deepEqual(loss?.trackedLists, { removed: 12, of: 12 })
   })
 
-  test('a tracked list is the query it watches: renaming or pausing one removes nothing', () => {
+  test('a tracked list is its id: renaming or pausing one removes nothing', () => {
     const current = withOptions({ trackedLists: trackedListsFixture(20) })
     const edited = trackedListsFixture(20, { reviewedThrough: 20100 })
     for (const entry of edited.lists) {
@@ -84,6 +84,33 @@ describe('assessPull', () => {
       entry.since = 20050
     }
     assert.equal(assessPull(current, withOptions({ trackedLists: edited })), null)
+  })
+
+  test('nor does refining every one of them: a new query and view filter on the same id', () => {
+    const current = withOptions({ trackedLists: trackedListsFixture(20) })
+    const refined = trackedListsFixture(20)
+    for (const entry of refined.lists) {
+      entry.url = `${entry.url}&work_search%5Bexcluded_tag_names%5D=Angst`
+      entry.filter = { facets: { characters: { ex: ['Draco Malfoy'] } } }
+      entry.alias = `${entry.alias}, no Draco`
+    }
+    assert.equal(assessPull(current, withOptions({ trackedLists: refined })), null)
+  })
+
+  test('dropping most lists is still held, however the rest were refined', () => {
+    const current = withOptions({ trackedLists: trackedListsFixture(12) })
+    const incoming = trackedListsFixture(2)
+    for (const entry of incoming.lists)
+      entry.url = '/works/search?work_search%5Bquery%5D=something+else'
+    assert.deepEqual(assessPull(current, withOptions({ trackedLists: incoming }))?.trackedLists, { removed: 10, of: 12 })
+  })
+
+  test('a list re-made under a new id is one lost and one gained, even with the same query', () => {
+    const current = withOptions({ trackedLists: trackedListsFixture(8) })
+    const remade = trackedListsFixture(8)
+    for (const entry of remade.lists)
+      entry.id = `new-${entry.id}`
+    assert.deepEqual(assessPull(current, withOptions({ trackedLists: remade }))?.trackedLists, { removed: 8, of: 8 })
   })
 
   test('a mark holding works that disappears from the table is always held', () => {
