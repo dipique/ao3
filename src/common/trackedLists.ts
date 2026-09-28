@@ -189,8 +189,9 @@ export interface TrackedList {
   type?: TrackedType
   /**
    * The root as a name: the tag, the author's account name (whichever pseud the
-   * page was of), the collection, the series' title or the search's words. Read
-   * through {@link trackedMeta}, like {@link type}.
+   * page was of), the collection, the series' title, or what's in the search's
+   * subject field (its words, or failing those a title, creator or tag name).
+   * Read through {@link trackedMeta}, like {@link type}.
    */
   entity?: string
   /**
@@ -768,10 +769,10 @@ function collapseSpaces(text: string): string {
 // Roots
 //
 // A list is a search *of* something — a tag, an author, a collection, an
-// uncommon tag, a series, a search's words — narrowed by filters. The root is
-// that something. Two lists with one root are the same search filtered two ways,
-// which is how a page that is exactly no list can still be offered as an update
-// to one.
+// uncommon tag, a series, a search's subject field — narrowed by filters. The
+// root is that something. Two lists with one root are the same search filtered
+// two ways, which is how a page that is exactly no list can still be offered as
+// an update to one.
 // ---------------------------------------------------------------------------
 
 /**
@@ -784,15 +785,18 @@ function collapseSpaces(text: string): string {
  *   path form does, and a pseud's listing roots at its author's, the pseud being
  *   one more filter ({@link listingOwner}).
  * - `tag-works`, `series-works` — the tag's page; the series.
- * - `text-search` — the search's words (`work_search[query]`), trimmed,
- *   lower-cased and with their spaces collapsed. A search without any, made
- *   entirely of the form's other fields, has no root.
+ * - `text-search` — its subject ({@link searchSubject}): the search's words,
+ *   or, when the "Any Field" box was left empty, the first of its title,
+ *   creator and tag-name fields it fills — lower-cased, and keyed with the
+ *   field's name, so a fandom and a title spelled alike are two roots. So the
+ *   same fandom searched for two different characters is one root, filtered
+ *   two ways. A search that fills none of those fields has no root.
  *
  * Kinds never share a root, even where they name the same thing: a works search
  * for a tag's name and that tag's listing are different queries, and deciding
  * when a name means one tag across kinds would be guesswork.
  *
- * Null for an entry whose URL isn't trackable, and for a search with no words.
+ * Null for an entry whose URL isn't trackable, and for a search with no subject.
  */
 export function trackedRoot(entry: Pick<TrackedList, 'url'>): string | null {
   const parsed = parseTracked(entry.url)
@@ -810,12 +814,52 @@ function rootOf(parsed: ParsedTracked): string | null {
     case 'works-filter':
       return `works-filter:${parsed.owner!.root}`
     case 'text-search': {
-      const words = collapseSpaces(paramValue(parsed.criteria, 'work_search[query]'))
-      return words ? `text-search:${words.toLowerCase()}` : null
+      const subject = searchSubject(parsed)
+      return subject ? `text-search:${subject.field}=${subject.words.toLowerCase()}` : null
     }
     default:
       return `${parsed.kind}:${parsed.path}`
   }
+}
+
+/**
+ * The works search fields a search can be a search *of*, first filled first: its
+ * words, then its title and creator fields, then its tag fields. The form's other
+ * fields — ratings, word counts, completion, excluded tags — only ever narrow
+ * one of these.
+ */
+const SEARCH_SUBJECT_FIELDS = ['query', 'title', 'creators', 'fandom_names', 'character_names', 'relationship_names', 'freeform_names', 'other_tag_names']
+
+/** What a works search is a search of ({@link searchSubject}). */
+interface SearchSubject {
+  /** The field, as the form names it inside `work_search[…]`: `query`, `fandom_names`… */
+  field: string
+  /** The field's parameter: `work_search[query]`. */
+  param: string
+  /** What's in it: trimmed, its spaces collapsed, its case as the reader typed it. */
+  words: string
+}
+
+/**
+ * A works search's subject: the first of {@link SEARCH_SUBJECT_FIELDS} it fills,
+ * by that order rather than the address's. Null for any other kind of page, and
+ * for a search that fills none of them (a rating and a word count, say).
+ *
+ * It is the one place that says what a search is of. Its root ({@link rootOf}),
+ * the name its title gives it ({@link metaOf}) and the field its filter summary
+ * leaves uncounted ({@link queryFilterCount}) are all read from it, so none of
+ * them can settle on a different field from the others.
+ */
+function searchSubject(parsed: ParsedTracked): SearchSubject | null {
+  if (parsed.kind !== 'text-search')
+    return null
+  for (const field of SEARCH_SUBJECT_FIELDS) {
+    const param = `work_search[${field}]`
+    const words = collapseSpaces(paramValue(parsed.criteria, param))
+    if (words)
+      return { field, param, words }
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -835,23 +879,16 @@ const TAG_TYPES = new Set<TrackedType>(['fandom', 'character', 'relationship', '
 const TYPE_NAMES = new Set<string>(TRACKED_TYPES)
 
 /**
- * The works search fields a search's name is taken from, first filled first: its
- * words, which are its root, then its title and creator fields, then its tag
- * fields. A search made of none of them (only a rating, say) has no name.
- */
-const SEARCH_NAME_FIELDS = ['query', 'title', 'creators', 'fandom_names', 'character_names', 'relationship_names', 'freeform_names', 'other_tag_names']
-  .map(field => `work_search[${field}]`)
-
-/**
  * A list's type and entity: as stored, where what's stored fits the URL, and
  * otherwise what the URL alone can say. Null for an entry whose URL isn't a
  * trackable archive page.
  *
  * The URL supplies a tag's name, an author's account name (whichever pseud the
- * listing was of), a collection's name, a series' id and a search's words. It
- * can't supply a tag's category, so a tag's list reads as `tag` until something
- * that has seen the page stores one; nor a series' title, so a series reads as
- * its id until the same.
+ * listing was of), a collection's name, a series' id and what a search is of
+ * ({@link searchSubject}), from the same field as its root. It can't supply a
+ * tag's category, so a tag's list reads as `tag` until something that has seen
+ * the page stores one; nor a series' title, so a series reads as its id until
+ * the same.
  *
  * What's stored is only trusted while it still describes the URL's root. Its
  * type has to be of the URL's family — any tag category on a tag's list,
@@ -887,14 +924,9 @@ function metaOf(parsed: ParsedTracked): TrackedMeta {
       return { type: 'tag', entity: tagName(parsed.path) }
     case 'series-works':
       return { type: 'series', entity: parsed.path.replace(/^\/series\//, '') }
-    case 'text-search': {
-      for (const field of SEARCH_NAME_FIELDS) {
-        const words = collapseSpaces(paramValue(parsed.criteria, field))
-        if (words)
-          return { type: 'search', entity: words }
-      }
-      return { type: 'search', entity: '' }
-    }
+    case 'text-search':
+      // Named for what it's a search of, so its title and its root agree.
+      return { type: 'search', entity: searchSubject(parsed)?.words ?? '' }
   }
 }
 
@@ -1183,9 +1215,9 @@ export interface TrackedChange {
 export interface TrackedUpdate {
   /**
    * Set when the update moves the list to another root — another tag, author or
-   * series, or a search for other words — with what it's a search of now and
-   * would be after, so the move can be named before it's made. Null when the
-   * root stays, or neither side has one.
+   * series, or a search for other words or of another fandom — with what it's a
+   * search of now and would be after, so the move can be named before it's made.
+   * Null when the root stays, or neither side has one.
    */
   root: { from: TrackedMeta, to: TrackedMeta } | null
   /** Every change, the query's before the view's. Empty when nothing a list is matched by changes. */
@@ -1217,7 +1249,8 @@ export interface DescribeUpdateOptions {
  * Neither the sort nor a relative date bound is a change: neither decides which
  * works a list holds. A listing's owner isn't a line either — moving to another
  * one is {@link TrackedUpdate.root} — but a pseud is, being a filter of its
- * author. A works search's words are both: they're its root, and a line.
+ * author. A works search's subject field — its words, or the field that stands
+ * in for them ({@link searchSubject}) — is both: it's the root, and a line.
  *
  * Nothing at all (no root, no lines) when either URL isn't trackable.
  */
@@ -1535,9 +1568,12 @@ const SUMMARY_SEPARATOR = ' · '
  *
  * A filter of the archive's is a criterion as the key holds it — each parameter
  * and value once, so neither the sort nor a relative date bound — less what the
- * list is a search *of*: a listing's owner, a works search's words. A pseud
- * counts, being a filter of its author ({@link trackedRoot}); so does a tag
- * named beside an author who owns the listing.
+ * list is a search *of*: a listing's owner, a works search's subject field (its
+ * words, or the field that stands in for them). So a search of a fandom for one
+ * character counts the character and not the fandom, just as an update that
+ * changes the fandom moves its root and one that changes the character doesn't.
+ * A pseud counts, being a filter of its author ({@link trackedRoot}); so does a
+ * tag named beside an author who owns the listing.
  *
  * When the whole line is longer than {@link DescribeFiltersOptions.maxLength},
  * {@link TrackedFilterSummary.text} stops at the last name that fits, and says
@@ -1596,8 +1632,9 @@ function moreText(count: number): string {
  */
 function queryFilterCount(parsed: ParsedTracked): number {
   const owner = parsed.owner
+  const subject = searchSubject(parsed)
   const isRoot = ([name, value]: [string, string]): boolean =>
-    (parsed.kind === 'text-search' && name === 'work_search[query]')
+    name === subject?.param
     // The one owner the key doesn't fold into its path.
     || (name === 'collection_id' && owner?.type === 'collection' && value.trim() === owner.name)
   return new Set(filterParams(parsed).filter(param => !isRoot(param)).map(serializeParam)).size

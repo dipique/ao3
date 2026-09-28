@@ -1072,8 +1072,9 @@ function liveFilter(page: TrackablePage): TrackedFilter | undefined {
   const listing = normalizeTrackedUrl(open.descriptor.listUrl)
   if (!listing || listing.kind !== page.normalized.kind)
     return undefined
-  // The key as well as the root, for a works search with no words: it has no
-  // root, and is still the very search its view was opened on.
+  // The key as well as the root, for a works search with nothing to be a search
+  // of — no words, title, creator or tag names, only such fields as a rating: it
+  // has no root, and is still the very search its view was opened on.
   if (listing.key !== page.normalized.key && !sameRoot(listing, page.normalized))
     return undefined
   return trackedFilterOf(open.filter)
