@@ -1,11 +1,14 @@
 import type { Day, ListProgress, MergedWork, Options, PlannedWindow, TrackedList } from '#common'
 import type { Work } from '#content_script/blurb.js'
+import type { FilterState } from '#content_script/searchView/engine.ts'
 
-import { dayOf, getArchiveLink, listBase, mergeItems, PAGE_SIZE, pageUrl, planWindow, sourceLabel, toShortId } from '#common'
+import { canonicalFilter, dayOf, getArchiveLink, listBase, mergeItems, PAGE_SIZE, pageUrl, planWindow, sourceLabel, toShortId } from '#common'
 import { archiveWaitRemaining, onArchiveWait, PATIENCE, WAIT_BUDGET, waitForArchive } from '#content_script/archiveFetch.js'
+import { matches } from '#content_script/searchView/engine.ts'
 import { applyHidden } from '#content_script/searchView/hidden.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
 import { TAG_BLURB_SELECTOR } from '#content_script/tagPage.ts'
+import { excludedTagNames, filterStateOf } from '#content_script/tracked/viewFilter.ts'
 
 /**
  * Reading a review window out of the archive: the loop that runs the tracked
@@ -142,9 +145,10 @@ export interface FetchedWindow {
   /**
    * The window's works in review order — oldest day first, and within a day the
    * order the first list to turn a work up listed it in. Already-reviewed works
-   * are not here. Works the rules hide are, stamped `hidden`/`filtered`, because
-   * whether a rule still hides one is the view's question at the moment it draws
-   * it, not this one's.
+   * are not here, and nor is a work that every list to turn it up has a view
+   * filter rejecting. Works the rules hide are, stamped `hidden`/`filtered`,
+   * because whether a rule still hides one is the view's question at the moment
+   * it draws it, not this one's.
    *
    * `markedOrder` is stamped with that order, which is what the view's "Review
    * order" sort shows.
@@ -163,7 +167,8 @@ export interface FetchedWindow {
    * today that this window doesn't — the toolbar's "about N more to review".
    * Free, because it's what each list's page 1 already said its query matched.
    * An upper bound: two lists that overlap count the same work twice, and works
-   * the reader's rules hide are in it.
+   * the reader's rules hide are in it, as are works a list's view filter rejects
+   * that the archive couldn't leave out for it.
    */
   backlog: number
   /**
@@ -200,6 +205,14 @@ export interface TrackedSession {
 interface ListState {
   entry: TrackedList
   progress: ListProgress
+  /**
+   * The list's view filter ({@link TrackedList.filter}) as the search view's own,
+   * built once per call — or null when it has none, and wants every work its
+   * query returns.
+   */
+  wants: FilterState | null
+  /** The tag names its view filter excludes, which every page it reads asks the archive to leave out. */
+  exclude: string[]
 }
 
 /** An empty session, for a caller that means to keep one across calls. */
@@ -209,10 +222,22 @@ export function createTrackedSession(): TrackedSession {
 
 /**
  * What a session's held progress is only true for: the window's start, and every
- * list's identity, address, tracking date and reading mode.
+ * list's identity, address, view filter, tracking date and reading mode.
+ *
+ * The filter because it decides both what is asked for (the tag names it
+ * excludes go to the archive) and which of the rows read the list wants. A list
+ * re-filtered between two calls would otherwise keep rows from a query it no
+ * longer asks, judged by a filter it no longer has.
  */
 function sessionSig(lists: readonly TrackedList[], start: Day): string {
-  return [start, ...lists.map(list => `${list.id}\u0000${list.kind}\u0000${list.url}\u0000${list.since}\u0000${list.scan ? 1 : 0}`)].join('\u0001')
+  return [start, ...lists.map(list => [
+    list.id,
+    list.kind,
+    list.url,
+    JSON.stringify(canonicalFilter(list.filter) ?? null),
+    list.since,
+    list.scan ? 1 : 0,
+  ].join('\u0000'))].join('\u0001')
 }
 
 /** `2:05`, or `9s` under a minute. */
@@ -248,6 +273,18 @@ function isScanned(entry: TrackedList): boolean {
  * — the same {@link applyHidden} pass the search view's host runs, so "hidden"
  * means one thing in both places. A work that doesn't count still holds its
  * place in its list's query, because the boundary arithmetic counts positions.
+ *
+ * A list with a **view filter** — what the reader had narrowed a custom search
+ * to when they tracked it — only wants the works that filter passes, tested with
+ * the search view's own `matches`, so the list tracks exactly what the view
+ * showed. A work it rejects isn't one of its works at all: it doesn't count for
+ * it, isn't named as coming from it, and is left out unless another list wants
+ * it (`ListItem.member`). It still holds its place in the list's rows, like
+ * every other row. The tag names the filter excludes are also sent with every
+ * page the list reads ({@link excludedTagNames}), so the archive can leave those
+ * works out before they cost a page; the filter is applied here all the same,
+ * which costs nothing and keeps the review right if the archive ever ignores a
+ * name.
  *
  * A list that can't be read is written off and the window is computed from the
  * rest; it comes back in {@link FetchedWindow.failed}, and the window isn't
@@ -396,16 +433,20 @@ export async function fetchWindow(opts: FetchWindowOptions): Promise<FetchedWind
   })
 }
 
-/** The held progress for one list, or a fresh one. */
+/** The held progress for one list, or a fresh one — either way with its filter read afresh for this call. */
 function stateFor(session: TrackedSession, entry: TrackedList, start: Day): ListState {
+  const wants = filterStateOf(entry.filter)
+  const exclude = excludedTagNames(entry.filter)
   const held = session.lists.get(entry.id)
   if (held) {
-    held.entry = entry
+    Object.assign(held, { entry, wants, exclude })
     return held
   }
   const scanned = isScanned(entry)
   const state: ListState = {
     entry,
+    wants,
+    exclude,
     progress: {
       id: entry.id,
       base: listBase(entry, start),
@@ -464,7 +505,7 @@ async function readPage(
   const docs: Document[] = []
 
   if (progress.scanned) {
-    const first = await get(urlFor(entry, progress.base, 1))
+    const first = await get(urlFor(state, progress.base, 1))
     if (signedOut(first)) {
       progress.failed = true
       return
@@ -475,10 +516,10 @@ async function readPage(
     // list they came from; `assignDay` drops the old ones either way.
     const from = pages <= SCAN_PAGE_CAP ? 2 : pages - SCAN_PAGE_CAP + 1
     for (let p = Math.max(2, from); p <= pages; p++)
-      docs.push(await get(urlFor(entry, progress.base, p)))
+      docs.push(await get(urlFor(state, progress.base, p)))
   }
   else {
-    const doc = await get(urlFor(entry, progress.base, page))
+    const doc = await get(urlFor(state, progress.base, page))
     if (page === 1 && signedOut(doc)) {
       progress.failed = true
       return
@@ -541,19 +582,23 @@ async function readPage(
  * are from the far side of it.
  */
 async function readBoundary(state: ListState, day: Day, get: (url: string) => Promise<Document>): Promise<void> {
-  const { entry, progress } = state
+  const { progress } = state
   // A page with no heading at all is read as "nothing from this day on", which
   // puts the boundary past everything read and asks for another page instead —
   // the conservative answer, and the true one when the day really is empty.
-  const from = detectResultCount(await get(urlFor(entry, day, 1))) ?? 0
+  const from = detectResultCount(await get(urlFor(state, day, 1))) ?? 0
   progress.bounds.set(day, Math.max(0, progress.total - from))
 }
 
-/** A list's page, absolute. Throws for an entry that can't be read, which `stateFor` has already failed. */
-function urlFor(entry: TrackedList, from: Day, page: number): string {
-  const url = pageUrl(entry, from, page)
+/**
+ * A list's page, asking the archive to leave out the tags its view filter
+ * excludes. Throws for an entry that can't be read, which `stateFor` has already
+ * failed.
+ */
+function urlFor(state: ListState, from: Day, page: number): string {
+  const url = pageUrl(state.entry, from, page, { exclude: state.exclude })
   if (!url)
-    throw new Error(`Not a page on the archive: ${entry.url}`)
+    throw new Error(`Not a page on the archive: ${state.entry.url}`)
   return url
 }
 
@@ -572,18 +617,26 @@ function signedOut(doc: Document): boolean {
 }
 
 /**
- * Say which rows count toward the target, now that their works' hide verdicts
- * have been taken. Rows are left in place either way: a work that doesn't count
+ * Say which rows each list wants, and which of those count toward the target,
+ * now that their works' hide verdicts have been taken. Rows are left in place
+ * either way: a work that doesn't count, or that the list's view filter rejects,
  * still sits where it sits in its list's query, and the boundary arithmetic
  * counts positions.
  */
 function markCounts(states: readonly ListState[], session: TrackedSession, reviewed: ReadonlySet<string>): void {
   for (const state of states) {
+    const { wants } = state
     for (const item of state.progress.items) {
       const work = session.works.get(item.sid)
+      // A row that isn't a work has nothing to test, and never counts anyway.
+      const member = !work || !wants || matches(work, wants)
+      if (member)
+        delete item.member
+      else
+        item.member = false
       // Both stamps: a work the rules hide is either dropped outright or handed
       // to the view's own filter, and either way the reader doesn't see it.
-      item.counts = !!work && !reviewed.has(work.workId) && !work.hidden && !work.filtered
+      item.counts = member && !!work && !reviewed.has(work.workId) && !work.hidden && !work.filtered
     }
   }
 }

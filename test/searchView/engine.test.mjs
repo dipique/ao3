@@ -13,11 +13,14 @@ import {
   computeView,
   emptyFilterState,
   FACET_KEYS,
+  facetValueKey,
   facetValues,
   layoutStablePages,
   matches,
   orderFacetKeys,
+  readerFilter,
   sortWorks,
+  VIEW_ONLY_KEYS,
 } from '../../src/content_script/searchView/engine.ts'
 
 /** Minimal work-like object — the engine only reads plain fields, never `el`. */
@@ -452,5 +455,76 @@ describe('a frozen page layout', () => {
     // "charlie" is Bleach only, so it is the one the new filter drops.
     assert.deepEqual([...dropped.keys()].map(w => w.workId), ['3'])
     assert.deepEqual([...dropped.values()], ['filtered'])
+  })
+})
+
+describe('the reader’s own filter', () => {
+  /** A view's state as the view holds it: the reader's picks with the rules' exclusions written in. */
+  function viewState() {
+    const state = emptyFilterState()
+    state.text = 'slow burn'
+    state.wordsMin = 1000
+    state.facets.characters.exclude.add('Draco Malfoy') // the reader's own
+    state.facets.freeforms.exclude.add('Angst') // a rule's
+    state.facets.freeforms.exclude.add('Mpreg') // a rule's, lifted and then put back by hand
+    state.facets.fandoms.include.add('Naruto') // a rule's exclusion the reader overruled by including it
+    state.facets.status.include.add('Ready')
+    state.facets.source.require.add('Alpha')
+    return state
+  }
+  const auto = new Set([
+    facetValueKey('freeforms', 'Angst'),
+    facetValueKey('freeforms', 'Mpreg'),
+    facetValueKey('fandoms', 'Naruto'),
+  ])
+  const released = new Set([facetValueKey('freeforms', 'Mpreg'), facetValueKey('fandoms', 'Naruto')])
+
+  test('the exclusions the reader’s rules imply are taken back out', () => {
+    const own = readerFilter(viewState(), auto, released)
+    assert.deepEqual([...own.facets.freeforms.exclude], ['Mpreg'], 'Angst is the rule’s, and goes')
+    assert.deepEqual([...own.facets.characters.exclude], ['Draco Malfoy'], 'an exclusion no rule implies is the reader’s')
+  })
+
+  test('but not one the reader lifted and then put back themselves', () => {
+    const own = readerFilter(viewState(), auto, released)
+    assert.ok(own.facets.freeforms.exclude.has('Mpreg'))
+    // Lifted and left lifted: it isn't excluded at all, and what the reader did
+    // with it instead is theirs.
+    assert.deepEqual([...own.facets.fandoms.include], ['Naruto'])
+    assert.equal(own.facets.fandoms.exclude.size, 0)
+  })
+
+  test('status and list source are left out', () => {
+    assert.deepEqual([...VIEW_ONLY_KEYS].sort(), ['source', 'status'])
+    const own = readerFilter(viewState(), auto, released)
+    for (const key of VIEW_ONLY_KEYS) {
+      const sel = own.facets[key]
+      assert.equal(sel.include.size + sel.exclude.size + sel.require.size, 0, key)
+    }
+  })
+
+  test('the text box and the word count come across as they are', () => {
+    const own = readerFilter(viewState(), auto, released)
+    assert.equal(own.text, 'slow burn')
+    assert.deepEqual([own.wordsMin, own.wordsMax], [1000, null])
+  })
+
+  test('the view’s own state is left untouched', () => {
+    const state = viewState()
+    readerFilter(state, auto, released)
+    assert.ok(state.facets.freeforms.exclude.has('Angst'))
+    assert.ok(state.facets.status.include.has('Ready'))
+    assert.ok(state.facets.source.require.has('Alpha'))
+  })
+
+  test('with no rules in play it is the view’s filter, less the two view-only groups', () => {
+    const state = viewState()
+    const own = readerFilter(state, new Set(), new Set())
+    for (const key of FACET_KEYS) {
+      if (VIEW_ONLY_KEYS.includes(key))
+        continue
+      for (const dir of ['include', 'exclude', 'require'])
+        assert.deepEqual([...own.facets[key][dir]], [...state.facets[key][dir]], `${key} ${dir}`)
+    }
   })
 })

@@ -221,6 +221,53 @@ export function cloneFilterState(f: FilterState): FilterState {
   return { text: f.text, facets, wordsMin: f.wordsMin, wordsMax: f.wordsMax, sort: f.sort, dir: f.dir }
 }
 
+/**
+ * Facet groups whose selections describe how the reader is looking at a view,
+ * never what the view is a search *for*, so they are no part of a filter kept
+ * beyond it (a tracked list's):
+ *
+ * - **Status** depends on the reader's marks and on what day it is, and a list's
+ *   review already leaves out the works the reader has dealt with;
+ * - **List source** only exists in the review, which is assembled *from* lists.
+ */
+export const VIEW_ONLY_KEYS: readonly FacetKey[] = ['status', 'source']
+
+/** How a view names one selected value in its bookkeeping: `key:value`. */
+export function facetValueKey(key: FacetKey, value: string): string {
+  return `${key}:${value}`
+}
+
+/**
+ * The part of a view's filter the reader dialled in themselves.
+ *
+ * A view writes the exclusions the reader's hide rules imply into the same
+ * selections the reader edits, so that the works they cover never reach a page.
+ * Those are taken back out here — `auto` names them, as {@link facetValueKey}s —
+ * because they belong to the rules rather than to this search: the rules apply
+ * wherever the works turn up anyway, and freezing today's into a saved filter
+ * would stop tomorrow's rule change from reaching it. The one exception is an
+ * exclusion the reader lifted and then put back by hand (`released` names every
+ * one they lifted): what is excluded now is their doing, not the rule's.
+ *
+ * The {@link VIEW_ONLY_KEYS} groups come back empty. Sort and direction are
+ * carried over untouched; they are layout, and nothing that reads a filter as a
+ * filter looks at them.
+ */
+export function readerFilter(f: FilterState, auto: ReadonlySet<string>, released: ReadonlySet<string>): FilterState {
+  const out = cloneFilterState(f)
+  for (const key of VIEW_ONLY_KEYS)
+    out.facets[key] = { include: new Set(), exclude: new Set(), require: new Set() }
+  for (const key of FACET_KEYS) {
+    const excluded = out.facets[key].exclude
+    for (const value of [...excluded]) {
+      const id = facetValueKey(key, value)
+      if (auto.has(id) && !released.has(id))
+        excluded.delete(value)
+    }
+  }
+  return out
+}
+
 // A work's searchable text never changes, so build it once and cache it. Keyed
 // by the work object, so it's dropped automatically when works are replaced.
 const haystackCache = new WeakMap<Work, string>()

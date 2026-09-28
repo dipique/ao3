@@ -10,7 +10,7 @@ import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
 import type { WriteSnapshotOptions } from './cache.ts'
-import type { FacetValueRef } from './engine.ts'
+import type { FacetValueRef, FilterState } from './engine.ts'
 import type { SearchViewPrefs } from './prefs.ts'
 import type { DeferredUpdate, SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
@@ -504,6 +504,31 @@ export function isSearchViewOpen(): boolean {
   return document.querySelector(`.${HOST}`) !== null
 }
 
+/**
+ * Whether the view for `cacheKey` is on its way to the screen: an open of it has
+ * started and not yet finished. A caller whose own open has just returned can
+ * tell from this whether a newer one — a global re-run's — has taken over.
+ */
+export function isOpening(cacheKey: string): boolean {
+  return busy && mounted?.cacheKey === cacheKey
+}
+
+/**
+ * The view on screen, as something a page can be tracked by: what it is a view
+ * of (its source's {@link SnapshotDescriptor}, whose `listUrl` is the listing
+ * it stands in for) and the filter the reader has set on it
+ * ({@link SearchView.getReaderFilter}). Null while no view is drawn.
+ *
+ * Whether the view is *this page's* — the listing the page is, rather than a
+ * list the page merely offers, like Marked for Later on a readings page — is the
+ * caller's to judge from the descriptor.
+ */
+export function activeSearchFilter(): { descriptor: SnapshotDescriptor, filter: FilterState } | null {
+  if (!active || !active.view.el.isConnected)
+    return null
+  return { descriptor: active.source.descriptor(), filter: active.view.getReaderFilter() }
+}
+
 /** Restore the native page: abort any scrape, remove the view, un-hide the list. */
 export function closeSearchView(): void {
   generation++
@@ -915,6 +940,12 @@ async function refresh(
 export interface OpenOptions {
   /** Restore a prior view state (a reopen after a global re-run). */
   initialState?: ViewState
+  /**
+   * Open with these selections rather than a blank filter — a tracked list's
+   * own, put back when the reader arrives to refine it
+   * ({@link SearchViewConfig.seed}). Ignored alongside {@link initialState}.
+   */
+  seed?: FilterState
   /** Skip the background re-scrape, when the cache is known to be fresh. */
   refresh?: boolean
   /**
@@ -990,6 +1021,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       initialState: reusingWorks || !opts.initialState
         ? opts.initialState
         : { ...opts.initialState, order: undefined },
+      seed: opts.seed,
       // How a work that has to keep a slot it no longer earns is drawn. Only a
       // view holding its page layout ever asks.
       collapseWork,

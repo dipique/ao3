@@ -411,3 +411,58 @@ describe('pageUrl', () => {
     assert.throws(() => pageUrl(entry, Number.NaN, 1), RangeError)
   })
 })
+
+describe('pageUrl — tag names the archive leaves out', () => {
+  const FROM = dayOf('1 Sep 2026')
+  const FIELD = 'work_search[excluded_tag_names]'
+
+  test('a works search asks the archive to exclude them, comma-separated', () => {
+    const url = pageUrl({ kind: 'text-search', url: '/works/search?work_search[query]=coffee' }, FROM, 1, { exclude: ['Draco Malfoy', 'Fluff', 'M/M'] })
+    assert.equal(paramsOf(url).get(FIELD), 'Draco Malfoy,Fluff,M/M')
+    assert.equal(paramsOf(url).get('work_search[query]'), 'coffee', 'the search itself is untouched')
+    assert.equal(paramsOf(url).get('work_search[date_from]'), '2026-09-01')
+  })
+
+  test('an uncommon tag read through a search by its name asks the same', () => {
+    const url = pageUrl({ kind: 'tag-works', url: '/tags/marriage%20problems' }, FROM, 2, { exclude: ['Angst'] })
+    const params = paramsOf(url)
+    assert.equal(params.get('work_search[other_tag_names]'), 'marriage problems')
+    assert.equal(params.get(FIELD), 'Angst')
+    assert.equal(params.get('page'), '2')
+  })
+
+  test('merged into an exclusion the search already makes, kept as the reader spelled it', () => {
+    const url = pageUrl({ kind: 'text-search', url: '/works/search?work_search[query]=coffee&work_search[excluded_tag_names]=Angst,+fluff' }, FROM, 1, { exclude: ['Fluff', 'Draco Malfoy'] })
+    const params = paramsOf(url)
+    assert.deepEqual(params.getAll(FIELD), ['Angst, fluff,Draco Malfoy'], 'Fluff is there already, in another case')
+  })
+
+  test('nothing to add leaves the query exactly as it was', () => {
+    const entry = { kind: 'text-search', url: '/works/search?work_search[query]=coffee&work_search[excluded_tag_names]=Angst' }
+    assert.equal(pageUrl(entry, FROM, 1, { exclude: ['angst'] }), pageUrl(entry, FROM, 1))
+    assert.equal(pageUrl(entry, FROM, 1, { exclude: [] }), pageUrl(entry, FROM, 1))
+  })
+
+  test('a name with a comma in it is never sent, since the archive would split it', () => {
+    // Tag names on the archive can't hold one, nor its full-width and
+    // ideographic cousins; one that somehow did would exclude two other tags.
+    const url = pageUrl({ kind: 'text-search', url: '/works/search?work_search[query]=coffee' }, FROM, 1, { exclude: ['Fluff', 'Odd, Name', 'Odd，Name', 'Odd、Name', '  '] })
+    assert.equal(paramsOf(url).get(FIELD), 'Fluff')
+    const none = pageUrl({ kind: 'text-search', url: '/works/search?work_search[query]=coffee' }, FROM, 1, { exclude: ['Odd, Name'] })
+    assert.equal(paramsOf(none).has(FIELD), false)
+  })
+
+  test('a listing, a series and a tag read off its own page take none', () => {
+    const exclude = ['Fluff']
+    assert.equal(paramsOf(pageUrl({ kind: 'works-filter', url: '/tags/Bees/works' }, FROM, 1, { exclude })).has(FIELD), false)
+    assert.equal(pageUrl({ kind: 'series-works', url: '/series/1' }, FROM, 1, { exclude }), '/series/1?page=1')
+    assert.equal(pageUrl({ kind: 'tag-works', url: '/tags/x', scan: true }, FROM, 1, { exclude }), '/tags/x?page=1')
+  })
+
+  test('the stored URL and the key never see them', () => {
+    const entry = { kind: 'text-search', url: '/works/search?work_search[query]=coffee' }
+    pageUrl(entry, FROM, 1, { exclude: ['Fluff'] })
+    assert.equal(entry.url, '/works/search?work_search[query]=coffee')
+    assert.equal(trackedKey(entry), normalizeTrackedUrl('/works/search?work_search[query]=coffee').key)
+  })
+})

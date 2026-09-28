@@ -1,10 +1,10 @@
-import type { SearchSource } from '#content_script/searchView/host.tsx'
-import type { ViewState } from '#content_script/searchView/view.tsx'
+import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
 import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
 import { detectFoundCount, detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
+import { restoreListFilter } from '#content_script/tracked/restore.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -81,13 +81,16 @@ export class SearchTextResults extends Unit {
     this.logger.debug('Search text results button added.')
 
     // If a global re-run (say a "Hide tag" from a context menu) closed an open
-    // view, put it back from cache where the reader left off.
+    // view, put it back from cache where the reader left off. Failing that, a
+    // tab that came here to refine a tracked list opens on the list's filter.
     const pending = takeReopen(snapshotKey())
     if (pending)
       void this.openView(list, { initialState: pending, refresh: false })
+    else
+      void restoreListFilter(this.options, snapshotKey(), opts => this.openView(list, opts))
   }
 
-  async openView(list: HTMLOListElement, opts: { initialState?: ViewState, refresh?: boolean } = {}): Promise<void> {
+  async openView(list: HTMLOListElement, opts: OpenOptions = {}): Promise<void> {
     await openSearchView(this.source(list), this.options, opts)
   }
 

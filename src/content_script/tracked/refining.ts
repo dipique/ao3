@@ -1,6 +1,6 @@
 import type { RefiningMark, TrackedList } from '#common'
 
-import { getArchiveLink, parseRefiningMark, refineLink, REFINING_STORAGE_KEY, refiningId } from '#common'
+import { getArchiveLink, normalizeTrackedUrl, parseRefiningMark, refineLink, REFINING_STORAGE_KEY, refiningId } from '#common'
 
 /**
  * Which list this tab is refining — the tab-side half of refining a list.
@@ -63,6 +63,35 @@ export function refiningList<T extends Pick<TrackedList, 'id'>>(lists: readonly 
   if (!list)
     endRefining()
   return list ?? null
+}
+
+/**
+ * The list whose view filter this page has to put back on screen, or null: the
+ * tab is refining it, arrived by its link and hasn't put the filter back yet
+ * ({@link RefiningMark.restore}), and this page is the list's own — the same
+ * query, whatever its page number or the spelling of its address.
+ */
+export function pendingRestore<T extends Pick<TrackedList, 'id' | 'kind' | 'url'>>(lists: readonly T[], href: string = location.href): T | null {
+  const mark = readRefiningMark()
+  if (!mark?.restore)
+    return null
+  const list = lists.find(one => one.id === mark.id)
+  if (!list)
+    return null
+  const page = normalizeTrackedUrl(href)
+  const own = normalizeTrackedUrl(list.url)
+  return page && own && page.kind === list.kind && page.key === own.key ? list : null
+}
+
+/**
+ * The list's view filter has been put back — or the chance to has passed — so
+ * no later run of the page puts it back over what the reader has done since.
+ * The tab goes on refining the list.
+ */
+export function restoreDone(id: string): void {
+  const mark = readRefiningMark()
+  if (mark?.id === id && mark.restore)
+    startRefining(id, false)
 }
 
 /**

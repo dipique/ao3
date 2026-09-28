@@ -1,6 +1,6 @@
-import type { NormalizedTrackedUrl, TagType, TrackedList, TrackedMeta, TrackedType } from '#common'
+import type { NormalizedTrackedUrl, TagType, TrackedFilter, TrackedList, TrackedMeta, TrackedType } from '#common'
 
-import { getArchiveLink, newTrackedListId, normalizeTrackedUrl, PAGE_SIZE, tagSearchUrl, tagTypeFromProfile, trackedMeta, trackedRoot, utcToday } from '#common'
+import { canonicalFilter, getArchiveLink, newTrackedListId, normalizeTrackedUrl, PAGE_SIZE, tagSearchUrl, tagTypeFromProfile, trackedMeta, trackedRoot, utcToday } from '#common'
 import { getBlurb } from '#content_script/blurb.ts'
 import { checkboxTagName } from '#content_script/filterSidebar.tsx'
 import { detectFoundCount, detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
@@ -210,9 +210,11 @@ export async function needsScan(page: TrackablePage, signal?: AbortSignal): Prom
 
 /**
  * A new entry for this page, tracked from today, with an id no sibling has, the
- * title given, and what the page says it is.
+ * title given, what the page says it is, and the filter its custom search view
+ * was set to, if any.
  */
-export function newEntry(page: TrackablePage, title: string, existing: readonly TrackedList[], scan: boolean, meta: TrackedMeta = page.meta): TrackedList {
+export function newEntry(page: TrackablePage, title: string, existing: readonly TrackedList[], scan: boolean, meta: TrackedMeta = page.meta, filter?: TrackedFilter): TrackedList {
+  const view = canonicalFilter(filter)
   return {
     id: newTrackedListId(existing),
     kind: page.normalized.kind,
@@ -220,6 +222,7 @@ export function newEntry(page: TrackablePage, title: string, existing: readonly 
     alias: title.trim(),
     type: meta.type,
     ...(meta.entity ? { entity: meta.entity } : {}),
+    ...(view ? { filter: view } : {}),
     tracked: true,
     since: utcToday(),
     ...(scan ? { scan: true as const } : {}),

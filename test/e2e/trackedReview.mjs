@@ -110,8 +110,12 @@ export function trackedOption(fixtures, over = {}) {
   }
 }
 
-const tagLi = name => `<li class="freeforms"><a class="tag" href="/tags/${encodeURIComponent(name)}">${name}</a></li>`
+const tagLi = (name, kind = 'freeforms') => `<li class="${kind}"><a class="tag" href="/tags/${encodeURIComponent(name)}">${name}</a></li>`
 
+/**
+ * A work's blurb as the archive draws it. `work.characters` go in their own
+ * `li`s ahead of `work.tags`, which are drawn as freeforms.
+ */
 export function blurbHtml(work) {
   return `<li id="work_${work.id}" class="work blurb group" role="article">`
     + `<div class="header module"><h4 class="heading">`
@@ -119,7 +123,7 @@ export function blurbHtml(work) {
     + `<a rel="author" href="/users/${work.author || 'someone'}/pseuds/${work.author || 'someone'}">${work.author || 'someone'}</a>`
     + `</h4><h5 class="fandoms heading">Fandoms: <a class="tag" href="/tags/Fandom/works">Fandom</a></h5>`
     + `<p class="datetime">${work.dateText}</p></div>`
-    + `<ul class="tags commas">${(work.tags || []).map(tagLi).join('')}</ul>`
+    + `<ul class="tags commas">${(work.characters || []).map(name => tagLi(name, 'characters')).join('')}${(work.tags || []).map(name => tagLi(name)).join('')}</ul>`
     + `<dl class="stats"><dt class="words">Words:</dt><dd class="words">1,000</dd>`
     + `<dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd></dl></li>`
 }

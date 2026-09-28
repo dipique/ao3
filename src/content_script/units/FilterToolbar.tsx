@@ -13,13 +13,15 @@ import MdiPlaylistPlus from '~icons/mdi/playlist-plus.jsx'
 import type { TrackedFilter, TrackedList, TrackedMeta, TrackedUndoPlan, TrackedUpdatePlan } from '#common'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, api, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, options, parseUser, planUndo, planUpdate, sameRoot, sourceLabel, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, api, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planUndo, planUpdate, sameRoot, sourceLabel, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
+import { activeSearchFilter } from '#content_script/searchView/host.tsx'
 import { findWorkText } from '#content_script/textReplaceScope.ts'
 import { metaUnsettled, needsScan, newEntry, resolveMeta, sidebarNameId, trackablePage } from '#content_script/tracked/createList.ts'
 import { endRefining, openRefining, refiningList, startRefining, takeRefiningLink } from '#content_script/tracked/refining.ts'
+import { trackedFilterOf } from '#content_script/tracked/viewFilter.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -78,20 +80,36 @@ function countHidden(): number {
  * ran can bring the count up to date. Null when the page has no peek pill.
  */
 let syncPeek: (() => void) | null = null
-let peekPending = false
+/**
+ * The mounted toolbar's tracking pill, so a custom search view opened, filtered
+ * or closed after this unit ran can bring it up to date — see
+ * {@link FilterToolbar.trackSync}. Null when the page has no tracking pill.
+ */
+let syncTrack: (() => void) | null = null
+let refreshPending = false
 
 /**
- * Bring the peek pill in line with what's actually hidden now — adding or
- * dropping it as that count crosses zero. Called by the search view after every
- * render, and when it closes; coalesced to one pass per frame.
+ * Each pill's redraw of what the live filter decides in its box, where there is
+ * any — see {@link FilterToolbar.trackSync}. Keyed by the pill's group, so a
+ * pill that's replaced takes its entry with it.
+ */
+const trackRedraws = new WeakMap<HTMLElement, () => void>()
+
+/**
+ * Bring the pills that describe what's on screen in line with it: the peek pill
+ * with what's actually hidden now — adding or dropping it as that count crosses
+ * zero — and the tracking pill with the filter the page's search view is set to,
+ * which is part of what the page *is* to a tracked list. Called by the search
+ * view after every render, and when it closes; coalesced to one pass per frame.
  */
 export function refreshFilterToolbar(): void {
-  if (!syncPeek || peekPending)
+  if ((!syncPeek && !syncTrack) || refreshPending)
     return
-  peekPending = true
+  refreshPending = true
   requestAnimationFrame(() => {
-    peekPending = false
+    refreshPending = false
     syncPeek?.()
+    syncTrack?.()
   })
 }
 
@@ -208,6 +226,7 @@ export class FilterToolbar extends Unit {
     detachOutsideHandler()
     detachReserveObserver()
     syncPeek = null
+    syncTrack = null
     document.body.classList.remove(PEEK_CLASS)
   }
 
@@ -240,8 +259,10 @@ export class FilterToolbar extends Unit {
   buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean, showReplace: boolean, trackable: TrackablePage | null): HTMLElement {
     const panel = <div class={PANEL_CLASS} role="group" />
     panel.append(this.buildOptionsButton())
-    if (trackable)
+    if (trackable) {
       panel.append(this.buildTrackButton(trackable))
+      syncTrack = this.trackSync(trackable, panel)
+    }
     if (showReplace)
       panel.append(this.buildReplaceToolsButton())
     if (showReader)
@@ -509,26 +530,81 @@ export class FilterToolbar extends Unit {
    *   of them to this page's search, or to track the page as a new list.
    * 4. **Nothing**: "Track this search".
    *
+   * What the page *is* includes the filter set on its custom search view, when
+   * one is open ({@link liveFilter}): a tag's works narrowed in the view are a
+   * different list from the tag's works as a whole.
+   *
    * Every change is a write to the `trackedLists` option, and stops there. The
    * write re-runs every unit, which rebuilds this toolbar from the saved value —
    * so what the pill says next came out of storage, and a page can never disagree
    * with the options about what it is. (The reader-mode pill works the same way.)
    * Ending the refining mark is the one change that isn't a write, so **Stop
-   * refining** rebuilds the pill itself.
+   * refining** rebuilds the pill itself; and the view's filter changes without
+   * one, which {@link trackSync} follows.
    */
   buildTrackButton(page: TrackablePage): HTMLElement {
     const lists = this.options.trackedLists.lists
-    const pageKey = filteredKey(page.normalized.key, liveFilter())
-    const refining = refiningList(lists)
-    if (refining && refining.kind === page.normalized.kind)
-      return this.buildRefiningPill(page, refining, lists, pageKey)
-    const entry = lists.find(one => trackedKey(one) === pageKey)
-    if (entry)
-      return this.buildTrackedPill(entry, lists)
-    const candidates = lists.filter(one => sameRoot(one, page.normalized))
-    return candidates.length
-      ? this.buildSameRootPill(page, candidates, lists)
-      : this.buildNewListPill(page, lists)
+    const row = trackRow(page, lists)
+    let group: HTMLElement
+    switch (row.kind) {
+      case 'refining':
+        group = this.buildRefiningPill(page, row.list, lists, row.changed)
+        break
+      case 'exact':
+        group = this.buildTrackedPill(row.entry, lists)
+        break
+      case 'same-root':
+        group = this.buildSameRootPill(page, row.candidates, lists)
+        break
+      case 'new':
+        group = this.buildNewListPill(page, lists)
+        break
+    }
+    group.dataset.ao3eRow = rowSignature(row)
+    return group
+  }
+
+  /**
+   * What keeps the tracking pill in step with the page's custom search view, run
+   * on every {@link refreshFilterToolbar}. The view's filter is part of what the
+   * page is to a tracked list ({@link liveFilter}), so opening the view, setting
+   * or clearing a facet, or closing the view again can make the page some other
+   * list's, or no list's, or change what an update would do.
+   *
+   * Nothing happens until the filter on screen has actually changed, so a
+   * render that only turned a page costs one comparison. After that:
+   *
+   * - with the pill's box shut, the pill is simply built again;
+   * - with it open the reader may be part-way through it — a title typed, the
+   *   diff being read — so it isn't pulled out from under them. When the pill
+   *   would still say the same thing, only what the filter decides is redrawn in
+   *   place: the diff, and whether another list already searches this. When it
+   *   wouldn't, the new pill takes its place already open, with any title the
+   *   reader typed carried across.
+   *
+   * Whatever is on screen when **Update** or **Track** is clicked is what gets
+   * written: both read the filter again at that moment.
+   */
+  private trackSync(page: TrackablePage, panel: HTMLElement): () => void {
+    let shown = filterSignature(liveFilter(page))
+    return () => {
+      const now = filterSignature(liveFilter(page))
+      if (now === shown)
+        return
+      shown = now
+      const group = panel.querySelector<HTMLElement>(`:scope > .${TRACK_CLASS}`)
+      if (!group)
+        return
+      const open = group.querySelector(':scope > button')?.getAttribute('aria-expanded') === 'true'
+      if (open && group.dataset.ao3eRow === rowSignature(trackRow(page, this.options.trackedLists.lists))) {
+        trackRedraws.get(group)?.()
+        return
+      }
+      const next = this.buildTrackButton(page)
+      if (open)
+        carryOver(group, next)
+      group.replaceWith(next)
+    }
   }
 
   /**
@@ -641,13 +717,13 @@ export class FilterToolbar extends Unit {
 
   /**
    * The tab is refining `list`, and this page is of its kind. Until the search
-   * differs from the list's, there's nothing to do but change it; once it does,
-   * the box says what an update would change, and offers the update, a new list
-   * instead, and a way out of refining.
+   * differs from the list's (`changed`), there's nothing to do but change it;
+   * once it does, the box says what an update would change, and offers the
+   * update, a new list instead, and a way out of refining.
    */
-  private buildRefiningPill(page: TrackablePage, list: TrackedList, lists: readonly TrackedList[], pageKey: string): HTMLElement {
+  private buildRefiningPill(page: TrackablePage, list: TrackedList, lists: readonly TrackedList[], changed: boolean): HTMLElement {
     const label = sourceLabel(list, lists)
-    if (trackedKey(list) === pageKey) {
+    if (!changed) {
       const { group, button } = trackPill(<MdiPlaylistEdit />, `Refining “${label}”`, `This tab is refining “${label}”. Change the search, and the list can be updated to match it.`)
       const { box } = trackBox(group, button)
       box.append(
@@ -662,6 +738,7 @@ export class FilterToolbar extends Unit {
     const summary: HTMLElement = <div class={TRACK_SUMMARY_CLASS} />
     const drawSummary = (): void => summary.replaceChildren(...this.updateSummary(list, page, meta, lists, label))
     drawSummary()
+    trackRedraws.set(group, drawSummary)
 
     const offered = (): string => titleAfterUpdate(list, page, meta, lists)
     const title = titleField(offered())
@@ -753,6 +830,7 @@ export class FilterToolbar extends Unit {
       refine.title = `Open “${label}”'s own search in this tab, to change it from there.`
     }
     draw()
+    trackRedraws.set(group, draw)
 
     chooser?.addEventListener('change', () => {
       chosen = sorted.find(one => one.id === chooser.value) ?? chosen
@@ -798,7 +876,7 @@ export class FilterToolbar extends Unit {
    * and a warning when another list already searches exactly this.
    */
   private updateSummary(list: TrackedList, page: TrackablePage, meta: TrackedMeta, lists: readonly TrackedList[], label: string): Node[] {
-    const filter = liveFilter()
+    const filter = liveFilter(page)
     const update = describeUpdate(list, { url: page.normalized.url, filter, type: meta.type, entity: meta.entity }, { nameId: sidebarNameId })
     const nodes: Node[] = []
     if (update.root)
@@ -845,7 +923,17 @@ export class FilterToolbar extends Unit {
         if (page.normalized.kind === 'tag-works')
           button.textContent = 'Checking…'
         const scan = await needsScan(page)
-        const entry = newEntry(page, title, lists, scan, meta)
+        // Read now rather than when the box was drawn: what's on screen as the
+        // list is made is what it's made of.
+        const filter = liveFilter(page)
+        const twin = lists.find(one => trackedKey(one) === filteredKey(page.normalized.key, filter))
+        if (twin) {
+          toast(`This search is already tracked as ${describeList(twin)}.`, { type: 'error' })
+          button.disabled = false
+          button.textContent = text
+          return
+        }
+        const entry = newEntry(page, title, lists, scan, meta, filter)
         if (endsRefining)
           endRefining()
         await this.writeLists([...lists, entry])
@@ -889,7 +977,7 @@ export class FilterToolbar extends Unit {
         button.textContent = 'Checking…'
         scan = await needsScan(page)
       }
-      const plan = planUpdate(lists, list.id, { url: page.normalized.url, filter: liveFilter(), alias, meta, scan })
+      const plan = planUpdate(lists, list.id, { url: page.normalized.url, filter: liveFilter(page), alias, meta, scan })
       if (plan.ok) {
         if (opts.refining)
           endRefining()
@@ -968,11 +1056,88 @@ const UNDO_TIMEOUT_MS = 20_000
 
 /**
  * The view filter on screen, which a page is compared by and a list written
- * with, alongside its URL. None: what a custom search view is filtered to isn't
- * read back, so a page is its query alone, and an update stores no view filter.
+ * with, alongside its URL: the reader's own filter on the custom search view
+ * open over this page ({@link activeSearchFilter}), as a list would store it —
+ * or none, when no view is open or the view narrows nothing.
+ *
+ * Only a view *of this page's listing* counts: one whose source is the same
+ * query, or the same root ({@link sameRoot}), of the same kind. A view a page
+ * merely offers — Marked for Later on a readings page — is filtered, but not
+ * a filter of anything the page could be tracked as.
  */
-function liveFilter(): TrackedFilter | undefined {
-  return undefined
+function liveFilter(page: TrackablePage): TrackedFilter | undefined {
+  const open = activeSearchFilter()
+  if (!open)
+    return undefined
+  const listing = normalizeTrackedUrl(open.descriptor.listUrl)
+  if (!listing || listing.kind !== page.normalized.kind)
+    return undefined
+  // The key as well as the root, for a works search with no words: it has no
+  // root, and is still the very search its view was opened on.
+  if (listing.key !== page.normalized.key && !sameRoot(listing, page.normalized))
+    return undefined
+  return trackedFilterOf(open.filter)
+}
+
+/** A live filter in a form two can be compared in. Canonical, so its JSON is. */
+function filterSignature(filter: TrackedFilter | undefined): string {
+  return JSON.stringify(filter ?? null)
+}
+
+/** Which of {@link FilterToolbar.buildTrackButton}'s rows the page is in, and for which lists. */
+type TrackRow
+  = | { kind: 'refining', list: TrackedList, changed: boolean }
+    | { kind: 'exact', entry: TrackedList }
+    | { kind: 'same-root', candidates: TrackedList[] }
+    | { kind: 'new' }
+
+/** The first row that applies, in {@link FilterToolbar.buildTrackButton}'s order. */
+function trackRow(page: TrackablePage, lists: readonly TrackedList[]): TrackRow {
+  const pageKey = filteredKey(page.normalized.key, liveFilter(page))
+  const refining = refiningList(lists)
+  if (refining && refining.kind === page.normalized.kind)
+    return { kind: 'refining', list: refining, changed: trackedKey(refining) !== pageKey }
+  const entry = lists.find(one => trackedKey(one) === pageKey)
+  if (entry)
+    return { kind: 'exact', entry }
+  const candidates = lists.filter(one => sameRoot(one, page.normalized))
+  return candidates.length ? { kind: 'same-root', candidates } : { kind: 'new' }
+}
+
+/** A row as a string, so a pill can say which one it was built for. Two equal ones draw the same pill. */
+function rowSignature(row: TrackRow): string {
+  switch (row.kind) {
+    case 'refining':
+      return `refining:${row.list.id}:${row.changed ? 'changed' : 'same'}`
+    case 'exact':
+      return `exact:${row.entry.id}`
+    case 'same-root':
+      return `same-root:${row.candidates.map(one => one.id).join(',')}`
+    case 'new':
+      return 'new'
+  }
+}
+
+/** Set on a title box once the reader has typed in it: what they typed is theirs, and outlives a rebuilt pill. */
+const TYPED_KEY = 'ao3eTyped'
+
+/**
+ * Open `next`'s box, as `old`'s was, before `next` takes its place — keeping any
+ * title the reader typed into `old`'s box, when `next` has a title box too.
+ *
+ * Only a pill with a box is opened. One without is a single action — resuming
+ * a paused list — which is the reader's to click, not this.
+ */
+function carryOver(old: HTMLElement, next: HTMLElement): void {
+  if (!next.querySelector(`:scope > .${TRACK_BOX_CLASS}`))
+    return
+  const typed = old.querySelector<HTMLInputElement>(`input.${TRACK_INPUT_CLASS}`)
+  const input = next.querySelector<HTMLInputElement>(`input.${TRACK_INPUT_CLASS}`)
+  if (typed && input && TYPED_KEY in typed.dataset) {
+    input.value = typed.value
+    input.dataset[TYPED_KEY] = ''
+  }
+  next.querySelector<HTMLButtonElement>(':scope > button')?.click()
 }
 
 /** The pill itself, in a group the box can grow under. */
@@ -1034,6 +1199,9 @@ function titleField(initial: string): { input: HTMLInputElement, offer: (title: 
   const input = (
     <input type="text" class={TRACK_INPUT_CLASS} value={initial} aria-label="Title for this list" placeholder="Title for this list" />
   ) as HTMLElement as HTMLInputElement
+  input.addEventListener('input', () => {
+    input.dataset[TYPED_KEY] = ''
+  })
   let offered = initial
   return {
     input,

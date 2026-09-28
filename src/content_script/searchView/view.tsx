@@ -25,9 +25,11 @@ import {
   emptyFilterState,
   FACET_KEYS,
   FACET_LABELS,
+  facetValueKey,
   facetValues,
   layoutStablePages,
   orderFacetKeys,
+  readerFilter,
   SORT_LABELS,
   sortWorks,
 } from './engine.ts'
@@ -128,6 +130,13 @@ export interface SearchView {
   /** Current filter/sort/page, so a caller can rebuild the view where it left off. */
   getState: () => ViewState
   /**
+   * The filter the reader has dialled in themselves (`readerFilter` in the
+   * engine): the selections, the text and the word count, less the exclusions
+   * their hide rules imply unless they put one back by hand, and with the Status
+   * and List source groups empty. What a tracked list made from this view keeps.
+   */
+  getReaderFilter: () => FilterState
+  /**
    * The works the view holds right now — what it was given, less any a
    * {@link BlurbAction} has since removed. Their blurbs are still decorated, and
    * still the view's own nodes.
@@ -191,6 +200,20 @@ export interface SearchViewConfig {
   onRendered?: () => void
   /** Restore a prior {@link SearchView.getState} snapshot (filters, sort, page). */
   initialState?: ViewState
+  /**
+   * Selections to open with on a fresh open: a tracked list's own filter, put
+   * back on screen when the reader comes to refine the list. Its facet
+   * selections, text and word count go over what the view would otherwise open
+   * with; the sort, the Status default and the layout prefs still come from
+   * {@link prefs}. Ignored when there is an {@link initialState}, which is the
+   * view as it last was and already holds whatever this once put there.
+   *
+   * Every value it selects counts as the reader's own choice, as it was when
+   * the filter was saved: a rule-implied exclusion ({@link autoExcludes}) of the
+   * same value is not imposed over it, and one it excludes itself stays the
+   * reader's, and so stays in {@link SearchView.getReaderFilter}.
+   */
+  seed?: FilterState
   /**
    * Local (never-synced) layout prefs restored on open: collapsed facet groups,
    * custom facet order, and last sort. Seeded from {@link onPrefsChange}'s prior
@@ -356,6 +379,26 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       if (!present.has(value))
         state.facets.status.include.delete(value)
     }
+  }
+  // A saved filter to open with, over the defaults just seeded. Its values are
+  // the reader's own, so each is marked as lifted from the rules: no rule-implied
+  // exclusion is pressed over one, and one it excludes itself stays theirs.
+  if (!config.initialState && config.seed) {
+    const seed = config.seed
+    const dirs = ['require', 'include', 'exclude'] as const
+    for (const key of FACET_KEYS) {
+      for (const dir of dirs) {
+        for (const value of seed.facets[key][dir]) {
+          for (const other of dirs)
+            state.facets[key][other].delete(value)
+          state.facets[key][dir].add(value)
+          released.add(facetValueKey(key, value))
+        }
+      }
+    }
+    state.text = seed.text
+    state.wordsMin = seed.wordsMin
+    state.wordsMax = seed.wordsMax
   }
   // The user's custom facet-group order (persisted locally), applied on every
   // (re)build and mutated by the per-group reorder arrows.
@@ -1588,5 +1631,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   layoutEl = el.querySelector<HTMLElement>(`.${cx('layout')}`)
   applySidebarWidth()
 
-  return { el, update, setUpdating, setRefreshedAt, getState, getWorks: () => works }
+  return {
+    el,
+    update,
+    setUpdating,
+    setRefreshedAt,
+    getState,
+    getReaderFilter: () => readerFilter(state, autoKeys, released),
+    getWorks: () => works,
+  }
 }

@@ -89,7 +89,7 @@ function series(id, rows, over = {}) {
  * tag's name — which the archive answers under that name, so that is the key —
  * and with it, off the tag's own page, which is keyed by its path like any other.
  */
-function uncommonTag(name, rows, { scan = false } = {}) {
+function uncommonTag(name, rows, { scan = false, filter } = {}) {
   return {
     entry: {
       id: `tag-${name}`,
@@ -99,6 +99,7 @@ function uncommonTag(name, rows, { scan = false } = {}) {
       tracked: true,
       since: 0,
       ...(scan ? { scan: true } : {}),
+      ...(filter ? { filter } : {}),
     },
     key: scan ? `/tags/${encodeURIComponent(name)}` : name,
     layout: scan ? 'tag' : 'search',
@@ -115,6 +116,7 @@ function spec(fixtures) {
       works: fixture.works,
       fail: fixture.fail,
       signedOut: fixture.signedOut,
+      ignoresExclusions: fixture.ignoresExclusions,
     }])),
   }
 }
@@ -130,6 +132,10 @@ function withOptions(over = {}) {
  * the answer as the kind of page that query would really be served from —
  * heading count and all, since the heading count is what the fetcher reads its
  * boundaries off.
+ *
+ * Like the archive, it leaves out works carrying a tag named in
+ * `work_search[excluded_tag_names]` (comma-separated, any case) — unless the
+ * fixture says `ignoresExclusions`, which stands for an archive that doesn't.
  *
  * It also puts a movable clock under `Date.now`. The fetch layer paces itself
  * every twenty requests and resets that count after a minute's quiet, so winding
@@ -161,7 +167,7 @@ function installArchive() {
 
   const dayOfIso = iso => iso ? Math.floor(Date.parse(`${iso}T00:00:00Z`) / DAY) : null
 
-  const tagLi = name => `<li class="freeforms"><a class="tag" href="/tags/${encodeURIComponent(name)}">${name}</a></li>`
+  const tagLi = (name, kind = 'freeforms') => `<li class="${kind}"><a class="tag" href="/tags/${encodeURIComponent(name)}">${name}</a></li>`
 
   const blurb = w => `<li id="work_${w.id}" class="work blurb group" role="article">`
     + `<div class="header module"><h4 class="heading">`
@@ -169,7 +175,7 @@ function installArchive() {
     + `<a rel="author" href="/users/${w.author || 'someone'}/pseuds/${w.author || 'someone'}">${w.author || 'someone'}</a>`
     + `</h4><h5 class="fandoms heading">Fandoms: <a class="tag" href="/tags/Fandom/works">Fandom</a></h5>`
     + `<p class="datetime">${w.dateText}</p></div>`
-    + `<ul class="tags commas">${(w.tags || []).map(tagLi).join('')}</ul>`
+    + `<ul class="tags commas">${(w.chars || []).map(name => tagLi(name, 'characters')).join('')}${(w.tags || []).map(name => tagLi(name)).join('')}</ul>`
     + `<dl class="stats"><dt class="words">Words:</dt><dd class="words">1,000</dd>`
     + `<dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd></dl></li>`
 
@@ -191,7 +197,11 @@ function installArchive() {
     const scanned = list.layout === 'tag' || list.layout === 'series'
     const page = Number(u.searchParams.get('page') || '1')
     const from = dayOfIso(u.searchParams.get('work_search[date_from]'))
-    const query = scanned || from === null ? list.works.slice() : list.works.filter(w => w.filed >= from)
+    const excluded = list.ignoresExclusions
+      ? []
+      : (u.searchParams.get('work_search[excluded_tag_names]') || '').split(',').map(name => name.trim().toLowerCase()).filter(Boolean)
+    const wanted = w => ![...(w.tags || []), ...(w.chars || [])].some(name => excluded.includes(name.toLowerCase()))
+    const query = (scanned || from === null ? list.works.slice() : list.works.filter(w => w.filed >= from)).filter(wanted)
     if (!scanned)
       query.sort((a, b) => a.filed - b.filed || Number(a.id) - Number(b.id))
     const total = query.length
@@ -556,5 +566,125 @@ describe('tracked/fetchWindow', { skip }, () => {
     const result = await gather([listing('L1', [[start, 5]], { entry: { alias: 'Hurt/comfort' } })], { start })
 
     assert.ok(result.progress.some(line => line.includes('Hurt/comfort')), 'names the list, not a page number')
+  })
+
+  // ---------------------------------------------------------------------------
+  // A list's view filter
+  // ---------------------------------------------------------------------------
+
+  /** The page numbers asked for, in order, and the boundaries (page-1 requests at a later day). */
+  const reads = (result, start) => result.urls.map((url) => {
+    const params = new URLSearchParams(url.split('?')[1])
+    const from = params.get('work_search[date_from]')
+    return from === isoDay(listBase({ since: 0 }, start)) ? Number(params.get('page')) : `boundary ${from}`
+  })
+
+  /** Works carrying every tag in `tags`, as a fixture row's extra. */
+  const tagged = (...tags) => ({ tags })
+
+  test('works a list’s view filter rejects don’t count, keep their place, and aren’t handed over', async () => {
+    const start = TODAY - 8
+    // Required, so it stays on this side: nothing is asked of the archive, and
+    // every row the query returns is read.
+    const filter = { facets: { freeforms: { req: ['Wanted'] } } }
+    const rows = [[start, 5, 0, tagged('Other')], [start, 16, 0, tagged('Wanted')], [start + 1, 25, 0, tagged('Wanted')], [start + 2, 20, 0, tagged('Wanted')]]
+    const fixture = search('coffee', rows, { entry: { filter } })
+    const rejected = fixture.works.slice(0, 5).map(work => work.id)
+    const result = await gather([fixture], { start })
+
+    // Sixteen count on the first day and twenty-five on the next: the target of
+    // forty is passed on the second, so the window is the first alone.
+    assert.equal(result.window.end, start)
+    assert.equal(result.window.count, 16, 'the five it rejects are not part of the target')
+    assert.deepEqual(result.days, [[start, 16]])
+    assert.equal(result.window.reviewable, true, 'the window settles')
+    assert.equal(result.works.length, 16)
+    for (const id of rejected)
+      assert.ok(!ids(result).includes(id), `work ${id} is not the list's, so it is not shown`)
+    assert.ok(result.sources.every(([, lists]) => lists.length === 1))
+
+    // The rows it rejects still hold their places. Were they dropped, the next
+    // page would be counted from too few rows and read twice, and the boundary
+    // placed against the wrong position.
+    assert.deepEqual(reads(result, start), [1, 2, 3, `boundary ${isoDay(start + 2)}`])
+    assert.equal(result.requests, 4, 'the same four requests the list would cost unfiltered')
+  })
+
+  test('a work two lists turn up, one of whose filters rejects it, shows once with the other as its source', async () => {
+    const start = TODAY - 2
+    const shared = works([[start, 1, 0, tagged('Other')]])
+    const one = listing('L1', [...shared, ...works([[start, 2]])])
+    const two = search('L2', [...shared, ...works([[start, 2, 0, tagged('Wanted')], [start, 1, 0, tagged('Other')]])], {
+      entry: { filter: { facets: { freeforms: { req: ['Wanted'] } } } },
+    })
+    const onlyTwo = two.works.at(-1).id
+    const result = await gather([one, two], { start })
+
+    assert.ok(ids(result).includes(shared[0].id), 'L1 wants it, so it is shown')
+    const withShared = result.sources.filter(([, lists]) => lists.includes('L1') && !lists.includes('L2'))
+    assert.equal(withShared.length, 3, 'every L1 work names L1 alone — the shared one included')
+    assert.ok(result.sources.every(([, lists]) => lists.length === 1), 'no work names both')
+    assert.ok(!ids(result).includes(onlyTwo), 'a work no list wants is left out')
+    assert.equal(result.window.count, 5)
+    assert.equal(result.works.length, 5)
+  })
+
+  test('a works search asks the archive to leave out the tags its filter excludes', async () => {
+    const start = TODAY - 10
+    const filter = { facets: { freeforms: { ex: ['Fluff'] }, characters: { ex: ['Draco Malfoy'] }, completion: { ex: ['Work in Progress'] } } }
+    const rows = Array.from({ length: 10 }, (_, i) => [
+      [start + i, 8, 0, tagged('Fluff')],
+      [start + i, 1, 0, { chars: ['Draco Malfoy'] }],
+      [start + i, 3],
+    ]).flat()
+    const entry = { url: '/works/search?work_search[query]=coffee&work_search[excluded_tag_names]=Angst', filter }
+    const pushed = await gather([search('coffee', rows, { entry })], { start, target: 10 })
+
+    for (const url of pushed.urls) {
+      const params = new URLSearchParams(url.split('?')[1])
+      assert.equal(params.get('work_search[excluded_tag_names]'), 'Angst,Draco Malfoy,Fluff', 'merged into the search’s own exclusion')
+      assert.equal(params.has('work_search[complete]'), false, 'completion is not a tag, and stays on this side')
+    }
+    // Three works a day are left, so the target of ten is passed on the fourth.
+    assert.equal(pushed.window.end, start + 2)
+    assert.equal(pushed.window.count, 9)
+    assert.equal(pushed.requests, 1, 'a page of works the list wants is all it takes')
+
+    // The same list against an archive that ignores the field: the same window,
+    // since the filter is still applied here — only dearer.
+    nextWorkId = 4000
+    const ignored = await gather([search('coffee', rows, { entry, list: { ignoresExclusions: true } })], { start, target: 10 })
+    assert.equal(ignored.window.end, pushed.window.end)
+    assert.equal(ignored.window.count, pushed.window.count)
+    assert.deepEqual(ids(ignored), ids(pushed), 'exactly the same works')
+    assert.equal(ignored.requests, 4, 'reading past every Fluff work it can’t leave out costs three more requests')
+  })
+
+  test('an uncommon tag read through a search asks the same, beside the tag’s name', async () => {
+    const start = TODAY - 3
+    const fixture = uncommonTag('marriage problems', [[start, 3], [start, 2, 0, tagged('Angst')]], {
+      filter: { facets: { freeforms: { ex: ['Angst'] } } },
+    })
+    const result = await gather([fixture], { start })
+
+    assert.ok(result.urls.length > 0)
+    for (const url of result.urls) {
+      const params = new URLSearchParams(url.split('?')[1])
+      assert.equal(params.get('work_search[other_tag_names]'), 'marriage problems')
+      assert.equal(params.get('work_search[excluded_tag_names]'), 'Angst')
+    }
+    assert.equal(result.works.length, 3)
+  })
+
+  test('a list re-filtered between two looks is read again, not judged from rows its old query returned', async () => {
+    const start = TODAY - 2
+    const rows = [[start, 3], [start, 2, 0, tagged('Fluff')]]
+    const first = await gather([search('coffee', rows, { entry: { filter: { facets: { freeforms: { ex: ['Fluff'] } } } } })], { start })
+    assert.equal(first.works.length, 3)
+
+    nextWorkId = 4000
+    const again = await gather([search('coffee', rows)], { start, reuseSession: true })
+    assert.ok(again.requests > 0, 'the rows held were read without the Fluff works, so they are read again')
+    assert.equal(again.works.length, 5, 'and with the filter gone, every work is the list’s')
   })
 })

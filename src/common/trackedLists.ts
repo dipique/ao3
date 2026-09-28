@@ -1658,12 +1658,15 @@ export const PAGE_SIZE = 20
  * series: just the page, since neither can be sorted or bounded, and `from` is
  * ignored.
  *
+ * `exclude` is tag names the page should leave out on the archive's side
+ * ({@link PageUrlOptions.exclude}).
+ *
  * Null when the entry's URL isn't a trackable archive page, or doesn't match
  * its kind — an entry that arrived through sync or an import is re-checked
  * here, where it would otherwise be fetched with the reader's session.
  * Throws on a `page` or `from` that isn't a whole number, which is a caller bug.
  */
-export function pageUrl(entry: Pick<TrackedList, 'kind' | 'url' | 'scan'>, from: Day, page: number): string | null {
+export function pageUrl(entry: Pick<TrackedList, 'kind' | 'url' | 'scan'>, from: Day, page: number, options: PageUrlOptions = {}): string | null {
   if (!Number.isSafeInteger(page) || page < 1)
     throw new RangeError(`Not a page number: ${page}`)
   if (!Number.isSafeInteger(from))
@@ -1683,12 +1686,70 @@ export function pageUrl(entry: Pick<TrackedList, 'kind' | 'url' | 'scan'>, from:
     case 'tag-works':
       if (entry.scan)
         return `${path}?page=${page}`
-      return datedUrl('/works/search', [['work_search[other_tag_names]', tagName(path)]], from, page)
+      return datedUrl('/works/search', withExclusions([['work_search[other_tag_names]', tagName(path)]], options.exclude), from, page)
     default: {
       const params = [...new URLSearchParams(query)].filter(([name]) => !OVERRIDDEN_PARAMS.has(name) && !DROPPED_PARAMS.has(name))
-      return datedUrl(path, params, from, page)
+      return datedUrl(path, normalized.kind === 'text-search' ? withExclusions(params, options.exclude) : params, from, page)
     }
   }
+}
+
+/** What {@link pageUrl} may add to a list's own query. */
+export interface PageUrlOptions {
+  /**
+   * Tag names the archive should leave out of the page — the tag exclusions of
+   * the list's view filter ({@link TrackedList.filter}), which a works search
+   * can apply itself, so the review doesn't read pages of works only to throw
+   * them away. Sent as `work_search[excluded_tag_names]`, merged into any the
+   * query already names; never part of the stored URL or the key.
+   *
+   * Only a works search takes it: a `text-search` list, and a `tag-works` list
+   * read through one. A listing's own filters are all in its URL already, and a
+   * series or a scanned tag page has no field to put it in.
+   */
+  exclude?: readonly string[]
+}
+
+/**
+ * The archive reads a `*_names` field as a list separated by commas — its tag
+ * names can't contain one, nor the full-width and ideographic commas it also
+ * forbids. A name that somehow does would be split into two names that aren't
+ * it, so it isn't sent at all; whoever asked still has it to match on their side.
+ */
+const NAME_SEPARATORS = /[,，、]/
+
+/**
+ * `params` with `names` added to its `work_search[excluded_tag_names]`: appended
+ * to the value the query already has (which is kept exactly as it was spelled),
+ * less any name already in it, compared as the archive compares tag names — case
+ * and spacing aside. The field goes where the query had it, or on the end.
+ */
+function withExclusions(params: [string, string][], names: readonly string[] = []): [string, string][] {
+  const FIELD = 'work_search[excluded_tag_names]'
+  const at = params.findIndex(([name]) => name === FIELD)
+  // Normally once. Named twice, both are kept, as one list.
+  const had = params.filter(([name]) => name === FIELD).map(([, value]) => value.trim()).filter(Boolean).join(',')
+  const seen = new Set(had.split(NAME_SEPARATORS).map(tagNameKey).filter(Boolean))
+  const added: string[] = []
+  for (const name of names) {
+    const tidy = collapseSpaces(name)
+    const key = tagNameKey(tidy)
+    if (!tidy || NAME_SEPARATORS.test(tidy) || seen.has(key))
+      continue
+    seen.add(key)
+    added.push(tidy)
+  }
+  if (!added.length)
+    return params
+  const value = [...(had ? [had] : []), ...added].join(',')
+  const out = params.filter(([name]) => name !== FIELD)
+  out.splice(at === -1 ? out.length : at, 0, [FIELD, value])
+  return out
+}
+
+/** A tag name as the archive tells two apart: trimmed, spaces collapsed, in any case. */
+function tagNameKey(name: string): string {
+  return collapseSpaces(name).toLowerCase()
 }
 
 /**
