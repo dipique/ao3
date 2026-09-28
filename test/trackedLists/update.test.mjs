@@ -202,6 +202,17 @@ describe('describeUpdate', () => {
     assert.deepEqual(texts(search), ['Search words: “coffee” → “tea”'])
   })
 
+  test('a works search without words moves only when its subject field does', () => {
+    const was = { url: '/works/search?work_search[fandom_names]=Harry+Potter&work_search[character_names]=Draco+Malfoy' }
+    const narrowed = describeUpdate(was, { url: '/works/search?work_search[fandom_names]=Harry+Potter&work_search[character_names]=Ron+Weasley' })
+    assert.equal(narrowed.root, null)
+    assert.deepEqual(texts(narrowed), ['Includes: Ron Weasley', 'No longer includes: Draco Malfoy'])
+
+    const moved = describeUpdate(was, { url: '/works/search?work_search[fandom_names]=Marvel&work_search[character_names]=Draco+Malfoy' })
+    assert.deepEqual(moved.root, { from: { type: 'search', entity: 'Harry Potter' }, to: { type: 'search', entity: 'Marvel' } })
+    assert.deepEqual(texts(moved), ['Includes: Marvel', 'No longer includes: Harry Potter'])
+  })
+
   test('nothing for a URL that isn\'t trackable', () => {
     assert.deepEqual(describeUpdate({ url: '/tags/Bees/works' }, { url: 'https://example.com/tags/Bees/works' }), { root: null, changes: [] })
   })

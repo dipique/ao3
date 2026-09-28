@@ -16,6 +16,7 @@ import {
   openTab,
   pillText,
   refiningMark,
+  searchPage,
   storedOption,
   toasts,
   TRACK_BOX,
@@ -174,5 +175,84 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     assert.equal(added.type, 'fandom')
     assert.equal(added.url, `/works?work_search[complete]=F&${HP_QUERY}`)
     assert.equal(added.since, TODAY)
+  })
+})
+
+/**
+ * A works search made on the Search Works form with its "Any Field" box left
+ * empty, a fandom and a character, tracked under its default title. It has no
+ * words to be a search of, so it's a search of its fandom.
+ */
+const HP_SEARCH = {
+  id: 'hpsrch',
+  kind: 'text-search',
+  url: normalizeTrackedUrl(`${ARCHIVE}/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[character_names]=Draco+Malfoy`).url,
+  alias: 'Search: Harry Potter - J. K. Rowling',
+  type: 'search',
+  entity: 'Harry Potter - J. K. Rowling',
+  tracked: true,
+  since: TODAY - 12,
+}
+
+/** The form's submit: every field it has, the empty ones too, with the character swapped for another. */
+const RON_INSTEAD = `${ARCHIVE}/works/search?utf8=%E2%9C%93&commit=Search&work_search%5Bquery%5D=&work_search%5Btitle%5D=&work_search%5Bcreators%5D=`
+  + '&work_search%5Bfandom_names%5D=Harry+Potter+-+J.+K.+Rowling&work_search%5Bcharacter_names%5D=Ron+Weasley&work_search%5Bcomplete%5D='
+
+/**
+ * The same, for a works search with no words: back on the form, the reader edits
+ * a field other than the one it's a search of, and submits. Nothing marks the tab
+ * as refining the list, so the pill knows the page only by what it searches.
+ */
+describe('tracked lists: updating a works search without words from an edited search', { skip }, () => {
+  let browser
+  let tab
+
+  before(async () => {
+    ensureBuilt()
+    browser = await launch(chromePath)
+    tab = await openTab(browser, {
+      seed: { 'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [HP_SEARCH] } },
+      route: url => (url.pathname === '/works/search' ? searchPage(url) : null),
+    })
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  const label = `“${HP_SEARCH.alias}”`
+
+  test('the same fandom with another character offers to update the list it came from', async () => {
+    await visit(tab, RON_INSTEAD)
+    assert.equal(await refiningMark(tab), null)
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Track or update…')
+    const text = await boxText(tab)
+    assert.match(text, /Update a list/)
+    assert.ok(text.includes(label), text)
+    assert.doesNotMatch(text, /This changes what/, 'the list keeps its root')
+    assert.deepEqual(await diffLines(tab), ['Includes: Ron Weasley', 'No longer includes: Draco Malfoy'])
+    assert.deepEqual(await boxButtons(tab), [`Update ${label}`, `Refine ${label}`, 'Track', 'Cancel'])
+  })
+
+  test('Update rewrites it in place, as the search it now is', async () => {
+    await clickBoxButton(tab, `Update ${label}`)
+    await sleep(1500)
+    const lists = (await storedOption(tab)).lists
+    assert.equal(lists.length, 1)
+    assert.deepEqual(lists[0], {
+      ...HP_SEARCH,
+      url: '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[character_names]=Ron+Weasley',
+    })
+    await tab.click('.AO3E--filter-toolbar--fab')
+    await sleep(300)
+    assert.equal(await pillText(tab), `Tracked as ${label}`)
+  })
+
+  test('another fandom with the same character is no list\'s', async () => {
+    await visit(tab, `${ARCHIVE}/works/search?work_search%5Bfandom_names%5D=Sherlock+%28TV%29&work_search%5Bcharacter_names%5D=Ron+Weasley`)
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Track this search')
+    assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Search: Sherlock (TV)')
   })
 })

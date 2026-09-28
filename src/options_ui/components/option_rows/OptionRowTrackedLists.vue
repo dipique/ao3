@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TrackedKind, TrackedList } from '#common'
 
-import { defaultTitle, formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, refineLink, sourceLabel, titleTakenBy, toEpochDays, TRACKED_TYPE_LABELS, trackedMeta, utcToday } from '#common'
+import { defaultTitle, describeFilters, formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, refineLink, sourceLabel, titleTakenBy, toEpochDays, TRACKED_TYPE_LABELS, trackedMeta, utcToday } from '#common'
 
 /**
  * Tracked lists: the saved queries whose new and updated works are gathered into
@@ -171,6 +171,12 @@ const rows = computed(() => {
       /** The whole of what it is, for the badge's tooltip: "Character: Draco Malfoy". */
       what: meta ? defaultTitle(meta) : '',
       kind: KIND_LABELS[entry.kind] ?? entry.kind,
+      /**
+       * What it filters by, in a line: the archive's filters counted, since the
+       * link opens them on screen, and the view's by name. Worded as the floating
+       * toolbar words an update's changes, so the two read alike.
+       */
+      filters: describeFilters(entry),
       broken: normalized === null,
       href: normalized && link ? getArchiveLink(link) : undefined,
       state: entry.tracked ? `Tracking since ${formatDay(entry.since)}` : 'Paused',
@@ -365,6 +371,23 @@ function remove() {
                     Refine on AO3
                   </ArchiveLink>
                 </template>
+              </span>
+              <!--
+                One line, however narrow the page: what the summary had to leave
+                out, or the page's width cuts off, is in the tooltip. A screen
+                reader gets the whole of it in place of the shortened line.
+              -->
+              <span
+                v-if="row.filters.text"
+                :title="row.filters.full"
+                data-tracked-filters
+                truncate text="xs muted-fg"
+              >
+                <template v-if="row.filters.more">
+                  <span aria-hidden="true">{{ row.filters.text }}</span>
+                  <span class="sr-only">{{ row.filters.full }}</span>
+                </template>
+                <template v-else>{{ row.filters.text }}</template>
               </span>
               <span v-if="row.broken" text="xs destructive">
                 This address isn't a page on AO3, so it can't be reviewed. Remove it and track the list again from the

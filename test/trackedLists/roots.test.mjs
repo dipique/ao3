@@ -97,23 +97,100 @@ describe('trackedRoot', () => {
   })
 
   test('a works search roots at its words, trimmed, lower-cased and collapsed', () => {
-    assert.equal(root('/works/search?work_search[query]=+Coffee++Shop%09AU+&work_search[complete]=T'), 'text-search:coffee shop au')
+    assert.equal(root('/works/search?work_search[query]=+Coffee++Shop%09AU+&work_search[complete]=T'), 'text-search:query=coffee shop au')
     assert.equal(sameRoot(
       { url: '/works/search?work_search[query]=coffee+shop+AU' },
       { url: '/works/search?work_search[query]=Coffee+Shop+AU&work_search[excluded_tag_names]=Angst' },
     ), true)
   })
+})
 
-  test('a works search without words has no root, and shares none', () => {
-    const url = '/works/search?work_search[title]=bees&work_search[complete]=T'
-    assert.equal(root(url), null)
-    assert.equal(sameRoot({ url }, { url }), false)
+describe('trackedRoot: a works search\'s subject field', () => {
+  // The Search Works form with its "Any Field" box left empty: a fandom and a character.
+  const HP_DRACO = '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[character_names]=Draco+Malfoy'
+
+  test('a search without words roots at its fandom', () => {
+    assert.equal(root(HP_DRACO), 'text-search:fandom_names=harry potter - j. k. rowling')
   })
 
+  test('the same fandom with other characters, or other filters, shares the root', () => {
+    const others = [
+      '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[character_names]=Ron+Weasley',
+      '/works/search?work_search[character_names]=Hermione+Granger&work_search[fandom_names]=harry++potter+-+j.+k.+rowling',
+      '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[complete]=T&work_search[excluded_tag_names]=Angst',
+    ]
+    for (const url of others) {
+      assert.equal(sameRoot({ url: HP_DRACO }, { url }), true, url)
+      assert.notEqual(key(url), key(HP_DRACO), 'a different search of it all the same')
+    }
+    assert.equal(sameRoot({ url: HP_DRACO }, { url: '/works/search?work_search[fandom_names]=Sherlock+(TV)&work_search[character_names]=Draco+Malfoy' }), false, 'another fandom')
+  })
+
+  test('the field is part of the root, so a fandom and a title spelled alike don\'t collide', () => {
+    const roots = [
+      '/works/search?work_search[query]=Bees',
+      '/works/search?work_search[title]=Bees',
+      '/works/search?work_search[creators]=Bees',
+      '/works/search?work_search[fandom_names]=Bees',
+      '/works/search?work_search[other_tag_names]=Bees',
+    ].map(root)
+    assert.equal(new Set(roots).size, roots.length, roots.join(' | '))
+    assert.equal(sameRoot({ url: '/works/search?work_search[fandom_names]=Bees' }, { url: '/works/search?work_search[title]=bees' }), false)
+  })
+
+  test('the words outrank every other field, and a field outranks those after it wherever it sits', () => {
+    assert.equal(root('/works/search?work_search[fandom_names]=Bees&work_search[query]=coffee'), 'text-search:query=coffee')
+    assert.equal(root('/works/search?work_search[other_tag_names]=Fluff&work_search[character_names]=Draco+Malfoy'), 'text-search:character_names=draco malfoy')
+    // An empty field, or one of nothing but spaces, isn't filled.
+    assert.equal(root('/works/search?work_search[query]=&work_search[title]=++&work_search[creators]=someone'), 'text-search:creators=someone')
+  })
+
+  test('the root and the entity always come from the same field', () => {
+    // Each search, the field it's a search of, and the name its title gives it.
+    const table = [
+      ['/works/search?work_search[query]=coffee++shop%20AU&work_search[title]=Beans', 'query', 'coffee shop AU'],
+      ['/works/search?work_search[title]=Bees&work_search[complete]=T', 'title', 'Bees'],
+      ['/works/search?work_search[creators]=BuckysGrace&work_search[fandom_names]=Marvel', 'creators', 'BuckysGrace'],
+      [HP_DRACO, 'fandom_names', 'Harry Potter - J. K. Rowling'],
+      ['/works/search?work_search[character_names]=Draco+Malfoy&work_search[relationship_names]=Draco+Malfoy/Harry+Potter', 'character_names', 'Draco Malfoy'],
+      ['/works/search?work_search[relationship_names]=Draco+Malfoy/Harry+Potter&work_search[freeform_names]=Fluff', 'relationship_names', 'Draco Malfoy/Harry Potter'],
+      ['/works/search?work_search[freeform_names]=Slow+Burn&work_search[other_tag_names]=Fluff', 'freeform_names', 'Slow Burn'],
+      ['/works/search?work_search[other_tag_names]=marriage+problems&work_search[excluded_tag_names]=Angst', 'other_tag_names', 'marriage problems'],
+      ['/works/search?work_search[title]=&work_search[fandom_names]=Bees', 'fandom_names', 'Bees'],
+      ['/works/search?work_search[fandom_names]=bees', 'fandom_names', 'bees'],
+    ]
+    for (const [url, field, entity] of table) {
+      assert.deepEqual(meta(url), { type: 'search', entity }, url)
+      assert.equal(root(url), `text-search:${field}=${entity.toLowerCase()}`, url)
+    }
+    // And so two searches share a root exactly when they name one thing from one field.
+    for (const [a, fieldA, entityA] of table) {
+      for (const [b, fieldB, entityB] of table) {
+        const same = fieldA === fieldB && entityA.toLowerCase() === entityB.toLowerCase()
+        assert.equal(sameRoot({ url: a }, { url: b }), same, `${a} vs ${b}`)
+      }
+    }
+  })
+
+  test('a search with none of those fields has no root, and shares none', () => {
+    for (const url of [
+      '/works/search?work_search[complete]=T&work_search[single_chapter]=1',
+      '/works/search?work_search[excluded_tag_names]=Angst&work_search[rating_ids]=13',
+      '/works/search?work_search[query]=++&work_search[language_id]=en',
+    ]) {
+      assert.equal(root(url), null, url)
+      assert.equal(sameRoot({ url }, { url }), false, url)
+      assert.deepEqual(meta(url), { type: 'search', entity: '' }, url)
+    }
+  })
+})
+
+describe('trackedRoot: across kinds, and none', () => {
   test('kinds never share a root', () => {
     assert.notEqual(root('/tags/Bees'), root('/tags/Bees/works'))
     assert.equal(sameRoot({ url: '/tags/Bees' }, { url: '/tags/Bees/works' }), false)
     assert.equal(sameRoot({ url: '/works/search?work_search[query]=Bees' }, { url: '/tags/Bees/works' }), false)
+    assert.equal(sameRoot({ url: '/works/search?work_search[fandom_names]=Bees' }, { url: '/tags/Bees/works' }), false)
   })
 
   test('none for an address that isn\'t a trackable archive page', () => {

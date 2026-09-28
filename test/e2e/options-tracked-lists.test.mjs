@@ -373,3 +373,141 @@ describe('options UI — tracked lists\' titles, badges and links', { skip }, ()
     assert.deepEqual(problems, [])
   })
 })
+
+/** A custom search narrowed in its view: only the view filter to show, by name. */
+const NARROWED = {
+  id: 'n4rr0w',
+  kind: 'tag-works',
+  url: '/tags/marriage%20problems',
+  alias: 'Additional tag: marriage problems',
+  type: 'freeform',
+  entity: 'marriage problems',
+  filter: { facets: { characters: { ex: ['Draco Malfoy'] }, freeforms: { req: ['Fluff'] } }, words: [5000, null] },
+  tracked: true,
+  since: TODAY - 2,
+}
+/** A listing narrowed in its Sort & Filter sidebar: three filters, plus a sort and a relative date that aren't. */
+const SIDEBAR = {
+  id: 's1d3b4r',
+  kind: 'works-filter',
+  url: '/works?work_search[sort_column]=kudos_count&work_search[revised_at]=%3C+2+weeks&work_search[complete]=T&work_search[language_id]=en&exclude_work_search[character_ids][]=12&tag_id=Harry+Potter',
+  alias: 'Fandom: Harry Potter',
+  type: 'fandom',
+  entity: 'Harry Potter',
+  tracked: true,
+  since: TODAY - 2,
+}
+/** Neither: a series as it comes. */
+const WHOLE = { id: 'wh0l3', kind: 'series-works', url: '/series/9991', alias: 'Series: The Long Way Round', type: 'series', entity: 'The Long Way Round', tracked: true, since: TODAY - 2 }
+/** Both, and more names than one line holds. */
+const CROWDED = {
+  id: 'cr0wd',
+  kind: 'text-search',
+  url: '/works/search?work_search[query]=coffee&work_search[complete]=T',
+  alias: 'Search: coffee',
+  type: 'search',
+  entity: 'coffee',
+  filter: { facets: { characters: { ex: ['Draco Malfoy', 'Ginny Weasley', 'Hermione Granger', 'Neville Longbottom', 'Ron Weasley'] } } },
+  tracked: true,
+  since: TODAY - 2,
+}
+
+/**
+ * The line under each list's title that says what it filters by: the archive's
+ * filters counted, the view's by name, nothing for a list that has neither, and
+ * one line however much there is to say.
+ */
+describe('options UI — what each tracked list filters by', { skip }, () => {
+  let server
+  let browser
+  let page
+  const problems = []
+
+  before(async () => {
+    ensureBuilt()
+    server = await serveDist()
+    browser = await puppeteer.launch({ executablePath: chromePath, headless: 'new', args: ['--no-first-run', '--no-default-browser-check'] })
+    page = await browser.newPage()
+    await page.evaluateOnNewDocument(installMock, {
+      'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [SIDEBAR, CROWDED, WHOLE, NARROWED] },
+    })
+    page.on('console', m => m.type() === 'error' && problems.push(m.text()))
+    page.on('pageerror', e => problems.push(e.message))
+    await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
+    await sleep(1500)
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+    await server?.close()
+  })
+
+  /** Each row, top to bottom: its title, and its filter line as it looks, as it's read out, and how it's set. */
+  const rows = () => page.evaluate(() => [...document.querySelectorAll('input[aria-label^="Title for "]')].map((input) => {
+    const cell = input.closest('span')
+    const line = cell.querySelector('[data-tracked-filters]')
+    if (!line)
+      return { title: input.value, filters: null }
+    const style = getComputedStyle(line)
+    // The line with the badge, the kind and the link, for the look to match.
+    const meta = cell.querySelector('a[href]').parentElement
+    return {
+      title: input.value,
+      filters: {
+        shown: (line.querySelector('[aria-hidden="true"]') ?? line).textContent.trim(),
+        // What's left for a screen reader: everything not hidden from one.
+        spoken: [...line.childNodes]
+          .filter(node => !(node instanceof Element && node.getAttribute('aria-hidden') === 'true'))
+          .map(node => node.textContent)
+          .join('')
+          .trim(),
+        tooltip: line.getAttribute('title'),
+        oneLine: style.whiteSpace === 'nowrap' && line.getBoundingClientRect().height <= Number.parseFloat(style.lineHeight) * 1.5,
+        afterMeta: (line.compareDocumentPosition(meta) & Node.DOCUMENT_POSITION_PRECEDING) !== 0,
+        looksLikeMeta: style.fontSize === getComputedStyle(meta).fontSize && style.color === getComputedStyle(meta).color,
+      },
+    }
+  }))
+
+  test('rows come in title order, as ever', async () => {
+    assert.deepEqual((await rows()).map(r => r.title), [NARROWED.alias, SIDEBAR.alias, CROWDED.alias, WHOLE.alias])
+  })
+
+  test('a view filter reads by name, in the words an update uses', async () => {
+    const { filters } = (await rows())[0]
+    const line = 'Requires: Fluff · Excludes: Draco Malfoy · Word count: ≥ 5,000'
+    assert.equal(filters.shown, line)
+    assert.equal(filters.spoken, line, 'a screen reader gets the same text')
+    assert.equal(filters.tooltip, line)
+  })
+
+  test('the archive\'s filters are counted, and the sort and relative date aren\'t among them', async () => {
+    const { filters } = (await rows())[1]
+    assert.equal(filters.shown, '3 search filters')
+    assert.equal(filters.spoken, '3 search filters')
+  })
+
+  test('a list with neither says nothing', async () => {
+    assert.equal((await rows())[3].filters, null)
+  })
+
+  test('more than fits: what fits, "+N more", and the rest in the tooltip and to a screen reader', async () => {
+    const { filters } = (await rows())[2]
+    const full = '1 search filter · Excludes: Draco Malfoy, Ginny Weasley, Hermione Granger, Neville Longbottom, Ron Weasley'
+    assert.equal(filters.shown, '1 search filter · Excludes: Draco Malfoy, Ginny Weasley +3 more')
+    assert.equal(filters.tooltip, full)
+    assert.equal(filters.spoken, full)
+  })
+
+  test('one muted line under the row\'s own, in its type', async () => {
+    for (const { title, filters } of (await rows()).filter(r => r.filters)) {
+      assert.ok(filters.oneLine, `${title}: one line`)
+      assert.ok(filters.afterMeta, `${title}: under the line with the badge and the link`)
+      assert.ok(filters.looksLikeMeta, `${title}: the same size and colour as that line`)
+    }
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(problems, [])
+  })
+})

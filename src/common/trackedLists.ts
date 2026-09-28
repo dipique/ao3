@@ -7,10 +7,11 @@
  * number, {@link TrackedListsOption.reviewedThrough}.
  *
  * This module is the decidable half — days, URL normalization, what a list is
- * (its root, its type, its title and its view filter), what an update to one
- * changes, the URLs a review fetches, and the planner that says which page to
- * read next and when a review window is settled. The fetcher that runs the
- * planner against the archive lives with the content script.
+ * (its root, its type, its title and its view filter), what it filters by in a
+ * line, what an update to one changes, the URLs a review fetches, and the
+ * planner that says which page to read next and when a review window is
+ * settled. The fetcher that runs the planner against the archive lives with the
+ * content script.
  *
  * ## Two days per work
  *
@@ -1270,18 +1271,41 @@ function diffNames(layer: LayerChanges, verb: FilterVerb, was: readonly string[]
 
 /** Additions, then removals (each by verb), then counts, then values by label. */
 function changeLines(layer: LayerChanges, name: TrackedChange['layer']): TrackedChange[] {
-  const texts: string[] = []
-  for (const [names, words] of [[layer.added, ADDED_VERBS], [layer.removed, REMOVED_VERBS]] as const) {
-    for (const verb of FILTER_VERBS) {
-      const list = [...new Set(names.get(verb))]
-      if (list.length)
-        texts.push(`${words[verb]}: ${list.join(', ')}`)
-    }
-  }
-  texts.push(...layer.counts)
-  for (const [label, was, now] of [...layer.values].sort((a, b) => compareStrings(a[0], b[0])))
-    texts.push(`${label}: ${was} → ${now}`)
+  const texts = [
+    ...verbClauses(layer.added, ADDED_VERBS).map(clauseText),
+    ...verbClauses(layer.removed, REMOVED_VERBS).map(clauseText),
+    ...layer.counts,
+    ...valuesByLabel(layer).map(([label, was, now]) => clauseText({ head: label, items: [`${was} → ${now}`] })),
+  ]
   return texts.map(text => ({ layer: name, text }))
+}
+
+/**
+ * One heading and what's under it: a verb and its names, or a field's label and
+ * its value. A change line and a list's filter summary ({@link describeFilters})
+ * are both written in these, so the two read alike.
+ */
+interface Clause {
+  head: string
+  items: string[]
+}
+
+/** `Excludes: Draco Malfoy, Ron Weasley`. */
+function clauseText(clause: Clause): string {
+  return `${clause.head}: ${clause.items.join(', ')}`
+}
+
+/** The names gathered under each verb, in {@link FILTER_VERBS} order and headed by `words`: a clause for each verb that has any. */
+function verbClauses(names: ReadonlyMap<FilterVerb, readonly string[]>, words: Readonly<Record<FilterVerb, string>>): Clause[] {
+  return FILTER_VERBS.flatMap((verb) => {
+    const list = [...new Set(names.get(verb))]
+    return list.length ? [{ head: words[verb], items: list }] : []
+  })
+}
+
+/** A layer's `[label, was, would be]` values, in the order its lines give them. */
+function valuesByLabel(layer: LayerChanges): [string, string, string][] {
+  return [...layer.values].sort((a, b) => compareStrings(a[0], b[0]))
 }
 
 /** A query's filters: what its key holds, with a pseud put back as the filter of its author that it is. */
@@ -1433,6 +1457,11 @@ function queryChanges(was: [string, string][], now: [string, string][], kind: Tr
 }
 
 function viewChanges(was: TrackedFilter | undefined, now: TrackedFilter | undefined): TrackedChange[] {
+  return changeLines(viewLayer(was, now), 'view')
+}
+
+/** What differs between two view filters, gathered: selections by name, the text box and word range as values. */
+function viewLayer(was: TrackedFilter | undefined, now: TrackedFilter | undefined): LayerChanges {
   const layer = newLayer()
   const keys = [...new Set([...Object.keys(was?.facets ?? {}), ...Object.keys(now?.facets ?? {})])].sort(compareStrings)
   for (const key of keys) {
@@ -1445,7 +1474,7 @@ function viewChanges(was: TrackedFilter | undefined, now: TrackedFilter | undefi
   const words = (filter: TrackedFilter | undefined) => rangeText(filter?.words?.[0] ?? null, filter?.words?.[1] ?? null)
   if (words(was) !== words(now))
     layer.values.push(['Word count', words(was), words(now)])
-  return changeLines(layer, 'view')
+  return layer
 }
 
 /** A word-count range as the reader reads it: `1,000–5,000`, `≥ 1,000`, `≤ 5,000`, or `any`. */
@@ -1458,6 +1487,120 @@ function rangeText(from: number | string | null, to: number | string | null): st
   if (to !== null)
     return `≤ ${show(to)}`
   return 'any'
+}
+
+// ---------------------------------------------------------------------------
+// What a list filters by
+// ---------------------------------------------------------------------------
+
+/** A list's filters as one line ({@link describeFilters}). */
+export interface TrackedFilterSummary {
+  /**
+   * The line to show: as many clauses as fit, then `+N more` for the rest —
+   * "2 search filters · Excludes: Draco Malfoy, Ron Weasley +3 more". `''` for a
+   * list with no filters of either kind.
+   */
+  text: string
+  /** Every clause, nothing left out: {@link text} itself when that is all of it. */
+  full: string
+  /** How many conditions {@link text} leaves out: names, a text box, a word range. 0 when none. */
+  more: number
+}
+
+export interface DescribeFiltersOptions {
+  /**
+   * How long {@link TrackedFilterSummary.text} may run, in characters, `+N more`
+   * included. The archive's filters and one of the view's always show, however
+   * long. By default {@link FILTER_SUMMARY_LENGTH}.
+   */
+  maxLength?: number
+}
+
+/** About what one line of small print holds on the options page before it has to wrap. */
+export const FILTER_SUMMARY_LENGTH = 80
+
+/** What the clauses of a summary are joined by. */
+const SUMMARY_SEPARATOR = ' · '
+
+/**
+ * What a list filters by, in a line: the archive's filters **counted** ("4 search
+ * filters"), then the view filter's **by name** ("Excludes: Draco Malfoy", "Word
+ * count: ≥ 5,000").
+ *
+ * The view's are worded exactly as {@link describeUpdate} words adding them to a
+ * list that had none, so the summary and the change lines an update shows speak
+ * one vocabulary. The archive's are only counted, because a list's link opens its
+ * search with every one of them on screen, and because most are ids the URL
+ * can't name.
+ *
+ * A filter of the archive's is a criterion as the key holds it — each parameter
+ * and value once, so neither the sort nor a relative date bound — less what the
+ * list is a search *of*: a listing's owner, a works search's words. A pseud
+ * counts, being a filter of its author ({@link trackedRoot}); so does a tag
+ * named beside an author who owns the listing.
+ *
+ * When the whole line is longer than {@link DescribeFiltersOptions.maxLength},
+ * {@link TrackedFilterSummary.text} stops at the last name that fits, and says
+ * how many conditions it left out. Nothing at all for a list with no filters, or
+ * whose URL isn't trackable.
+ */
+export function describeFilters(entry: Pick<TrackedList, 'url' | 'filter'>, options: DescribeFiltersOptions = {}): TrackedFilterSummary {
+  const parsed = parseTracked(entry.url)
+  if (!parsed)
+    return { text: '', full: '', more: 0 }
+  const count = queryFilterCount(parsed)
+  const lead = count ? [`${count} ${plural('search filter', count)}`] : []
+  const layer = viewLayer(undefined, canonicalFilter(entry.filter))
+  const clauses = [
+    ...verbClauses(layer.added, ADDED_VERBS),
+    ...valuesByLabel(layer).map(([label, , now]) => ({ head: label, items: [now] })),
+  ]
+  const full = [...lead, ...clauses.map(clauseText)].join(SUMMARY_SEPARATOR)
+  const maxLength = options.maxLength ?? FILTER_SUMMARY_LENGTH
+  if (full.length <= maxLength)
+    return { text: full, full, more: 0 }
+
+  // Name by name, so a long list of exclusions is cut between two names rather
+  // than dropped whole — and never cut before its first one, so the line always
+  // says something the view filters by.
+  const total = clauses.reduce((sum, clause) => sum + clause.items.length, 0)
+  const shown = [...lead]
+  let used = 0
+  for (const clause of clauses) {
+    const taken: string[] = []
+    for (const item of clause.items) {
+      const line = [...shown, clauseText({ head: clause.head, items: [...taken, item] })].join(SUMMARY_SEPARATOR)
+      const left = total - used - 1
+      if (used > 0 && `${line}${moreText(left)}`.length > maxLength)
+        break
+      taken.push(item)
+      used++
+    }
+    if (taken.length)
+      shown.push(clauseText({ head: clause.head, items: taken }))
+    if (taken.length < clause.items.length)
+      break
+  }
+  const more = total - used
+  return { text: `${shown.join(SUMMARY_SEPARATOR)}${moreText(more)}`, full, more }
+}
+
+/** ` +3 more`, or nothing for none. */
+function moreText(count: number): string {
+  return count > 0 ? ` +${count} more` : ''
+}
+
+/**
+ * How many filters of the archive's a query holds, by {@link describeFilters}'
+ * rule: the criteria its key holds, and a pseud, less the query's root.
+ */
+function queryFilterCount(parsed: ParsedTracked): number {
+  const owner = parsed.owner
+  const isRoot = ([name, value]: [string, string]): boolean =>
+    (parsed.kind === 'text-search' && name === 'work_search[query]')
+    // The one owner the key doesn't fold into its path.
+    || (name === 'collection_id' && owner?.type === 'collection' && value.trim() === owner.name)
+  return new Set(filterParams(parsed).filter(param => !isRoot(param)).map(serializeParam)).size
 }
 
 // ---------------------------------------------------------------------------
