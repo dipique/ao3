@@ -2,13 +2,13 @@ import MdiCheckCircleOutline from '~icons/mdi/check-circle-outline.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiProgressClock from '~icons/mdi/progress-clock.jsx'
 
-import type { Completion } from '#content_script/completionFilter.js'
+import type { Completion } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { ADDON_CLASS } from '#common'
-import { getCompletion, hasCompletionFields, setCompletion } from '#content_script/completionFilter.js'
+import { ADDON_CLASS, COMPLETION_LABELS } from '#common'
 import { attachMenuTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import { searchFilterChanged } from '#content_script/pendingSearch.js'
+import { completionFilter } from '#content_script/radioFilter.js'
 import { findFacetBridge } from '#content_script/searchView/facetBridge.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -49,9 +49,9 @@ interface CompletionTarget {
 }
 
 /** The two picks, in menu order. */
-const CHOICES: Record<Completion, { label: string, icon: () => Node }> = {
-  complete: { label: 'Completed works only', icon: () => <MdiCheckCircleOutline /> },
-  incomplete: { label: 'Incomplete works only', icon: () => <MdiProgressClock /> },
+const ICONS: Record<Completion, () => Node> = {
+  complete: () => <MdiCheckCircleOutline />,
+  incomplete: () => <MdiProgressClock />,
 }
 
 /**
@@ -67,15 +67,12 @@ function targetFor(el: Element): CompletionTarget | null {
       apply: completion => bridge.setCompletion(completion),
     }
   }
-  if (hasCompletionFields()) {
+  if (completionFilter.has()) {
     return {
-      current: () => getCompletion(),
+      current: () => completionFilter.get(),
       apply: (completion) => {
-        if (!setCompletion(completion))
-          return
-        searchFilterChanged(completion
-          ? `Completion filter set to ${CHOICES[completion].label.toLowerCase()}.`
-          : 'Completion filter cleared.')
+        if (completionFilter.set(completion))
+          searchFilterChanged(completionFilter.describe(completion))
       },
     }
   }
@@ -90,18 +87,17 @@ function buildCompletionMenu(target: CompletionTarget): MenuItem[] {
   if (current) {
     items.push({
       icon: () => <MdiCloseCircleOutline />,
-      label: `Clear completion filter (${CHOICES[current].label.toLowerCase()})`,
+      label: `Clear completion filter (${COMPLETION_LABELS[current].toLowerCase()})`,
       scope: 'search',
       onSelect: () => target.apply(null),
     })
   }
 
-  for (const completion of Object.keys(CHOICES) as Completion[]) {
-    const { label, icon } = CHOICES[completion]
+  for (const completion of Object.keys(ICONS) as Completion[]) {
     const active = current === completion
     items.push({
-      icon,
-      label,
+      icon: ICONS[completion],
+      label: COMPLETION_LABELS[completion],
       scope: 'search',
       active,
       // Re-applying the choice that's already on would just re-run the same

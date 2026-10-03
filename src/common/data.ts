@@ -124,6 +124,22 @@ export interface Language {
   label: string
 }
 
+/** One side of AO3's Completion Status filter. "All works" is spelled `null` wherever it can be picked. */
+export type Completion = 'complete' | 'incomplete'
+
+export const COMPLETION_LABELS: Readonly<Record<Completion, string>> = {
+  complete: 'Completed works only',
+  incomplete: 'Incomplete works only',
+}
+
+/** One side of AO3's Crossovers filter. "Include crossovers" is spelled `null` wherever it can be picked. */
+export type Crossovers = 'exclude' | 'only'
+
+export const CROSSOVER_LABELS: Readonly<Record<Crossovers, string>> = {
+  exclude: 'No crossovers',
+  only: 'Crossovers only',
+}
+
 /* Represents an author on AO3 */
 export interface Author {
   /* Author user id, /users/:user_id/ */

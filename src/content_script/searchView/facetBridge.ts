@@ -1,5 +1,4 @@
-import type { WordCountRange } from '#common'
-import type { Completion } from '#content_script/completionFilter.js'
+import type { Completion, WordCountRange } from '#common'
 
 import type { FacetDir, FacetKey } from './engine.ts'
 

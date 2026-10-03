@@ -81,6 +81,10 @@
       <OptionDivider />
       <OptionRowSearchWordCount />
       <OptionDivider />
+      <OptionRowSearchCompletion />
+      <OptionDivider />
+      <OptionRowSearchCrossovers />
+      <OptionDivider />
       <OptionRowWordCountRanges />
       <OptionDivider />
       <OptionRow

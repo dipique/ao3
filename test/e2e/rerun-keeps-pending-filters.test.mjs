@@ -10,8 +10,8 @@ const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 /**
- * Everything that fills AO3's filter in on its own: a default language and word
- * count, and an auto-excluded rating. `Crossover Fandom` is known by id (as the
+ * Everything that fills AO3's filter in on its own: a default language, word
+ * count, completion status and crossover choice, and an auto-excluded rating. `Crossover Fandom` is known by id (as the
  * learned cache would have it) but has no row in the sidebar, so excluding it
  * means injecting a checkbox.
  */
@@ -21,6 +21,8 @@ const SEED = {
   'option.autoExcludeHidden': true,
   'option.searchLanguage': { enabled: true, language: { value: 'en', label: 'English' } },
   'option.searchWordCount': { enabled: true, from: 1000, to: null },
+  'option.searchCompletion': { enabled: true, completion: 'complete' },
+  'option.searchCrossovers': { enabled: true, crossovers: 'exclude' },
   'option.rules': {
     enabled: true,
     colors: {},
@@ -63,6 +65,12 @@ const PAGE = `
     </select>
     <input type="text" name="work_search[words_from]" id="work_search_words_from">
     <input type="text" name="work_search[words_to]" id="work_search_words_to">
+    <input type="radio" value="" checked name="work_search[crossover]" id="work_search_crossover_">
+    <input type="radio" value="F" name="work_search[crossover]" id="work_search_crossover_f">
+    <input type="radio" value="T" name="work_search[crossover]" id="work_search_crossover_t">
+    <input type="radio" value="" checked name="work_search[complete]" id="work_search_complete_">
+    <input type="radio" value="T" name="work_search[complete]" id="work_search_complete_t">
+    <input type="radio" value="F" name="work_search[complete]" id="work_search_complete_f">
     <input id="work_search_other_tag_names" name="work_search[other_tag_names]" type="text" value="">
     <input id="work_search_excluded_tag_names" name="work_search[excluded_tag_names]" type="text" value="">
     <dd id="exclude_fandom_tags" class="expandable fandom tags">
@@ -142,6 +150,8 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
   const form = () => page.evaluate(() => ({
     language: document.getElementById('work_search_language_id').value,
     wordsFrom: document.getElementById('work_search_words_from').value,
+    complete: document.querySelector('input[name="work_search[complete]"]:checked').value,
+    crossover: document.querySelector('input[name="work_search[crossover]"]:checked').value,
     explicit: document.getElementById('ex_r_13').checked,
     injected: [...document.querySelectorAll('input[name="exclude_work_search[fandom_ids][]"][value="4242"]')]
       .map(input => input.checked),
@@ -152,6 +162,8 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
     const state = await form()
     assert.equal(state.language, 'en')
     assert.equal(state.wordsFrom, '1000')
+    assert.equal(state.complete, 'T')
+    assert.equal(state.crossover, 'F')
     assert.equal(state.explicit, true, 'the hidden Explicit work should have been auto-excluded')
   })
 
@@ -162,6 +174,8 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
     await page.evaluate(() => {
       document.getElementById('work_search_language_id').value = ''
       document.getElementById('work_search_words_from').value = ''
+      document.getElementById('work_search_complete_').checked = true
+      document.getElementById('work_search_crossover_').checked = true
       document.getElementById('ex_r_13').checked = false
     })
 
@@ -176,6 +190,8 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
     assert.deepEqual(await form(), {
       language: '', // not defaulted again
       wordsFrom: '', // not defaulted again
+      complete: '', // not defaulted again
+      crossover: '', // not defaulted again
       explicit: false, // not auto-excluded again
       injected: [true], // the unlisted fandom's exclusion survived the cleanup
       submits: 0,

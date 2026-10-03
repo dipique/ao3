@@ -59,6 +59,8 @@ export const OPTION_DEFAULTS: Options = {
   searchLanguage: { enabled: false, language: null },
   wordCountToolbar: { enabled: false, ranges: DEFAULT_WORD_COUNT_RANGES.map(range => ({ ...range })) },
   searchWordCount: { enabled: false, from: null, to: null },
+  searchCompletion: { enabled: false, completion: 'complete' },
+  searchCrossovers: { enabled: false, crossovers: 'exclude' },
   completionToolbar: false,
   trackedLists: { enabled: true, target: 40, reviewedThrough: 0, lists: [] },
 

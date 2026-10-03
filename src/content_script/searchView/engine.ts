@@ -1,5 +1,5 @@
+import type { Completion } from '#common'
 import type { Work } from '#content_script/blurb.js'
-import type { Completion } from '#content_script/completionFilter.js'
 
 /**
  * DOM-free filter/sort/facet engine for the in-memory search view. Operates on

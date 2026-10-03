@@ -45,6 +45,8 @@ declare module 'vue' {
     OptionRowRules: typeof import('./../options_ui/components/option_rows/OptionRowRules.vue')['default']
     OptionRowRulesEditDialog: typeof import('./../options_ui/components/option_rows/OptionRowRulesEditDialog.vue')['default']
     OptionRowRulesTable: typeof import('./../options_ui/components/option_rows/OptionRowRulesTable.vue')['default']
+    OptionRowSearchCompletion: typeof import('./../options_ui/components/option_rows/OptionRowSearchCompletion.vue')['default']
+    OptionRowSearchCrossovers: typeof import('./../options_ui/components/option_rows/OptionRowSearchCrossovers.vue')['default']
     OptionRowSearchLanguage: typeof import('./../options_ui/components/option_rows/OptionRowSearchLanguage.vue')['default']
     OptionRowSearchWordCount: typeof import('./../options_ui/components/option_rows/OptionRowSearchWordCount.vue')['default']
     OptionRowTextReplacements: typeof import('./../options_ui/components/option_rows/OptionRowTextReplacements.vue')['default']

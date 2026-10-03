@@ -6,6 +6,7 @@ import { CollapsibleDashboard } from './CollapsibleDashboard.ts'
 import { CompletionToolbar } from './CompletionToolbar.tsx'
 import { CompressSearchUrls } from './CompressSearchUrls.ts'
 import { DefaultSearchLanguage } from './DefaultSearchLanguage.ts'
+import { DefaultSearchCompletion, DefaultSearchCrossovers } from './DefaultSearchRadios.ts'
 import { DefaultSearchWordCount } from './DefaultSearchWordCount.ts'
 import { FandomToolbar } from './FandomToolbar.tsx'
 import { FilterSeriesToolbar, FilterWorkToolbar } from './FilterEntityToolbars.tsx'
@@ -60,6 +61,8 @@ export const UNITS = [
   CompressSearchUrls,
   DefaultSearchLanguage,
   DefaultSearchWordCount,
+  DefaultSearchCompletion,
+  DefaultSearchCrossovers,
   CaptureMarkButtons,
   // The context-menu decorators. Subscribe/mute/mark-for-later were folded into
   // the author and work menus, so they're no longer separate units.

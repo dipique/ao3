@@ -1,4 +1,4 @@
-import type { Language, Rule, RuleColors, TextReplacement } from './data.ts'
+import type { Completion, Crossovers, Language, Rule, RuleColors, TextReplacement } from './data.ts'
 import type { TrackedListsOption } from './trackedLists.ts'
 import type { WordCountRange } from './wordCount.ts'
 import type { WorkMarks } from './workMarks.ts'
@@ -199,6 +199,18 @@ export interface Options {
    * range.
    */
   searchWordCount: { enabled: boolean, from: number | null, to: number | null }
+  /**
+   * Tick this choice in AO3's Completion Status filter, at the same point (and
+   * under the same "only when nothing is set yet" rule) as
+   * {@link Options.searchLanguage}.
+   */
+  searchCompletion: { enabled: boolean, completion: Completion }
+  /**
+   * Tick this choice in AO3's Crossovers filter, likewise. AO3 decides which
+   * works are crossovers; {@link Options.hideCrossovers} is our own, cruder
+   * count of a work's fandoms.
+   */
+  searchCrossovers: { enabled: boolean, crossovers: Crossovers }
   /**
    * Click a work's chapter total (or the "Chapters:" label) on a listing for a
    * menu narrowing it to complete works or works in progress. Drives AO3's own

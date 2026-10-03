@@ -1,20 +1,14 @@
 import type { Options, WordCountRange } from '#common'
 
 import { formatWordCountRange, isValidRange } from '#common'
-import { searchFilterChanged } from '#content_script/pendingSearch.js'
-import { Unit } from '#content_script/Unit.js'
+import { DefaultSearchFilter } from '#content_script/defaultSearchFilter.js'
 import { getWordCountRange, setWordCountRange, wordCountControl } from '#content_script/wordCountFilter.js'
 
 /**
  * Pre-fill AO3's Word Count filter with a default range, so browsing defaults to
- * the lengths you actually read without dialling them in each time.
- *
- * The companion to {@link file://./DefaultSearchLanguage.ts}, and deliberately
- * the same deal: it runs at the same point (page ready), fills the same Sort &
- * Filter sidebar (plus the advanced search page's single `word_count` field),
- * and only when nothing is set yet — so a range already chosen, or one carried
- * in the page URL, is left alone. We only set the controls and say so; the
- * reader runs the search.
+ * the lengths you actually read without dialling them in each time — in the Sort
+ * & Filter sidebar's pair of fields, or the advanced search page's single
+ * `word_count` field.
  */
 
 /** The default range, or null when the setting is off or its bounds are unusable. */
@@ -26,40 +20,18 @@ export function resolveDefaultWordCount(options: Options): WordCountRange | null
   return isValidRange(range) ? range : null
 }
 
-/**
- * The default each word-count control has already been offered, so it is
- * offered once. The same arrangement as the language dropdown's, for the same
- * reason: every options change re-runs this unit, and a reader who cleared the
- * range without searching yet must not find it filled back in. Keyed by the
- * range so that changing the setting itself still reaches an open page.
- */
-const offered = new WeakMap<HTMLInputElement, string>()
-
-export class DefaultSearchWordCount extends Unit {
+export class DefaultSearchWordCount extends DefaultSearchFilter<WordCountRange, HTMLInputElement> {
   static override get name() { return 'DefaultSearchWordCount' }
 
-  override get enabled(): boolean {
-    return resolveDefaultWordCount(this.options) !== null
-  }
+  protected resolve() { return resolveDefaultWordCount(this.options) }
+  protected key(range: WordCountRange) { return `${range.from ?? ''}-${range.to ?? ''}` }
 
-  override async ready(): Promise<void> {
-    const range = resolveDefaultWordCount(this.options)
+  protected controls() {
     const control = wordCountControl(this.root)
-    if (!range || !control)
-      return
-
-    const key = `${range.from ?? ''}-${range.to ?? ''}`
-    if (offered.get(control) === key)
-      return
-    offered.set(control, key)
-
-    // Respect a range the user (or the URL) already put there.
-    if (getWordCountRange(this.root) !== null)
-      return
-
-    if (setWordCountRange(range, this.root)) {
-      this.logger.debug('Defaulted the word count filter.', range)
-      searchFilterChanged(`Word count filter set to ${formatWordCountRange(range)} words.`)
-    }
+    return control ? [control] : []
   }
+
+  protected isSet() { return getWordCountRange(this.root) !== null }
+  protected apply(_control: HTMLInputElement, range: WordCountRange) { return setWordCountRange(range, this.root) }
+  protected describe(range: WordCountRange) { return `Word count filter set to ${formatWordCountRange(range)} words.` }
 }
