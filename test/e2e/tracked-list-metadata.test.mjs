@@ -159,8 +159,14 @@ describe('tracked lists: what a list is, from its page', { skip }, () => {
     const before = requests.length
     await visit(tab, `${ARCHIVE}/tags/marriage%20problems`)
     await openBox(tab)
-    assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Additional tag: marriage problems')
+    // Titled as readers name an additional tag, so only what's stored shows the category was read.
+    assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Tag: marriage problems')
     assert.deepEqual(requests.slice(before).map(url => new URL(url).pathname), ['/tags/marriage%20problems'], 'only the page itself')
+    await clickBoxButton(tab, 'Track')
+    await sleep(1500)
+    const added = (await storedOption(tab)).lists.at(-1)
+    assert.equal(added.type, 'freeform')
+    assert.equal(added.alias, 'Tag: marriage problems')
   })
 
   test('a series\' page gives its title', async () => {

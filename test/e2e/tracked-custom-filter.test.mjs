@@ -27,7 +27,7 @@ const TAG_PATH = '/tags/marriage%20problems'
 const TAG_URL = `${ARCHIVE}${TAG_PATH}`
 const REVIEW_URL = `${ARCHIVE}/users/me/readings#ao3e-tracked`
 /** The title a new list of this tag gets: its category, read off the tag's own page, then its name. */
-const TITLE = 'Additional tag: marriage problems'
+const TITLE = 'Tag: marriage problems'
 
 resetWorkIds(7000)
 /**

@@ -105,12 +105,16 @@ export type TrackedType
     | 'series'
     | 'search'
 
-/** Each {@link TrackedType} as the reader reads it. */
+/**
+ * Each {@link TrackedType} as the reader reads it. An additional tag reads as a
+ * plain "Tag", the same as one whose category isn't known yet: readers call the
+ * archive's freeform tags tags, though every category is technically one.
+ */
 export const TRACKED_TYPE_LABELS: Readonly<Record<TrackedType, string>> = {
   fandom: 'Fandom',
   character: 'Character',
   relationship: 'Relationship',
-  freeform: 'Additional tag',
+  freeform: 'Tag',
   rating: 'Rating',
   warning: 'Warning',
   category: 'Category',

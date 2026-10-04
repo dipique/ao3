@@ -379,7 +379,7 @@ const NARROWED = {
   id: 'n4rr0w',
   kind: 'tag-works',
   url: '/tags/marriage%20problems',
-  alias: 'Additional tag: marriage problems',
+  alias: 'Tag: marriage problems',
   type: 'freeform',
   entity: 'marriage problems',
   filter: { facets: { characters: { ex: ['Draco Malfoy'] }, freeforms: { req: ['Fluff'] } }, words: [5000, null] },
@@ -468,13 +468,15 @@ describe('options UI — what each tracked list filters by', { skip }, () => {
       },
     }
   }))
+  /** The row for one of the seeded lists. */
+  const row = async list => (await rows()).find(r => r.title === list.alias)
 
   test('rows come in title order, as ever', async () => {
-    assert.deepEqual((await rows()).map(r => r.title), [NARROWED.alias, SIDEBAR.alias, CROWDED.alias, WHOLE.alias])
+    assert.deepEqual((await rows()).map(r => r.title), [SIDEBAR.alias, CROWDED.alias, WHOLE.alias, NARROWED.alias])
   })
 
   test('a view filter reads by name, in the words an update uses', async () => {
-    const { filters } = (await rows())[0]
+    const { filters } = await row(NARROWED)
     const line = 'Requires: Fluff · Excludes: Draco Malfoy · Word count: ≥ 5,000'
     assert.equal(filters.shown, line)
     assert.equal(filters.spoken, line, 'a screen reader gets the same text')
@@ -482,17 +484,17 @@ describe('options UI — what each tracked list filters by', { skip }, () => {
   })
 
   test('the archive\'s filters are counted, and the sort and relative date aren\'t among them', async () => {
-    const { filters } = (await rows())[1]
+    const { filters } = await row(SIDEBAR)
     assert.equal(filters.shown, '3 search filters')
     assert.equal(filters.spoken, '3 search filters')
   })
 
   test('a list with neither says nothing', async () => {
-    assert.equal((await rows())[3].filters, null)
+    assert.equal((await row(WHOLE)).filters, null)
   })
 
   test('more than fits: what fits, "+N more", and the rest in the tooltip and to a screen reader', async () => {
-    const { filters } = (await rows())[2]
+    const { filters } = await row(CROWDED)
     const full = '1 search filter · Excludes: Draco Malfoy, Ginny Weasley, Hermione Granger, Neville Longbottom, Ron Weasley'
     assert.equal(filters.shown, '1 search filter · Excludes: Draco Malfoy, Ginny Weasley +3 more')
     assert.equal(filters.tooltip, full)

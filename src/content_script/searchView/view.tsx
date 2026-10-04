@@ -14,6 +14,7 @@ import React from '#dom'
 
 import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FacetValueRef, FilterState, SortKey, StableDrop } from './engine.ts'
 import type { SearchViewPrefs } from './prefs.ts'
+import type { TextSearchPhase, WorkTextSearcher } from './textSearch.ts'
 
 import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
 import {
@@ -36,6 +37,7 @@ import {
 import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
 import { DEFAULT_STATUS, SIDEBAR_WIDTH } from './prefs.ts'
 import { pristineBlurb } from './pristine.ts'
+import { describeTextSearch, parseTextQuery } from './textSearch.ts'
 
 const ROOT = VIEW_ROOT
 /** Body class while the filter column is being dragged — see ReaderMode, same idea. */
@@ -94,6 +96,13 @@ export interface ViewState {
    * did and sliding a work off the next page onto one they have already read.
    */
   order?: string[]
+  /**
+   * The work-text search box ({@link SearchViewConfig.textSearch}) and, once a
+   * search over it has finished, the works it found. Carrying the answer lets a
+   * rebuilt view open showing it, rather than every work until the search has
+   * run again.
+   */
+  workText?: { query: string, hits?: string[] }
 }
 
 /**
@@ -277,9 +286,22 @@ export interface SearchViewConfig {
    * a frozen layout is worth less than works that never appear.
    */
   onUpdateDeferred?: (update: DeferredUpdate) => void
+  /**
+   * Search inside the works themselves, where the host holds copies of them.
+   * Draws a second search box whose results narrow the view like any filter,
+   * with an excerpt under each blurb showing where the text matched.
+   *
+   * No part of the {@link FilterState}: nothing that keeps a filter beyond the
+   * view (a tracked list, the saved prefs) could run it again, since it needs
+   * text that only this host has.
+   */
+  textSearch?: WorkTextSearcher
 }
 
 const DEFAULT_PER_PAGE = 50
+
+/** The wrapper HideWorks moves a collapsed blurb's contents into. */
+const HIDE_WRAPPER_CLASS = `${ADDON_CLASS}--hide-works--wrapper`
 
 /**
  * What a work holding a slot it no longer earns is told it is doing there —
@@ -428,6 +450,20 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // saved snapshot/prefs only once, on the first build. Later rebuilds (a
   // refresh) instead carry over the live on-screen state (see renderFacets).
   let facetUiRestored = false
+
+  // The work-text search: the query whose answer narrows the view and the works
+  // it found, and the search under way, if any. Kept out of `state` along with
+  // the rest of it; see `SearchViewConfig.textSearch`.
+  const textSearch = config.textSearch
+  const restoredText = textSearch ? config.initialState?.workText : undefined
+  let textApplied: { query: string, hits: Set<string> } | null
+    = restoredText?.hits && parseTextQuery(restoredText.query).length
+      ? { query: restoredText.query, hits: new Set(restoredText.hits) }
+      : null
+  let textRun: { query: string, controller: AbortController } | null = null
+  // Excerpts drawn into blurbs, all cut for `snippetQuery`.
+  const snippetEls = new Map<Work, HTMLElement>()
+  let snippetQuery = ''
 
   // Registry of facet rows, rebuilt whenever the facet list changes, so render()
   // can sync toggle state and live drill-down counts against the current filter
@@ -626,6 +662,129 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     filterChanged()
   }, 120))
 
+  const textInput = textSearch
+    ? (<input type="search" class={`${cx('input')}  ${cx('text-input')}`} placeholder='Words, or "a phrase"…' aria-label="Search inside works" />) as HTMLElement as HTMLInputElement
+    : null
+  const textStatus = (<p class={cx('text-status')} aria-live="polite" />) as HTMLElement
+  if (textInput) {
+    textInput.value = restoredText?.query ?? ''
+    // Slower than the box above: every pause starts a pass over the works.
+    textInput.addEventListener('input', debounce(() => searchText(textInput.value), 350))
+    textInput.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter')
+        searchText(textInput.value)
+    })
+  }
+
+  function showTextStatus(phase: TextSearchPhase): void {
+    textStatus.textContent = describeTextSearch(phase)
+  }
+
+  function showTextCoverage(): void {
+    if (textSearch)
+      showTextStatus({ kind: 'idle', searchable: pool.filter(work => textSearch.has(work.workId)).length, total: pool.length })
+  }
+
+  /**
+   * Search the works' text for `query`, abandoning whatever search is under way.
+   *
+   * A `restore` is the same search asked again on the reader's behalf — over a
+   * rebuilt view, or a fresh set of works — so it leaves their page where it is
+   * and redraws only if the answer changed. Anything else is the reader asking,
+   * and goes back to the first page like any other filter; a query that only
+   * differs in spacing or case asks nothing new and is ignored.
+   */
+  function searchText(query: string, { restore = false } = {}): void {
+    if (!textSearch)
+      return
+    const terms = parseTextQuery(query)
+    const asked = textRun?.query ?? textApplied?.query ?? ''
+    if (!restore && terms.join('\0') === parseTextQuery(asked).join('\0'))
+      return
+    textRun?.controller.abort()
+    textRun = null
+    if (!terms.length) {
+      showTextCoverage()
+      if (textApplied) {
+        textApplied = null
+        filterChanged()
+      }
+      return
+    }
+    const run = { query, controller: new AbortController() }
+    textRun = run
+    textSearch.search(pool.map(work => work.workId), query, {
+      signal: run.controller.signal,
+      onProgress: (done, total) => {
+        if (textRun === run)
+          showTextStatus({ kind: 'searching', done, total })
+      },
+    }).then(({ hits, searched, unavailable }) => {
+      if (textRun !== run)
+        return
+      textRun = null
+      const before = textApplied
+      textApplied = { query, hits }
+      showTextStatus({ kind: 'done', hits: hits.size, searched, unavailable })
+      if (!restore)
+        filterChanged()
+      else if (!before || before.query !== query || before.hits.size !== hits.size || [...hits].some(id => !before.hits.has(id)))
+        render()
+    }, (error: unknown) => {
+      if (textRun !== run)
+        return
+      textRun = null
+      showTextStatus({ kind: 'failed', message: error instanceof Error ? error.message : String(error) })
+    })
+  }
+
+  /** Empty the work-text search box, and stop narrowing the view by it. */
+  function clearTextSearch(): void {
+    if (!textInput)
+      return
+    textInput.value = ''
+    textRun?.controller.abort()
+    textRun = null
+    textApplied = null
+    showTextCoverage()
+  }
+
+  /**
+   * Under each blurb on the page that the applied work-text search found, the
+   * stretch of the work where it matched — and once that search is no longer
+   * the one applied, none of them.
+   */
+  function syncSnippets(page: Work[]): void {
+    const query = textApplied?.query ?? ''
+    if (query !== snippetQuery) {
+      for (const el of snippetEls.values())
+        el.remove()
+      snippetEls.clear()
+      snippetQuery = query
+    }
+    if (!textSearch || !textApplied)
+      return
+    for (const work of page) {
+      if (snippetEls.has(work) || !textApplied.hits.has(work.workId))
+        continue
+      const el = (<blockquote class={`${ADDON_CLASS}  ${cx('snippet')}`} />) as HTMLElement
+      snippetEls.set(work, el)
+      void textSearch.snippet(work.workId, query).then((snippet) => {
+        if (!snippet || snippetEls.get(work) !== el)
+          return
+        el.replaceChildren(
+          `${snippet.clippedStart ? '…' : ''}${snippet.before}`,
+          <mark>{snippet.match}</mark>,
+          `${snippet.after}${snippet.clippedEnd ? '…' : ''}`,
+        )
+        // Inside the wrapper of a work a rule has collapsed, so that the excerpt
+        // is put away with the rest of it.
+        const host = work.el.querySelector(`:scope > .${HIDE_WRAPPER_CLASS}`) ?? work.el
+        host.append(el)
+      })
+    }
+  }
+
   const sortSelect = (
     <select class={cx('select')} aria-label="Sort by">
       {(Object.keys(sortLabels) as SortKey[]).map(key => <option value={key}>{sortLabels[key]}</option>)}
@@ -682,6 +841,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     state.sort = fresh.sort
     state.dir = fresh.dir
     searchInput.value = ''
+    clearTextSearch()
     minInput.value = ''
     maxInput.value = ''
     sortSelect.value = state.sort
@@ -1349,7 +1509,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   function render(): void {
-    const { visible, facetCounts, resultCounts } = computeView(pool, state)
+    const applied = textApplied
+    const candidates = applied ? pool.filter(work => applied.hits.has(work.workId)) : pool
+    const { visible, facetCounts, resultCounts } = computeView(candidates, state)
 
     // Re-sort (and cache the order) only when the sort changed or the works did —
     // filtering never reorders, so this stays off the hot path.
@@ -1429,6 +1591,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       if (config.blurbAction)
         injectBlurbAction(work, config.blurbAction)
     }
+    syncSnippets(page)
 
     const noun = total === 1 ? 'work' : 'works'
     if (total === 0) {
@@ -1453,6 +1616,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     resultsOl.replaceChildren()
     mounted = new Set()
     shown = []
+    // A fresh set's blurbs are drawn from scratch, excerpts and all.
+    for (const el of snippetEls.values())
+      el.remove()
+    snippetEls.clear()
     sortSig = '' // new works; force a re-sort.
   }
 
@@ -1506,6 +1673,12 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // Selections may have been dropped just above; the re-mounted blurbs are
     // decorated fresh, but anything else watching the filter needs telling.
     notifyFacetChange()
+    // The works the text was searched over have changed under it.
+    const textQuery = textRun?.query ?? textApplied?.query
+    if (textQuery)
+      searchText(textQuery, { restore: true })
+    else
+      showTextCoverage()
   }
 
   function setUpdating(updating: boolean): void {
@@ -1536,6 +1709,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       // Only a view that holds its layout has one to hand on; for anything else
       // recording it would be an invitation to honour it later.
       ...(frozenOrder ? { order: [...frozenOrder] } : {}),
+      ...(textInput?.value
+        ? { workText: { query: textInput.value, ...(textApplied ? { hits: [...textApplied.hits] } : {}) } }
+        : {}),
     }
   }
 
@@ -1586,6 +1762,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   mountResults()
   renderFacets()
   render()
+  if (restoredText && parseTextQuery(restoredText.query).length)
+    searchText(restoredText.query, { restore: true })
+  else
+    showTextCoverage()
 
   const el = (
     <div class={`${ADDON_CLASS}  ${ROOT}`}>
@@ -1601,6 +1781,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
             <label class={cx('label')}>Search</label>
             {searchInput}
           </div>
+          {textInput && (
+            <div class={cx('field')}>
+              <label class={cx('label')}>Search inside works</label>
+              {textInput}
+              {textStatus}
+            </div>
+          )}
           <div class={cx('field')}>
             <label class={cx('label')}>Sort by</label>
             <div class={cx('sort-row')}>

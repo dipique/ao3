@@ -252,7 +252,8 @@ describe('trackedMeta', () => {
 describe('titles', () => {
   test('the default is "Type: entity", or the type alone', () => {
     assert.equal(defaultTitle({ type: 'character', entity: 'Draco Malfoy' }), 'Character: Draco Malfoy')
-    assert.equal(defaultTitle({ type: 'freeform', entity: 'Slow Burn' }), 'Additional tag: Slow Burn')
+    // What the archive calls an additional tag is what readers call a tag.
+    assert.equal(defaultTitle({ type: 'freeform', entity: 'Slow Burn' }), 'Tag: Slow Burn')
     assert.equal(defaultTitle(meta('/works?pseud_id=Grace+Notes&user_id=BuckysGrace')), 'Author: BuckysGrace')
     assert.equal(defaultTitle(meta('/works/search?work_search[query]=coffee+shop+AU')), 'Search: coffee shop AU')
     assert.equal(defaultTitle({ type: 'search', entity: '' }), 'Search')
