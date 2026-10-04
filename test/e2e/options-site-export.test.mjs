@@ -640,6 +640,85 @@ describe('options UI — site export', { skip }, () => {
   })
 
   /**
+   * The copies a file carries are searchable from it, as text: a phrase that is
+   * in one work's body and in no blurb, so the view's own search box could never
+   * have found it.
+   */
+  test('the saved works\' text can be searched from the file', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('console', m => m.type() === 'error' && errors.push(m.text()))
+    reader.on('pageerror', e => errors.push(e.message))
+    const VISIBLE = '.AO3E--search-view--results > li:not(.AO3E--search-view--hidden)'
+    const visibleIds = () => reader.$$eval(VISIBLE, els => els.map(el => el.id))
+    const statusLine = () => reader.$eval('.AO3E--search-view--text-status', el => el.textContent)
+    try {
+      await reader.goto(fileUrl(dir, 'library.html'), { waitUntil: 'load' })
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.equal(await statusLine(), 'Searches the saved text of all 3 works')
+
+      await reader.type('.AO3E--search-view--text-input', '"of work 12"')
+      await reader.keyboard.press('Enter')
+      await reader.waitForFunction(
+        sel => document.querySelectorAll(sel).length === 1,
+        { timeout: 10000 },
+        VISIBLE,
+      )
+      assert.deepEqual(await visibleIds(), ['work_12'])
+      assert.equal(await statusLine(), 'Found in 1 of 3 works')
+
+      // Why it matched, cut from the work's own text with the match marked.
+      await reader.waitForSelector('#work_12 .AO3E--search-view--snippet mark', { timeout: 10000 })
+      assert.equal(await reader.$eval('#work_12 .AO3E--search-view--snippet mark', el => el.textContent), 'of work 12')
+      assert.match(await reader.$eval('#work_12 .AO3E--search-view--snippet', el => el.textContent), /The rewritten text of work 12\./)
+
+      // Any settings change rebuilds the view — a mark does it too — and the
+      // search has to come through that with the box still saying what it found.
+      await reader.evaluate(() => {
+        document.querySelector('.AO3E--search-view').dataset.testOld = ''
+        return browser.storage.local.set({ 'option.searchPerPage': 20 })
+      })
+      await reader.waitForFunction(
+        () => {
+          const view = document.querySelector('.AO3E--search-view')
+          return view && !('testOld' in view.dataset)
+        },
+        { timeout: 10000 },
+      )
+      assert.equal(await reader.$eval('.AO3E--search-view--text-input', el => el.value), '"of work 12"')
+      assert.deepEqual(await visibleIds(), ['work_12'])
+      await reader.waitForSelector('#work_12 .AO3E--search-view--snippet mark', { timeout: 10000 })
+
+      // Every work's body has the word; no blurb does.
+      await reader.click('.AO3E--search-view--text-input', { count: 3 })
+      await reader.type('.AO3E--search-view--text-input', 'rewritten')
+      await reader.waitForFunction(sel => document.querySelectorAll(sel).length === 3, { timeout: 10000 }, VISIBLE)
+      await reader.waitForFunction(() => document.querySelector('.AO3E--search-view--text-status').textContent === 'Found in 3 of 3 works')
+      assert.equal(await reader.$$eval('.AO3E--search-view--snippet mark', els => els.length), 3)
+
+      // Emptying the box takes the search away, and its excerpts with it.
+      await reader.click('.AO3E--search-view--text-input', { count: 3 })
+      await reader.keyboard.press('Backspace')
+      await reader.waitForFunction(() => document.querySelectorAll('.AO3E--search-view--snippet').length === 0, { timeout: 10000 })
+      assert.equal(await statusLine(), 'Searches the saved text of all 3 works')
+
+      // Something no work's text holds leaves nothing showing.
+      await reader.type('.AO3E--search-view--text-input', 'dragon')
+      await reader.waitForFunction(sel => document.querySelectorAll(sel).length === 0, { timeout: 10000 }, VISIBLE)
+      assert.equal(await statusLine(), 'Not found in any of 3 works')
+
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
    * The reader's marks, filters and layout are kept on the one origin every
    * local file shares — so a re-export, which lands under a new name, still
    * finds what the last one left.

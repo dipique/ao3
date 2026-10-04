@@ -13,6 +13,7 @@ import { decorateBlurb, decorateContainer, makeFacetHider } from '#content_scrip
 import { applyHidden } from '#content_script/searchView/hidden.js'
 import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.js'
 import { applyStatus } from '#content_script/searchView/status.js'
+import { createWorkTextSearcher } from '#content_script/searchView/textSearch.js'
 import { createSearchView } from '#content_script/searchView/view.js'
 import { decompressEntry } from '#content_script/siteExport/compress.js'
 import { applySurfaceTheme } from '#content_script/theme.js'
@@ -86,6 +87,25 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   const blurbsHtml = JSON.parse(await decompressEntry(data.blurbs)) as string[]
   const texts = new Map(data.works.map(work => [work.id, work]))
   const listed = new Map(data.manifest.works.map(work => [work.id, work]))
+
+  /**
+   * The search inside the works, over the copies this file carries. Made once
+   * rather than per view: the view is rebuilt on every mark, and the text the
+   * searcher has already unpacked is what makes the next search cheap.
+   */
+  const textSearch = createWorkTextSearcher({
+    has: id => texts.has(id),
+    load: async (ids) => {
+      const unpacked = await Promise.allSettled(ids.map(id => decompressEntry(texts.get(id)!)))
+      const out: { [id: string]: string } = {}
+      // A damaged copy is one fewer work searched; opening it says what is wrong.
+      unpacked.forEach((result, i) => {
+        if (result.status === 'fulfilled')
+          out[ids[i]!] = result.value
+      })
+      return out
+    },
+  })
 
   const loaded = await options.get()
   const status = statusPanel(storage)
@@ -178,6 +198,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
       decorateBlurb: blurb => decorateBlurb(blurb, current, { hidesNothing }),
       decorateContainer: root => decorateContainer(root, current),
       hideFacetValue: makeFacetHider(current),
+      textSearch,
       initialState,
       prefs: await loadPrefs(sourceId),
       onPrefsChange: (next) => {

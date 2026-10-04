@@ -1622,6 +1622,26 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   box-sizing: border-box;
 }
 
+.AO3E--search-view--text-status {
+  margin: 0;
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
+.AO3E--search-view--text-status:empty {
+  display: none;
+}
+
+/* Where the work-text search matched, under the blurb it matched in. */
+.AO3E--search-view--snippet {
+  clear: both;
+  margin: 0.6em 0 0;
+  padding: 0.2em 0 0.2em 0.75em;
+  border-left: 3px solid var(--ao3e-surface-accent);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
 .AO3E--search-view--sort-row {
   display: flex;
   gap: 0.3em;
