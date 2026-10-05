@@ -284,6 +284,11 @@ export interface Options {
   textReplacements: { enabled: boolean, tools: boolean, rules: TextReplacement[] }
 
   theme: ThemeOption
+  /**
+   * Recolour AO3 itself in the extension's dark palette: a site skin laid over
+   * whichever one the reader chose on AO3 (see `content_script/darkSkin.ts`).
+   */
+  darkSkin: boolean
   user: { userId?: string }
 
   // Special case - see ./logger.ts

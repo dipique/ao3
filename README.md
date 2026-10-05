@@ -45,6 +45,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 - A floating button in the corner of AO3 pages holds quick actions: open the options, switch the menus off, toggle reader mode or the text replacement tools, "Track this search", and, with **Reveal filtered works** on, a peek at the works your filters hid.
 - **Collapsible dashboard sidebar** folds away the sidebar on your own user pages.
 - **Extension theme** (follow AO3, light or dark) for the extension's own pages and menus, and **Hide "muted author" notices**.
+- **Dark skin for AO3** recolours AO3 itself in the extension's dark palette, on top of any site skin you chose on AO3.
 
 ### Hiding and highlighting works
 
@@ -139,7 +140,7 @@ For development, `pnpm run start:chrome` and `pnpm run start:firefox` launch a b
 
 - **Where it runs:** only on `archiveofourown.org` and its subdomains. That is its one content-script match and its only host permission.
 - **What it sends:** requests go to AO3 and nowhere else. It loads the listing pages, works and chapter indexes its features need (search views, tracked lists, site export, chapter dates), looks up your subscription or Marked for Later state when a menu needs it, and performs the actions you choose from its menus. These requests carry your AO3 login, as your own browsing does. There is no analytics or telemetry.
-- **Where your data lives:** settings, marks and cached lists are kept in the browser's local extension storage. If you turn sync on, settings travel through the browser's own sync service (your Firefox or Google account) and nowhere else. Backups stay on the device. Reader mode's text size, the dashboard sidebar's folded state and which tracked list a tab is refining are kept in AO3's page storage on that device.
+- **Where your data lives:** settings, marks and cached lists are kept in the browser's local extension storage. If you turn sync on, settings travel through the browser's own sync service (your Firefox or Google account) and nowhere else. Backups stay on the device. Reader mode's text size, the dashboard sidebar's folded state, whether the dark skin is on (so the next page can apply it before it's drawn) and which tracked list a tab is refining are kept in AO3's page storage on that device.
 - **Permissions:** `storage` for settings and cached lists; `unlimitedStorage` because cached lists and exported work text outgrow the default quota; `contextMenus` for the entries in the browser's right-click menu; `alarms` to schedule sync.
 
 ## Developing

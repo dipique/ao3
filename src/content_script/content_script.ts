@@ -3,6 +3,7 @@ import { debounce } from '@antfu/utils'
 import { ADDON_CLASS, api, isExtensionContextValid, logBanner, logger, options, toast } from '#common'
 
 import { setMenusEnabled } from './contextTrigger.tsx'
+import { applyDarkSkin, applyRememberedDarkSkin } from './darkSkin.ts'
 import { serveMarkRequests } from './markForLater.ts'
 import { captureSearchBaseline, installPendingSearch } from './pendingSearch.ts'
 import { applySurfaceTheme } from './theme.ts'
@@ -41,6 +42,10 @@ async function run() {
   }
 
   const opts = await options.get()
+  // Before waiting on the page, so a skin switched on since the last page still
+  // lands ahead of the first paint if it can. Every re-run passes through here,
+  // which is what makes the switch work without a reload.
+  applyDarkSkin(opts.darkSkin)
   // Seed the context-menu enable flag before any unit decorates the page.
   setMenusEnabled(opts.contextMenusEnabled)
   const units = UNITS.map(U => new U(opts))
@@ -93,6 +98,10 @@ api.getTag.addListener(async (linkUrl) => {
 api.toast.addListener(async (...args) => {
   toast(...args)
 })
+
+// The dark skin, if the last page had it: the options aren't read yet, and it
+// has to be in place before the first paint.
+applyRememberedDarkSkin()
 
 // Make a Marked for Later request on behalf of a page that is not on AO3. The
 // archive-side half of replaying a site export's changes normally runs straight

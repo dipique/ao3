@@ -40,7 +40,7 @@ import type { Options } from './options.ts'
  * and the default `lists` is empty, so the recorded shape didn't move. An older
  * build would read a filtered list as unfiltered.
  */
-export const SYNC_SCHEMA_VERSION = 7
+export const SYNC_SCHEMA_VERSION = 8
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400

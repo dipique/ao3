@@ -98,13 +98,20 @@
 
     <OptionSubsection
       title="Appearance"
-      subtitle="How the extension's own pages, menus and additions to AO3 look."
+      subtitle="How the extension's own pages, menus and additions to AO3 look, and AO3 itself if you want it dark."
     >
       <OptionRow
         title="Extension theme"
-        subtitle="Light or dark for the extension's own pages, menus and popups. AO3's own colours come from the site skin you chose there."
+        subtitle="Light or dark for the extension's own pages, menus and popups. AO3's own colours come from the site skin you chose there, or from the dark skin below."
       >
         <OptionTheme />
+      </OptionRow>
+      <OptionDivider />
+      <OptionRow
+        title="Dark skin for AO3"
+        subtitle="Recolours AO3 itself to match the extension's dark theme. If you already use a site skin chosen on AO3, this one goes on top of it."
+      >
+        <OptionSwitch option-id="darkSkin" />
       </OptionRow>
       <OptionDivider />
       <OptionRow

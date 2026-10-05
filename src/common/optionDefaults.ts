@@ -74,6 +74,7 @@ export const OPTION_DEFAULTS: Options = {
   textReplacements: { enabled: false, tools: false, rules: [] },
 
   theme: { chosen: 'inherit', current: 'light' },
+  darkSkin: false,
   user: { },
 
   verbose: false,

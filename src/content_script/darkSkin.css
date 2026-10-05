@@ -1,0 +1,1030 @@
+/* Dark site skin for archiveofourown.org, built on the extension's dark tokens.
+
+   The `darkSkin` option injects it after AO3's own stylesheets (see
+   darkSkin.ts). It is also a valid AO3 site skin as it stands: paste it into a
+   new Site Skin with Role "add on to archive skin" and Media "screen" to use it
+   without the extension.
+
+   It only recolours: AO3's own layout, fonts and spacing are untouched, so it
+   reads as the same site at night rather than a different one.
+
+   It wins over AO3 by coming later, never by !important or added specificity,
+   so it has to stay last in the cascade -- and AO3's skin sanitizer shapes how
+   it is written: no calc(), no @media, var() without a fallback, rgba() with
+   commas, one line per declaration. */
+
+/* ==== Tokens ============================================================= */
+
+:root {
+  color-scheme: dark;
+
+  --skin-default: #09090b;
+  --skin-default-fg: #ffffff;
+  --skin-fg: #e4e4e7;
+  --skin-card: #18181b;
+  --skin-popover: #1f1f23;
+  --skin-secondary: #27272a;
+  --skin-muted-fg: #a1a1aa;
+  --skin-border: #3f3f46;
+  --skin-hair: #2a2a2f;
+  --skin-line: #71717a;
+
+  --skin-primary: #990000;
+  --skin-primary-fg: #ffffff;
+  --skin-brand-fg: #d96666;
+  --skin-on-tint: rgba(217, 102, 102, 0.14);
+  --skin-on-edge: rgba(217, 102, 102, 0.38);
+
+  --skin-ring: #3b82f6;
+  --skin-info-tint: rgba(59, 130, 246, 0.12);
+  --skin-info-edge: rgba(59, 130, 246, 0.4);
+  --skin-destructive: #dc2626;
+  --skin-danger-tint: rgba(220, 38, 38, 0.14);
+  --skin-warning: #f59e0b;
+  --skin-warning-tint: rgba(245, 158, 11, 0.12);
+  --skin-success: #4ade80;
+  --skin-success-tint: rgba(74, 222, 128, 0.12);
+
+  --skin-shadow: rgba(0, 0, 0, 0.55);
+}
+
+/* ==== Ground, text, links ================================================ */
+
+html {
+  background: var(--skin-default);
+  scrollbar-color: rgba(161, 161, 170, 0.3) var(--skin-default);
+}
+
+/* .javascript is <body> once AO3's script has run; the narrow-screen sheet
+   paints it grey behind the filter drawer. The extension samples <body> to
+   decide its own theme, so it has to be dark here too. */
+body,
+.javascript,
+#outer,
+.dropdown {
+  background: var(--skin-default);
+  color: var(--skin-fg);
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.35);
+  color: var(--skin-default-fg);
+}
+
+a,
+a:link,
+a:visited:hover {
+  color: var(--skin-default-fg);
+  border-bottom-color: var(--skin-line);
+}
+
+a:visited {
+  color: var(--skin-muted-fg);
+  border-bottom-color: var(--skin-line);
+}
+
+a:hover {
+  color: var(--skin-brand-fg);
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--skin-ring);
+  outline-offset: 2px;
+}
+
+hr {
+  border-bottom-color: var(--skin-border);
+}
+
+/* ==== Tables ============================================================= */
+
+table {
+  background: var(--skin-card);
+}
+
+thead,
+tfoot {
+  border-bottom-color: var(--skin-border);
+}
+
+tfoot td {
+  border-top-color: var(--skin-border);
+}
+
+tbody tr {
+  border-bottom-color: var(--skin-hair);
+}
+
+thead td {
+  background: var(--skin-secondary);
+  border-bottom-color: var(--skin-hair);
+}
+
+th,
+tr:hover,
+col.name {
+  background: var(--skin-secondary);
+  border-color: var(--skin-border);
+}
+
+.userstuff tr:hover {
+  background: transparent;
+}
+
+/* ==== Header ============================================================= */
+
+/* The red band goes quiet: one card-coloured bar, with AO3's red carried by
+   the logo and the site title. */
+#header {
+  background: var(--skin-card);
+  border-bottom: 1px solid var(--skin-border);
+}
+
+#header a,
+#header a:visited,
+#header .primary .open a,
+#header .primary .dropdown:hover a,
+#header .primary .dropdown a:focus {
+  color: var(--skin-default-fg);
+}
+
+#header .actions a:hover,
+#header .actions a:focus {
+  background: var(--skin-secondary);
+}
+
+/* An open menu's toggle shares the menu's colour, so the two read as one tab. */
+#header .dropdown:hover a,
+#header .open a {
+  background: var(--skin-popover);
+}
+
+#header .heading a {
+  color: var(--skin-brand-fg);
+}
+
+/* Takes the logo's #990000 to brand-fg #d96666: desaturate toward grey, then
+   lift. Same hue as the title beside it. */
+#header .logo {
+  filter: saturate(0.194) brightness(3.88);
+}
+
+#header .menu,
+#small_login {
+  background: var(--skin-popover);
+  border: 1px solid var(--skin-border);
+  box-shadow: 0 8px 24px var(--skin-shadow);
+}
+
+#header .menu li {
+  border-bottom-color: var(--skin-hair);
+}
+
+#header .dropdown .menu a {
+  background: transparent;
+}
+
+#header .dropdown .menu a:hover,
+#header .dropdown .menu a:focus {
+  background: var(--skin-secondary);
+}
+
+#header .user a:hover,
+#header .user a:focus {
+  color: var(--skin-brand-fg);
+}
+
+#login .open a:hover,
+#login .open a:focus {
+  background: var(--skin-secondary);
+}
+
+#greeting .menu {
+  box-shadow: 0 8px 24px var(--skin-shadow);
+}
+
+#header .primary {
+  background: transparent;
+  box-shadow: inset 0 1px 0 var(--skin-hair);
+}
+
+#header .primary a {
+  color: var(--skin-default-fg);
+}
+
+#header .primary .menu a {
+  color: var(--skin-default-fg);
+}
+
+#header .search {
+  color: var(--skin-fg);
+}
+
+#header #search .text {
+  background: var(--skin-default);
+  color: var(--skin-default-fg);
+  box-shadow: inset 0 0 0 1px var(--skin-border);
+}
+
+#header #search input:focus {
+  color: var(--skin-default-fg);
+}
+
+#header h2 {
+  border-top-color: var(--skin-hair);
+  color: var(--skin-default-fg);
+}
+
+/* The narrow-screen sheet resets focused header links to #111 text. */
+#header .dropdown a:focus,
+#header .dropdown .menu a:focus,
+#header .primary .dropdown a:focus,
+#header .primary .open a:focus {
+  color: var(--skin-default-fg);
+}
+
+#header .open a:focus {
+  background: var(--skin-popover);
+}
+
+#header .user .open a:focus {
+  color: var(--skin-brand-fg);
+}
+
+/* ==== Dashboard (user pages' side menu) ================================== */
+
+#dashboard a,
+#dashboard span {
+  color: var(--skin-default-fg);
+}
+
+#dashboard a:hover {
+  background: var(--skin-secondary);
+  color: var(--skin-brand-fg);
+}
+
+#dashboard ul {
+  border-top-color: var(--skin-border);
+}
+
+#dashboard .current {
+  background: var(--skin-on-tint);
+  color: var(--skin-brand-fg);
+}
+
+/* The bars that mark your own dashboard stay AO3 red: they are a fill. */
+#dashboard,
+#dashboard.own {
+  border-top-color: var(--skin-primary);
+  border-bottom-color: var(--skin-primary);
+}
+
+#dashboard .secondary {
+  background: var(--skin-card);
+  box-shadow: none;
+}
+
+/* ==== Footer ============================================================= */
+
+#footer {
+  background: var(--skin-card);
+  border-top: 1px solid var(--skin-border);
+  color: var(--skin-fg);
+}
+
+#footer a,
+#footer button {
+  color: var(--skin-muted-fg);
+}
+
+#footer a:hover,
+#footer button:hover {
+  color: var(--skin-brand-fg);
+}
+
+#footer .heading {
+  color: var(--skin-default-fg);
+}
+
+/* ==== Forms ============================================================== */
+
+fieldset,
+form dl,
+fieldset dl dl,
+fieldset fieldset fieldset,
+fieldset fieldset dl dl,
+dd.hideme,
+form blockquote.userstuff {
+  background: var(--skin-card);
+  border: 1px solid var(--skin-border);
+  box-shadow: none;
+}
+
+fieldset dl,
+fieldset.actions,
+fieldset dl fieldset dl {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+fieldset fieldset,
+fieldset dl dl,
+form blockquote.userstuff {
+  background: var(--skin-default);
+}
+
+li.blurb {
+  border-color: var(--skin-border);
+}
+
+input,
+textarea,
+select {
+  background: var(--skin-default);
+  color: var(--skin-default-fg);
+  border: 1px solid var(--skin-border);
+  box-shadow: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  background: var(--skin-default);
+  border-color: var(--skin-ring);
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--skin-primary);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--skin-muted-fg);
+  opacity: 1;
+}
+
+form dt {
+  border-bottom-color: var(--skin-hair);
+}
+
+form dd.required,
+.post .required .warnings,
+dd.required {
+  color: var(--skin-fg);
+}
+
+.LV_invalid {
+  background: var(--skin-danger-tint);
+  border: 1px solid var(--skin-destructive);
+  color: var(--skin-brand-fg);
+  box-shadow: none;
+}
+
+.LV_invalid_field,
+input.LV_invalid_field:hover,
+input.LV_invalid_field:active,
+textarea.LV_invalid_field:hover,
+textarea.LV_invalid_field:active {
+  border: 1px solid var(--skin-destructive);
+}
+
+.LV_invalid:before {
+  border-color: var(--skin-destructive) transparent;
+}
+
+form.verbose legend,
+.verbose form legend {
+  background: var(--skin-card);
+  border: 1px solid var(--skin-border);
+  box-shadow: none;
+}
+
+form.single fieldset,
+.authentication fieldset {
+  background: transparent;
+  border: 1px solid var(--skin-border);
+}
+
+/* ==== Autocomplete, sortable lists, pickers, tooltips ==================== */
+
+.autocomplete div.dropdown ul {
+  background: var(--skin-popover);
+  border: 1px solid var(--skin-border);
+  color: var(--skin-fg);
+  box-shadow: 0 8px 24px var(--skin-shadow);
+}
+
+.autocomplete .dropdown ul li:hover,
+.autocomplete .dropdown li.selected {
+  background: var(--skin-primary);
+  color: var(--skin-primary-fg);
+}
+
+.required .autocomplete,
+.autocomplete .notice {
+  color: var(--skin-fg);
+}
+
+.ui-sortable li {
+  background: var(--skin-card);
+  border-color: var(--skin-border);
+}
+
+.ui-sortable li:hover {
+  background: var(--skin-secondary);
+  border-color: var(--skin-line);
+  box-shadow: none;
+}
+
+.ui-draggable form {
+  box-shadow: 0 8px 24px var(--skin-shadow);
+}
+
+#ui-datepicker-div {
+  background: var(--skin-popover);
+  box-shadow: 0 8px 24px var(--skin-shadow);
+}
+
+.ui-datepicker table {
+  background: var(--skin-card);
+}
+
+.ui-datepicker td {
+  border-color: var(--skin-border);
+}
+
+.ui-datepicker tr:hover {
+  background: var(--skin-secondary);
+}
+
+.ui-datepicker td:hover {
+  background: var(--skin-on-tint);
+}
+
+.qtip-content,
+.search [role='tooltip'] {
+  background: var(--skin-popover);
+  border: 1px solid var(--skin-border);
+  color: var(--skin-fg);
+}
+
+/* ==== Modal and pop-out forms ============================================ */
+
+#modal {
+  background: var(--skin-popover);
+  border-color: var(--skin-card);
+  box-shadow: 0 16px 48px var(--skin-shadow);
+}
+
+#modal .content {
+  border-bottom-color: var(--skin-hair);
+}
+
+div.dynamic {
+  background: var(--skin-popover);
+}
+
+.toggled form,
+.dynamic form,
+.secondary {
+  background: var(--skin-popover);
+  color: var(--skin-fg);
+  border: 1px solid var(--skin-border);
+  box-shadow: 0 8px 24px var(--skin-shadow);
+}
+
+.dynamic form fieldset,
+.toggled form fieldset,
+.toggled form dl,
+.secondary .toggled form,
+.secondary form {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.work.navigation .download,
+.javascript .work.navigation .download .secondary {
+  background: var(--skin-popover);
+  border: 1px solid var(--skin-border);
+  box-shadow: 0 8px 24px var(--skin-shadow);
+}
+
+.work.navigation .download .secondary,
+.javascript .work.navigation .download {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+/* ==== Buttons ============================================================ */
+
+.actions a,
+.actions a:link,
+.action,
+.action:link,
+.actions button,
+.actions input,
+input[type='submit'],
+button,
+.current,
+.actions label {
+  background: var(--skin-secondary);
+  color: var(--skin-fg);
+  border: 1px solid var(--skin-border);
+  box-shadow: none;
+}
+
+.actions a:visited,
+.action:visited,
+.action a:link,
+.action a:visited {
+  color: var(--skin-fg);
+}
+
+.actions a:hover,
+.actions button:hover,
+.actions input:hover,
+.actions a:focus,
+.actions button:focus,
+.actions input:focus,
+label.action:hover,
+.action:hover,
+.action:focus {
+  background: var(--skin-border);
+  color: var(--skin-default-fg);
+  border-color: var(--skin-line);
+  box-shadow: none;
+}
+
+/* The page you are on, the tab that is open: the extension's "on" chip. */
+.actions a:active,
+.current,
+a.current,
+a:link.current,
+.current a:visited {
+  background: var(--skin-on-tint);
+  color: var(--skin-brand-fg);
+  border-color: var(--skin-on-edge);
+  box-shadow: none;
+}
+
+.actions label.disabled {
+  background: var(--skin-card);
+  color: var(--skin-muted-fg);
+}
+
+.actions .disabled select {
+  background: transparent;
+  color: var(--skin-fg);
+  border-color: var(--skin-border);
+}
+
+.actions a.symbol,
+.action a {
+  border: 0;
+  background: none;
+}
+
+.delete a,
+span.delete {
+  color: var(--skin-brand-fg);
+  box-shadow: none;
+}
+
+/* ==== Status marks ======================================================= */
+
+.own,
+.draft,
+.draft .wrapper,
+.unread,
+.child,
+.unwrangled,
+.unreviewed {
+  background: var(--skin-card);
+}
+
+.draft {
+  border-color: var(--skin-line);
+}
+
+span.unread,
+.replied,
+span.claimed,
+.actions span.defaulted {
+  background: var(--skin-secondary);
+  color: var(--skin-brand-fg);
+  border: 1px solid var(--skin-border);
+}
+
+.actions span.defaulted {
+  color: var(--skin-fg);
+}
+
+.draggable,
+.droppable,
+span.requested,
+.nominations .rejected {
+  color: var(--skin-brand-fg);
+}
+
+span.offered,
+.replied,
+.nominations .approved {
+  color: var(--skin-success);
+}
+
+.nominations .approved {
+  background: var(--skin-success-tint);
+}
+
+.nominations .rejected {
+  background: var(--skin-danger-tint);
+}
+
+span.offered.requested {
+  color: var(--skin-warning);
+}
+
+/* ==== Tags =============================================================== */
+
+a.tag {
+  color: var(--skin-default-fg);
+  border-bottom-color: var(--skin-line);
+}
+
+a.tag:hover,
+.listbox .heading a.tag:visited:hover {
+  background: var(--skin-primary);
+  color: var(--skin-primary-fg);
+}
+
+a.cloud1 {
+  color: #71717a;
+}
+a.cloud2 {
+  color: #8a8a93;
+}
+a.cloud3 {
+  color: #a1a1aa;
+}
+a.cloud4 {
+  color: #c4c4cc;
+}
+a.cloud5 {
+  color: #e4e4e7;
+}
+a.cloud6 {
+  color: #e8a3a3;
+}
+a.cloud7 {
+  color: #df8585;
+}
+a.cloud8 {
+  color: #d96666;
+}
+
+/* ==== Listings, blurbs, meta ============================================= */
+
+/* The soft drop shadow AO3 puts round a work's or series' info box vanishes
+   on a dark ground; the box's own 1px border is frame enough. */
+.wrapper {
+  box-shadow: none;
+}
+
+dl.index dd {
+  background: var(--skin-card);
+}
+
+a.work,
+.blurb h4 a:link,
+.blurb h4 img {
+  color: var(--skin-brand-fg);
+}
+
+li.relationships a {
+  background: var(--skin-card);
+}
+
+.actions .reindex a {
+  border-bottom-color: var(--skin-primary);
+}
+
+span.series .divider {
+  color: var(--skin-muted-fg);
+}
+
+.statistics .index li:nth-of-type(even) {
+  background: var(--skin-card);
+}
+
+.listbox,
+fieldset fieldset.listbox {
+  background: var(--skin-card);
+  border: 1px solid var(--skin-border);
+  box-shadow: none;
+}
+
+.listbox > .heading,
+.listbox .heading a:visited {
+  color: var(--skin-fg);
+}
+
+.listbox .index {
+  background: var(--skin-default);
+  box-shadow: none;
+}
+
+dl.meta {
+  border-color: var(--skin-border);
+}
+
+dl.meta .wrapper {
+  border-bottom-color: var(--skin-hair);
+}
+
+.picture .header {
+  border-bottom-color: var(--skin-hair);
+}
+
+.item dl.visibility {
+  background: var(--skin-card);
+}
+
+.bookmark .count a {
+  color: var(--skin-ring);
+}
+
+.bookmark .count a:hover,
+.bookmark .count a:focus {
+  color: var(--skin-default-fg);
+}
+
+.bookmark .user {
+  border-color: var(--skin-border);
+}
+
+.reading h4.viewed {
+  background: var(--skin-card);
+}
+
+/* ==== Work page and comments ============================================= */
+
+.chapter .preface {
+  border-top-color: var(--skin-border);
+}
+
+.preface h3 {
+  border-bottom-color: var(--skin-border);
+}
+
+div.comment,
+li.comment {
+  border-color: var(--skin-border);
+}
+
+.comment div.icon {
+  border-bottom-color: var(--skin-border);
+}
+
+.comment h4.byline {
+  background: var(--skin-secondary);
+}
+
+.thread .even {
+  background: var(--skin-card);
+}
+
+/* ==== Text the archive and its creators write ============================ */
+
+.userstuff h2 {
+  color: var(--skin-default-fg);
+}
+
+.userstuff h3,
+.faq .categories h3,
+.tos .userstuff nav.toc > details > summary {
+  border-bottom-color: var(--skin-border);
+}
+
+.userstuff blockquote,
+.userstuff address {
+  border-inline-start-color: var(--skin-line);
+}
+
+.userstuff hr {
+  border-color: var(--skin-border);
+}
+
+/* ==== Notices ============================================================ */
+
+.required,
+.error,
+.alert.flash {
+  color: var(--skin-brand-fg);
+}
+
+.notice,
+.comment_notice,
+.kudos_notice,
+ul.notes,
+.caution,
+.error,
+.comment_error,
+.kudos_error,
+.alert.flash {
+  background: var(--skin-info-tint);
+  border: 1px solid var(--skin-info-edge);
+  box-shadow: none;
+}
+
+.caution {
+  background: var(--skin-warning-tint);
+  color: var(--skin-fg);
+  border-color: var(--skin-warning);
+}
+
+.error,
+.comment_error,
+.kudos_error,
+.alert.flash {
+  background: var(--skin-danger-tint);
+  border-color: var(--skin-destructive);
+}
+
+form .notice,
+form ul.notes {
+  box-shadow: none;
+}
+
+.annotation {
+  background: var(--skin-card);
+  border-color: var(--skin-border);
+}
+
+.announcement .userstuff {
+  background: var(--skin-info-tint);
+  border-color: var(--skin-info-edge);
+  color: var(--skin-fg);
+}
+
+.announcement .action {
+  background: var(--skin-secondary);
+  border-color: var(--skin-border);
+}
+
+.alert .userstuff {
+  background: var(--skin-warning-tint);
+  border-color: var(--skin-warning);
+  color: var(--skin-fg);
+}
+
+.announcement .thermometer .track {
+  background: var(--skin-card);
+  border-color: var(--skin-border);
+}
+
+#tos_prompt {
+  background: var(--skin-popover);
+}
+
+#tos_prompt .heading {
+  background: var(--skin-primary);
+  color: var(--skin-primary-fg);
+}
+
+#tos_prompt [disabled] {
+  background: var(--skin-secondary);
+}
+
+#proxy-notice {
+  background: var(--skin-danger-tint);
+  border-bottom-color: var(--skin-destructive);
+}
+
+/* ==== Help symbols ======================================================= */
+
+span.symbol {
+  color: var(--skin-muted-fg);
+}
+
+span.question {
+  background: var(--skin-secondary);
+  border-color: var(--skin-border);
+  box-shadow: none;
+}
+
+.question a:hover {
+  background: var(--skin-ring);
+  border-color: var(--skin-ring);
+  color: var(--skin-default-fg);
+}
+
+#symbols-key dl,
+.faq .example,
+.guideline .example {
+  border-color: var(--skin-border);
+}
+
+/* ==== Search and filters ================================================= */
+
+form.search input[type='text'] {
+  border-top-color: var(--skin-border);
+}
+
+.filters .expander,
+.filters .expanded .expander {
+  background: none;
+  color: var(--skin-fg);
+}
+
+/* AO3 draws the disclosure arrows with dark GIFs that disappear on a dark
+   ground; these are the same triangles drawn in CSS. */
+.filters .expander:before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  margin-top: -4px;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent var(--skin-muted-fg);
+}
+
+.filters .expanded .expander:before {
+  left: 1px;
+  margin-top: -3px;
+  border-width: 6px 4px 0 4px;
+  border-color: var(--skin-muted-fg) transparent transparent transparent;
+}
+
+.filters .group dt.bookmarker {
+  border-top-color: var(--skin-hair);
+}
+
+/* Unticked boxes still draw a tick, kept as faint as AO3's grey-on-grey. */
+.filters .indicator:before {
+  background: var(--skin-default);
+  color: var(--skin-border);
+  border-color: var(--skin-border);
+}
+
+.filters input:checked + .indicator:before {
+  border-color: var(--skin-line);
+}
+
+.filters [type='checkbox']:checked + .indicator:before {
+  background: var(--skin-success-tint);
+  color: var(--skin-success);
+}
+
+.filters [type='radio']:checked + .indicator:before {
+  background: var(--skin-default);
+  background-image: radial-gradient(circle, var(--skin-default-fg) 0%, var(--skin-default-fg) 28%, transparent 36%);
+}
+
+.filters .exclude [type='checkbox']:checked + .indicator:before {
+  background: var(--skin-danger-tint);
+  color: var(--skin-brand-fg);
+}
+
+/* ==== Front page ========================================================= */
+
+.splash .module h3 {
+  border-bottom-color: var(--skin-border);
+  color: var(--skin-brand-fg);
+}
+
+.splash .browse li a:before {
+  color: var(--skin-brand-fg);
+}
+
+.splash .favorite li:nth-of-type(odd) a {
+  background: var(--skin-card);
+}
+
+.splash .favorite li:nth-of-type(odd) a:hover,
+.splash .favorite li:nth-of-type(odd) a:focus {
+  background: var(--skin-primary);
+  color: var(--skin-primary-fg);
+}
+
+.splash .module div.account {
+  background: var(--skin-card);
+  border-color: var(--skin-border);
+}
+
+.splash .news li {
+  border-bottom-color: var(--skin-hair);
+}
+
+.home .header h2 {
+  border-bottom-color: var(--skin-border);
+}
