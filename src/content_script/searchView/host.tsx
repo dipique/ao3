@@ -624,7 +624,7 @@ function undecorated(works: Work[]): Work[] {
  */
 function prepare(source: SearchSource, works: Work[], options: Options, fresh: boolean): FacetValueRef[] {
   source.prepare?.(works, { fresh })
-  return applyHidden(works, options, { hidesNothing: source.hidesNothing })
+  return applyHidden(works, options, { hidesNothing: source.hidesNothing, log: log.log })
 }
 
 /** Write the blurb snapshot, plus whatever else the source keeps in step with it. */

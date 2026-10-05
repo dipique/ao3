@@ -70,14 +70,27 @@ function symbol([cls, title]) {
   return `<li><a class="help symbol question modal" href="/help/symbols-key.html"><span class="${cls}" title="${title}"><span class="text">${title}</span></span></a></li>`
 }
 
+/** A page of the export, with nothing in it but `body` and the skin. */
+function skinned(body) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${stylesheet()}</style></head>
+<body class="ao3e-site">
+${body}</body></html>`
+}
+
+/** Where an element landed. */
+function box(page, selector) {
+  return page.$eval(selector, (el) => {
+    const r = el.getBoundingClientRect()
+    return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom }
+  })
+}
+
 /**
  * A blurb with everything the skin has an opinion about — the four symbols, the
  * date, the landmark captions, an inner list, a summary and the stats line.
  */
 function page(symbols) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>${stylesheet()}</style></head>
-<body class="ao3e-site">
-<ol class="work index group AO3E--search-view--results">
+  return skinned(`<ol class="work index group AO3E--search-view--results">
   <li id="work_11" class="work blurb group" role="article">
     <div class="header module">
       <h4 class="heading"><a href="https://archiveofourown.org/works/11">A work</a> by <a rel="author" href="#">someone</a></h4>
@@ -93,7 +106,20 @@ function page(symbols) {
     <ul class="series"><li>Part <strong>1</strong> of <a href="#">A Series</a></li></ul>
     <dl class="stats"><dt class="words">Words:</dt><dd class="words">5,000</dd></dl>
   </li>
-</ol></body></html>`
+</ol>`)
+}
+
+/**
+ * The panel above the list, as `statusPanel` builds it once a journal is open:
+ * the unexported count (hidden while there is none), what this browser keeps,
+ * and the export button with the line it answers in.
+ */
+function statusPage({ pending = '', said = '' } = {}) {
+  return skinned(`<div class="AO3E--site--status" data-ao3e-writable="true" data-ao3e-pending="${pending ? 1 : 0}">
+  <p class="AO3E--site--status-pending"${pending ? '' : ' hidden'}>${pending}</p>
+  <p class="AO3E--site--status-keep">Local updates enabled, BUT save/export often if you're on Android/iOS; browsers will discard your data without warning! Archive opened 4x as of 19 hours ago.</p>
+  <p class="AO3E--site--status-actions"><button type="button" class="AO3E--site--status-export">Export changes</button><span class="AO3E--site--status-said">${said}</span></p>
+</div>`)
 }
 
 describe('site export — the blurb skin', { skip }, () => {
@@ -109,10 +135,7 @@ describe('site export — the blurb skin', { skip }, () => {
 
   after(async () => browser?.close())
 
-  const box = selector => view.$eval(selector, (el) => {
-    const r = el.getBoundingClientRect()
-    return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom }
-  })
+  const at = selector => box(view, selector)
 
   /**
    * AO3 ships these captions for screen readers and hides them; without a rule
@@ -152,9 +175,9 @@ describe('site export — the blurb skin', { skip }, () => {
   /** The bug that started this: floated, it landed halfway down the card. */
   test('the date sits in the corner, level with the title', async () => {
     const [blurb, date, title] = await Promise.all([
-      box('li.blurb'),
-      box('.blurb .datetime'),
-      box('.blurb .header h4'),
+      at('li.blurb'),
+      at('.blurb .datetime'),
+      at('.blurb .header h4'),
     ])
     assert.ok(date.y < title.bottom, 'the date should start no lower than the title it belongs to')
     assert.ok(date.right <= blurb.right, 'and stay inside the card')
@@ -180,7 +203,7 @@ describe('site export — the blurb skin', { skip }, () => {
     assert.equal(new Set(cells.map(c => Math.round(c.x))).size, 2)
     assert.equal(new Set(cells.map(c => Math.round(c.y))).size, 2)
 
-    const [square, title] = await Promise.all([box('.blurb ul.required-tags'), box('.blurb .header h4')])
+    const [square, title] = await Promise.all([at('.blurb ul.required-tags'), at('.blurb .header h4')])
     assert.ok(square.right <= title.x, 'the title should clear the square, not overlap it')
     assert.ok(title.x - square.right < 24, 'and not by a mile')
   })
@@ -229,5 +252,54 @@ describe('site export — the blurb skin', { skip }, () => {
     await view.setContent(page(QUAD), { waitUntil: 'load' })
     const border = await view.$eval('.blurb .summary', el => getComputedStyle(el).borderTopWidth)
     assert.equal(border, '0px', 'the rule read as a divider under the caption that used to show above it')
+  })
+})
+
+/**
+ * The export button belongs beside the line it answers. The panel's own source
+ * order puts that line first, and a grid places in source order, so this is the
+ * kind of thing that comes out on a diagonal without anything throwing.
+ */
+describe('site export — the status panel', { skip }, () => {
+  let browser
+  let view
+
+  before(async () => {
+    browser = await puppeteer.launch({ executablePath: chromePath, headless: true })
+    view = await browser.newPage()
+    await view.setViewport({ width: 390, height: 844 })
+  }, { timeout: 120000 })
+
+  after(async () => browser?.close())
+
+  const at = selector => box(view, selector)
+
+  async function assertBeside() {
+    const [button, line] = await Promise.all([at('.AO3E--site--status-export'), at('.AO3E--site--status-keep')])
+    assert.ok(button.right <= line.x, `the button (right ${button.right}) should be left of the line (x ${line.x})`)
+    assert.ok(
+      button.y < line.bottom && line.y < button.bottom,
+      `the button (y ${button.y}–${button.bottom}) should share a row with the line (y ${line.y}–${line.bottom})`,
+    )
+    return { button, line }
+  }
+
+  test('the export button sits beside the line it acts on', async () => {
+    await view.setContent(statusPage(), { waitUntil: 'load' })
+    await assertBeside()
+  })
+
+  test('and stays beside it under the unexported count', async () => {
+    await view.setContent(statusPage({ pending: '<strong>3 changes</strong> not yet exported.' }), { waitUntil: 'load' })
+    const { button, line } = await assertBeside()
+    const pending = await at('.AO3E--site--status-pending')
+    assert.ok(pending.bottom <= Math.min(button.y, line.y), 'the count should lead, above both')
+  })
+
+  test('what the button says afterwards goes underneath both', async () => {
+    await view.setContent(statusPage({ said: 'Saved 3 changes as ao3e-changes-1.json.' }), { waitUntil: 'load' })
+    const { button, line } = await assertBeside()
+    const said = await at('.AO3E--site--status-said')
+    assert.ok(said.y >= Math.max(button.bottom, line.bottom), 'the result should read after the row it reports on')
   })
 })

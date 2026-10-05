@@ -130,10 +130,15 @@ body.ao3e-site {
 
 /* What this file keeps, and what is riding on it keeping it. The count of
    unexported changes leads, because it is the only mitigation there is for an
-   origin that can be cleared without warning or trace. */
+   origin that can be cleared without warning or trace.
+
+   The export button sits in the first column beside the keep line, but comes
+   after it in the source, so a sparse grid would start it a row further down.
+   `dense` lets it back into the cell beside the line. */
 .AO3E--site--status {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
+  grid-auto-flow: row dense;
   align-items: center;
   column-gap: 0.6rem;
   row-gap: 0.4rem;
@@ -168,12 +173,12 @@ body.ao3e-site {
   background: none;
 }
 
-/* The way out of that warning: write everything recorded here to a file. Sized
-   for a thumb, because the device this is read on has no pointer. */
 .AO3E--site--status .AO3E--site--status-keep {
   grid-column: 2;
 }
 
+/* The way out of that warning: write everything recorded here to a file. Sized
+   for a thumb, because the device this is read on has no pointer. */
 .AO3E--site--status .AO3E--site--status-actions {
   display: contents;
 }

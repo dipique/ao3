@@ -1254,22 +1254,25 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
    its own layout (`container-type` on .AO3E--search-view), so it can't run
    under the float — it shrinks to clear it instead, and the results give up the
    width of the whole subnav for the length of the page. Out of flow, the links
-   keep their corner and the view gets the column back. Only for the two views
-   offered on the readings pages: the works-search view means to share its
-   toolbar line with that page's own "Edit Your Search". */
-#main:has(:is(.AO3E--marked-for-later, .AO3E--read-works)) {
+   keep their corner and the view gets the column back. Only for the views
+   offered on the readings pages, the tracked review among them: the
+   works-search view means to share its toolbar line with that page's own
+   "Edit Your Search". */
+#main:has(:is(.AO3E--marked-for-later, .AO3E--read-works, .AO3E--tracked-review)) {
   /* The corner the subnav is pinned to. AO3's own skin already positions #main;
      saying so here keeps a skin that doesn't from flinging it to the top of the
      page instead. */
   position: relative;
 }
 
-#main:has(:is(.AO3E--marked-for-later, .AO3E--read-works)) > ul.navigation.actions {
+#main:has(:is(.AO3E--marked-for-later, .AO3E--read-works, .AO3E--tracked-review)) > ul.navigation.actions {
   position: absolute;
   top: 0;
   right: 0;
-  /* Over the view, which now starts where the subnav used to sit. */
-  z-index: 20;
+  /* Over the view, which now starts where the subnav used to sit -- and no
+     higher. AO3 stacks the header at 20 (`#header .user`), and its menus drop
+     down over this corner; a tie goes to whichever comes later in the page. */
+  z-index: 1;
 }
 
 /* Sits at the end of the "this tag has not been marked common" sentence, so it
@@ -1995,21 +1998,6 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
    --------------------------------------------------------------------------- */
 .AO3E--tracked-review--button {
   cursor: pointer;
-}
-
-/* The same float that the two other readings-page views have to get out from
-   under: AO3 pins this subnav right, and the view contains its own layout, so
-   it would otherwise give up the width of the whole subnav for the length of
-   the page. See the rule for those views above. */
-#main:has(.AO3E--tracked-review) {
-  position: relative;
-}
-
-#main:has(.AO3E--tracked-review) > ul.navigation.actions {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 20;
 }
 
 .AO3E--tracked-review--bar {

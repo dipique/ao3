@@ -4,6 +4,7 @@ import type { HideVerdict } from '#content_script/units/HideWorks.tsx'
 
 import { blurbOf, hasNode } from '#content_script/blurb.js'
 import { FACET_TAG_TYPES, facetForTagType } from '#content_script/filterTarget.js'
+import { describeRemoval } from '#content_script/removalLog.js'
 import { hideVerdict } from '#content_script/units/HideWorks.tsx'
 
 import type { FacetKey, FacetValueRef } from './engine.ts'
@@ -56,8 +57,17 @@ function facetKey(key: FacetKey, value: string): string {
  * work is hidden, none is handed to the filter either — an exclusion would take
  * it off the list just as surely — and the per-blurb half of the same decision
  * is switched off beside it (see `decorateBlurb`).
+ *
+ * `log` hears one line per work kept out of the results, naming the reasons —
+ * debug mode's account of works that otherwise leave no trace on the page. Left
+ * to the caller because not every pass is one the reader sees: the tracked
+ * review also runs this a page at a time just to count.
  */
-export function applyHidden(works: Work[], options: Options, opts: { hidesNothing?: boolean } = {}): FacetValueRef[] {
+export function applyHidden(
+  works: Work[],
+  options: Options,
+  opts: { hidesNothing?: boolean, log?: (line: string) => void } = {},
+): FacetValueRef[] {
   if (opts.hidesNothing) {
     for (const work of works)
       stamp(work, false, false)
@@ -93,6 +103,8 @@ export function applyHidden(works: Work[], options: Options, opts: { hidesNothin
       ? asExclusions(verdict, kept, muted)
       : null
     stamp(work, verdict.mode === 'hide' && !handed, !!handed)
+    if (verdict.mode === 'hide')
+      opts.log?.(describeRemoval(handed ? 'exclude' : 'drop', blurbOf(work), verdict.reasons))
     for (const ref of handed ?? [])
       excludes.set(facetKey(ref.key, ref.value), ref)
   })

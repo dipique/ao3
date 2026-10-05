@@ -20,6 +20,7 @@ import {
   onFilterTargetChange,
 } from '#content_script/filterTarget.js'
 import { markIcon } from '#content_script/markIcons.js'
+import { describeRemoval } from '#content_script/removalLog.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -324,7 +325,9 @@ export class HideWorks extends Unit {
       if (!mode)
         continue
 
-      if (this.hideWork(blurbElement, handedToFilter(blurbElement) ? 'collapse' : mode, reasons, kinds))
+      const removal = handedToFilter(blurbElement) ? 'collapse' : mode
+      this.logger.log(describeRemoval(removal, blurb, reasons), blurbElement)
+      if (this.hideWork(blurbElement, removal, reasons, kinds))
         usedFandomExclude = true
     }
 
@@ -551,7 +554,6 @@ export class HideWorks extends Unit {
    * lookup.
    */
   hideWork(blurb: Element, mode: HideMode, reasons: HideReasons, kinds: Set<HideKind>): boolean {
-    this.logger.debug('Hiding:', blurb)
     if (blurb instanceof HTMLElement && kinds.size > 0)
       blurb.dataset.ao3eHiddenBy = [...kinds].join(' ')
 

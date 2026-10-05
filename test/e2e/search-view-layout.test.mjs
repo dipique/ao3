@@ -31,6 +31,34 @@ function blurb(id) {
 }
 
 /**
+ * The greeting menu, stacked the way AO3's default skin stacks it: the menu's
+ * own z-index only counts inside `.user`, which competes with the rest of the
+ * page at 20. It drops down over the top right of `#main` -- where the readings
+ * subnav is pinned once a view opens. Closed until a test adds `open`.
+ */
+const HEADER_CSS = `
+  #header { position: relative }
+  #header .user { position: relative; z-index: 20; float: right; margin: 0; list-style: none }
+  #header .menu { display: none; position: absolute; right: 0; width: 20em; z-index: 55; background: #ddd }
+  #header .open .menu { display: block }
+  #header::after { content: ''; display: block; clear: both }`
+
+const HEADER = `
+  <div id="header">
+    <ul class="user">
+      <li class="dropdown"><a href="/users/me">Hi, me!</a>
+        <ul class="menu">
+          <li><a href="/users/me">My Dashboard</a></li>
+          <li><a href="/users/me/subscriptions">My Subscriptions</a></li>
+          <li><a href="/users/me/bookmarks">My Bookmarks</a></li>
+          <li><a href="/users/me/readings">My History</a></li>
+          <li><a href="/users/me/preferences">My Preferences</a></li>
+        </ul>
+      </li>
+    </ul>
+  </div>`
+
+/**
  * `mainCss` stands in for an AO3 skin that constrains `#main` to a fixed column.
  * Plenty do, and it is the case the default skin never exercises: the window
  * stays wide while the space the view actually gets is a few hundred pixels.
@@ -40,9 +68,9 @@ function readings(mainCss) {
   const blurbs = Array.from({ length: 120 }, (_, i) => blurb(i + 1)).join('')
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Marked for Later</title>
-<style>body { font-family: Verdana, sans-serif; margin: 0 } #main { ${mainCss} }</style></head>
+<style>body { font-family: Verdana, sans-serif; margin: 0 } #main { ${mainCss} } ${HEADER_CSS}</style></head>
 <body class="logged-in">
-  <div id="header"><a href="/users/me/preferences">Preferences</a></div>
+  ${HEADER}
   <div id="main">
     <ul class="navigation actions"><li><span class="current">Marked for Later</span></li></ul>
     <ol class="reading work index group">${blurbs}</ol>
@@ -302,6 +330,29 @@ describe('the search view layout', { skip }, () => {
     const after = await sidebarWidth(tab)
     await tab.close()
     assert.ok(after > before, `expected wider, went ${before} -> ${after}`)
+  })
+
+  test('the header\'s menus open over the pinned subnav', async () => {
+    // The regression: pinned at z-index 20, the subnav tied with AO3's `.user`
+    // and won on document order, so the greeting menu dropped down *behind*
+    // the History / Marked for Later buttons.
+    const tab = await openView(1400, '')
+    const hit = await tab.evaluate(() => {
+      document.querySelector('#header .dropdown').classList.add('open')
+      const menu = document.querySelector('#header .menu').getBoundingClientRect()
+      const nav = document.querySelector('#main > ul.navigation.actions').getBoundingClientRect()
+      const left = Math.max(menu.left, nav.left)
+      const right = Math.min(menu.right, nav.right)
+      const top = Math.max(menu.top, nav.top)
+      const bottom = Math.min(menu.bottom, nav.bottom)
+      if (right - left < 4 || bottom - top < 4)
+        return { overlap: false }
+      const el = document.elementFromPoint((left + right) / 2, (top + bottom) / 2)
+      return { overlap: true, inMenu: !!el?.closest('#header .menu'), got: el?.outerHTML.slice(0, 80) }
+    })
+    await tab.close()
+    assert.ok(hit.overlap, 'the fixture should drop the menu over the subnav')
+    assert.ok(hit.inMenu, `the menu should be on top, found ${hit.got}`)
   })
 
   test('there is no handle to drag while the columns are stacked', async () => {
