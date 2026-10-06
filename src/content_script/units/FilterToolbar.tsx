@@ -10,16 +10,16 @@ import MdiPlaylistEdit from '~icons/mdi/playlist-edit.jsx'
 import MdiPlaylistPlay from '~icons/mdi/playlist-play.jsx'
 import MdiPlaylistPlus from '~icons/mdi/playlist-plus.jsx'
 
-import type { TrackedFilter, TrackedList, TrackedMeta, TrackedUndoPlan, TrackedUpdatePlan } from '#common'
+import type { ListState, SavedList, TrackedFilter, TrackedList, TrackedMeta, TrackedUndoPlan, TrackedUpdatePlan } from '#common'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, api, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planUndo, planUpdate, sameRoot, sourceLabel, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, aliasOf, api, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planStopTracking, planTrack, planTrackSearch, planUndo, planUpdate, sameRoot, sameTitle, savedListAt, savedListsOf, savedListsWrite, sourceLabel, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { activeSearchFilter } from '#content_script/searchView/host.tsx'
 import { findWorkText } from '#content_script/textReplaceScope.ts'
-import { metaUnsettled, needsScan, newEntry, resolveMeta, sidebarNameId, trackablePage } from '#content_script/tracked/createList.ts'
+import { metaUnsettled, needsScan, pageQuery, resolveMeta, sidebarNameId, trackablePage } from '#content_script/tracked/createList.ts'
 import { endRefining, openRefining, refiningList, startRefining, takeRefiningLink } from '#content_script/tracked/refining.ts'
 import { trackedFilterOf } from '#content_script/tracked/viewFilter.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -523,45 +523,61 @@ export class FilterToolbar extends Unit {
    *   kind: "Update “X”" once the search differs from X's, else "Refining “X”". A
    *   page of another kind can't become X's query, so there the mark waits and
    *   the rows below apply.
-   * 2. **Exactly a list**: "Tracked as “X”", or "Resume tracking “X”" if it's
-   *   paused.
-   * 3. **The same root as one or more lists** — the same tag, author, series or
-   *   words, filtered differently: "Track or update…", which offers to update one
-   *   of them to this page's search, or to track the page as a new list.
-   * 4. **Nothing**: "Track this search".
+   * 2. **Exactly a tracked list**: "Tracked as “X”".
+   * 3. **Exactly a saved list that isn't tracked**, and has a title: "Track
+   *   “X”", one click from tracking it under its own id and title. One with no
+   *   title is offered as row 5, and tracking it there still takes its id.
+   * 4. **The same root as one or more tracked lists** — the same tag, author,
+   *   series or words, filtered differently: "Track or update…", which offers to
+   *   update one of them to this page's search, or to track the page as a new
+   *   list.
+   * 5. **Nothing**: "Track this search".
    *
    * What the page *is* includes the filter set on its custom search view, when
    * one is open ({@link liveFilter}): a tag's works narrowed in the view are a
    * different list from the tag's works as a whole.
    *
-   * Every change is a write to the `trackedLists` option, and stops there. The
-   * write re-runs every unit, which rebuilds this toolbar from the saved value —
-   * so what the pill says next came out of storage, and a page can never disagree
-   * with the options about what it is. (The reader-mode pill works the same way.)
-   * Ending the refining mark is the one change that isn't a write, so **Stop
-   * refining** rebuilds the pill itself; and the view's filter changes without
-   * one, which {@link trackSync} follows.
+   * Every change is a write to the `trackedLists` option, and to this browser's
+   * saved-list records (`savedLists`) when it touches them, and stops there.
+   * Tracking, stopping and making a list read both afresh just before they
+   * write, since the background files records as the page is used. The write to
+   * `trackedLists` re-runs every unit, which rebuilds this toolbar from the
+   * saved values — so what the pill says next came out of storage, and a page
+   * can never disagree with the options about what it is. (The reader-mode pill
+   * works the same way.) Ending the refining mark is the one change that isn't
+   * a write, so **Stop refining** rebuilds the pill itself; and the view's
+   * filter changes without one, which {@link trackSync} follows.
    */
   buildTrackButton(page: TrackablePage): HTMLElement {
-    const lists = this.options.trackedLists.lists
-    const row = trackRow(page, lists)
+    const state = this.listState()
+    const lists = trackedOnly(state)
+    const titles = titlesOf(state)
+    const row = trackRow(page, state)
     let group: HTMLElement
     switch (row.kind) {
       case 'refining':
-        group = this.buildRefiningPill(page, row.list, lists, row.changed)
+        group = this.buildRefiningPill(page, row.list, lists, titles, row.changed)
         break
       case 'exact':
         group = this.buildTrackedPill(row.entry, lists)
         break
+      case 'saved':
+        group = this.buildSavedPill(row.list)
+        break
       case 'same-root':
-        group = this.buildSameRootPill(page, row.candidates, lists)
+        group = this.buildSameRootPill(page, row.candidates, lists, titles)
         break
       case 'new':
-        group = this.buildNewListPill(page, lists)
+        group = this.buildNewListPill(page, titles)
         break
     }
     group.dataset.ao3eRow = rowSignature(row)
     return group
+  }
+
+  /** The saved lists as this page's options hold them: the synced entries, and this browser's records. */
+  private listState(): ListState {
+    return { tracked: this.options.trackedLists, saved: this.options.savedLists }
   }
 
   /**
@@ -596,7 +612,7 @@ export class FilterToolbar extends Unit {
       if (!group)
         return
       const open = group.querySelector(':scope > button')?.getAttribute('aria-expanded') === 'true'
-      if (open && group.dataset.ao3eRow === rowSignature(trackRow(page, this.options.trackedLists.lists))) {
+      if (open && group.dataset.ao3eRow === rowSignature(trackRow(page, this.listState()))) {
         trackRedraws.get(group)?.()
         return
       }
@@ -607,39 +623,57 @@ export class FilterToolbar extends Unit {
     }
   }
 
-  /**
-   * A page that is exactly a list. Tracked, it says so and offers the two things
-   * left to do with it; paused, one click starts it again — from today, so the
-   * stretch the reader chose to skip isn't poured back in.
-   */
+  /** A page that is exactly a tracked list: it says so, and offers the two things left to do with it. */
   private buildTrackedPill(entry: TrackedList, lists: readonly TrackedList[]): HTMLElement {
     const label = sourceLabel(entry, lists)
-    const { group, button } = entry.tracked
-      ? trackPill(<MdiPlaylistCheck />, `Tracked as “${label}”`, 'This page is a tracked list. Its new and updated works turn up in your review.', true)
-      : trackPill(<MdiPlaylistPlay />, `Resume tracking “${label}”`, 'Tracking is paused for this page. Starting again picks up from today — nothing from the gap is filled in.')
-
-    // Paused is the one state whose click needs nothing from the reader.
-    if (!entry.tracked) {
-      button.addEventListener('click', () => {
-        void this.writeLists(lists.map(one => (one.id === entry.id ? { ...one, tracked: true, since: utcToday() } : one)))
-        toast(`Tracking “${label}” again, from today on.`, { type: 'success' })
-      })
-      return group
-    }
-
+    const { group, button } = trackPill(<MdiPlaylistCheck />, `Tracked as “${label}”`, 'This page is a tracked list. Its new and updated works turn up in your review.', true)
     const { box } = trackBox(group, button)
     this.fillTrackedBox(box, entry, label)
     return group
   }
 
+  /**
+   * A page that is exactly a saved list nothing tracks. It has its title, so one
+   * click is all tracking it needs: under its own id, from today, so nothing
+   * from before is poured in.
+   */
+  private buildSavedPill(list: SavedList): HTMLElement {
+    const label = sourceLabel(aliasOf(list))
+    const { group, button } = trackPill(<MdiPlaylistPlay />, `Track “${label}”`, `Track “${label}”, so works added or updated from today on turn up in your review.`)
+    button.addEventListener('click', () => void this.trackSaved(list.id, label))
+    return group
+  }
+
+  /** Track saved list `id`, as storage holds it now. */
+  private async trackSaved(id: string, label: string): Promise<void> {
+    if (!extensionAlive())
+      return
+    try {
+      const before = await readListState()
+      const plan = planTrack(before, id, utcToday())
+      if (!plan.ok) {
+        toast(`This search is already tracked as ${describeList(plan.twin)}.`, { type: 'error' })
+        return
+      }
+      if (plan.state === before) {
+        // Gone, or tracked already: either way the options say so, and the
+        // write that would have redrawn this pill never comes.
+        toast(`“${label}” is no longer a saved list waiting to be tracked.`, { type: 'error' })
+        return
+      }
+      await writeListState(before, plan.state)
+      toast(`Tracking “${label}”. Works added or updated from today on will turn up in your review.`, { type: 'success' })
+    }
+    catch (err) {
+      this.logger.error('Could not track the list.', err)
+      toast('Could not track this list. Please try again.', { type: 'error' })
+    }
+  }
+
   /** What a tracked list offers: stop, or go and look at the review. */
   private fillTrackedBox(box: HTMLElement, entry: TrackedList, label: string): void {
-    const lists = this.options.trackedLists.lists
-    const stop = minorButton('Stop tracking', 'Stop tracking this page. The list is kept, so its title and its place come back if you resume.')
-    stop.addEventListener('click', () => {
-      void this.writeLists(lists.map(one => (one.id === entry.id ? { ...one, tracked: false } : one)))
-      toast(`Stopped tracking “${label}”. The list is kept — resume it any time.`, { type: 'success' })
-    })
+    const stop = minorButton('Stop tracking', 'Stop tracking this page. It stays a saved list on this browser, title and all.')
+    stop.addEventListener('click', () => void this.stopTracking(entry.id, label))
 
     const row: HTMLElement = <div class={TRACK_ROW_CLASS}>{stop}</div>
     // The review lives on the reader's own readings page, so it takes a session.
@@ -655,26 +689,42 @@ export class FilterToolbar extends Unit {
     box.append(row)
   }
 
+  /** Stop tracking list `id`, as storage holds it now: its entry goes, and it stays a saved list on this browser. */
+  private async stopTracking(id: string, label: string): Promise<void> {
+    if (!extensionAlive())
+      return
+    try {
+      const before = await readListState()
+      await writeListState(before, planStopTracking(before, id))
+      toast(`Stopped tracking “${label}”. It stays a saved list on this browser.`, { type: 'success' })
+    }
+    catch (err) {
+      this.logger.error('Could not stop tracking the list.', err)
+      toast('Could not stop tracking this list. Please try again.', { type: 'error' })
+    }
+  }
+
   /** A page nothing tracks yet: the box that titles a new list, and the one write that creates it. */
-  private buildNewListPill(page: TrackablePage, lists: readonly TrackedList[]): HTMLElement {
+  private buildNewListPill(page: TrackablePage, titles: readonly ListTitle[]): HTMLElement {
     const { group, button } = trackPill(<MdiPlaylistPlus />, 'Track this search', 'Track this search, so works added or updated from now on turn up in one review stream.')
     // The box and the section each need the other: the box opens the section,
     // and the section's Cancel closes the box.
     let section: NewListSection | undefined
     const { box, close } = trackBox(group, button, () => section?.opened())
-    section = this.newListSection(page, lists, close)
+    section = this.newListSection(page, titles, close)
     box.append(...section.nodes)
     return group
   }
 
   /**
    * The title box and **Track** for a page about to become a new list. The title
-   * starts as the page's default — "Type: entity", made unique — which the reader
-   * edits there or later on the options page. A tag's category that only the
-   * tag's own page can supply is asked for when the box first opens, and put
-   * into the title unless the reader has typed over it by then.
+   * starts as the page's default — "Type: entity", made unique among every saved
+   * list's — which the reader edits there or later on the options page. A tag's
+   * category that only the tag's own page can supply is asked for when the box
+   * first opens, and put into the title unless the reader has typed over it by
+   * then.
    */
-  private newListSection(page: TrackablePage, lists: readonly TrackedList[], close: () => void): NewListSection {
+  private newListSection(page: TrackablePage, titles: readonly ListTitle[], close: () => void): NewListSection {
     const nodes: Node[] = []
     // A relative date bound can't come along: it means a different span of days
     // every day it's read, and the review sets its own. Said here rather than
@@ -682,10 +732,10 @@ export class FilterToolbar extends Unit {
     if (page.normalized.relativeDate)
       nodes.push(relativeDateNote(page))
 
-    const title = titleField(uniqueTitle(defaultTitle(page.meta), lists))
+    const title = titleField(uniqueTitle(defaultTitle(page.meta), titles))
     const track = minorButton('Track')
     const cancel = minorButton('Cancel')
-    const save = (): void => void this.createList(page, lists, title.input.value, track)
+    const save = (): void => void this.createList(page, title.input.value, track)
     track.addEventListener('click', save)
     cancel.addEventListener('click', close)
     title.input.addEventListener('keydown', (e) => {
@@ -710,7 +760,7 @@ export class FilterToolbar extends Unit {
       nodes,
       opened: () => {
         if (metaUnsettled(page))
-          void resolveMeta(page).then(meta => title.offer(uniqueTitle(defaultTitle(meta), lists)))
+          void resolveMeta(page).then(meta => title.offer(uniqueTitle(defaultTitle(meta), titles)))
       },
     }
   }
@@ -721,7 +771,7 @@ export class FilterToolbar extends Unit {
    * once it does, the box says what an update would change, and offers the
    * update, a new list instead, and a way out of refining.
    */
-  private buildRefiningPill(page: TrackablePage, list: TrackedList, lists: readonly TrackedList[], changed: boolean): HTMLElement {
+  private buildRefiningPill(page: TrackablePage, list: TrackedList, lists: readonly TrackedList[], titles: readonly ListTitle[], changed: boolean): HTMLElement {
     const label = sourceLabel(list, lists)
     if (!changed) {
       const { group, button } = trackPill(<MdiPlaylistEdit />, `Refining “${label}”`, `This tab is refining “${label}”. Change the search, and the list can be updated to match it.`)
@@ -740,16 +790,16 @@ export class FilterToolbar extends Unit {
     drawSummary()
     trackRedraws.set(group, drawSummary)
 
-    const offered = (): string => titleAfterUpdate(list, page, meta, lists)
+    const offered = (): string => titleAfterUpdate(list, page.normalized.url, meta, titles)
     const title = titleField(offered())
     const update = minorButton(`Update “${label}”`, `Change “${label}” to search what this page does. It keeps its place in your review.`)
     const asNew = minorButton('Track as a new list instead', `Leave “${label}” as it is, and track this page as a list of its own.`)
-    update.addEventListener('click', () => void this.updateList(page, list, lists, update, { alias: title.input.value, refining: true }))
+    update.addEventListener('click', () => void this.updateList(page, list, titles, update, { alias: title.input.value, refining: true }))
     asNew.addEventListener('click', () => {
       // The box holds the list's own title, which a new list can't share: unless
       // the reader has typed another, the new one takes the page's default.
       const typed = sameTitle(title.input.value, list.alias) ? '' : title.input.value
-      void this.createList(page, lists, typed, asNew, true)
+      void this.createList(page, typed, asNew, true)
     })
     title.input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -768,8 +818,6 @@ export class FilterToolbar extends Unit {
       }
     })
     box.append(summary)
-    if (!list.tracked)
-      box.append(pausedNote(label))
     if (page.normalized.relativeDate)
       box.append(relativeDateNote(page))
     box.append(
@@ -801,7 +849,7 @@ export class FilterToolbar extends Unit {
    * to track this page as a list of its own. Several candidates are chosen
    * between by title.
    */
-  private buildSameRootPill(page: TrackablePage, candidates: readonly TrackedList[], lists: readonly TrackedList[]): HTMLElement {
+  private buildSameRootPill(page: TrackablePage, candidates: readonly TrackedList[], lists: readonly TrackedList[], titles: readonly ListTitle[]): HTMLElement {
     const { group, button } = trackPill(<MdiPlaylistPlus />, 'Track or update…', 'This page searches what a list you track does, filtered differently. Update that list to search this way, or track the page as a new list.')
 
     const sorted = [...candidates].sort((a, b) => compareTitles(sourceLabel(a, lists), sourceLabel(b, lists)))
@@ -822,8 +870,6 @@ export class FilterToolbar extends Unit {
       const label = sourceLabel(chosen, lists)
       name.textContent = `“${label}”`
       summary.replaceChildren(...this.updateSummary(chosen, page, meta, lists, label))
-      if (!chosen.tracked)
-        summary.append(pausedNote(label))
       update.textContent = `Update “${label}”`
       update.title = `Change “${label}” to search what this page does. It keeps its place in your review.`
       refine.textContent = `Refine “${label}”`
@@ -836,7 +882,7 @@ export class FilterToolbar extends Unit {
       chosen = sorted.find(one => one.id === chooser.value) ?? chosen
       draw()
     })
-    update.addEventListener('click', () => void this.updateList(page, chosen, lists, update, { refining: false }))
+    update.addEventListener('click', () => void this.updateList(page, chosen, titles, update, { refining: false }))
     refine.addEventListener('click', () => {
       if (!extensionAlive())
         return
@@ -854,7 +900,7 @@ export class FilterToolbar extends Unit {
         })
       }
     })
-    section = this.newListSection(page, lists, close)
+    section = this.newListSection(page, titles, close)
     box.append(
       <p class={TRACK_HEAD_CLASS}>Update a list</p>,
       chooser ?? name,
@@ -899,21 +945,28 @@ export class FilterToolbar extends Unit {
   }
 
   /**
-   * Track this page as a new list, titled `typed` — or, left blank, by the page's
-   * default. Refuses a title another list has, and says which. `button` shows
-   * the work while it's done, and stays disabled once it has worked: the write
-   * rebuilds the toolbar around it. `endsRefining` is the refining box's **Track
-   * as a new list instead**, which is the end of refining the list it was for.
+   * Track this page as a list, titled `typed` — or, left blank, by the page's
+   * default. The lists are read afresh first: a saved list that is exactly this
+   * search ({@link savedListAt}), which the background may have filed since the
+   * page was drawn, is the one tracked, under its own id; otherwise the page
+   * becomes a new list. Refuses a title another list has, and a search another
+   * list tracks, and says which. `button` shows the work while it's done, and
+   * stays disabled once it has worked: the write rebuilds the toolbar around
+   * it. `endsRefining` is the refining box's **Track as a new list instead**,
+   * which is the end of refining the list it was for.
    */
-  private async createList(page: TrackablePage, lists: readonly TrackedList[], typed: string, button: HTMLButtonElement, endsRefining = false): Promise<void> {
+  private async createList(page: TrackablePage, typed: string, button: HTMLButtonElement, endsRefining = false): Promise<void> {
     if (button.disabled || !extensionAlive())
       return
     const text = button.textContent
     button.disabled = true
     try {
       const meta = await resolveMeta(page)
-      const title = typed.trim() || uniqueTitle(defaultTitle(meta), lists)
-      const taken = titleTakenBy(title, lists)
+      const known = await readListState()
+      const existing = savedListAt(known, filteredKey(page.normalized.key, liveFilter(page)))
+      const titles = titlesOf(known)
+      const title = typed.trim() || uniqueTitle(defaultTitle(meta), titles, existing?.id)
+      const taken = titleTakenBy(title, titles, existing?.id)
       if (taken) {
         toast(titleRefusal(taken), { type: 'error' })
       }
@@ -924,25 +977,23 @@ export class FilterToolbar extends Unit {
           button.textContent = 'Checking…'
         const scan = await needsScan(page)
         // Read now rather than when the box was drawn: what's on screen as the
-        // list is made is what it's made of.
+        // list is made is what it's made of, and the lists as they stand now
+        // are what it joins.
         const filter = liveFilter(page)
-        const twin = lists.find(one => trackedKey(one) === filteredKey(page.normalized.key, filter))
-        if (twin) {
-          toast(`This search is already tracked as ${describeList(twin)}.`, { type: 'error' })
-          button.disabled = false
-          button.textContent = text
+        const before = await readListState()
+        const plan = planTrackSearch(before, pageQuery(page, scan, meta, filter), title, utcToday())
+        if (plan.ok) {
+          if (endsRefining)
+            endRefining()
+          await writeListState(before, plan.state)
+          toast(
+            `Tracking “${title}”. Works added or updated from today on will turn up in your review.${
+              scan ? ' This tag is read from its own page, so an update to an older work may be missed.' : ''}`,
+            { type: 'success' },
+          )
           return
         }
-        const entry = newEntry(page, title, lists, scan, meta, filter)
-        if (endsRefining)
-          endRefining()
-        await this.writeLists([...lists, entry])
-        toast(
-          `Tracking “${title}”. Works added or updated from today on will turn up in your review.${
-            scan ? ' This tag is read from its own page, so an update to an older work may be missed.' : ''}`,
-          { type: 'success' },
-        )
-        return
+        toast('twin' in plan ? `This search is already tracked as ${describeList(plan.twin)}.` : titleRefusal(aliasOf(plan.takenBy)), { type: 'error' })
       }
     }
     catch (err) {
@@ -958,34 +1009,42 @@ export class FilterToolbar extends Unit {
   /**
    * Replace `list`'s query with this page's ({@link planUpdate}), then offer to
    * take it back. `alias` is the title box's, where there is one; blank, it's the
-   * page's default. `refining` ends the tab's refining mark: the list it was for
-   * has become what the reader made of it.
+   * page's default. A title is unique among every saved list's (`titles`),
+   * tracked or not. `refining` ends the tab's refining mark: the list it was
+   * for has become what the reader made of it.
    */
-  private async updateList(page: TrackablePage, list: TrackedList, lists: readonly TrackedList[], button: HTMLButtonElement, opts: { alias?: string, refining: boolean }): Promise<void> {
+  private async updateList(page: TrackablePage, list: TrackedList, titles: readonly ListTitle[], button: HTMLButtonElement, opts: { alias?: string, refining: boolean }): Promise<void> {
     if (button.disabled || !extensionAlive())
       return
     const text = button.textContent
-    const label = sourceLabel(list, lists)
+    const lists = this.options.trackedLists.lists
+    const label = sourceLabel(list, trackedOnly(this.listState()))
     button.disabled = true
     try {
       const meta = await resolveMeta(page)
-      const alias = opts.alias === undefined ? undefined : (opts.alias.trim() || uniqueTitle(defaultTitle(meta), lists, list.id))
-      // Whether a tag's works can be read by date was checked for the tag the
-      // list was made on. Another tag has to be checked again.
-      let scan: boolean | undefined
-      if (page.normalized.kind === 'tag-works' && trackedRoot(list) !== trackedRoot(page.normalized)) {
-        button.textContent = 'Checking…'
-        scan = await needsScan(page)
+      const alias = opts.alias === undefined ? undefined : (opts.alias.trim() || uniqueTitle(defaultTitle(meta), titles, list.id))
+      const taken = alias === undefined || sameTitle(alias, list.alias) ? null : titleTakenBy(alias, titles, list.id)
+      if (taken) {
+        toast(titleRefusal(taken), { type: 'error' })
       }
-      const plan = planUpdate(lists, list.id, { url: page.normalized.url, filter: liveFilter(page), alias, meta, scan })
-      if (plan.ok) {
-        if (opts.refining)
-          endRefining()
-        await this.writeLists(plan.lists)
-        offerUndo(plan.before, plan.after, opts.refining)
-        return
+      else {
+        // Whether a tag's works can be read by date was checked for the tag the
+        // list was made on. Another tag has to be checked again.
+        let scan: boolean | undefined
+        if (page.normalized.kind === 'tag-works' && trackedRoot(list) !== trackedRoot(page.normalized)) {
+          button.textContent = 'Checking…'
+          scan = await needsScan(page)
+        }
+        const plan = planUpdate(lists, list.id, { url: page.normalized.url, filter: liveFilter(page), alias, meta, scan })
+        if (plan.ok) {
+          if (opts.refining)
+            endRefining()
+          await this.writeLists(plan.lists)
+          offerUndo(plan.before, plan.after, opts.refining)
+          return
+        }
+        toast(updateRefusal(plan, label), { type: 'error' })
       }
-      toast(updateRefusal(plan, label), { type: 'error' })
     }
     catch (err) {
       this.logger.error('Could not update the tracked list.', err)
@@ -1085,15 +1144,43 @@ function filterSignature(filter: TrackedFilter | undefined): string {
   return JSON.stringify(filter ?? null)
 }
 
+/** A list as the title helpers read one: a saved list's title as its alias. */
+type ListTitle = Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>
+
+/** The entries of the lists tracked right now, in their stored order. */
+function trackedOnly(state: ListState): TrackedList[] {
+  return state.tracked.lists.filter(one => one.tracked === true)
+}
+
+/** Every saved list's title, tracked or not: what a title has to be unique among. */
+function titlesOf(state: ListState): ListTitle[] {
+  return savedListsOf(state).map(({ list }) => aliasOf(list))
+}
+
+/** The saved lists as storage holds them now, rather than as this page's options were read. */
+async function readListState(): Promise<ListState> {
+  const { trackedLists, savedLists } = await options.get(['trackedLists', 'savedLists'])
+  return { tracked: trackedLists, saved: savedLists }
+}
+
+/** Write what a plan given `before` changed, in one write. */
+async function writeListState(before: ListState, next: ListState): Promise<void> {
+  const update = savedListsWrite(before, next)
+  if (Object.keys(update).length && extensionAlive())
+    await options.set(update)
+}
+
 /** Which of {@link FilterToolbar.buildTrackButton}'s rows the page is in, and for which lists. */
 type TrackRow
   = | { kind: 'refining', list: TrackedList, changed: boolean }
     | { kind: 'exact', entry: TrackedList }
+    | { kind: 'saved', list: SavedList }
     | { kind: 'same-root', candidates: TrackedList[] }
     | { kind: 'new' }
 
 /** The first row that applies, in {@link FilterToolbar.buildTrackButton}'s order. */
-function trackRow(page: TrackablePage, lists: readonly TrackedList[]): TrackRow {
+function trackRow(page: TrackablePage, state: ListState): TrackRow {
+  const lists = trackedOnly(state)
   const pageKey = filteredKey(page.normalized.key, liveFilter(page))
   const refining = refiningList(lists)
   if (refining && refining.kind === page.normalized.kind)
@@ -1101,6 +1188,9 @@ function trackRow(page: TrackablePage, lists: readonly TrackedList[]): TrackRow 
   const entry = lists.find(one => trackedKey(one) === pageKey)
   if (entry)
     return { kind: 'exact', entry }
+  const saved = savedListAt(state, pageKey)
+  if (saved && typeof saved.title === 'string' && saved.title.trim())
+    return { kind: 'saved', list: saved }
   const candidates = lists.filter(one => sameRoot(one, page.normalized))
   return candidates.length ? { kind: 'same-root', candidates } : { kind: 'new' }
 }
@@ -1112,6 +1202,8 @@ function rowSignature(row: TrackRow): string {
       return `refining:${row.list.id}:${row.changed ? 'changed' : 'same'}`
     case 'exact':
       return `exact:${row.entry.id}`
+    case 'saved':
+      return `saved:${row.list.id}`
     case 'same-root':
       return `same-root:${row.candidates.map(one => one.id).join(',')}`
     case 'new':
@@ -1126,8 +1218,8 @@ const TYPED_KEY = 'ao3eTyped'
  * Open `next`'s box, as `old`'s was, before `next` takes its place — keeping any
  * title the reader typed into `old`'s box, when `next` has a title box too.
  *
- * Only a pill with a box is opened. One without is a single action — resuming
- * a paused list — which is the reader's to click, not this.
+ * Only a pill with a box is opened. One without is a single action — tracking
+ * a saved list — which is the reader's to click, not this.
  */
 function carryOver(old: HTMLElement, next: HTMLElement): void {
   if (!next.querySelector(`:scope > .${TRACK_BOX_CLASS}`))
@@ -1223,11 +1315,6 @@ function relativeDateNote(page: TrackablePage): HTMLElement {
   )
 }
 
-/** A paused list stays paused through an update, and says what resuming it means. */
-function pausedNote(label: string): HTMLElement {
-  return <p class={TRACK_NOTE_CLASS}>{`“${label}” is paused, and updating it leaves it paused. Resuming it tracks from that day on.`}</p>
-}
-
 /**
  * The warning an update that moves a list to another root shows first: "This
  * changes what “X” searches: from Harry Potter to Marvel." The type is named too
@@ -1239,39 +1326,20 @@ function rootMoveText(label: string, root: { from: TrackedMeta, to: TrackedMeta 
   return `This changes what “${label}” searches: from ${name(root.from)} to ${name(root.to)}.`
 }
 
-/**
- * The title an update offers: the list's own — unless it was the default for a
- * root the page has left, when the new root's default takes its place, so
- * "Search: coffee" refined into a search for tea isn't left calling itself
- * coffee.
- */
-function titleAfterUpdate(list: TrackedList, page: TrackablePage, meta: TrackedMeta, lists: readonly TrackedList[]): string {
-  const was = trackedMeta(list)
-  const moved = trackedRoot(list) !== trackedRoot(page.normalized)
-  return was && moved && sameTitle(list.alias, defaultTitle(was))
-    ? uniqueTitle(defaultTitle(meta), lists, list.id)
-    : list.alias
-}
-
-/** Whether two titles are one, the way titles are compared: trimmed, in any case. */
-function sameTitle(a: string, b: string): boolean {
-  return a.trim().toLowerCase() === b.trim().toLowerCase()
-}
-
 /** Titles in the order a reader looks for them in. */
 function compareTitles(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
 }
 
 /** Which list a refusal is about: its title, and what it is when the title doesn't say. */
-function describeList(list: TrackedList): string {
+function describeList(list: ListTitle): string {
   const title = sourceLabel(list)
   const meta = trackedMeta(list)
   return meta && !sameTitle(title, defaultTitle(meta)) ? `“${title}” (${defaultTitle(meta)})` : `“${title}”`
 }
 
 /** A title the reader typed that another list already has. */
-function titleRefusal(other: TrackedList): string {
+function titleRefusal(other: ListTitle): string {
   return `Another list is already called ${describeList(other)}. Choose a different title.`
 }
 
@@ -1307,7 +1375,7 @@ function undoRefusal(plan: Extract<TrackedUndoPlan, { ok: false }>, label: strin
  * page's copy of the lists.
  */
 function offerUndo(before: TrackedList, after: TrackedList, wasRefining: boolean): void {
-  toast(`Updated “${sourceLabel(after)}”.${after.tracked ? '' : ' It stays paused.'}`, {
+  toast(`Updated “${sourceLabel(after)}”.`, {
     type: 'success',
     timeout: UNDO_TIMEOUT_MS,
     action: { label: 'Undo', onClick: () => void undoUpdate(before, after, wasRefining) },

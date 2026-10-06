@@ -955,13 +955,10 @@ function drawStrip(strip: HTMLElement, window: TrackedReviewCache): void {
   }))
 }
 
-/** `5 lists · 1 paused · about 412 more to review`. */
+/** `5 lists · about 412 more to review`. */
 function noteLine(lists: readonly TrackedList[], backlog: number | undefined): string {
   const tracked = lists.filter(list => list.tracked).length
-  const paused = lists.length - tracked
   const parts = [`${tracked} ${tracked === 1 ? 'list' : 'lists'}`]
-  if (paused)
-    parts.push(`${paused} paused`)
   if (backlog && backlog > 0)
     parts.push(`about ${backlog.toLocaleString()} more to review`)
   return parts.join(' · ')

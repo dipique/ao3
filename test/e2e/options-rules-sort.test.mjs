@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
-
-const chromePath = findChrome()
-const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
+import { sleep } from './helpers.mjs'
+import { skip, startOptions } from './optionsPage.mjs'
 
 /**
- * Four rules, each column deliberately ordering them differently, so no single
+ * Four rules, each key deliberately ordering them differently, so no single
  * expected order could be produced by sorting on the wrong key. Targets are real
  * `RuleTarget` values — fandom is TagType `'f'`, not the string "fandom".
  *
@@ -27,162 +24,158 @@ const RULES = [
 
 const SEED = { 'option.rules': { enabled: true, filters: RULES, colors: {} } }
 
+const LIST = 'rules'
+
 /**
  * Default: grouped by target, then value — what "sort off" must return to. Note
- * this pre-existing grouping compares the *raw* target code (`author`, `f`, `F`,
- * `series`), not the label, which is why Fandom lands between Author and
- * Additional Tags. Sorting the column explicitly uses the label instead.
+ * this grouping compares the *raw* target code (`author`, `f`, `F`, `series`),
+ * not the label, which is why Fandom lands between Author and Additional Tags.
+ * Sorting by Applies to uses the label instead.
  */
 const DEFAULT_ORDER = ['Mango', 'apple', 'Zebra', 'banana']
 
+/**
+ * The rules list's sort: a menu in the list's header of the four keys. Each
+ * press of a key sorts by it ascending, then descending, then not at all; the
+ * menu button and each key say where the sort is in `aria-sort`'s terms.
+ */
 describe('options UI — rules sorting', { skip }, () => {
-  let server
-  let browser
+  let session
+  let options
   let page
-  const consoleMsgs = []
 
   before(async () => {
-    ensureBuilt()
-    server = await serveDist()
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
-    page = await browser.newPage()
-    await page.evaluateOnNewDocument(installMock, SEED)
-    page.on('console', m => consoleMsgs.push({ type: m.type(), text: m.text() }))
-    page.on('pageerror', e => consoleMsgs.push({ type: 'pageerror', text: e.message }))
-    await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
-    await sleep(1200)
+    session = await startOptions()
+    options = await session.open({ seed: SEED, hash: '#customize-search-results' })
+    page = options.page
   }, { timeout: 180000 })
 
-  after(async () => {
-    await browser?.close()
-    await server?.close()
-  })
+  after(() => session?.close())
 
-  /** The rules table — its `id` prop never reaches the DOM, so go via a header. */
-  const TABLE = '[id^="rules-filters-header-"]'
+  /** Rule text of every rendered row, in render order. Each row is the rule at that place in the stored list. */
+  const order = async () => (await options.listRowIds(LIST)).map(at => RULES[Number(at)].value)
 
-  /** Rule text of every rendered row, in render order. */
-  const order = () => page.evaluate((sel) => {
-    const table = document.querySelector(sel)?.closest('table')
-    return [...table.querySelectorAll('th[scope="row"] pre')]
-      .map(el => (el.firstChild?.textContent ?? el.textContent).trim())
-  }, TABLE)
+  /** The sort in the list's header, named for the sort the list shows. */
+  const sortButton = async () => options.control(await options.list(LIST), 'button', /^Sort: /)
+  const sortName = async () => options.name(await sortButton())
 
-  /** Click the header whose column id is `id`. */
-  const clickHeader = async (id) => {
-    await page.evaluate((columnId) => {
-      const th = document.querySelector(`#rules-filters-header-${columnId}`)
-      const button = th.querySelector('button')
-      button.click()
-    }, id)
-    await sleep(250)
+  const closeMenu = async () => {
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[role="menuitem"]'))
   }
 
-  /** `aria-sort` on that column's header cell. */
-  const ariaSort = id => page.evaluate(columnId =>
-    document.querySelector(`#rules-filters-header-${columnId}`).getAttribute('aria-sort'), id)
+  /** The menu's keys, as `{ text, name, hint }`: what each shows, what it is called, and what pressing it does. */
+  const menu = async () => {
+    await options.press(await sortButton())
+    await page.waitForSelector('[role="menuitem"]')
+    const items = await page.$$eval('[role="menuitem"]', els => els.map(el => ({
+      text: el.textContent.trim(),
+      name: el.getAttribute('aria-label'),
+      hint: el.title,
+    })))
+    await closeMenu()
+    return items
+  }
 
-  test('every sortable column has a header, and the Action one is an icon', async () => {
-    const headers = await page.evaluate(() =>
-      ['behavior', 'priority', 'value', 'target', 'actions'].map((id) => {
-        const th = document.querySelector(`#rules-filters-header-${id}`)
-        return th
-          ? { id, text: th.textContent.replace(/\s+/g, ' ').trim(), sortable: !!th.querySelector('button[title]') }
-          : { id, missing: true }
-      }))
-    // The Action column had no header at all before — the Rule header's
-    // colspan=2 was standing in for it.
-    assert.deepEqual(headers.map(h => h.id), ['behavior', 'priority', 'value', 'target', 'actions'])
-    assert.ok(headers.every(h => !h.missing), JSON.stringify(headers))
-    assert.equal(headers[0].text, 'Action', 'the icon carries an accessible name')
-    assert.deepEqual(headers.map(h => h.sortable), [true, true, true, true, false])
-  })
+  /** Press the key so labelled in the sort's menu, `times` times over, then close the menu. */
+  const press = async (label, times = 1) => {
+    await options.press(await sortButton())
+    await page.waitForSelector('[role="menuitem"]')
+    for (let i = 0; i < times; i++) {
+      await page.evaluate(text => [...document.querySelectorAll('[role="menuitem"]')]
+        .find(item => item.textContent.trim() === text)
+        .click(), label)
+      await sleep(150)
+    }
+    await closeMenu()
+    await sleep(150)
+  }
 
-  test('the header row and the body rows have the same number of cells', async () => {
-    // Handing the span back from the Rule header is only correct if the counts
-    // still line up.
-    const counts = await page.evaluate((sel) => {
-      const table = document.querySelector(sel).closest('table')
-      const span = ths => ths.reduce((n, th) => n + (Number(th.getAttribute('colspan')) || 1), 0)
-      const headerRow = table.querySelector('thead tr') ?? table.rows[0]
-      const bodyRow = [...table.rows].find(r => r !== headerRow)
-      return { header: span([...headerRow.cells]), body: span([...bodyRow.cells]) }
-    }, TABLE)
-    assert.equal(counts.header, counts.body, JSON.stringify(counts))
+  test('the menu offers the four keys, Action first, none of them sorting yet', async () => {
+    const items = await menu()
+    assert.deepEqual(items.map(item => item.text), ['Action', 'Priority', 'Rule', 'Applies to'])
+    assert.deepEqual(items.map(item => item.name), ['Action', 'Priority', 'Rule', 'Applies to'])
+    assert.ok(items.every(item => item.hint === 'Sort ascending'), JSON.stringify(items))
   })
 
   test('it starts unsorted, grouped by target then value', async () => {
     assert.deepEqual(await order(), DEFAULT_ORDER)
-    assert.equal(await ariaSort('value'), 'none')
+    assert.equal(await sortName(), 'Sort: none')
   })
 
-  test('clicking Rule sorts by text, ignoring case', async () => {
-    await clickHeader('value')
+  test('pressing Rule sorts by text, ignoring case', async () => {
+    await press('Rule')
     assert.deepEqual(await order(), ['apple', 'banana', 'Mango', 'Zebra'])
-    assert.equal(await ariaSort('value'), 'ascending')
+    assert.equal(await sortName(), 'Sort: Rule, ascending')
+    const rule = (await menu()).find(item => item.text === 'Rule')
+    assert.deepEqual(rule, { text: 'Rule', name: 'Rule, sorted ascending', hint: 'Sort descending' })
   })
 
-  test('clicking it again reverses', async () => {
-    await clickHeader('value')
+  test('pressing it again reverses', async () => {
+    await press('Rule')
     assert.deepEqual(await order(), ['Zebra', 'Mango', 'banana', 'apple'])
-    assert.equal(await ariaSort('value'), 'descending')
+    assert.equal(await sortName(), 'Sort: Rule, descending')
+    const rule = (await menu()).find(item => item.text === 'Rule')
+    assert.deepEqual(rule, { text: 'Rule', name: 'Rule, sorted descending', hint: 'Clear sort' })
   })
 
-  test('a third click turns sorting off, back to the default grouping', async () => {
-    await clickHeader('value')
+  test('a third press turns sorting off, back to the default grouping', async () => {
+    await press('Rule')
     assert.deepEqual(await order(), DEFAULT_ORDER)
-    assert.equal(await ariaSort('value'), 'none')
+    assert.equal(await sortName(), 'Sort: none')
+  })
+
+  test('the menu stays open, so the cycle can be stepped through at once', async () => {
+    await press('Rule', 2)
+    assert.equal(await sortName(), 'Sort: Rule, descending')
+    await press('Rule')
+    assert.equal(await sortName(), 'Sort: none')
   })
 
   test('Priority sorts numerically, both ways', async () => {
-    await clickHeader('priority')
+    await press('Priority')
     assert.deepEqual(await order(), ['Zebra', 'banana', 'apple', 'Mango'])
-    await clickHeader('priority')
+    await press('Priority')
     assert.deepEqual(await order(), ['Mango', 'apple', 'banana', 'Zebra'])
-    await clickHeader('priority')
+    await press('Priority')
   })
 
   test('Applies to sorts by the label shown, not the stored target', async () => {
     // Stored targets are 'F', 'f', 'author', 'series' — sorting those raw would
     // put 'F' first. By label it is Additional Tags, Author, Fandom, Series.
-    await clickHeader('target')
+    await press('Applies to')
     assert.deepEqual(await order(), ['Zebra', 'Mango', 'apple', 'banana'])
-    await clickHeader('target')
+    await press('Applies to')
     assert.deepEqual(await order(), ['banana', 'apple', 'Mango', 'Zebra'])
-    await clickHeader('target')
+    await press('Applies to')
   })
 
   test('Action sorts by effect: hide, show, highlight, hide-tag', async () => {
-    await clickHeader('behavior')
+    await press('Action')
     assert.deepEqual(await order(), ['Zebra', 'apple', 'Mango', 'banana'])
-    await clickHeader('behavior')
+    await press('Action')
     assert.deepEqual(await order(), ['banana', 'Mango', 'apple', 'Zebra'])
-    await clickHeader('behavior')
+    await press('Action')
   })
 
-  test('sorting one column clears the sort on another', async () => {
-    await clickHeader('value')
-    await clickHeader('priority')
-    assert.equal(await ariaSort('value'), 'none')
-    assert.equal(await ariaSort('priority'), 'ascending')
-    await clickHeader('priority')
-    await clickHeader('priority')
+  test('sorting by one key clears the sort by another', async () => {
+    await press('Rule')
+    await press('Priority')
+    const items = await menu()
+    assert.deepEqual(items.map(item => item.name), ['Action', 'Priority, sorted ascending', 'Rule', 'Applies to'])
+    assert.equal(await sortName(), 'Sort: Priority, ascending')
+    await press('Priority', 2)
   })
 
-  test('sorting and the search filter compose', async () => {
-    await page.type('input[aria-label="Search rules by text"]', 'an')
+  test('sorting and the filter compose', async () => {
+    await (await options.control(await options.list(LIST), 'textbox', 'Search rules by text')).type('an')
     await sleep(300)
-    await clickHeader('value')
+    await press('Rule')
     const sorted = await order()
-    await clickHeader('value')
+    await press('Rule')
     const reversed = await order()
-    await page.click('button[aria-label="Clear rule search"]')
-    await clickHeader('value')
-    await sleep(250)
+    await (await options.control(await options.list(LIST), 'button', 'Clear rule search')).click()
+    await press('Rule')
 
     // Only Mango and banana contain "an" — the sort has to run over what the
     // filter left, not over the whole list.
@@ -190,8 +183,17 @@ describe('options UI — rules sorting', { skip }, () => {
     assert.deepEqual(reversed, ['Mango', 'banana'])
   })
 
+  test('sorting writes nothing, and a reload starts unsorted', async () => {
+    await press('Priority')
+    await sleep(500)
+    assert.equal(await options.lastWrite('option.rules'), null)
+    await page.reload({ waitUntil: 'networkidle2' })
+    await sleep(1500)
+    assert.equal(await sortName(), 'Sort: none')
+    assert.deepEqual(await order(), DEFAULT_ORDER)
+  })
+
   test('renders without console errors', () => {
-    const bad = consoleMsgs.filter(m => m.type === 'error' || m.type === 'pageerror')
-    assert.deepEqual(bad.map(m => m.text), [])
+    assert.deepEqual(options.problems(), [])
   })
 })

@@ -32,32 +32,63 @@ export const BREAKPOINTS = {
 
 export const COLORS = {
   light: {
-    default: ['#ffffff', '#09090b'],
-    card: ['#f7f7f7', '#09090b'],
-    popover: ['#f9f9f9', '#09090b'],
-    primary: ['#990000', '#ffffff'],
-    secondary: ['#f4f4f5', '#18181b'],
-    muted: ['#f4f4f5', '#71717a'],
-    accent: ['#60a5fa', '#18181b'],
-    destructive: ['#ef4444', '#fafafa'],
-    border: '#e4e4e7',
-    input: '#e4e4e7',
-    ring: '#60a5fa',
+    'default': ['#ffffff', '#09090b'],
+    'card': ['#f7f7f7', '#09090b'],
+    'popover': ['#f9f9f9', '#09090b'],
+    'primary': ['#990000', '#ffffff'],
+    'secondary': ['#f4f4f5', '#18181b'],
+    'muted': ['#f4f4f5', '#71717a'],
+    'accent': ['#60a5fa', '#18181b'],
+    'destructive': ['#ef4444', '#fafafa'],
+    'border': '#e4e4e7',
+    'input': '#e4e4e7',
+    'ring': '#60a5fa',
+    'brand-fg': '#990000',
+    'hair': '#ededef',
+    'warning': '#b45309',
+    'success': '#15803d',
+    'sunken': '#f7f7f7',
   },
   dark: {
-    default: ['#09090b', '#ffffff'],
-    card: ['#18181b', '#f7f7f7'],
-    popover: ['#1f1f23', '#f9f9f9'],
-    primary: ['#990000', '#ffffff'],
-    secondary: ['#27272a', '#f4f4f5'],
-    muted: ['#27272a', '#a1a1aa'],
-    accent: ['#3b82f6', '#f1f5f9'],
-    destructive: ['#dc2626', '#fafafa'],
-    border: '#3f3f46',
-    input: '#3f3f46',
-    ring: '#3b82f6',
+    'default': ['#09090b', '#ffffff'],
+    'card': ['#18181b', '#f7f7f7'],
+    'popover': ['#1f1f23', '#f9f9f9'],
+    'primary': ['#990000', '#ffffff'],
+    'secondary': ['#27272a', '#f4f4f5'],
+    'muted': ['#27272a', '#a1a1aa'],
+    'accent': ['#3b82f6', '#f1f5f9'],
+    'destructive': ['#dc2626', '#fafafa'],
+    'border': '#3f3f46',
+    'input': '#3f3f46',
+    'ring': '#3b82f6',
+    'brand-fg': '#d96666',
+    'hair': '#2a2a2f',
+    'warning': '#f59e0b',
+    'success': '#4ade80',
+    'sunken': '#131316',
   },
 } as const
+
+/**
+ * Neutral overlays a token can't carry, each a colour at an alpha of its own in
+ * each theme, set beside the tokens as plain CSS variables (`var(--row-hover)`):
+ * a list's scrollbar thumb, at rest and hovered; the shade at an edge a list
+ * scrolls past; and the tint under a hovered row.
+ */
+export const OVERLAYS = {
+  light: {
+    'scroll-thumb': 'rgb(113 113 122 / 0.32)',
+    'scroll-thumb-hover': 'rgb(113 113 122 / 0.55)',
+    'scroll-shade': 'rgb(9 9 11 / 0.1)',
+    'row-hover': 'rgb(9 9 11 / 0.028)',
+  },
+  dark: {
+    'scroll-thumb': 'rgb(161 161 170 / 0.3)',
+    'scroll-thumb-hover': 'rgb(161 161 170 / 0.55)',
+    'scroll-shade': 'rgb(0 0 0 / 0.55)',
+    'row-hover': 'rgb(255 255 255 / 0.035)',
+  },
+} as const satisfies Record<keyof typeof COLORS, Record<string, string>>
 
 // Load the installed @iconify-json/* collections explicitly, by require rather
 // than by letting a preset go looking for them. This began as a workaround for
@@ -104,6 +135,11 @@ for (const name of objectKeys(COLORS.light)) {
   else {
     addColor(name, { light: COLORS.light[name] as string, dark: COLORS.dark[name] as string })
   }
+}
+
+for (const type of objectKeys(COLOR_CSS)) {
+  for (const [name, value] of Object.entries(OVERLAYS[type]))
+    COLOR_CSS[type].push(`--${name}: ${value};\n`)
 }
 
 const THEME = {
@@ -174,6 +210,17 @@ const OTHER_SHORTCUTS: UserShortcuts<PresetWind3Theme> = {
   'input-ring': 'outline-none focus-visible:input-ring-visible',
   'btn': 'input-ring flex-inline items-center justify-center hover:bg-input cursor-pointer rounded-md',
   'link': 'input-ring color-inherit underline underline-accent hover:no-underline',
+  // A glyph-only button for a list's header or row, quiet until hovered, and at
+  // 48% while inert.
+  'icon-btn': 'input-ring size-6 inline-grid shrink-0 place-items-center rounded-md bg-transparent p-0 text-muted-fg cursor-pointer enabled:hover:bg-[var(--row-hover)] enabled:hover:text-default-fg disabled:cursor-default disabled:op-48',
+  // A button with words, and a glyph before them if it has one, at the height
+  // of a settings row's other controls (28 px), and at 48% while inert. Its
+  // look is one of the two below: `outline-btn` is framed on the page's
+  // ground; `ghost-btn` has no frame, and recedes to the muted colour until
+  // hovered.
+  'label-btn': 'input-ring h-7 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-solid px-[11px] text-[12.5px] cursor-pointer disabled:cursor-default disabled:op-48',
+  'outline-btn': 'label-btn border-input bg-default text-default-fg enabled:hover:border-muted-fg enabled:hover:bg-[var(--row-hover)]',
+  'ghost-btn': 'label-btn border-transparent bg-transparent text-muted-fg enabled:hover:text-default-fg',
 }
 
 function presetAnimations(): Preset {

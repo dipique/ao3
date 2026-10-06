@@ -1,6 +1,6 @@
 import type { FandomCache } from '#common'
 
-import { ADDON_CLASS, fandomCache, fetchAndParseDocument } from '#common'
+import { ADDON_CLASS, fandomCache, fetchAndParseDocument, loadFandomIndex } from '#common'
 import React from '#dom'
 
 /**
@@ -301,12 +301,7 @@ export async function loadFandomIdLookup(): Promise<Map<string, number>> {
     idLookupPromise = (async () => {
       const map = new Map<string, number>()
       try {
-        // Shipped gzipped by the build; extension files come with no
-        // Content-Encoding, so the unpacking is ours.
-        const response = await fetch(browser.runtime.getURL('data/fandom-index.json.gz'))
-        const json = response.body!.pipeThrough(new DecompressionStream('gzip'))
-        const obj = await new Response(json).json() as Record<string, number>
-        for (const [name, id] of Object.entries(obj))
+        for (const [name, id] of Object.entries(await loadFandomIndex()))
           map.set(name, id)
       }
       catch (err) {

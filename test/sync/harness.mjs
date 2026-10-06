@@ -3,6 +3,7 @@
 // a scripted stand-in for an outdated build. Not a test file itself.
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { planSavedLists, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
 import { decode, encode, MANIFEST_KEY } from '../../src/common/syncCodec.ts'
 import { createSyncEngine } from '../../src/common/syncCore.ts'
 import { SYNC_META_DEFAULTS } from '../../src/common/syncMetaDefaults.ts'
@@ -96,15 +97,24 @@ export function createCloud() {
 
 /**
  * One browser running the real engine. `options` and `meta` seed its storage;
- * `version` is the sync version its build speaks.
+ * `version` is the sync version its build speaks. `stored` is its stored lists
+ * (`cache.searchLists`).
+ *
+ * `savedLists` says whether its build keeps saved-list records. One that does
+ * runs the background's half of them, the saved-list planner, one run at a time:
+ * once as it is installed (the migration), whenever its tracked lists or stored
+ * lists change, and inside the engine before a pull is applied.
  */
-export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true } = {}) {
+export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true, savedLists = true, stored = {} } = {}) {
   let opts = clone({ ...OPTION_DEFAULTS, ...options })
+  let searchLists = clone(stored)
   const state = { ...clone(SYNC_META_DEFAULTS), ...clone(meta) }
   let alarms = new Map()
   const backups = []
   let seq = 0
   let engine
+  let keepsSavedLists = savedLists
+  let planner = Promise.resolve()
 
   const peer = {
     name,
@@ -155,8 +165,13 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     async writeOptions(update) {
       opts = { ...opts, ...clone(update) }
       const changes = Object.fromEntries(Object.keys(update).map(key => [`option.${key}`, {}]))
-      queueMicrotask(() => engine.onStorageChanged(changes, 'local'))
+      queueMicrotask(() => {
+        engine.onStorageChanged(changes, 'local')
+        if (keepsSavedLists && 'trackedLists' in update)
+          void reconcile()
+      })
     },
+    prePull: savedLists ? reconcile : undefined,
     meta: {
       get: async keys => Object.fromEntries(keys.map(key => [key, clone(state[key])])),
       set: async (update) => { Object.assign(state, clone(update)) },
@@ -176,8 +191,22 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     randomId: () => `${name}-${++seq}`,
   }
 
+  /** The planner's run, after any already under way: writes only what it changed. */
+  function reconcile() {
+    const run = planner.then(async () => {
+      const state = { tracked: opts.trackedLists, saved: opts.savedLists }
+      const update = savedListsWrite(state, planSavedLists(state, storedListRefs(searchLists)).state)
+      if (Object.keys(update).length)
+        await deps.writeOptions(update)
+    })
+    planner = run.catch(() => {})
+    return run
+  }
+
   engine = createSyncEngine(deps)
   cloud.attach(peer)
+  if (keepsSavedLists)
+    void reconcile()
 
   const device = {
     name,
@@ -187,13 +216,24 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     get meta() { return clone(state) },
     get alarms() { return [...alarms.keys()] },
     get engine() { return engine },
+    /** Its stored lists, `cache.searchLists`. */
+    get stored() { return clone(searchLists) },
 
-    /** Wait for every queued storage event and engine operation to finish. */
+    /** Wait for every queued storage event, engine operation and planner run to finish. */
     async settle() {
       for (let pass = 0; pass < 6; pass++) {
         await tick()
         await engine.idle()
+        await planner
       }
+    },
+
+    /** A search view stores a list, as `cache.searchLists[key]`. */
+    async store(key, list) {
+      searchLists = { ...searchLists, [key]: clone(list) }
+      if (keepsSavedLists)
+        void reconcile()
+      await device.settle()
     },
 
     /** Fire whatever alarms are pending, as if their delay had passed. */
@@ -236,13 +276,24 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
      * The worker restarts (an extension reload, an update, the browser coming
      * back): alarms are gone, the engine's memory is gone, storage survives.
      * `start` is whatever the background does at the top level when it wakes.
+     *
+     * An update can bring saved lists (`savedLists`), and with them `migrate`,
+     * the migration's planner run, ahead of the engine's reconciliation with the
+     * cloud, as an install runs them. Without `migrate`, the engine gets there
+     * first.
      */
-    async restart({ version: nextVersion, init = false } = {}) {
+    async restart({ version: nextVersion, init = false, savedLists: keeps, migrate = false } = {}) {
       alarms = new Map()
       if (nextVersion !== undefined)
         deps.version = nextVersion
+      if (keeps !== undefined) {
+        keepsSavedLists = keeps
+        deps.prePull = keeps ? reconcile : undefined
+      }
       engine = createSyncEngine(deps)
       await engine.start?.()
+      if (migrate)
+        await reconcile()
       // An update or browser start also reconciles with the cloud.
       if (init)
         await engine.init()

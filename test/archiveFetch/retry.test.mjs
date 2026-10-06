@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 // Node strips the TS types on import; archiveFetch.ts imports nothing at all, so
 // it loads under a plain `node --test`. `fetch` is stubbed per test and the
 // clock is mocked, which is the only way a fifteen-minute budget is testable.
-import { archiveWaitRemaining, fetchWithRetry, onArchiveWait, PATIENCE } from '../../src/content_script/archiveFetch.ts'
+import { archivePause, archiveWaitRemaining, fetchWithRetry, onArchiveWait, PATIENCE } from '../../src/content_script/archiveFetch.ts'
 
 const MINUTE = 60_000
 
@@ -442,5 +442,43 @@ describe('archiveFetch — when waiting stops being sensible', () => {
     // And nothing is asked of AO3 after the reader said stop.
     await clk.tick(5 * MINUTE)
     assert.equal(calls.length, 1)
+  })
+})
+
+describe('archiveFetch — for a request that won\'t wait', () => {
+  test('with nothing paused, there is no pause to report', (t) => {
+    useClock(t)
+    assert.equal(archivePause(), null)
+  })
+
+  test('a suggestion\'s patience is none: the first refusal comes straight back, and is everyone\'s pause', async (t) => {
+    useClock(t)
+    const calls = stubFetch(t, [{ status: 429, retryAfter: 3 }, { status: 200 }])
+
+    const res = await fetchWithRetry(url, undefined, PATIENCE.suggestion)
+
+    assert.equal(res.status, 429)
+    assert.equal(calls.length, 1, 'asked once, not again')
+    assert.deepEqual(archivePause(), { reason: 'refused', until: calls[0].at + 3000 })
+  })
+
+  test('a breather is a pause of its own kind', async (t) => {
+    useClock(t)
+    const calls = stubFetch(t, [{ status: 200 }])
+
+    for (let i = 0; i < 20; i++)
+      await fetchWithRetry(url)
+
+    assert.deepEqual(archivePause(), { reason: 'pacing', until: calls[19].at + 5000 })
+  })
+
+  test('a refusal outranks a breather, and the pause lasts until both are over', async (t) => {
+    useClock(t)
+    const calls = stubFetch(t, [...Array.from({ length: 19 }, () => ({ status: 200 })), { status: 429, retryAfter: 2 }])
+
+    for (let i = 0; i < 20; i++)
+      await fetchWithRetry(url, undefined, PATIENCE.suggestion)
+
+    assert.deepEqual(archivePause(), { reason: 'refused', until: calls[19].at + 5000 })
   })
 })

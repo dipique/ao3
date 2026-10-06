@@ -82,8 +82,14 @@ const PACE_IDLE_RESET_MS = 60_000
  * of a five-minute blind refusal before noticing it only had two minutes to
  * spend — which is precisely the silence the short budget is there to prevent,
  * and the caller cannot regroup until the refusal is back in its hands.
+ *
+ * A suggestion while the reader types is worth nothing late, so it has none:
+ * the first refusal comes straight back, written down for everyone else. It
+ * checks {@link archivePause} first, since even a request with no patience
+ * sits out a pause already in force before it is sent.
  */
 export const PATIENCE = {
+  suggestion: 0,
   interactive: 2 * 60_000,
   bulk: 4 * 60 * 60_000,
 } as const
@@ -166,6 +172,22 @@ export function archiveWaitRemaining(): number {
  */
 function waitReason(): WaitReason {
   return refusedUntil > Date.now() ? 'refused' : 'pacing'
+}
+
+/** A pause in requests to the archive: the epoch ms it runs to, and which kind it is. */
+export interface ArchivePause {
+  until: number
+  reason: WaitReason
+}
+
+/**
+ * The pause in force now, or null: until whichever kind ends later, and named
+ * for the refusal if there is one. For a request that would rather not be sent
+ * than wait, which has to know before it asks.
+ */
+export function archivePause(): ArchivePause | null {
+  const until = pausedUntil()
+  return until > Date.now() ? { until, reason: waitReason() } : null
 }
 
 function announce(until: number, reason: WaitReason): void {

@@ -1,3 +1,5 @@
+import { anchorSlug, categoryId } from '../model/anchors.ts'
+
 /**
  * The page's anchor registry: every category, sub-section and option row, by the
  * id it renders with and the name it shows. It's what turns a `#hash` into
@@ -6,9 +8,9 @@
  * {@link file://./useOptionSearch.ts}) and the thing that *reads* it don't have
  * to import each other.
  *
- * Entries are never removed. A sub-section really does unmount when its category
- * folds shut, and an anchor that vanished with it could never be jumped to
- * again — which is the one case a deep link most needs to handle.
+ * Entries are never removed, so a hash naming a row that comes and goes with
+ * its data, such as a stored list's, still resolves to its category while the
+ * row isn't drawn.
  */
 
 export type AnchorKind = 'category' | 'subsection' | 'row'
@@ -19,7 +21,7 @@ export interface Anchor {
   kind: AnchorKind
   /** What the page calls it, so a hash can name that instead of the id. */
   name: string
-  /** Owning category and sub-section, so a jump can unfold the way in. */
+  /** Titles of the owning category and sub-section, so a jump can find the way in. */
   category: string | null
   subsection: string | null
 }
@@ -28,22 +30,6 @@ export interface Anchor {
 const KIND_ORDER: AnchorKind[] = ['category', 'subsection', 'row']
 
 const anchors = new Map<string, Anchor>()
-
-/**
- * Anchor id for anything on the page — a row, a sub-section, a category — and
- * the same normalisation a `#hash` is put through before it is looked up.
- * Deliberately not `kebabCase`, which splits on case boundaries and turns
- * "Compress filter URLs" into `compress-filter-ur-ls`.
- */
-export function anchorSlug(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/['’]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
 
 export function registerAnchor(anchor: Anchor): void {
   anchors.set(anchor.id, anchor)
@@ -78,4 +64,10 @@ export function resolveAnchor(hash: string): Anchor | null {
       return hit
   }
   return null
+}
+
+/** The id of the category `hash` lands in: the one it names, or the one holding what it names. */
+export function anchorCategory(hash: string): string | null {
+  const category = resolveAnchor(hash)?.category
+  return category ? categoryId(category) : null
 }

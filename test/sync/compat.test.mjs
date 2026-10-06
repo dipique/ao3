@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
-import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
+import { LOCAL_ONLY, SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { syncShape } from '../../src/common/syncShape.ts'
 
 const history = JSON.parse(readFileSync(new URL('./sync-shape.json', import.meta.url), 'utf8'))
@@ -47,5 +47,11 @@ describe('sync compatibility version', () => {
     assert.deepEqual(changed({ workMarks: withMark }), base)
     assert.deepEqual(changed({ wordsPerMinute: 350 }), base)
     assert.deepEqual(changed({ verbose: { anything: 'local-only' } }), base, 'local-only options aren\'t synced')
+    assert.deepEqual(changed({ savedLists: { v: 1, lists: { a1: { id: 'a1', kind: 'series-works', url: '/series/1', title: '', mirror: true } } } }), base, 'nor are the saved lists\' records')
+  })
+
+  test('the saved lists\' records are an option, kept on each browser', () => {
+    assert.deepEqual(OPTION_DEFAULTS.savedLists, { lists: {} }, 'with no version, so a fresh install\'s first planner run stamps it')
+    assert.equal(LOCAL_ONLY.has('savedLists'), true)
   })
 })

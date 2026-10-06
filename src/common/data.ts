@@ -285,7 +285,7 @@ export function isTagTarget(target: RuleTarget): target is 'tag' | TagType {
   return target !== 'author' && target !== 'work' && target !== 'series'
 }
 
-/** Human name for a rule target, as shown in the options table and menus. */
+/** Human name for a rule target, as shown in the options list and menus. */
 export function ruleTargetLabel(target: RuleTarget): string {
   switch (target) {
     case 'tag': return 'Any tag'
@@ -374,6 +374,19 @@ export const DEFAULT_RULE_COLORS: Record<RuleTarget, string> = {
   series: DEFAULT_SERIES_HIGHLIGHT_COLOR,
 }
 
+/**
+ * The colours the rule editor offers a rule beside its target's default, as
+ * swatches. Picking one stores its colour as the rule's own `color`; a rule
+ * whose colour equals one shows that swatch picked.
+ */
+export const HIGHLIGHT_PRESETS = [
+  { name: 'Sky', color: '#0ea5e9' },
+  { name: 'Amber', color: '#f59e0b' },
+  { name: 'Violet', color: '#7c3aed' },
+] as const satisfies readonly { name: string, color: string }[]
+
+export type HighlightPreset = typeof HIGHLIGHT_PRESETS[number]
+
 /** Per-target highlight colour overrides, as stored in `options.rules.colors`. */
 export type RuleColors = Partial<Record<RuleTarget, string>>
 
@@ -400,8 +413,12 @@ export function ruleHighlightColor(rule: Rule, colors?: RuleColors): string | nu
   }
 }
 
-/** Apply a rule's matcher to one subject string. */
-function matchesValue(rule: Rule, subject: string): boolean {
+/**
+ * Apply a rule's matcher to one subject string: exact is case-sensitive,
+ * contains and regex aren't, and an invalid regex matches nothing. The rule
+ * editor's regex tester calls it too, so its verdicts are the live rules'.
+ */
+export function ruleValueMatches(rule: Pick<Rule, 'value' | 'matcher'>, subject: string): boolean {
   if (rule.matcher === 'contains')
     return subject.toLowerCase().includes(rule.value.toLowerCase())
 
@@ -428,7 +445,7 @@ export function ruleMatchesTag(rule: Rule, tag: Tag): boolean {
     return false
   if (rule.target !== 'tag' && rule.target !== tag.type)
     return false
-  return matchesValue(rule, tag.name)
+  return ruleValueMatches(rule, tag.name)
 }
 
 /** Whether an author-targeted rule matches a given author (by user id, then optional pseud). */
@@ -437,7 +454,7 @@ export function ruleMatchesAuthor(rule: Rule, author: { userId: string, pseud?: 
     return false
   if (rule.pseud !== undefined && rule.pseud !== author.pseud)
     return false
-  return matchesValue(rule, author.userId)
+  return ruleValueMatches(rule, author.userId)
 }
 
 /** A work or series, as parsed from its link: a numeric id (if known) and display name. */
@@ -464,7 +481,7 @@ export function ruleMatchesEntity(rule: Rule, kind: 'work' | 'series', entity: F
   if (/^\d+$/.test(value))
     return entity.id !== undefined && entity.id === value
 
-  return matchesValue({ ...rule, value }, entity.name)
+  return ruleValueMatches({ ...rule, value }, entity.name)
 }
 
 /**

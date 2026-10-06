@@ -47,7 +47,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 - **Extension theme** (follow AO3, light or dark) for the extension's own pages and menus, and **Hide "muted author" notices**.
 - **Dark skin for AO3** recolours AO3 itself in the extension's dark palette, on top of any site skin you chose on AO3.
 
-### Hiding and highlighting works
+### Customize search results
 
 - **Rules**: one list for hiding, collapsing, always-showing or highlighting works by tag (any tag, or one type such as fandom or character), author, work or series, matched exactly, by substring or by regular expression. Rules can also be added straight from the menus above.
   - Each rule has a priority from 0 to 9: when several match a work, the highest wins, and always-show wins a tie. A "hide tag" rule takes just the tag itself out of tag lists and the sidebar. Rules can be disabled without deleting them, and highlight colours can be set per target.
@@ -65,15 +65,16 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 ### Tracked lists
 
 - **Tracked lists** gather the new and updated works from saved searches, filtered listings, uncommon tags and series into one review, under a "Tracked" item on your readings page.
-- Add a list with "Track this search" on the floating toolbar, or from a stored list under Site export. A new list is titled for what it searches ("Character: Draco Malfoy"), and no two lists share a title. Retitle, pause or remove lists on the options page.
-- To change what a list searches, use "Refine on AO3" on its options row: it opens the list's search, and once you have changed it (the Sort & Filter sidebar, the search form) the floating toolbar offers "Update". The list keeps its place in your review, and the update can be undone. A page that searches what a list does, filtered differently, offers the same through "Track or update…".
+- Add a list with "Track this search" on the floating toolbar, or from a stored list under Site export. A new list is titled for what it searches ("Character: Draco Malfoy"), and no two lists share a title. Retitle lists, stop or start tracking them, or remove them on the options page.
+- Every list you track, and every works search, uncommon tag or series you've opened in an instant search view, is a saved list on that browser, kept with its title whether it's tracked or not. Only tracked lists sync: stopping tracking keeps the list saved where it is, and takes it off your other browsers, unless they hold a copy of it or you changed it there.
+- To change what a tracked list searches, use "Refine on AO3" on its options row: it opens the list's search, and once you have changed it (the Sort & Filter sidebar, the search form) the floating toolbar offers "Update". The list keeps its place in your review, and the update can be undone. A page that searches what a list does, filtered differently, offers the same through "Track or update…".
 - A review covers a range of days, oldest first. Mark whatever deserves marking, then "Mark reviewed" moves on to the next range. Works you've already marked read or saved for later are left out.
 
 ### Sync and backups
 
-- **Sync settings across devices** keeps your settings in the browser's own synced storage, so they follow you to other browsers signed in to the same account. It shows how much of the roughly 100 KB quota is in use. Cached lists and work text are never synced.
-  - An incoming update that would delete a large part of your rules, marks, text replacements or tracked lists is held until you choose "Accept the update" or "Keep this browser's settings", and AO3 pages tell you when that happens. Browsers running different versions of the sync format pause rather than overwrite each other.
-- **Keep daily backups** takes a local snapshot the first time you change a setting each day, keeping as many as **Number of daily backups to keep**. **Restore a backup** rolls back to one, backing up your current settings first.
+- **Sync settings across devices** keeps your settings in the browser's own synced storage, so they follow you to other browsers signed in to the same account. Cached lists and work text are never synced. While it is on, the switch heads a panel that says whether sync is working, when it last synced, anything that needs your attention, and how much of the roughly 100 KB quota is in use.
+  - An incoming update that would delete a large part of your rules, marks, text replacements or tracked lists is held until you choose "Keep this browser's settings" or "Accept the update", and AO3 pages tell you when that happens. The panel lists what the update would remove and what each answer does. Browsers running different versions of the sync format pause rather than overwrite each other.
+- **Keep daily backups** takes a local snapshot the first time you change a setting each day, keeping as many as **Number of daily backups to keep**. **Restore a backup** lists every snapshot, newest first: the daily ones, and those taken around turning on sync, a restore, or a sync update you held back or declined. A second press of a snapshot's Restore rolls back to it, backing up your current settings first.
 
 ### Your data and offline exports
 
@@ -87,7 +88,11 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 
 ### The options page
 
-- Settings search (`/` to focus, Escape to clear), a **Descriptions** switch that hides the explanatory text, **Collapse all** and **Expand all**, and a link anchor on every setting.
+- One category at a time, picked from a rail that also lists the open category's sections; on a narrow window the rail is a row of chips.
+- Settings search (`/` to focus, Escape to clear) looks across every category, and the rail narrows to the categories with a match.
+- A switch in the top bar flips between light and dark. It sets the same choice as **Extension theme**.
+- A link anchor on every setting, and on every category and section.
+- Settings that **Right-click menus** switches off hang beneath it, and are greyed out, with the reason, while it is off.
 - **Debug mode** logs what the extension is doing to the browser's developer console, which helps when reporting a problem.
 
 The aim is for the extension to be at least as accessible as AO3 itself. If it falls short somewhere, please [open an issue](https://github.com/dipique/ao3/issues); bug reports and feature requests go there too.
@@ -205,6 +210,7 @@ pnpm run verify       # typecheck, lint, then all tests: run this before sending
 
 - **Unit tests** import modules straight from `src/`. Node strips TypeScript types instead of compiling them, so only pure modules (no `#common` import, no `browser` APIs) can be tested this way, and syntax that would emit code (`enum`, namespaces with a body, parameter properties) is rejected; `erasableSyntaxOnly` in the tsconfig enforces this. A few site-export tests load one module into headless Chrome for a DOM, and skip when Chrome isn't found.
 - **End-to-end tests** build a production `dist/chrome` if it's missing or older than its sources, then drive the built options page and content scripts in headless Chrome through `puppeteer-core`. The files run in parallel, and the build is taken under a lock so they don't build over each other.
+- **Options-page tests** open the page through `test/e2e/optionsPage.mjs`. It finds a settings row by its anchor id, the categories the pane shows by their `data-category`, the rail's links by `data-rail-item`, an editable list by its `data-list`, the list's rows by their `data-list-row` and its count by `data-list-count`, and controls by role and accessible name, with what their `aria-describedby` says, so the tests don't depend on the page's markup. Its `theme` option seeds the reader's choice in `option.theme`, since that, not the system's colour scheme, is what the page follows. Puppeteer hides headless Chrome's scrollbars, so they take no room; `startOptions({ scrollbars: true })` keeps them for a test of what a scrollbar does to a layout, and `colourAt` reads a pixel off the screen for what only shows there, such as a list's scroll shadows. `contrast` gives the contrast ratio of an element's text against what is drawn behind it, for asserting that text reads at AA (4.5:1). `stubArchive` stands in for AO3, for a page that would ask the archive for something, such as the rule editor's suggestions, so no test reaches the real archive. `captureDownloads` catches the files a page saves, such as a settings export, and `lastDownload` reads the last one back. `scriptBackground` stands in for the background, answering each API message from a table of replies, and `sent` reads back what the page sent; `toasts` reads the toasts on screen. The page is served from the build's root, and `runtime.getURL` names files there, so it reads what the build ships, such as the bundled fandom index.
 
 Chrome is found in its usual install locations on Windows, macOS and Linux. Set `CHROME_PATH` to a Chrome or Chromium binary if it's somewhere else.
 
@@ -243,7 +249,7 @@ pnpm run dist:lint  # runs web-ext lint on the Firefox build
 - `src/manifest.ts`: the manifest, generated per browser. Permissions, content-script matches and minimum browser versions are set here.
 - `src/background/`: the service worker (Chrome) or background script (Firefox): message routing, storage migrations, the browser's context-menu entries, sync and backups.
 - `src/content_script/`: runs on AO3 pages. Each feature is a `Unit` subclass in `src/content_script/units/`, registered in order in `units/index.ts`. The instant search views are in `searchView/`.
-- `src/options_ui/`: the options page, in Vue 3 with reka-ui and UnoCSS.
+- `src/options_ui/`: the options page, in Vue 3 with reka-ui and UnoCSS. Its colours are the theme tokens (`COLORS` in `uno.config.ts`), each with a light and a dark value, and `test/options/no-literal-colours.test.mjs` fails on a hex colour written into its source. A message with a severity is a `Callout`, its colour on a glyph (`SeverityGlyph`), an edge and a tint while its words stay in the text colour; a list row's error is drawn the same way. A state with a glyph of its own, such as a sync pause, passes it as `glyph`, and keeps its severity's colour and screen-reader word. An editable list is a `ListFrame` of `ListRow`s, an on/off setting in a row is an `IconToggle`, and a button whose action can't be taken back asks again in its own place (`useConfirmInPlace`). A settings row's 28 px controls are the `outline-btn` and `ghost-btn` button shortcuts (`uno.config.ts`) and `Select` with `size="row"`. What a row reveals, or keeps under its line, sits in an `OptionRowInset`. Decisions the page makes, such as what the settings search keeps and what the category rail lists, are pure functions in `src/options_ui/model/`, unit-tested under `test/options/` (the sync status under `test/sync/`); the components and composables only wire them up.
 - `src/site/`: the app inside a site export, which reuses the content script's search view.
 - `src/common/`: shared code, mostly pure so it can be unit-tested.
 - `test/`: unit tests by area, and `test/e2e/` for the end-to-end tests.
@@ -275,7 +281,6 @@ This is a fork of [AO3 Enhancements](https://github.com/jsmnbom/ao3-enhancements
 Thanks to:
 
 - the icon's sources: the AO3 logo (SVG version from IconFinder), combined with the Gear icon from GitHub's Octicons pack;
-- [Hero Patterns](http://www.heropatterns.com/), for the options page background (CC BY 4.0);
 - the userscripts that inspired the original extension:
   - [AO3: Kudos/hits ratio](https://greasyfork.org/en/scripts/3144-ao3-kudos-hits-ratio) by `Min`
   - [AO3: Estimated reading time](https://greasyfork.org/en/scripts/391940-ao3-estimated-reading-time) by `oulfis`

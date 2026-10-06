@@ -39,8 +39,13 @@ import type { Options } from './options.ts'
  * 6 was one of those: tracked lists gained `type`, `entity` and a view `filter`,
  * and the default `lists` is empty, so the recorded shape didn't move. An older
  * build would read a filtered list as unfiltered.
+ *
+ * 9 was another: `trackedLists.lists` holds only the lists tracked right now,
+ * each list's title kept in a saved-list record that never syncs. An older build
+ * adopting such a copy would drop the untracked lists it still holds as
+ * entries, titles and all; at a version it doesn't speak, it waits instead.
  */
-export const SYNC_SCHEMA_VERSION = 8
+export const SYNC_SCHEMA_VERSION = 9
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400
@@ -57,9 +62,11 @@ export const CHUNK_PREFIX = 'o'
 /**
  * Option keys never written to sync. `theme` is handled specially (only
  * `theme.chosen` syncs, never the device-derived `theme.current`); `user` is the
- * per-device logged-in AO3 account and `verbose` is a local debug toggle.
+ * per-device logged-in AO3 account, `verbose` is a local debug toggle, and
+ * `savedLists` holds this browser's saved lists, which reach another browser
+ * only while they are tracked, as `trackedLists` entries.
  */
-export const LOCAL_ONLY = new Set<keyof Options>(['user', 'verbose'])
+export const LOCAL_ONLY = new Set<keyof Options>(['user', 'verbose', 'savedLists'])
 
 export interface Manifest {
   /** schema version */

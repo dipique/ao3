@@ -3,9 +3,12 @@ import type { ComponentInstance, GlobalComponents } from 'vue'
 
 import type { HideMode, MarkId } from '#common'
 
-import { addMark, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, localMarkIds, MARK_ICON_NAMES, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
+import { addMark, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, listedMarkIds, MARK_ICON_NAMES, markedWorkCount, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
+
+import type { MarkSort } from '../../model/listView.ts'
 
 import { markIconClass } from '../../markIcons.ts'
+import { MARK_ORDER_OFF, MARK_SORTS, markOrderOff, sortMarks } from '../../model/listView.ts'
 
 const { enabled, marks, hideMode, hidePriority } = useOption('workMarks')
 
@@ -39,8 +42,8 @@ const priority = computed({
   },
 })
 
-/** The marks that hold their own work ids, in table order. */
-const local = computed(() => localMarkIds(marks.value))
+/** The marks that hold their own work ids, in the reader's order. */
+const local = computed(() => listedMarkIds(marks.value))
 
 /** The marks that only configure how something else is drawn (Marked for Later). */
 const external = computed(() => Object.keys(marks.value).filter(id => !markIsLocal(marks.value, id)))
@@ -154,6 +157,30 @@ const rows = computed(() => local.value.map((id) => {
 }))
 
 /**
+ * How the list is shown. It lasts for this visit and is never stored: the
+ * order the reader keeps is `order` on the marks, which only the order
+ * buttons write, and those are inert under any other sort.
+ */
+const sort = ref<MarkSort>('order')
+const shown = computed(() => sortMarks(rows.value, sort.value))
+const orderOff = computed(() => markOrderOff(sort.value))
+const orderOffId = useId()
+
+const header = computed(() => {
+  const works = markedWorkCount(marks.value)
+  return `${rows.value.length} · ${works.toLocaleString()} ${works === 1 ? 'work' : 'works'}`
+})
+
+/**
+ * Each row is the mark's order buttons, or its pin; its icon; its name with
+ * the pencil; its count, in a column of its own so the counts line up; then
+ * its Hide and In menus toggles and Clear. In a narrow frame the count goes
+ * under the name, as wide as the row leaves it.
+ */
+const ROW = '"order icon identity meta actions" / 48px 24px minmax(6rem, 1fr) minmax(0, 13rem) auto'
+const NARROW_ROW = '"order icon identity actions" "order icon meta meta" / 48px 24px minmax(0, 1fr) auto'
+
+/**
  * Rough size of the packed sets. Marks live in the synced options, which share a
  * 100 KB quota across every setting, so this is shown once the list is big enough
  * to be worth knowing about rather than hidden away as a surprise later.
@@ -168,24 +195,30 @@ const packedKb = computed(() =>
   ) / 1024)
 const showSize = computed(() => packedKb.value >= 1)
 
+/**
+ * Clearing can't be taken back (a daily backup may still have the marks), so
+ * the button asks again in its own place: the first press arms it, the second
+ * clears.
+ */
+const confirm = useConfirmInPlace()
+const clearId = (id: MarkId) => `work-marks-clear:${id}`
+
 function clear(id: MarkId) {
-  const n = count(id)
   const config = marks.value[id]
-  // eslint-disable-next-line no-alert
-  if (n && config && confirm(`Clear all ${n} "${label(id)}" marks? This can't be undone (a daily backup may still have them).`)) {
-    config.items = ''
-    // The payload is keyed by the ids just dropped, so it has to go with them —
-    // otherwise every entry is orphaned, unreachable, and still costs quota.
-    if (typeof config.progress === 'string')
-      config.progress = ''
-  }
+  if (!count(id) || !config || !confirm.press(clearId(id)))
+    return
+  config.items = ''
+  // The payload is keyed by the ids just dropped, so it has to go with them —
+  // otherwise every entry is orphaned, unreachable, and still costs quota.
+  if (typeof config.progress === 'string')
+    config.progress = ''
 }
 
 // ---------------------------------------------------------------------------
 // The edit dialog. One dialog for both jobs, because both are the same three
 // fields — adding a mark is editing one that doesn't exist yet. Opened by a
-// row's icon, by the pencil beside its name, or by the Add button, all of them
-// detached triggers so focus comes back to whichever was pressed.
+// row's icon or the pencil beside its name, both detached triggers, or by the
+// frame's Add, and focus comes back to whichever was pressed.
 // ---------------------------------------------------------------------------
 
 const dialog = ref<ComponentInstance<GlobalComponents['Dialog']> | null>(null)
@@ -221,6 +254,16 @@ const draftError = computed(() => {
     return markNameError(marks.value, draftLabel.value)
   return draftLabel.value.trim() ? null : 'Give the mark a name.'
 })
+
+/**
+ * Add, from the frame's header. The dialog gives focus back to whatever had it
+ * when it opened, so the button takes focus first, as a click doesn't make it
+ * do in every browser.
+ */
+function add(event: MouseEvent) {
+  (event.currentTarget as HTMLElement).focus()
+  edit(null)
+}
 
 function edit(id: MarkId | null) {
   open.value = true
@@ -327,118 +370,134 @@ function save() {
         </label>
       </div>
 
-      <div flex="~ col gap-2" text="sm" border-t pt-3>
-        <div grid="~ cols-[min-content_1fr_min-content_min-content_min-content]" items-center gap-x-4 gap-y-2>
-          <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>Order</span>
-          <span text="xs muted-fg uppercase tracking-wide">Mark</span>
-          <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>Hide</span>
-          <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>In menus</span>
-          <span />
+      <ListFrame
+        list-id="work-marks"
+        title="Work marks"
+        :count="header"
+        add-label="Add mark"
+        @add="add"
+      >
+        <template #controls>
+          <ListSort v-model="sort" :choices="MARK_SORTS" />
+        </template>
 
-          <template v-for="row in rows" :key="row.id">
-            <span v-if="row.movable" flex="~ col" items-center>
+        <ListRow
+          v-for="row in shown"
+          :key="row.id"
+          :row-id="row.id"
+          :template="ROW"
+          :narrow-template="NARROW_ROW"
+        >
+          <template #order>
+            <template v-if="row.movable">
               <button
-                class="input-ring"
-                text="4 muted-fg hover:default-fg"
-                cursor="pointer disabled:default" op="disabled:40"
-                rounded-md p-0.5
-                :disabled="!row.canMoveUp"
-                :title="`Move ${row.label} up`"
+                type="button"
+                class="icon-btn"
+                :aria-label="`Move ${row.label} up`"
+                :title="orderOff ?? `Move ${row.label} up`"
+                :aria-describedby="orderOff ? orderOffId : undefined"
+                :disabled="!!orderOff || !row.canMoveUp"
                 @click="move(row.id, -1)"
               >
-                <Icon i-mdi-chevron-up :label="`Move ${row.label} up`" />
+                <span class="i-tabler-chevron-up" text="[15px]" aria-hidden="true" />
               </button>
               <button
-                class="input-ring"
-                text="4 muted-fg hover:default-fg"
-                cursor="pointer disabled:default" op="disabled:40"
-                rounded-md p-0.5
-                :disabled="!row.canMoveDown"
-                :title="`Move ${row.label} down`"
+                type="button"
+                class="icon-btn"
+                :aria-label="`Move ${row.label} down`"
+                :title="orderOff ?? `Move ${row.label} down`"
+                :aria-describedby="orderOff ? orderOffId : undefined"
+                :disabled="!!orderOff || !row.canMoveDown"
                 @click="move(row.id, 1)"
               >
-                <Icon i-mdi-chevron-down :label="`Move ${row.label} down`" />
+                <span class="i-tabler-chevron-down" text="[15px]" aria-hidden="true" />
               </button>
-            </span>
+            </template>
             <span
               v-else
-              flex="~ items-center justify-center"
-              text="3 muted-fg"
+              class="grid size-6 place-items-center"
               :title="`${row.label} always comes last — it isn't one of the read verdicts`"
             >
-              <Icon i-mdi-pin-outline :label="`${row.label} is always last`" />
+              <Icon i-tabler-pin text="[13px]" :label="`${row.label} is always last`" />
             </span>
-            <span flex="~ items-center gap-2">
-              <DialogDetachedTrigger
-                v-if="dialog"
-                class="input-ring"
-                bg="hover:input"
-                cursor-pointer rounded-md p-0.5
-                :dialog="dialog"
-                :title="`Change the ${row.label} icon`"
-                @click="edit(row.id)"
-              >
-                <Icon
-                  :class="row.icon"
-                  :style="row.color ? { color: row.color } : undefined"
-                  :label="`Change the ${row.label} icon`"
-                />
-              </DialogDetachedTrigger>
-              <span flex="~ col gap-0.5">
-                <span flex="~ items-center gap-1">
-                  <span :title="`id: ${row.id}`">{{ row.label }}</span>
-                  <DialogDetachedTrigger
-                    v-if="dialog"
-                    class="input-ring"
-                    text="3.5 muted-fg hover:default-fg"
-                    cursor-pointer rounded-md p-0.5
-                    :dialog="dialog"
-                    :title="`Rename ${row.label}`"
-                    @click="edit(row.id)"
-                  >
-                    <Icon i-mdi-pencil :label="`Rename ${row.label}`" />
-                  </DialogDetachedTrigger>
-                </span>
-                <span text="xs muted-fg">
-                  {{ row.count.toLocaleString() }} {{ row.count === 1 ? 'work' : 'works' }}<template v-if="row.tracksProgress"> · stays on Marked for Later</template><template v-else-if="row.alias"> · counts as {{ label(row.alias) }}</template>
-                </span>
-              </span>
-            </span>
-            <Switch v-model="row.hide.value" :title="row.hideLabel" :aria-label="row.hideAria" />
-            <Switch v-model="row.offer.value" title="Offer when marking a work" :aria-label="row.offerAria" />
-            <Button
-              variant="outline"
-              size="sm"
-              :disabled="row.count === 0"
-              @click="clear(row.id)"
+          </template>
+          <template #icon>
+            <DialogDetachedTrigger
+              v-if="dialog"
+              class="icon-btn"
+              :dialog="dialog"
+              :title="`Change the ${row.label} icon`"
+              @click="edit(row.id)"
             >
-              Clear
-            </Button>
+              <Icon
+                :class="row.icon"
+                text="[15px]"
+                :style="row.color ? { color: row.color } : undefined"
+                :label="`Change the ${row.label} icon`"
+              />
+            </DialogDetachedTrigger>
           </template>
-        </div>
-
-        <div>
-          <Button variant="outline" size="sm" @click="edit(null)">
-            <Icon i-mdi-plus mr-1 />
-            Add mark
-          </Button>
-        </div>
-
-        <p v-if="external.length" text="xs muted-fg" border-t pt-3>
-          <template v-for="id in external" :key="id">
-            <Icon :class="markIconClass(marks[id]?.icon)" />
-            {{ label(id) }}<span v-if="id === SAVED_MARK"> lives on AO3, not here — this entry only says how it is drawn on results.</span>
+          <span class="min-w-0 flex items-center gap-1">
+            <span class="truncate" :title="`id: ${row.id}`">{{ row.label }}</span>
+            <DialogDetachedTrigger
+              v-if="dialog"
+              class="icon-btn"
+              :dialog="dialog"
+              :title="`Rename ${row.label}`"
+              @click="edit(row.id)"
+            >
+              <Icon i-tabler-pencil text="[13px]" :label="`Rename ${row.label}`" />
+            </DialogDetachedTrigger>
+          </span>
+          <template #meta>
+            {{ row.count.toLocaleString() }} {{ row.count === 1 ? 'work' : 'works' }}<template v-if="row.tracksProgress">
+              · stays on Marked for Later
+            </template><template v-else-if="row.alias">
+              · counts as {{ label(row.alias) }}
+            </template>
           </template>
-        </p>
-
-        <p text="xs muted-fg">
-          Marks are stored with your settings, so they're included in backups and sync.
-          <template v-if="showSize">
-            They currently take about {{ packedKb.toFixed(1) }}&nbsp;KB (compressed further before syncing, which has a
-            100&nbsp;KB budget for all settings combined).
+          <template #actions>
+            <div class="flex items-center gap-[2px]">
+              <IconToggle v-model="row.hide.value" :label="row.hideAria" :tip="row.hideLabel" icon="i-tabler-eye-off" />
+              <IconToggle v-model="row.offer.value" :label="row.offerAria" tip="In menus" icon="i-tabler-menu-2" />
+              <!-- One button, armed or not, so a press from the keyboard keeps its focus. -->
+              <button
+                type="button"
+                :class="confirm.armed(clearId(row.id))
+                  ? 'destructive input-ring ml-[2px] h-6 cursor-pointer whitespace-nowrap rounded-md px-2 text-[11.5px] font-600'
+                  : 'icon-btn'"
+                :aria-label="confirm.armed(clearId(row.id)) ? undefined : `Clear ${row.label} marks`"
+                :title="confirm.armed(clearId(row.id))
+                  ? `Clear all ${row.count.toLocaleString()} “${row.label}” marks? This can't be undone (a daily backup may still have them).`
+                  : `Clear ${row.label} marks`"
+                :disabled="row.count === 0"
+                @click="clear(row.id)"
+              >
+                <template v-if="confirm.armed(clearId(row.id))">
+                  Clear {{ row.count.toLocaleString() }}?
+                </template>
+                <span v-else class="i-tabler-trash" text="sm" aria-hidden="true" />
+              </button>
+            </div>
           </template>
-        </p>
-      </div>
+        </ListRow>
+      </ListFrame>
+      <span :id="orderOffId" hidden>{{ MARK_ORDER_OFF }}</span>
+
+      <p v-if="external.length" text="xs muted-fg">
+        <template v-for="id in external" :key="id">
+          <Icon :class="markIconClass(marks[id]?.icon)" />
+          {{ label(id) }}<span v-if="id === SAVED_MARK"> lives on AO3, not here — this entry only says how it is drawn on results.</span>
+        </template>
+      </p>
+
+      <p text="xs muted-fg">
+        Marks are stored with your settings, so they're included in backups and sync.
+        <template v-if="showSize">
+          They currently take about {{ packedKb.toFixed(1) }}&nbsp;KB (compressed further before syncing, which has a
+          100&nbsp;KB budget for all settings combined).
+        </template>
+      </p>
     </div>
 
     <Dialog :ref="setDialogRef" v-model:open="open" detached-trigger>

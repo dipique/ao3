@@ -24,4 +24,15 @@ describe('sync messages', () => {
     assert.match(syncPauseMessage({ reason: 'older-cloud', remoteVersion: 1 }, 2), /^Waiting for an up-to-date browser: .*sync version 1; this browser has 2\)/)
     assert.match(syncRefusalMessage({ ok: false, reason: 'newer-version', remoteVersion: 3, version: 2 }), /^Can't turn on sync: .*sync version 3; this browser has 2\)/)
   })
+
+  test('version pauses read in full', () => {
+    assert.equal(
+      syncPauseMessage({ reason: 'newer-version', remoteVersion: 9 }, 7),
+      'Sync is paused: your synced settings were saved by a newer version of AO3 Enhancements (sync version 9; this browser has 7). Update or reload the extension in this browser. Changes you make here won\'t sync until then.',
+    )
+    assert.equal(
+      syncPauseMessage({ reason: 'older-cloud', remoteVersion: 5 }, 7),
+      'Waiting for an up-to-date browser: your synced settings were saved by an older version of AO3 Enhancements (sync version 5; this browser has 7). They\'ll sync here once a browser running this version saves them.',
+    )
+  })
 })

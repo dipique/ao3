@@ -105,7 +105,7 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
 </script>
 
 <template>
-  <OptionRow :title="name" :subtitle="row.summary" stacked control-width="24rem">
+  <OptionRow :title="name" :subtitle="row.summary" stacked control-width="24rem" :data-list-row="row.key">
     <!--
       Where the list actually is. A row can be refreshed from here only after the
       view has scraped it once, so "go and open it" is a real instruction — and
@@ -291,15 +291,14 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
         {{ REVIEW_WINDOW_NOTE }}
       </p>
       <!--
-        Said here rather than as a switch, because pausing, renaming and dropping
-        an entry all belong together in one place — this row's job is only to say
-        that the list has one.
+        Said here rather than as a switch, because retitling, stopping and
+        removing a list all belong together in one place — this row's job is only
+        to say that the list is tracked.
       -->
       <p v-if="tracked" text="sm muted-fg" pt-1>
-        {{ tracked.tracked
-          ? 'Tracked — its new and updated works turn up in your review.'
-          : 'Tracked, but paused — nothing from it is being reviewed.' }}
-        Rename, pause or drop it under Search &rarr; Tracked lists. This stored list is untouched either way.
+        Tracked — its new and updated works turn up in your review.
+        Retitle it or stop tracking it under Search &rarr; Tracked lists, which keeps this stored list; removing the
+        list there removes this too.
       </p>
       <SiteExportProgress v-if="mine" />
     </template>

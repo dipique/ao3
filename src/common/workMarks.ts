@@ -379,6 +379,20 @@ export function readWorkIds(workMarks: WorkMarks): Set<string> {
 }
 
 /**
+ * How many works carry a mark of the table's own, each counted once however
+ * many marks it carries — the finer verdicts stack, so adding up the marks'
+ * own counts would count such a work twice.
+ */
+export function markedWorkCount(marks: Record<MarkId, MarkConfig>): number {
+  const ids = new Set<string>()
+  for (const mark of localMarkIds(marks)) {
+    for (const workId of markItems(marks, mark))
+      ids.add(workId)
+  }
+  return ids.size
+}
+
+/**
  * Every mark that behaves as `id` does — the group's root plus each mark
  * aliasing it, in table order. Which of them can sit on one work together is
  * {@link markClears}.
@@ -468,6 +482,16 @@ export function reorderableMarkIds(marks: Record<MarkId, MarkConfig>): MarkId[] 
 }
 
 /**
+ * The marks holding ids of their own, in the order the options list keeps
+ * them: the reorderable run, then the pinned marks after it. That is the order
+ * {@link moveMark} writes, so it holds even for a table whose stored slots put
+ * a pinned mark among the verdicts.
+ */
+export function listedMarkIds(marks: Record<MarkId, MarkConfig>): MarkId[] {
+  return pinnedLast(marks, reorderableMarkIds(marks)).filter(id => markIsLocal(marks, id))
+}
+
+/**
  * Move one mark `delta` places through the reorderable run, returning a new
  * table — or the original (identity-equal) when the move would leave the run,
  * so a redundant `options.set` can be skipped.
@@ -519,7 +543,7 @@ function renumbered(
   marks: Record<MarkId, MarkConfig>,
   movable: MarkId[],
 ): Record<MarkId, MarkConfig> {
-  const sequence = [...movable, ...markIds(marks).filter(id => !markIsReorderable(marks, id))]
+  const sequence = pinnedLast(marks, movable)
   if (sequence.every((id, index) => marks[id]?.order === index))
     return marks
 
@@ -527,6 +551,11 @@ function renumbered(
   for (const [index, id] of sequence.entries())
     next[id] = { ...marks[id]!, order: index }
   return next
+}
+
+/** Every mark id: the reorderable `movable` as given, then the pinned marks in table order. */
+function pinnedLast(marks: Record<MarkId, MarkConfig>, movable: readonly MarkId[]): MarkId[] {
+  return [...movable, ...markIds(marks).filter(id => !markIsReorderable(marks, id))]
 }
 
 /**

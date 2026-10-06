@@ -5,11 +5,8 @@
   <OptionCategory
     title="Reading"
     subtitle="Keeping track of what you've read, how long a work will take, and how its text is laid out."
+    icon="i-mdi-book-open-page-variant"
   >
-    <template #icon>
-      <Icon i-mdi-book-open-page-variant />
-    </template>
-
     <OptionSubsection
       title="Marks &amp; status"
       subtitle="Remember what you've read and what you thought of it. Marks live in your settings rather than on AO3, and can hide marked works from listings."
@@ -30,21 +27,18 @@
         :slider-min="50"
         :slider-max="1000"
       />
-      <OptionDivider />
       <OptionRow
         title="Reading time"
         subtitle="How long the whole work will take you at your reading speed."
       >
         <OptionSwitch option-id="showTotalTime" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Finish reading at"
         subtitle="The clock time you would finish the whole work if you started now."
       >
         <OptionSwitch option-id="showTotalFinish" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Kudos/hits ratio"
         subtitle="What share of readers left kudos — a rough popularity signal AO3 doesn't show."
@@ -63,21 +57,18 @@
       >
         <OptionSwitch option-id="showChapterWords" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Reading time"
         subtitle="How long this chapter will take you at your reading speed."
       >
         <OptionSwitch option-id="showChapterTime" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Finish reading at"
         subtitle="The clock time you would finish this chapter if you started now."
       >
         <OptionSwitch option-id="showChapterFinish" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Last updated"
         subtitle="The date this chapter was posted."
@@ -92,11 +83,11 @@
     >
       <OptionRow
         title="Reader mode"
-        subtitle="Zoom over the work text (Ctrl+scroll, or pinch on a trackpad) to resize and reflow it instead of zooming the page, and drag the handles at its left and right edges to set the reading width. This device only."
+        subtitle="Zoom over the work text (Ctrl+scroll, or pinch on a trackpad) to resize and reflow it instead of zooming the page, and drag the handles at its left and right edges to set the reading width."
+        :badges="['this-device']"
       >
         <OptionSwitch option-id="readerMode" />
       </OptionRow>
-      <OptionDivider />
       <OptionRowNumberSlider
         title="Narrow the work text"
         subtitle="Shrinks the reading column, which makes long lines easier to follow on a wide screen. 0 leaves the width alone."
@@ -106,14 +97,12 @@
         :min="0"
         :max="100"
       />
-      <OptionDivider />
       <OptionRow
         title="Force text alignment"
         subtitle="Override the alignment an author set — for a work centred or justified in a way you find hard to read."
       >
         <OptionForceAlignment />
       </OptionRow>
-      <OptionDivider />
       <OptionRowTextReplacements />
     </OptionSubsection>
   </OptionCategory>

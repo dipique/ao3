@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { addressOf, planRetitle, planStopTracking, planTrack, planTrackSearch } from '../../src/common/savedLists.ts'
 import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixture, range, rulesFixture, textReplacementsFixture, trackedListsFixture } from './harness.mjs'
 
@@ -270,8 +271,8 @@ describe('sync scenarios', () => {
       assert.equal(laptop.options.trackedLists.lists.length, 2)
     })
 
-    /** Renaming and pausing every list is an edit, and passes straight through. */
-    test('renaming and pausing them all is not a loss', async () => {
+    /** Renaming every list is an edit, and passes straight through to the other browser's records. */
+    test('renaming them all is not a loss', async () => {
       const cloud = createCloud()
       const laptop = mainBrowser(cloud)
       await laptop.enableSync()
@@ -281,16 +282,15 @@ describe('sync scenarios', () => {
       await cloud.run()
 
       const edited = trackedListsFixture(12, { reviewedThrough: 20100 })
-      for (const entry of edited.lists) {
+      for (const entry of edited.lists)
         entry.alias = `${entry.alias} — renamed`
-        entry.tracked = false
-      }
       await desktop.edit({ trackedLists: edited })
       await cloud.run()
 
       assert.equal(laptop.meta.pause, null)
       assert.equal(laptop.options.trackedLists.reviewedThrough, 20100)
-      assert.equal(laptop.options.trackedLists.lists.every(entry => !entry.tracked), true)
+      assert.deepEqual(laptop.options.trackedLists.lists.map(entry => entry.alias), edited.lists.map(entry => entry.alias))
+      assert.deepEqual(Object.values(laptop.options.savedLists.lists).map(record => record.title), edited.lists.map(entry => entry.alias))
     })
 
     /**
@@ -318,6 +318,198 @@ describe('sync scenarios', () => {
       assert.equal(laptop.meta.pause, null)
       assert.deepEqual(laptop.options.trackedLists.lists.map(entry => entry.id), refined.lists.map(entry => entry.id))
       assert.equal(laptop.options.trackedLists.lists.every(entry => entry.url.endsWith('=Angst') && entry.filter?.facets?.characters?.ex?.[0] === 'Draco Malfoy'), true)
+    })
+  })
+
+  /**
+   * Every saved list has a record on its browser that never syncs, and only the
+   * lists tracked right now are entries in `trackedLists`. A browser on a build
+   * from before that holds untracked ("paused") lists as entries too.
+   */
+  describe('saved lists', () => {
+    const V = SYNC_SCHEMA_VERSION
+    const OLD_BUILD = { version: V - 1, savedLists: false }
+
+    /** Twelve tracked lists, and three paused ones with titles of their own, as a build from before saved lists held them. */
+    function withPaused() {
+      const option = trackedListsFixture(12)
+      for (let i = 0; i < 3; i++)
+        option.lists.push({ id: `p${i}`, kind: 'tag-works', url: `/tags/paused%20${i}`, alias: `Paused ${i}`, tracked: false, since: 19990 })
+      return option
+    }
+
+    const TRACKED_IDS = trackedListsFixture(12).lists.map(entry => entry.id)
+    const ids = lists => lists.map(entry => entry.id)
+    const listState = device => ({ tracked: device.options.trackedLists, saved: device.options.savedLists })
+    const written = state => ({ trackedLists: state.tracked, savedLists: state.saved })
+
+    /** A stored copy of fixture list `i`, as its search view stores one. */
+    const copyOf = i => ({
+      v: 3,
+      scrapedAt: 1_000,
+      ids: '',
+      descriptor: { sourceId: 'text-search', label: `Search: word ${i}`, listUrl: `https://archiveofourown.org${trackedListsFixture(12).lists[i].url}` },
+    })
+
+    /** A laptop and a desktop on a build from before saved lists, in sync, holding the paused lists as entries. */
+    async function oldBrowsers() {
+      const cloud = createCloud()
+      const laptop = createDevice(cloud, 'laptop', { ...OLD_BUILD, options: { rules: rulesFixture(40), trackedLists: withPaused() } })
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', OLD_BUILD)
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.options.trackedLists.lists.length, 15, 'precondition: the paused lists synced, as entries')
+
+      // The laptop is updated first, and moves the cloud to the new version.
+      await laptop.restart({ version: V, savedLists: true, migrate: true, init: true })
+      await cloud.run()
+      return { cloud, laptop, desktop }
+    }
+
+    /** Each of the desktop's paused lists is a record of its own, title and all. */
+    function assertPausedKept(desktop) {
+      const records = desktop.options.savedLists.lists
+      for (let i = 0; i < 3; i++)
+        assert.deepEqual(records[`p${i}`], { id: `p${i}`, kind: 'tag-works', url: `/tags/paused%20${i}`, title: `Paused ${i}` })
+      assert.deepEqual(ids(desktop.options.trackedLists.lists), TRACKED_IDS)
+    }
+
+    test('the first browser updated moves its paused lists into records, and syncs only what is tracked', async () => {
+      const { cloud, laptop } = await oldBrowsers()
+      assert.equal(cloud.manifest().v, V)
+      assert.deepEqual(ids(laptop.options.trackedLists.lists), TRACKED_IDS)
+      assert.equal(laptop.options.savedLists.v, 1)
+      assert.deepEqual(laptop.options.savedLists.lists.p0, { id: 'p0', kind: 'tag-works', url: '/tags/paused%200', title: 'Paused 0' })
+      assert.equal(Object.values(laptop.options.savedLists.lists).some(record => record.mirror), false, 'a migrated record is this browser\'s own')
+    })
+
+    test('an old build\'s paused entries survive a newer copy, which it waits on rather than adopts', async () => {
+      const { cloud, desktop } = await oldBrowsers()
+      assert.equal(desktop.meta.pause?.reason, 'newer-version')
+      assert.equal(desktop.options.trackedLists.lists.length, 15)
+      assert.deepEqual(desktop.options.trackedLists.lists.filter(entry => !entry.tracked).map(entry => entry.alias), ['Paused 0', 'Paused 1', 'Paused 2'])
+
+      // Updated, it moves them into records before it takes the copy.
+      await desktop.restart({ version: V, savedLists: true, migrate: true, init: true })
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assertPausedKept(desktop)
+      assert.equal(desktop.backups.some(backup => backup.kind === 'sync-held'), false, 'the lists both had tracked raise nothing')
+    })
+
+    test('a pull that reaches the engine before the migration loses nothing', async () => {
+      const { cloud, desktop } = await oldBrowsers()
+      // The update's first pull runs before the migration does.
+      await desktop.restart({ version: V, savedLists: true, init: true })
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assertPausedKept(desktop)
+    })
+
+    test('a tracked entry arriving without a copy makes a record of it, under its id and title', async () => {
+      const cloud = createCloud()
+      const laptop = createDevice(cloud, 'laptop', { options: { trackedLists: trackedListsFixture(2) } })
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+
+      const query = { kind: 'text-search', url: '/works/search?work_search[query]=tea', type: 'search', entity: 'tea' }
+      const plan = planTrackSearch(listState(laptop), query, 'Tea', 20400)
+      await laptop.edit(written(plan.state))
+      await cloud.run()
+
+      assert.deepEqual(desktop.options.savedLists.lists[plan.id], { id: plan.id, ...query, title: 'Tea', mirror: true })
+      assert.equal(laptop.options.savedLists.lists[plan.id].mirror, undefined, 'the tracker\'s own record is no mirror')
+      assert.deepEqual(desktop.options.trackedLists.lists.at(-1), { id: plan.id, ...query, alias: 'Tea', tracked: true, since: 20400 })
+    })
+
+    /**
+     * A laptop tracking twelve lists, and a desktop that adopted them and then
+     * stored a copy of the second, which joins that list's record by address.
+     */
+    async function mirrored() {
+      const cloud = createCloud()
+      const laptop = createDevice(cloud, 'laptop', { options: { trackedLists: trackedListsFixture(12) } })
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+      await desktop.store('text-search:word-1', copyOf(1))
+      assert.deepEqual(Object.keys(desktop.options.savedLists.lists), TRACKED_IDS, 'precondition: the copy is the second list\'s, not a list of its own')
+      assert.equal(Object.values(desktop.options.savedLists.lists).every(record => record.mirror), true, 'precondition: all only mirrored')
+      return { cloud, laptop, desktop }
+    }
+
+    test('a copy stored before its list arrived is a list of its own, beside the tracked one', async () => {
+      const cloud = createCloud()
+      const laptop = createDevice(cloud, 'laptop', { options: { trackedLists: trackedListsFixture(2) } })
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { stored: { 'text-search:word-1': copyOf(1) } })
+      await desktop.enableSync()
+      await cloud.run()
+
+      const records = Object.values(desktop.options.savedLists.lists)
+      const atAddress = records.filter(record => addressOf(record.url) === addressOf(trackedListsFixture(2).lists[1].url))
+      assert.equal(atAddress.length, 2, 'nothing is merged')
+      assert.deepEqual(atAddress.map(record => record.title).sort(), ['', 'Search 1'])
+      assert.deepEqual(ids(desktop.options.trackedLists.lists), ['l0', 'l1'])
+    })
+
+    test('tracking stopped on one browser: the other keeps the lists it holds a copy of or changed, and lets the rest go', async () => {
+      const { cloud, laptop, desktop } = await mirrored()
+      // The desktop retitles one, which makes it a list it has had a hand in.
+      await desktop.edit(written(planRetitle(listState(desktop), 'l2', 'Word two').state))
+      await cloud.run()
+      assert.equal(laptop.options.savedLists.lists.l2.title, 'Word two')
+
+      let state = listState(laptop)
+      for (const id of ['l0', 'l1', 'l2'])
+        state = planStopTracking(state, id)
+      await laptop.edit(written(state))
+      await cloud.run()
+
+      assert.equal(desktop.meta.pause, null, 'three lists is within bounds')
+      assert.deepEqual(ids(desktop.options.trackedLists.lists), TRACKED_IDS.slice(3))
+      const records = desktop.options.savedLists.lists
+      assert.equal(records.l0, undefined, 'only ever mirrored, and nothing of it held here')
+      assert.deepEqual(records.l1, { id: 'l1', kind: 'text-search', url: trackedListsFixture(12).lists[1].url, title: 'Search 1' }, 'kept for its copy, and no longer a mirror')
+      assert.deepEqual(records.l2, { id: 'l2', kind: 'text-search', url: trackedListsFixture(12).lists[2].url, title: 'Word two' }, 'kept, with the last title it had')
+      for (const id of ['l0', 'l1', 'l2'])
+        assert.ok(laptop.options.savedLists.lists[id], `${id} stays saved where tracking stopped`)
+
+      // Tracked again on the desktop: the entry is back, and the laptop's record takes the tracker's title.
+      await desktop.edit(written(planRetitle(listState(desktop), 'l2', 'Word 2').state))
+      await cloud.run()
+      assert.equal(laptop.options.savedLists.lists.l2.title, 'Word two', 'a saved list\'s title doesn\'t sync')
+      await desktop.edit(written(planTrack(listState(desktop), 'l2', 20400).state))
+      await cloud.run()
+      assert.equal(laptop.options.trackedLists.lists.find(entry => entry.id === 'l2').alias, 'Word 2')
+      assert.equal(laptop.options.savedLists.lists.l2.title, 'Word 2')
+    })
+
+    test('tracking stopped on most of the lists is held, and accepting it keeps what this browser holds', async () => {
+      const { cloud, laptop, desktop } = await mirrored()
+      let state = listState(laptop)
+      for (const id of TRACKED_IDS.slice(0, 6))
+        state = planStopTracking(state, id)
+      await laptop.edit(written(state))
+      await cloud.run()
+
+      assert.equal(desktop.meta.pause?.reason, 'held')
+      assert.deepEqual(desktop.meta.pause.loss.trackedLists, { removed: 6, of: 12 })
+      assert.deepEqual(ids(desktop.options.trackedLists.lists), TRACKED_IDS, 'nothing is applied while it is held')
+      assert.deepEqual(Object.keys(desktop.options.savedLists.lists), TRACKED_IDS)
+
+      assert.equal(await desktop.resolveHeld('accept'), true)
+      await cloud.run()
+      assert.deepEqual(ids(desktop.options.trackedLists.lists), TRACKED_IDS.slice(6))
+      assert.deepEqual(Object.keys(desktop.options.savedLists.lists), ['l1', ...TRACKED_IDS.slice(6)], 'the one with a copy stays saved')
     })
   })
 

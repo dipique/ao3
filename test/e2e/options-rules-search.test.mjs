@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
-
-const chromePath = findChrome()
-const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
+import { sleep } from './helpers.mjs'
+import { skip, startOptions } from './optionsPage.mjs'
 
 /**
- * Rules chosen to pin down what the search does and does not look at:
+ * Rules chosen to pin down what the filter does and does not look at:
  * casing, a substring that is not a prefix, a `.` and a `*` that must stay
  * literal, and a pseud/target that must NOT be searchable.
  */
@@ -24,150 +21,133 @@ const RULES = [
 
 const SEED = { 'option.rules': { enabled: true, filters: RULES, colors: {} } }
 
+const LIST = 'rules'
+
 /**
- * Searching the rules list. It filters on the rule *text* alone — a few hundred
- * rules are searched for the tag you half-remember, and matching the target or
- * pseud columns would turn up rules whose text has nothing to do with what was
- * typed.
+ * Filtering the rules list from the filter in its header. It filters on the
+ * rule *text* alone — a few hundred rules are searched for the tag you
+ * half-remember, and matching the target or pseud would turn up rules whose
+ * text has nothing to do with what was typed.
  */
-describe('options UI — rules search', { skip }, () => {
-  let server
-  let browser
-  let page
-  const consoleMsgs = []
+describe('options UI — rules filter', { skip }, () => {
+  let session
+  let options
 
   before(async () => {
-    ensureBuilt()
-    server = await serveDist()
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
-    page = await browser.newPage()
-    await page.evaluateOnNewDocument(installMock, SEED)
-    page.on('console', m => consoleMsgs.push({ type: m.type(), text: m.text() }))
-    page.on('pageerror', e => consoleMsgs.push({ type: 'pageerror', text: e.message }))
-    await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
-    await sleep(1200)
+    session = await startOptions()
+    options = await session.open({ seed: SEED, hash: '#customize-search-results' })
   }, { timeout: 180000 })
 
-  after(async () => {
-    await browser?.close()
-    await server?.close()
-  })
+  after(() => session?.close())
 
-  const SEARCH = 'input[aria-label="Search rules by text"]'
+  const filterBox = async () => options.control(await options.list(LIST), 'textbox', 'Search rules by text')
 
-  /** Type `text` into the search box (replacing whatever is there). */
-  const search = async (text) => {
-    await page.click(SEARCH, { clickCount: 3 })
-    await page.keyboard.press('Backspace')
+  /** Type `text` into the filter (replacing whatever is there). */
+  const filter = async (text) => {
+    const box = await filterBox()
+    await box.click({ clickCount: 3 })
+    await options.page.keyboard.press('Backspace')
     if (text)
-      await page.type(SEARCH, text)
+      await box.type(text)
     await sleep(300)
   }
 
-  /**
-   * The rule text of every row currently rendered. The table's `id` is a
-   * component prop rather than a DOM attribute, so it never reaches the
-   * `<table>`; the generated header ids are what actually identify it.
-   */
-  const rows = () => page.evaluate(() => {
-    const table = document.querySelector('[id^="rules-filters-header-"]')?.closest('table')
-    if (!table)
-      return []
-    // The value cell is `<pre>text<span>(pseud)</span></pre>` — take the text
-    // node so a pseud doesn't get folded into the value.
-    return [...table.querySelectorAll('th[scope="row"] pre')]
-      .map(el => (el.firstChild?.textContent ?? el.textContent).trim())
-  })
+  /** The text of every rule the list is showing. Each row is the rule at that place in the stored list. */
+  const rows = async () => (await options.listRowIds(LIST)).map(at => RULES[Number(at)].value)
 
-  test('every rule is listed before anything is typed', async () => {
-    await search('')
+  test('every rule is listed before anything is typed, and the header counts them', async () => {
+    await filter('')
     const listed = await rows()
     assert.equal(listed.length, RULES.length, listed.join(' | '))
+    assert.equal(await options.listCount(LIST), `${RULES.length} rules`)
   })
 
   test('matching is case-insensitive', async () => {
-    await search('SLOW')
+    await filter('SLOW')
     const listed = await rows()
-    await search('')
+    await filter('')
     assert.deepEqual(listed.sort(), ['Slow Burn', 'slow build'])
   })
 
   test('it matches anywhere in the text, not just the start', async () => {
-    await search('lovers')
+    await filter('lovers')
     const listed = await rows()
-    await search('')
+    await filter('')
     assert.deepEqual(listed, ['Enemies to Lovers'])
   })
 
-  test('the target column is not searched', async () => {
-    // "Fandom" is what the target column shows for one of these rules, but no
-    // rule has the word in its text — so this must find nothing.
-    await search('fandom')
+  test('what a rule applies to is not searched', async () => {
+    // "Fandom" is what one of these rules applies to, but no rule has the word
+    // in its text — so this must find nothing.
+    await filter('fandom')
     const listed = await rows()
-    await search('')
+    await filter('')
     assert.deepEqual(listed, [])
   })
 
   test('an author pseud is not searched either', async () => {
     // The pseud renders right beside the rule text, so it is the obvious thing
     // to match by accident.
-    await search('BurnNotice')
+    await filter('BurnNotice')
     const listed = await rows()
-    await search('')
+    await filter('')
     assert.deepEqual(listed, [])
 
-    await search('someone')
+    await filter('someone')
     const byValue = await rows()
-    await search('')
+    await filter('')
     assert.deepEqual(byValue, ['someone'], 'the author value itself still matches')
   })
 
   test('a dot is a dot, not a wildcard', async () => {
-    await search('A.B.O')
+    await filter('A.B.O')
     const listed = await rows()
-    await search('')
+    await filter('')
     assert.deepEqual(listed, ['A.B.O. Dynamics'])
   })
 
   test('a star is a star, not a wildcard', async () => {
-    await search('5*')
+    await filter('5*')
     const listed = await rows()
-    await search('')
+    await filter('')
     assert.deepEqual(listed, ['5*Stars'])
   })
 
-  test('no matches says so rather than showing an empty table', async () => {
-    await search('zzzzz')
-    const empty = await page.evaluate(() =>
-      [...document.querySelectorAll('p')].some(p => p.textContent.includes('No rules match')))
-    await search('')
-    assert.ok(empty, 'an empty result explains itself')
+  test('no matches says so in the list\'s place', async () => {
+    await filter('zzzzz')
+    const listed = await rows()
+    const text = await options.text(await options.list(LIST))
+    await filter('')
+    assert.deepEqual(listed, [])
+    assert.match(text, /No rules match “zzzzz”/, 'an empty result explains itself')
   })
 
-  test('the count shows how much of the list is showing', async () => {
-    await search('slow')
-    const count = await page.evaluate(() =>
-      [...document.querySelectorAll('span')].map(s => s.textContent.trim()).find(t => /^\d+ of \d+$/.test(t)) ?? null)
-    await search('')
+  test('the header\'s count shows how much of the list is showing', async () => {
+    await filter('slow')
+    const count = await options.listCount(LIST)
+    await filter('')
     assert.equal(count, `2 of ${RULES.length}`)
   })
 
-  test('clearing the box brings the whole list back', async () => {
-    await search('slow')
-    await page.click('button[aria-label="Clear rule search"]')
+  test('clearing the filter brings the whole list back, and keeps the focus in it', async () => {
+    await filter('slow')
+    await (await options.control(await options.list(LIST), 'button', 'Clear rule search')).click()
     await sleep(300)
     const listed = await rows()
-    const value = await page.$eval(SEARCH, el => el.value)
-    assert.equal(value, '')
+    const box = await filterBox()
+    assert.equal(await box.evaluate(el => el.value), '')
     assert.equal(listed.length, RULES.length)
+    assert.equal(await box.evaluate(el => el === document.activeElement), true, 'the clear button went, so the field has the focus')
+  })
+
+  test('filtering writes nothing', async () => {
+    await filter('slow')
+    await filter('')
+    await sleep(500)
+    assert.equal(await options.lastWrite('option.rules'), null)
   })
 
   test('renders without console errors', () => {
-    const bad = consoleMsgs.filter(m => m.type === 'error' || m.type === 'pageerror')
-    assert.deepEqual(bad.map(m => m.text), [])
+    assert.deepEqual(options.problems(), [])
   })
 })

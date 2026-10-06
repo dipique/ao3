@@ -7,7 +7,7 @@ const id = OptionLabelId.inject()
   <Select
     :id="id"
     v-model="optionValue"
-    h-8 w-40
+    size="row"
   >
     <SelectItem :value="null">
       <span text="muted-fg">Disabled</span>

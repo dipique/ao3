@@ -1,83 +1,83 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
+import { sleep } from './helpers.mjs'
+import { skip, startOptions, stubArchive } from './optionsPage.mjs'
 
-const chromePath = findChrome()
-const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
-const SEED = { 'option.rules': { enabled: true, filters: [], colors: {} } }
+/** A highlight in a colour of its own, a disabled rule, and a collapse rule to switch off. */
+const RULES = [
+  { target: 'F', value: 'Painted', matcher: 'exact', behavior: 'highlight', color: '#123456' },
+  { target: 'C', value: 'Set aside', matcher: 'exact', behavior: 'none' },
+  { target: 'F', value: 'Folded', matcher: 'exact', behavior: 'collapse' },
+]
+
+const SEED = { 'option.rules': { enabled: true, filters: RULES, colors: {} } }
 
 describe('options UI — rules dialog', { skip }, () => {
-  let server
-  let browser
+  let session
+  let options
   let page
-  const consoleMsgs = []
 
   before(async () => {
-    ensureBuilt()
-    server = await serveDist()
-    browser = await puppeteer.launch({ executablePath: chromePath, headless: 'new', args: ['--no-first-run', '--no-default-browser-check'] })
-    page = await browser.newPage()
-    await page.evaluateOnNewDocument(installMock, SEED)
-    page.on('console', m => consoleMsgs.push({ type: m.type(), text: m.text() }))
-    page.on('pageerror', e => consoleMsgs.push({ type: 'pageerror', text: e.message }))
-    await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
-    await sleep(1200)
+    session = await startOptions()
+    options = await session.open({
+      seed: SEED,
+      hash: '#customize-search-results',
+      // A value typed in Exact mode asks AO3 for suggestions; none are wanted here.
+      prepare: tab => stubArchive(tab, () => ({ json: [] })),
+    })
+    page = options.page
   }, { timeout: 180000 })
 
-  after(async () => {
-    await browser?.close()
-    await server?.close()
-  })
+  after(() => session?.close())
 
   // --- helpers bound to the live page ---
-  const openAddRuleDialog = async () => {
-    for (const b of await page.$$('[i-mdi-plus-box]')) {
-      await b.evaluate(el => (el.closest('button') || el).click())
-      await sleep(400)
-      const isRule = await page.evaluate(() => {
-        const d = document.querySelector('[role="dialog"]')
-        return !!(d && d.querySelector('[i-codicon-regex]') && d.querySelector('[i-codicon-whole-word]'))
-      })
-      if (isRule)
-        return true
-      await page.keyboard.press('Escape')
-      await sleep(200)
-    }
-    return false
+  const dialog = async () => {
+    await page.waitForSelector('[role="dialog"]', { timeout: 5000 })
+    return page.$('[role="dialog"]')
   }
-  const openEditRuleDialog = async () => {
-    for (const e of await page.$$('[i-codicon-edit]')) {
-      await e.evaluate(el => (el.closest('button,a,[role="button"]') || el).click())
-      await sleep(400)
-      if (await page.$('[role="dialog"]'))
-        return true
-    }
-    return false
-  }
-  const clickInDialog = sel => page.evaluate((s) => {
-    const el = document.querySelector('[role="dialog"]')?.querySelector(s)
-    if (!el)
-      return false
-    const target = el.closest('button,a,[role="button"]') || el
-    target.click()
-    return true
-  }, sel)
-  const saveDialog = () => page.evaluate(() => {
+  /** Whether the open dialog is the rule editor: it is the one with the matcher toggles. */
+  const ruleDialogOpen = () => page.evaluate(() => {
     const d = document.querySelector('[role="dialog"]')
-    const b = [...(d?.querySelectorAll('button') || [])].find(x => x.textContent.trim() === 'Save')
-    if (!b)
-      return false
-    b.click()
-    return true
+    return !!(d && d.querySelector('[i-codicon-regex]') && d.querySelector('[i-codicon-whole-word]'))
   })
-  const lastRules = () => page.evaluate(() => {
-    const w = window.__writes.filter(x => 'option.rules' in x).map(x => x['option.rules'])
-    return w.at(-1) ?? null
-  })
+  const openAddRuleDialog = async () => {
+    await options.press(await options.control(await options.list('rules'), 'button', 'Add a rule'))
+    await sleep(400)
+    return ruleDialogOpen()
+  }
+  const openEditRuleDialog = async (value) => {
+    await options.press(await options.control(await options.list('rules'), 'button', `Edit rule “${value}”`))
+    await sleep(400)
+    return ruleDialogOpen()
+  }
+  /** One of a radio group's choices, the group by its name, such as “What the rule does”. */
+  const choice = async (group, name) => options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name)
+  const pick = async (group, name) => {
+    await options.press(await choice(group, name))
+    await sleep(200)
+  }
+  const checked = handle => handle.evaluate(el => el.getAttribute('aria-checked') === 'true')
+  const disabled = handle => handle.evaluate(el => el.disabled)
+  /** The value field: a combobox while it offers suggestions, a plain text field otherwise. */
+  const valueField = async () => {
+    const [combobox] = await options.controls(await dialog(), 'combobox')
+    return combobox ?? options.control(await dialog(), 'textbox')
+  }
+  const typeValue = async (text) => {
+    await (await valueField()).type(text)
+  }
+  const enabledSwitch = async () => options.control(await dialog(), 'switch', 'Rule Enabled')
+  /** Add rule, or Save when editing; the dialog closes and the rules are written. */
+  const saveDialog = async (name) => {
+    await options.press(await options.control(await dialog(), 'button', name))
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
+    await sleep(1000)
+  }
+  const storedRule = async value => (await options.lastWrite('option.rules'))?.filters?.find(f => f.value === value)
   const closeDialog = async () => {
     await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
     await sleep(250)
   }
 
@@ -102,14 +102,10 @@ describe('options UI — rules dialog', { skip }, () => {
 
   test('creating a rule with the Regex matcher persists', async () => {
     assert.ok(await openAddRuleDialog(), 'the Add-rule dialog should open')
-    await page.waitForSelector('[role="dialog"] input[type="text"]', { timeout: 5000 })
-    await page.focus('[role="dialog"] input[type="text"]')
-    await page.type('[role="dialog"] input[type="text"]', 'e2e-regex')
-    assert.ok(await clickInDialog('[i-codicon-regex]'), 'the Regex toggle should be present')
-    await sleep(300)
-    assert.ok(await saveDialog(), 'the Save button should be present')
-    await sleep(1000)
-    const stored = await lastRules()
+    await typeValue('e2e-regex')
+    await pick('How to match', 'Regex')
+    await saveDialog('Add rule')
+    const stored = await options.lastWrite('option.rules')
     assert.ok(
       stored?.filters?.some(f => f.value === 'e2e-regex' && f.matcher === 'regex' && f.target === 'tag'),
       `expected a persisted {target:'tag', value:'e2e-regex', matcher:'regex'} rule, got ${JSON.stringify(stored)}`,
@@ -117,21 +113,137 @@ describe('options UI — rules dialog', { skip }, () => {
   })
 
   test('editing a rule to the Contains matcher persists', async () => {
-    assert.ok(await openEditRuleDialog(), 'the Edit-rule dialog should open')
-    await sleep(300)
-    assert.ok(await clickInDialog('[i-codicon-whole-word]'), 'the Contains toggle should be present')
-    await sleep(300)
-    assert.ok(await saveDialog(), 'the Save button should be present')
-    await sleep(1000)
-    const stored = await lastRules()
+    assert.ok(await openEditRuleDialog('e2e-regex'), 'the Edit-rule dialog should open')
+    await pick('How to match', 'Contains')
+    await saveDialog('Save')
+    const stored = await options.lastWrite('option.rules')
     assert.ok(
       stored?.filters?.some(f => f.value === 'e2e-regex' && f.matcher === 'contains'),
       `expected the rule's matcher updated to 'contains', got ${JSON.stringify(stored)}`,
     )
   })
 
+  test('the Amber swatch writes #f59e0b', async () => {
+    assert.ok(await openAddRuleDialog(), 'the Add-rule dialog should open')
+    await typeValue('amber')
+    await pick('What the rule does', 'Highlight')
+    await pick('Highlight colour', 'Amber')
+    await saveDialog('Add rule')
+    assert.deepEqual(await storedRule('amber'), { target: 'tag', value: 'amber', matcher: 'exact', behavior: 'highlight', color: '#f59e0b' })
+  })
+
+  test('the Default swatch writes no colour of the rule\'s own', async () => {
+    assert.ok(await openEditRuleDialog('amber'), 'the Edit-rule dialog should open')
+    assert.ok(await checked(await choice('Highlight colour', 'Amber')), 'the rule opens on its preset')
+    await pick('Highlight colour', 'Default')
+    await saveDialog('Save')
+    assert.deepEqual(await storedRule('amber'), { target: 'tag', value: 'amber', matcher: 'exact', behavior: 'highlight' })
+  })
+
+  test('Your default highlight colours opens their dialog over the editor, and Escape goes back to the editor', async () => {
+    assert.ok(await openEditRuleDialog('amber'), 'the Edit-rule dialog should open')
+    await options.press(await options.control(await dialog(), 'button', 'Your default highlight colours'))
+    await sleep(400)
+    const titles = () => page.$$eval('[role="dialog"]', dialogs => dialogs.map(d => d.querySelector('h1, h2')?.textContent.trim()))
+    assert.deepEqual(await titles(), ['Edit rule', 'Default highlight colors'])
+    await page.keyboard.press('Escape')
+    await sleep(400)
+    assert.deepEqual(await titles(), ['Edit rule'])
+    await closeDialog()
+  })
+
+  test('a rule with a colour of its own opens on Custom, with the picker on that colour', async () => {
+    assert.ok(await openEditRuleDialog('Painted'), 'the Edit-rule dialog should open')
+    for (const swatch of ['Default', 'Sky', 'Amber', 'Violet'])
+      assert.equal(await checked(await choice('Highlight colour', swatch)), false, swatch)
+    assert.ok(await checked(await choice('Highlight colour', 'Custom')))
+    const fields = await options.controls(await dialog(), 'textbox')
+    const values = await Promise.all(fields.map(field => field.evaluate(el => el.value)))
+    assert.ok(values.includes('#123456'), `the picker shows the colour, got ${JSON.stringify(values)}`)
+    await closeDialog()
+  })
+
+  test('Rule Enabled off writes behavior none, and leaves Then inert', async () => {
+    assert.ok(await openEditRuleDialog('Folded'), 'the Edit-rule dialog should open')
+    const toggle = await enabledSwitch()
+    assert.equal(await toggle.evaluate(el => el.getAttribute('aria-checked')), 'true')
+    await options.press(toggle)
+    await sleep(200)
+    assert.equal(await (await enabledSwitch()).evaluate(el => el.getAttribute('aria-checked')), 'false')
+    const collapse = await choice('What the rule does', 'Collapse')
+    assert.ok(await checked(collapse), 'Then shows the rule\'s choice')
+    assert.ok(await disabled(collapse), 'Then is inert')
+    await saveDialog('Save')
+    assert.deepEqual(await storedRule('Folded'), { target: 'F', value: 'Folded', matcher: 'exact', behavior: 'none' })
+  })
+
+  test('in Regex mode the tester gives a verdict as either field changes, and nothing is written or fetched', async () => {
+    const ruleWrites = () => page.evaluate(() => window.__writes.filter(w => 'option.rules' in w).length)
+    const before = await ruleWrites()
+    assert.ok(await openAddRuleDialog(), 'the Add-rule dialog should open')
+    /** What the page asked the network for: not the icons, which are images inlined as `data:` URLs. */
+    const requests = []
+    const onRequest = (request) => {
+      if (!request.url().startsWith('data:'))
+        requests.push(request.url())
+    }
+    page.on('request', onRequest)
+    try {
+      /** The verdict, once it is this one: its words, as a screen reader reads them, and how well they read. */
+      const verdict = async (kind) => {
+        const handle = await page.waitForSelector(`[role="dialog"] [data-regex-verdict="${kind}"]`, { timeout: 2000 })
+        return { text: await options.text(handle), aa: await options.contrast(handle) >= 4.5 }
+      }
+      const replace = async (field, text) => {
+        await field.evaluate(el => el.select())
+        await field.type(text)
+      }
+
+      assert.equal(await page.$('[role="dialog"] [data-regex-verdict]'), null, 'no tester in Exact mode')
+      await pick('How to match', 'Regex')
+      assert.deepEqual(await verdict('none'), { text: 'No pattern yet', aa: true })
+      await typeValue('^slow.*burn$')
+      assert.deepEqual(await verdict('none'), { text: 'Type a tag', aa: true })
+
+      const subject = await options.control(await dialog(), 'textbox', 'Test it')
+      assert.equal(await options.description(subject), 'Checks the pattern as you type. Nothing is saved from here.')
+      await subject.type('Slow Burn')
+      assert.deepEqual(await verdict('match'), { text: 'Matches', aa: true }, 'the pattern is tested ignoring case')
+      await replace(subject, 'Slow Burning')
+      assert.deepEqual(await verdict('miss'), { text: 'No match', aa: true })
+
+      const value = await valueField()
+      await replace(value, '^slow.*(burn')
+      assert.deepEqual(await verdict('invalid'), { text: 'Error: Invalid pattern', aa: true })
+      assert.equal(await options.description(subject), 'Unterminated group', 'the engine\'s reason')
+      await replace(value, '^slow')
+      assert.deepEqual(await verdict('match'), { text: 'Matches', aa: true })
+
+      await closeDialog()
+    }
+    finally {
+      page.off('request', onRequest)
+    }
+    assert.equal(await ruleWrites(), before, 'no rule is written')
+    assert.deepEqual(requests, [], 'nothing is fetched')
+  })
+
+  test('a disabled rule opens with Rule Enabled off and Then inert', async () => {
+    assert.ok(await openEditRuleDialog('Set aside'), 'the Edit-rule dialog should open')
+    assert.equal(await (await enabledSwitch()).evaluate(el => el.getAttribute('aria-checked')), 'false')
+    const then = await options.controls(await options.control(await dialog(), 'radiogroup', 'What the rule does'), 'radio')
+    assert.equal(then.length, 5)
+    for (const action of then)
+      assert.ok(await disabled(action), await options.name(action))
+    assert.ok(await checked(await choice('What the rule does', 'Hide Work')))
+    await options.press(await enabledSwitch())
+    await sleep(200)
+    assert.equal(await disabled(await choice('What the rule does', 'Collapse')), false, 'switched on, Then is live again')
+    await closeDialog()
+  })
+
   test('dialogs declare an accessible description (no reka warning)', () => {
-    const a11y = consoleMsgs.filter(m => /aria-describedby|Description` or|DialogContent/i.test(m.text))
+    const a11y = options.messages.filter(m => /aria-describedby|Description` or|DialogContent/i.test(m.text))
     assert.equal(a11y.length, 0, `unexpected DialogContent a11y warnings: ${JSON.stringify(a11y)}`)
   })
 })

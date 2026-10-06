@@ -7,7 +7,8 @@
  * Work text dwarfs everything else the extension stores, so this is part of
  * shipping the feature rather than polish. Deleting it costs
  * nothing but the hours of AO3 requests it would take to fetch again, which is
- * why the buttons ask a second time rather than opening a dialog.
+ * why the buttons ask a second time in place rather than opening a dialog
+ * ({@link file://../../composables/useConfirmInPlace.ts}).
  *
  * **Two deletions, because the cache outlives the lists on purpose.** Text is
  * keyed by work rather than by list, so forgetting a list leaves its works
@@ -51,42 +52,34 @@ const subtitle = computed(() => {
   return `${usage.value.cached.toLocaleString()} works (${formatBytes(usage.value.bytes)}) cached.${failed}${stranded.value}`
 })
 
-/**
- * Which button is one press from doing something, at most one at a time — a
- * confirmation left standing over the wrong button is exactly how the wrong
- * thing gets deleted. Resets itself, so one left on screen can't be clicked into
- * later either.
- */
-const confirming = autoResetRef<'orphans' | 'all' | null>(null, 5000)
+const confirm = useConfirmInPlace()
+const DISCARD = 'site-export-cache-discard-orphans'
+const DELETE = 'site-export-cache-delete-all'
 
-async function press(which: 'orphans' | 'all'): Promise<void> {
-  if (confirming.value !== which) {
-    confirming.value = which
-    return
-  }
-  confirming.value = null
-  await (which === 'orphans' ? discardOrphans() : purge())
+async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
+  if (confirm.press(id))
+    await (id === DISCARD ? discardOrphans() : purge())
 }
 </script>
 
 <template>
   <OptionRow title="Cached work text" :subtitle="subtitle">
-    <div flex="~ row items-center gap-2">
+    <div flex="~ row wrap items-center justify-end gap-2">
       <Button
-        :variant="confirming === 'orphans' ? 'destructive' : 'outline'"
+        :variant="confirm.armed(DISCARD) ? 'destructive' : 'outline'"
         class="disabled:cursor-default disabled:op-50"
         :disabled="!orphanCount || status.running"
-        @click.prevent="press('orphans')"
+        @click.prevent="press(DISCARD)"
       >
-        {{ confirming === 'orphans' ? `Discard ${orphanCount.toLocaleString()}?` : 'Discard orphans' }}
+        {{ confirm.armed(DISCARD) ? `Discard ${orphanCount.toLocaleString()}?` : 'Discard orphans' }}
       </Button>
       <Button
-        :variant="confirming === 'all' ? 'destructive' : 'outline'"
+        :variant="confirm.armed(DELETE) ? 'destructive' : 'outline'"
         class="disabled:cursor-default disabled:op-50"
         :disabled="!usage.cached || status.running"
-        @click.prevent="press('all')"
+        @click.prevent="press(DELETE)"
       >
-        {{ confirming === 'all' ? 'Delete it all?' : 'Delete cached text' }}
+        {{ confirm.armed(DELETE) ? 'Delete it all?' : 'Delete cached text' }}
       </Button>
     </div>
   </OptionRow>

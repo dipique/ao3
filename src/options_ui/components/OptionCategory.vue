@@ -2,64 +2,45 @@
 const props = defineProps<{
   title: string
   subtitle: string
+  /** Its icon on the rail, as an icon class such as `i-mdi-magnify`. */
+  icon: string
+  /** Its name on the rail, where the title is too long. */
+  railLabel?: string
+  /** Its name on the chip row of a narrow window, where the rail's name is too long. */
+  chipLabel?: string
 }>()
 
 OptionCategoryName.provide(props.title)
 
-const { id } = useAddNav(props.title)
-const { open } = useCollapsibleCategory(props.title)
+const railLabel = props.railLabel ?? props.title
+const { id } = useAddNav({ title: props.title, icon: props.icon, railLabel, chipLabel: props.chipLabel ?? railLabel })
 
 // Also findable by a `#hash`, by that id or by the category's own name.
-registerAnchor({ id: id.value, kind: 'category', name: props.title, category: props.title, subsection: null })
+registerAnchor({ id, kind: 'category', name: props.title, category: props.title, subsection: null })
 
-const { showDescriptions, searching, categoryMatches, highlight } = useOptionSearch()
+const { highlight } = useOptionSearch()
+const { inPane } = useCurrentCategory()
 
-const visible = computed(() => categoryMatches(props.title))
+const shown = computed(() => inPane(id))
 </script>
 
 <template>
+  <!-- Hidden rather than unmounted while another category is shown, so every
+       setting stays in the search index and every anchor can be jumped to. -->
   <section
-    v-show="visible"
+    v-show="shown"
     :id="id"
-    card px-2 sm:px-8
-    style="scroll-margin-top: calc(var(--header-height, 0px) + var(--toolbar-height, 0px));"
+    :data-category="id"
+    pb-10
+    style="scroll-margin-top: var(--shell-top);"
   >
-    <RekaCollapsibleRoot v-model:open="open">
-      <!--
-        The heading wraps the trigger rather than the other way round: a button's
-        children are presentational to screen readers, so an <h1> nested inside
-        one would drop out of the document outline the nav is built from.
-      -->
-      <h1>
-        <RekaCollapsibleTrigger
-          class="input-ring"
-          flex="~ row" w-full cursor-pointer pb-2 pt-3 text-left
-        >
-          <span flex="~ col grow-1">
-            <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <span block text="2xl primary" font="serif 500" v-html="highlight(props.title)" />
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <span
-              v-if="showDescriptions || searching"
-              block font="sans light" max-w="sm:80%"
-              v-html="highlight(props.subtitle)"
-            />
-          </span>
-          <span text="4xl op80" flex="~ row items-end" pl-6>
-            <slot name="icon" />
-          </span>
-          <span text="2xl op60" flex="~ row items-end" pl-3>
-            <Icon v-if="open" i-mdi-chevron-up :label="`Collapse ${props.title}`" />
-            <Icon v-else i-mdi-chevron-down :label="`Expand ${props.title}`" />
-          </span>
-        </RekaCollapsibleTrigger>
-      </h1>
-      <div border="b-1" />
-      <!-- Both axes stated; see OptionSubsection for why. -->
-      <RekaCollapsibleContent animate-collapsible overflow-hidden>
-        <slot />
-      </RekaCollapsibleContent>
-    </RekaCollapsibleRoot>
+    <div pb-4>
+      <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
+      <!-- eslint-disable-next-line vue/no-v-html -->
+      <h1 class="text-[22px] md:text-[26px]" text-brand-fg font="serif 400" leading="[1.15]" v-html="highlight(props.title)" />
+      <!-- eslint-disable-next-line vue/no-v-html -->
+      <p class="text-[12.5px] md:text-[13px]" text-muted-fg leading-normal max-w="[62ch]" mt="[5px]" v-html="highlight(props.subtitle)" />
+    </div>
+    <slot />
   </section>
 </template>

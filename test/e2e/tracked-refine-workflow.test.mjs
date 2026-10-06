@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
-import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome, serveDist, sleep } from './helpers.mjs'
+import { openOptions } from './optionsPage.mjs'
 import {
   ARCHIVE,
   boxButtons,
@@ -79,13 +80,9 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     browser = await launch(chromePath)
 
     // Step 1 happens on the options page: the links are read off its rows.
-    const options = await browser.newPage()
-    await options.evaluateOnNewDocument(installMock, SEED)
-    await options.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
-    await sleep(1500)
-    Object.assign(links, await options.evaluate(() => Object.fromEntries(
-      [...document.querySelectorAll('a[href*="#ao3e-list="]')].map(a => [a.href.split('#ao3e-list=')[1], a.href]),
-    )))
+    const options = await openOptions(browser, server, { seed: SEED, hash: '#instant-search-views-tracked-lists' })
+    for (const id of await options.listRowIds('tracked-lists'))
+      links[id] = await (await options.control(await options.listRow('tracked-lists', id), 'link')).evaluate(a => a.href)
     await options.close()
 
     tab = await openTab(browser, { seed: SEED, route })

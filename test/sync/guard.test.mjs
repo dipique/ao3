@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
-import { assessPull, describePullLoss, GUARD_MIN_REMOVED } from '../../src/common/syncGuard.ts'
+import { assessPull, describePullLoss, GUARD_MIN_REMOVED, pullLossParts } from '../../src/common/syncGuard.ts'
 import { createDefaultMarks, packIds } from '../../src/common/workMarks.ts'
 import { marksFixture, range, rulesFixture, textReplacementsFixture, trackedListsFixture } from './harness.mjs'
 
@@ -75,15 +75,27 @@ describe('assessPull', () => {
     assert.deepEqual(loss?.trackedLists, { removed: 12, of: 12 })
   })
 
-  test('a tracked list is its id: renaming or pausing one removes nothing', () => {
+  test('a tracked list is its id: renaming one removes nothing', () => {
     const current = withOptions({ trackedLists: trackedListsFixture(20) })
     const edited = trackedListsFixture(20, { reviewedThrough: 20100 })
     for (const entry of edited.lists) {
       entry.alias = `${entry.alias} (renamed)`
-      entry.tracked = false
       entry.since = 20050
     }
     assert.equal(assessPull(current, withOptions({ trackedLists: edited })), null)
+  })
+
+  /**
+   * An entry that isn't tracked can only arrive from a restored or imported
+   * copy an older build made. The saved-list planner keeps its list as a record
+   * here, so nothing of it is lost.
+   */
+  test('nor does an entry that arrives untracked', () => {
+    const current = withOptions({ trackedLists: trackedListsFixture(20) })
+    const untracked = trackedListsFixture(20)
+    for (const entry of untracked.lists)
+      entry.tracked = false
+    assert.equal(assessPull(current, withOptions({ trackedLists: untracked })), null)
   })
 
   test('nor does refining every one of them: a new query and view filter on the same id', () => {
@@ -126,6 +138,29 @@ describe('assessPull', () => {
   })
 })
 
+describe('pullLossParts', () => {
+  const none = { removed: 0, of: 0 }
+
+  test('one part for each collection the update would take from, the marks last', () => {
+    assert.deepEqual(
+      pullLossParts({ rules: { removed: 18, of: 22 }, markedWorks: { removed: 204, of: 374 }, textReplacements: none, trackedLists: { removed: 5, of: 7 }, marks: ['Favorite', 'Ongoing'] }),
+      ['18 of your 22 rules', '204 of your 374 marked works', '5 of your 7 tracked lists (they stay saved on this browser if you keep a copy)', 'the marks “Favorite”, “Ongoing”'],
+    )
+  })
+
+  test('one mark is named as one', () => {
+    assert.deepEqual(pullLossParts({ rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, trackedLists: none, marks: ['meh'] }), ['9 of your 12 text replacements', 'the mark “meh”'])
+  })
+
+  test('nothing removed is no parts', () => {
+    assert.deepEqual(pullLossParts({ rules: none, markedWorks: none, textReplacements: none, trackedLists: none, marks: [] }), [])
+  })
+
+  test('a collection a stored loss lacks is left out', () => {
+    assert.deepEqual(pullLossParts({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, marks: [] }), ['5 of your 20 rules'])
+  })
+})
+
 describe('describePullLoss', () => {
   const none = { removed: 0, of: 0 }
 
@@ -140,7 +175,7 @@ describe('describePullLoss', () => {
     assert.equal(describePullLoss({ rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, trackedLists: none, marks: [] }), '9 of your 12 text replacements')
     assert.equal(
       describePullLoss({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, trackedLists: { removed: 6, of: 7 }, marks: ['Cute/Sweet', 'meh'] }),
-      '5 of your 20 rules, 6 of your 7 tracked lists and the marks “Cute/Sweet”, “meh”',
+      '5 of your 20 rules, 6 of your 7 tracked lists (they stay saved on this browser if you keep a copy) and the marks “Cute/Sweet”, “meh”',
     )
   })
 

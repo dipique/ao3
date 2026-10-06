@@ -1,73 +1,42 @@
-import { kebabCase } from 'change-case'
-import type { ComputedRef, VNode } from 'vue'
+import { categoryId } from '../model/anchors.ts'
 
-export interface NavItem {
-  name: string
-  ref: HTMLElement
+/**
+ * The page's categories, in the order they render, and what the rail calls each
+ * one. A title can be too long for the rail, and the rail's name too long for a
+ * chip on a narrow window, so each has a name of its own.
+ */
+export interface NavCategory {
+  /** Its anchor id. */
   id: string
-  active?: ComputedRef<boolean> | boolean
+  title: string
+  /** Its name on the rail. */
+  railLabel: string
+  /** Its name on the chip row a narrow window has in place of the rail. */
+  chipLabel: string
+  /** Its icon on the rail, as an icon class. */
+  icon: string
 }
 
-const nav = ref<NavItem[]>([])
-const intersectionMap = ref(new Map<string, boolean>())
+const categories = ref<NavCategory[]>([])
 
 export function useNav() {
   return {
-    nav,
+    categories,
   }
 }
 
-export function useAddNav(name: string) {
-  const id = ref(kebabCase(name))
+/** Put a category on the rail, in the order the categories render, and hand back its anchor id. */
+export function useAddNav(category: Omit<NavCategory, 'id'>): { id: string } {
+  const id = categoryId(category.title)
+  const entry = { id, ...category }
+  const at = categories.value.findIndex(c => c.id === id)
+  categories.value = at < 0
+    ? [...categories.value, entry]
+    : categories.value.map((c, i) => i === at ? entry : c)
 
-  onMounted(() => {
-    const el = (getCurrentInstance()?.vnode as VNode<HTMLElement>).el
-    if (!el)
-      return
-
-    const item: NavItem = {
-      active: computed(() => {
-        for (const item of nav.value) {
-          if (intersectionMap.value.get(item.name))
-            return item.name === name
-        }
-        return false
-      }),
-      id: id.value,
-      name,
-      ref: el,
-    }
-
-    nav.value.push(item as any)
-
-    const headerHeightInPx = useLayoutVar('--header-height')
-    let stop: (() => void) | undefined
-
-    watch(headerHeightInPx, () => {
-      stop?.()
-
-      stop = useIntersectionObserver(
-        el,
-        ([entry]) => {
-          // The observer always reports at least one entry, but the array is
-          // typed as an ordinary list, so the first one reads as optional.
-          if (entry)
-            intersectionMap.value.set(name, entry.isIntersecting)
-        },
-        {
-          rootMargin: `-${headerHeightInPx.value} 0px 0px 0px`,
-          threshold: [0, 0.1, 0.9, 1.0],
-        },
-      ).stop
-    }, { immediate: true })
-
-    onUnmounted(() => {
-      nav.value = nav.value.filter(item => item.name !== name)
-      stop?.()
-    })
+  onUnmounted(() => {
+    categories.value = categories.value.filter(c => c.id !== id)
   })
 
-  return {
-    id,
-  }
+  return { id }
 }

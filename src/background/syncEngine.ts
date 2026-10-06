@@ -1,6 +1,7 @@
 import { createLogger, createSyncEngine, options, syncMeta } from '#common'
 
 import { createBackup, maybeDailyBackup } from './backups.ts'
+import { reconcileSavedLists } from './savedLists.ts'
 
 /**
  * The sync engine, wired to the real browser: `storage.local` options, the
@@ -25,6 +26,7 @@ const engine = createSyncEngine({
     maybeDaily: maybeDailyBackup,
     create: createBackup,
   },
+  prePull: reconcileSavedLists,
   logger: createLogger('Sync'),
 })
 

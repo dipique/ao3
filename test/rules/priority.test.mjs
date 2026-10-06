@@ -18,10 +18,25 @@ import {
   ruleMatchesTag,
   rulePriority,
   ruleTargetColor,
+  ruleValueMatches,
   TagType,
 } from '../../src/common/data.ts'
 
 const rule = props => ({ target: 'tag', value: '', matcher: 'exact', ...props })
+
+describe('ruleValueMatches', () => {
+  test('exact is case-sensitive; contains and regex are not', () => {
+    assert.ok(ruleValueMatches({ value: 'Slow Burn', matcher: 'exact' }, 'Slow Burn'))
+    assert.ok(!ruleValueMatches({ value: 'slow burn', matcher: 'exact' }, 'Slow Burn'))
+    assert.ok(ruleValueMatches({ value: 'SLOW', matcher: 'contains' }, 'Slow Burn'))
+    assert.ok(ruleValueMatches({ value: '^slow.*BURN$', matcher: 'regex' }, 'Slow Burn'))
+    assert.ok(!ruleValueMatches({ value: '^burn', matcher: 'regex' }, 'Slow Burn'))
+  })
+
+  test('an invalid regex matches nothing rather than throwing', () => {
+    assert.equal(ruleValueMatches({ value: '(', matcher: 'regex' }, '('), false)
+  })
+})
 
 describe('rulePriority', () => {
   test('an unset priority follows the behaviour', () => {

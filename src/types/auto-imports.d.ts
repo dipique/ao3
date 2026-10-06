@@ -10,12 +10,14 @@ declare global {
   const NO_DESCRIPTOR_NOTE: typeof import('../options_ui/composables/useSiteExport').NO_DESCRIPTOR_NOTE
   const OptionCategoryName: typeof import('../options_ui/composables/context').OptionCategoryName
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
+  const OptionMasterState: typeof import('../options_ui/composables/context').OptionMasterState
+  const OptionRowOff: typeof import('../options_ui/composables/context').OptionRowOff
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
   const REVIEW_SOURCE_ID: typeof import('../options_ui/composables/useSiteExport').REVIEW_SOURCE_ID
   const REVIEW_WINDOW_NOTE: typeof import('../options_ui/composables/useSiteExport').REVIEW_WINDOW_NOTE
-  const TRACKABLE_SOURCE_IDS: typeof import('../options_ui/composables/useSiteExport').TRACKABLE_SOURCE_IDS
-  const anchorSlug: typeof import('../options_ui/composables/useAnchors').anchorSlug
+  const anchorCategory: typeof import('../options_ui/composables/useAnchors').anchorCategory
+  const askAutocomplete: typeof import('../options_ui/composables/useTagSuggestions').askAutocomplete
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
   const canRefresh: typeof import('../options_ui/composables/useSiteExport').canRefresh
@@ -47,8 +49,6 @@ declare global {
   const describeChangeReport: typeof import('../options_ui/composables/useSiteExport').describeChangeReport
   const eagerComputed: typeof import('@vueuse/core').eagerComputed
   const effectScope: typeof import('vue').effectScope
-  const expandCategory: typeof import('../options_ui/composables/useCategoryCollapse').expandCategory
-  const expandSubsection: typeof import('../options_ui/composables/useCategoryCollapse').expandSubsection
   const extendRef: typeof import('@vueuse/core').extendRef
   const formatBytes: typeof import('../options_ui/composables/useSiteExport').formatBytes
   const getCurrentInstance: typeof import('vue').getCurrentInstance
@@ -110,11 +110,9 @@ declare global {
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveRef: typeof import('@vueuse/core').resolveRef
   const resolveUnref: typeof import('@vueuse/core').resolveUnref
-  const restoreCollapsed: typeof import('../options_ui/composables/useCategoryCollapse').restoreCollapsed
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
-  const stashCollapsed: typeof import('../options_ui/composables/useCategoryCollapse').stashCollapsed
   const syncRef: typeof import('@vueuse/core').syncRef
   const syncRefs: typeof import('@vueuse/core').syncRefs
   const templateRef: typeof import('@vueuse/core').templateRef
@@ -153,6 +151,7 @@ declare global {
   const useAsyncQueue: typeof import('@vueuse/core').useAsyncQueue
   const useAsyncState: typeof import('@vueuse/core').useAsyncState
   const useAttrs: typeof import('vue').useAttrs
+  const useBackups: typeof import('../options_ui/composables/useBackups').useBackups
   const useBase64: typeof import('@vueuse/core').useBase64
   const useBattery: typeof import('@vueuse/core').useBattery
   const useBluetooth: typeof import('@vueuse/core').useBluetooth
@@ -160,24 +159,23 @@ declare global {
   const useBroadcastChannel: typeof import('@vueuse/core').useBroadcastChannel
   const useBrowserLocation: typeof import('@vueuse/core').useBrowserLocation
   const useCached: typeof import('@vueuse/core').useCached
-  const useCategoryCollapse: typeof import('../options_ui/composables/useCategoryCollapse').useCategoryCollapse
+  const useCanonicalTags: typeof import('../options_ui/composables/useCanonicalTags').useCanonicalTags
   const useClipboard: typeof import('@vueuse/core').useClipboard
   const useClipboardItems: typeof import('@vueuse/core').useClipboardItems
   const useCloned: typeof import('@vueuse/core').useCloned
-  const useCollapsibleCategory: typeof import('../options_ui/composables/useCategoryCollapse').useCollapsibleCategory
-  const useCollapsibleSubsection: typeof import('../options_ui/composables/useCategoryCollapse').useCollapsibleSubsection
   const useColorMode: typeof import('@vueuse/core').useColorMode
   const useConfirmDialog: typeof import('@vueuse/core').useConfirmDialog
+  const useConfirmInPlace: typeof import('../options_ui/composables/useConfirmInPlace').useConfirmInPlace
   const useCountdown: typeof import('@vueuse/core').useCountdown
   const useCounter: typeof import('@vueuse/core').useCounter
   const useCssModule: typeof import('vue').useCssModule
   const useCssSupports: typeof import('@vueuse/core').useCssSupports
   const useCssVar: typeof import('@vueuse/core').useCssVar
   const useCssVars: typeof import('vue').useCssVars
+  const useCurrentCategory: typeof import('../options_ui/composables/useCurrentCategory').useCurrentCategory
   const useCurrentElement: typeof import('@vueuse/core').useCurrentElement
   const useCycleList: typeof import('@vueuse/core').useCycleList
   const useDark: typeof import('@vueuse/core').useDark
-  const useDataTable: typeof import('../options_ui/components/basic/DataTable/useDataTable').useDataTable
   const useDateFormat: typeof import('@vueuse/core').useDateFormat
   const useDebounce: typeof import('@vueuse/core').useDebounce
   const useDebounceFn: typeof import('@vueuse/core').useDebounceFn
@@ -224,7 +222,6 @@ declare global {
   const useIntervalFn: typeof import('@vueuse/core').useIntervalFn
   const useKeyModifier: typeof import('@vueuse/core').useKeyModifier
   const useLastChanged: typeof import('@vueuse/core').useLastChanged
-  const useLayoutVar: typeof import('../options_ui/directives/vLayoutVar').useLayoutVar
   const useLocalStorage: typeof import('@vueuse/core').useLocalStorage
   const useMagicKeys: typeof import('@vueuse/core').useMagicKeys
   const useManualRefHistory: typeof import('@vueuse/core').useManualRefHistory
@@ -267,6 +264,7 @@ declare global {
   const useRefHistory: typeof import('@vueuse/core').useRefHistory
   const useResizeObserver: typeof import('@vueuse/core').useResizeObserver
   const useSSRWidth: typeof import('@vueuse/core').useSSRWidth
+  const useSavedLists: typeof import('../options_ui/composables/useSavedLists').useSavedLists
   const useScreenOrientation: typeof import('@vueuse/core').useScreenOrientation
   const useScreenSafeArea: typeof import('@vueuse/core').useScreenSafeArea
   const useScriptTag: typeof import('@vueuse/core').useScriptTag
@@ -287,6 +285,7 @@ declare global {
   const useSupported: typeof import('@vueuse/core').useSupported
   const useSwipe: typeof import('@vueuse/core').useSwipe
   const useSync: typeof import('../options_ui/composables/useSync').useSync
+  const useTagSuggestions: typeof import('../options_ui/composables/useTagSuggestions').useTagSuggestions
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTemplateRefsList: typeof import('@vueuse/core').useTemplateRefsList
   const useTextDirection: typeof import('@vueuse/core').useTextDirection
@@ -320,7 +319,6 @@ declare global {
   const useWindowFocus: typeof import('@vueuse/core').useWindowFocus
   const useWindowScroll: typeof import('@vueuse/core').useWindowScroll
   const useWindowSize: typeof import('@vueuse/core').useWindowSize
-  const vLayoutVar: typeof import('../options_ui/directives/vLayoutVar').vLayoutVar
   const watch: typeof import('vue').watch
   const watchArray: typeof import('@vueuse/core').watchArray
   const watchAtMost: typeof import('@vueuse/core').watchAtMost
@@ -344,12 +342,12 @@ declare global {
   export type { AnchorKind, Anchor } from '../options_ui/composables/useAnchors'
   import('../options_ui/composables/useAnchors')
   // @ts-ignore
-  export type { NavItem } from '../options_ui/composables/useNav'
+  export type { NavCategory } from '../options_ui/composables/useNav'
   import('../options_ui/composables/useNav')
-  // @ts-ignore
-  export type { OptionRowEntry } from '../options_ui/composables/useOptionSearch'
-  import('../options_ui/composables/useOptionSearch')
   // @ts-ignore
   export type { SiteExportListRow, OrphanSummary } from '../options_ui/composables/useSiteExport'
   import('../options_ui/composables/useSiteExport')
+  // @ts-ignore
+  export type { AutocompleteAnswer } from '../options_ui/composables/useTagSuggestions'
+  import('../options_ui/composables/useTagSuggestions')
 }

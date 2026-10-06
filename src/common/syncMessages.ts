@@ -3,22 +3,37 @@ import type { SyncPause } from './syncMeta.ts'
 
 import { describePullLoss } from './syncGuard.ts'
 
+/** Said of a held update when this browser's settings were backed up as it was held. */
+export const HELD_BACKUP_NOTE = `A backup of this browser's settings was saved first.`
+
 /**
- * What the reader is told when sync stops, in one place: the options page's sync
- * row and the notice on AO3 pages say the same thing. `version` is the sync
- * version of the build doing the telling.
+ * What the reader is told when sync stops, in one place: the options page and
+ * the notice on AO3 pages say the same thing. `version` is the sync version of
+ * the build doing the telling.
  */
 export function syncPauseMessage(pause: SyncPause, version: number): string {
   switch (pause.reason) {
     case 'held': {
-      const backup = pause.backedUp ? ` A backup of this browser's settings was saved first.` : ''
+      const backup = pause.backedUp ? ` ${HELD_BACKUP_NOTE}` : ''
       return `Sync is on hold: an update from another browser would remove ${describePullLoss(pause.loss)}.${backup}`
     }
     case 'newer-version':
-      return `Sync is paused: your synced settings were saved by a newer version of AO3 Enhancements (sync version ${pause.remoteVersion}; this browser has ${version}). Update or reload the extension in this browser. Changes you make here won't sync until then.`
+      return `Sync is paused: ${versionPauseReason(pause, version)}`
     case 'older-cloud':
-      return `Waiting for an up-to-date browser: your synced settings were saved by an older version of AO3 Enhancements (sync version ${pause.remoteVersion}; this browser has ${version}). They'll sync here once a browser running this version saves them.`
+      return `Waiting for an up-to-date browser: ${versionPauseReason(pause, version)}`
   }
+}
+
+export type VersionPause = Extract<SyncPause, { reason: 'newer-version' | 'older-cloud' }>
+
+/**
+ * Why a version pause stopped sync, and what lifts it, as a clause for a lead
+ * of the caller's own: both sync versions, and what the reader can do.
+ */
+export function versionPauseReason(pause: VersionPause, version: number): string {
+  return pause.reason === 'newer-version'
+    ? `your synced settings were saved by a newer version of AO3 Enhancements (sync version ${pause.remoteVersion}; this browser has ${version}). Update or reload the extension in this browser. Changes you make here won't sync until then.`
+    : `your synced settings were saved by an older version of AO3 Enhancements (sync version ${pause.remoteVersion}; this browser has ${version}). They'll sync here once a browser running this version saves them.`
 }
 
 /**

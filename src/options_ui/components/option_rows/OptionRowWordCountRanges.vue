@@ -75,8 +75,19 @@ watch([parsed, valid], () => {
     ranges.value = next.map(range => ({ ...range }))
 }, { deep: true })
 
-function add() {
+/**
+ * Each row is the two bounds, the label they make or the error that stops
+ * them, and Remove. In a narrow frame the label takes a line of its own.
+ */
+const ROW = '"identity meta actions" / 226px minmax(0, 1fr) 28px'
+const NARROW_ROW = '"identity actions" "meta ." / minmax(0, 1fr) 28px'
+
+const frame = useTemplateRef('frame')
+
+async function add() {
   drafts.value.push({ from: '', to: '' })
+  await nextTick()
+  frame.value?.reveal(drafts.value.length - 1)
 }
 
 function remove(index: number) {
@@ -90,70 +101,76 @@ function remove(index: number) {
     title="Word count menu"
     subtitle="Click a work’s word count in a listing for a menu of lengths to filter by. Edit the ranges it offers below; they may overlap."
   >
-    <div flex="~ col gap-3" pt-2>
+    <div flex="~ col gap-3">
       <p text="sm muted-fg">
         The menu offers these ranges plus a row clearing the one currently applied. On a normal listing your pick
         fills AO3's own Word Count filter and re-runs the search; inside an instant search view it filters the loaded
         list instead.
       </p>
 
-      <p v-if="drafts.length === 0" text="sm muted-fg">
-        No ranges yet. Add one to offer it in the menu.
-      </p>
-
-      <div
-        v-for="(draft, index) in drafts"
-        :key="index"
-        flex="~ col gap-1"
-        border rounded-md p-3
+      <ListFrame
+        ref="frame"
+        list-id="word-count-ranges"
+        title="Word count ranges"
+        :count="drafts.length ? String(drafts.length) : 'none yet'"
+        :empty="drafts.length === 0"
+        add-label="Add a range"
+        class="max-w-[540px]"
+        @add="add"
       >
-        <div flex="~ gap-2 items-center wrap">
-          <Input
-            v-model="draft.from"
-            type="text"
-            inputmode="numeric"
-            placeholder="No minimum"
-            aria-label="Lowest word count"
-            text="base" h-9 min-w-32 flex-1 py-2 pl-2
-          />
-          <span shrink-0 text="sm muted-fg">to</span>
-          <Input
-            v-model="draft.to"
-            type="text"
-            inputmode="numeric"
-            placeholder="No maximum"
-            aria-label="Highest word count"
-            text="base" h-9 min-w-32 flex-1 py-2 pl-2
-          />
-          <span shrink-0 text="sm muted-fg">words</span>
-          <button
-            class="input-ring"
-            text="4 muted-fg hover:default-fg"
-            shrink-0 cursor-pointer rounded-md p-1
-            title="Remove this range"
-            @click="remove(index)"
-          >
-            <Icon i-codicon-trash label="Remove" />
-          </button>
-        </div>
-        <p v-if="errors[index]" text="sm destructive" pl-1>
-          {{ errors[index] }}
-        </p>
-        <p v-else-if="parsed[index]" text="xs muted-fg" pl-1>
-          Shown as “{{ formatWordCountRange(parsed[index]!) }} words”.
-        </p>
-      </div>
+        <template #empty>
+          <b>No ranges yet</b>
+          Add one to offer it in the menu.
+        </template>
+
+        <ListRow
+          v-for="(draft, index) in drafts"
+          :key="index"
+          :row-id="index"
+          :template="ROW"
+          :narrow-template="NARROW_ROW"
+          :error="errors[index]"
+        >
+          <div class="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2">
+            <Input
+              v-model="draft.from"
+              type="text"
+              inputmode="numeric"
+              placeholder="No min"
+              aria-label="Lowest word count"
+              class="h-[22px] w-full px-[7px] text-[12.5px] tabular-nums"
+            />
+            <span class="text-center text-muted-fg">to</span>
+            <Input
+              v-model="draft.to"
+              type="text"
+              inputmode="numeric"
+              placeholder="No max"
+              aria-label="Highest word count"
+              class="h-[22px] w-full px-[7px] text-[12.5px] tabular-nums"
+            />
+          </div>
+          <template v-if="parsed[index]" #meta>
+            “{{ formatWordCountRange(parsed[index]!) }} words”
+          </template>
+          <template #actions>
+            <button
+              type="button"
+              class="icon-btn"
+              aria-label="Remove range"
+              title="Remove range"
+              @click="remove(index)"
+            >
+              <span class="i-tabler-trash" text="sm" aria-hidden="true" />
+            </button>
+          </template>
+        </ListRow>
+      </ListFrame>
 
       <p text="xs muted-fg" pl-1>
         Leave a box empty for an open-ended range — “5000” to nothing offers “5,000+”. Ranges may overlap; only
         exact duplicates are rejected.
       </p>
-
-      <div>
-        <Button variant="outline" text="sm" @click="add">
-          <Icon i-mdi-plus mr-1 label="Add" /> Add range
-        </Button>
-      </div>
     </div>
   </OptionRowCollapsable>
 </template>

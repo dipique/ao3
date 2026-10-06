@@ -66,7 +66,8 @@ const LATER_PAGE = `<!doctype html>
 
 /**
  * The floating toolbar's "Track this search" pill: making a tracked list out of
- * the page the reader is on, and the two things they can do to one afterwards.
+ * the page the reader is on, the two things they can do to one afterwards, and
+ * tracking a saved list from its page again.
  *
  * Every state the pill shows is read back out of the saved option — a write
  * re-runs every unit, which rebuilds the toolbar — so this drives it the way a
@@ -122,17 +123,24 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     await sleep(300)
   }
 
-  /** The `trackedLists` option as it was last written, or null. */
-  const savedOption = tab => tab.evaluate(() => {
+  /** An option as it was last written, or null: `trackedLists` unless told otherwise. */
+  const savedOption = (tab, name = 'trackedLists') => tab.evaluate((key) => {
     const writes = window.__writes ?? []
     for (let i = writes.length - 1; i >= 0; i--) {
-      if ('option.trackedLists' in writes[i])
-        return writes[i]['option.trackedLists']
+      if (key in writes[i])
+        return writes[i][key]
     }
     return null
-  })
+  }, `option.${name}`)
+
+  const TODAY = Math.floor(Date.now() / 86_400_000)
 
   const pillText = tab => tab.$eval(TRACK_TEXT, el => el.textContent.trim())
+
+  /** The messages of the toasts on screen. */
+  const toasts = tab => tab.evaluate(() => [...document.querySelectorAll('body > div')]
+    .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast .message') ?? []])
+    .map(el => el.textContent.trim()))
 
   let tab
 
@@ -187,11 +195,14 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     assert.match(entry.id, /^[a-z0-9]+$/)
     // Tracking starts today, on the archive's calendar — the UTC one its date
     // filters work in.
-    assert.equal(entry.since, Math.floor(Date.now() / 86_400_000))
+    assert.equal(entry.since, TODAY)
     // Everything else about the option is left as it was.
     assert.equal(saved.enabled, true)
     assert.equal(saved.target, 40)
     assert.equal(saved.reviewedThrough, 0)
+    // The list is this browser's saved list too, under the same id and title.
+    const records = await savedOption(tab, 'savedLists')
+    assert.deepEqual(records.lists[entry.id], { id: entry.id, kind: 'text-search', url: entry.url, title: 'Coffee shop AUs', type: 'search', entity: 'coffee' })
   })
 
   test('the rebuilt pill says the page is tracked, and by what name', async () => {
@@ -210,32 +221,55 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     assert.equal(actions[1].href, 'https://archiveofourown.org/users/someone/readings#ao3e-tracked')
   })
 
-  test('Stop tracking pauses the list without losing it', async () => {
+  let id
+
+  test('Stop tracking takes the list out of what syncs, and keeps it saved', async () => {
+    id = (await savedOption(tab)).lists[0].id
     await tab.click(`${TRACK_BOX} button`)
     await sleep(1500)
-    const saved = await savedOption(tab)
-    assert.equal(saved.lists.length, 1, 'the entry is kept, not removed')
-    assert.equal(saved.lists[0].tracked, false)
-    assert.equal(saved.lists[0].alias, 'Coffee shop AUs', 'and keeps its name')
+    assert.deepEqual((await savedOption(tab)).lists, [], 'the entry goes')
+    assert.equal((await savedOption(tab, 'savedLists')).lists[id].title, 'Coffee shop AUs', 'and the saved list keeps its title')
+    assert.ok((await toasts(tab)).includes('Stopped tracking “Coffee shop AUs”. It stays a saved list on this browser.'))
   })
 
-  test('the pill then offers to resume, and does it in one click', async () => {
+  test('the pill then offers to track that saved list, and does it in one click, under its own id', async () => {
     await openPanel(tab)
-    assert.equal(await pillText(tab), 'Resume tracking “Coffee shop AUs”')
+    assert.equal(await pillText(tab), 'Track “Coffee shop AUs”')
     assert.equal(await tab.$eval(TRACK_PILL, el => el.getAttribute('aria-pressed')), 'false')
-    // No box: resuming needs nothing from the reader.
+    // No box: the list already has its title.
     assert.equal(await tab.$(TRACK_BOX), null)
 
     await tab.click(TRACK_PILL)
     await sleep(1500)
-    const saved = await savedOption(tab)
-    assert.equal(saved.lists[0].tracked, true)
-    // Resuming restarts the clock, so the paused stretch is not filled back in.
-    assert.equal(saved.lists[0].since, Math.floor(Date.now() / 86_400_000))
+    const [entry] = (await savedOption(tab)).lists
+    assert.equal(entry.id, id)
+    assert.equal(entry.alias, 'Coffee shop AUs')
+    assert.equal(entry.tracked, true)
+    // Tracking starts the clock again, so the stretch it wasn't tracked is not filled back in.
+    assert.equal(entry.since, TODAY)
 
     await openPanel(tab)
     assert.equal(await pillText(tab), 'Tracked as “Coffee shop AUs”')
     await tab.close()
+  })
+
+  test('Track this search tracks the saved list the page already is, read when it is pressed', async () => {
+    const page = await load(SEARCH_URL, SEARCH_PAGE)
+    // Opening the search view stores a copy, and the background gives it a
+    // record — after the page was drawn, and without drawing it again.
+    const auto = { id: 'aut0', kind: 'text-search', url: '/works/search?work_search[query]=coffee', title: '', type: 'search', entity: 'coffee' }
+    await page.evaluate(record => window.browser.storage.local.set({ 'option.savedLists': { v: 1, lists: { [record.id]: record } } }), auto)
+    await sleep(800)
+    await openPanel(page)
+    assert.equal(await pillText(page), 'Track this search')
+    await page.click(TRACK_PILL)
+    await sleep(200)
+    await page.click(`${TRACK_BOX} button:first-of-type`)
+    await sleep(1500)
+
+    assert.deepEqual((await savedOption(page)).lists.map(entry => entry.id), ['aut0'], 'no second list at its address')
+    assert.deepEqual((await savedOption(page, 'savedLists')).lists, { aut0: { ...auto, title: 'Search: coffee' } })
+    await page.close()
   })
 
   test('Marked for Later is never offered — those works are the reader\'s own choices', async () => {

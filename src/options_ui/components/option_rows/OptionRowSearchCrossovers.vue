@@ -8,7 +8,7 @@ const { enabled, crossovers } = useOption('searchCrossovers')
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Default crossovers"
-    subtitle="Pre-selects AO3’s Crossovers filter, so listings start without crossovers, or with nothing else. AO3 decides what counts as one; hiding works by how many fandoms they list is under Hiding &amp; highlighting."
+    subtitle="Pre-selects AO3’s Crossovers filter, so listings start without crossovers, or with nothing else. AO3 decides what counts as one; hiding works by how many fandoms they list is under Customize Search Results."
   >
     <label py-1 flex="~ row items-center gap-1">
       <span font="leading-none" text="sm muted-fg">Default the crossover filter to</span>

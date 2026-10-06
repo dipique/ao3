@@ -5,10 +5,51 @@
   <OptionCategory
     title="Search"
     subtitle="Better search pages, filter defaults, and what to keep out of your results."
+    icon="i-mdi-magnify"
   >
-    <template #icon>
-      <Icon i-mdi-magnify />
-    </template>
+    <OptionSubsection
+      title="Filter defaults"
+      subtitle="Values AO3's own Sort &amp; Filter sidebar and search forms should start with. Applied only when you haven't already chosen one, so anything in the URL wins."
+    >
+      <OptionRowSearchLanguage />
+      <OptionRowSearchWordCount />
+      <OptionRowSearchCompletion />
+      <OptionRowSearchCrossovers />
+      <OptionRowWordCountRanges />
+      <OptionRow
+        title="Completion menu"
+        subtitle="Click a work’s chapter total in a listing — the 5 of 1/5, or the ? of 1/? — or its “Chapters:” label, for a menu offering completed or incomplete works only. On a normal listing your pick fills AO3's own Completion Status filter; inside an instant search view it filters the loaded list instead."
+      >
+        <OptionSwitch option-id="completionToolbar" />
+      </OptionRow>
+    </OptionSubsection>
+
+    <OptionSubsection
+      title="Customize Search Results"
+      subtitle="Choose what shows up in your listings and how it looks — hide or collapse works, make others stand out, or remove individual tags from work blurbs. Applies anywhere works are listed."
+    >
+      <OptionRowRules />
+      <OptionRow
+        title="Exclude hidden works from the search"
+        subtitle="When a rule hides a work outright, add what hid it to the search itself — ticked in AO3's own Sort &amp; Filter exclusions, or typed in when it isn't listed — so a page of twenty stops arriving with one work left on it. Nothing is submitted for you; press Sort and Filter when you're ready. Anything still carried by a work you always-show is left alone."
+      >
+        <OptionSwitch option-id="autoExcludeHidden" />
+      </OptionRow>
+      <OptionRowHideCrossovers />
+      <OptionRowHideLanguages />
+      <OptionRow
+        title="Collapse or hide"
+        subtitle="What to do with a work hidden by the crossover or language filter, or by a mark set to hide it. Collapsing leaves a line saying why, with a button to show the work anyway. Rules choose this for themselves, per rule."
+      >
+        <OptionHideReason />
+      </OptionRow>
+      <OptionRow
+        title="Show what matched"
+        subtitle="On a collapsed work, name the tag, fandom or author that matched rather than the rule that hid it. Hover a value — or tap it on a touchscreen — to see its rule, and use its exclude (−) button to add it straight to the filter sidebar."
+      >
+        <OptionSwitch option-id="hideShowMatchedValues" />
+      </OptionRow>
+    </OptionSubsection>
 
     <OptionSubsection
       title="Instant search views"
@@ -20,111 +61,49 @@
       >
         <OptionSwitch option-id="searchMarkedForLater" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Reload your own lists"
         subtitle="How long the Marked for Later and read-works views reuse what they already have. Both can run to thousands of works — dozens of requests to AO3 — so raise this if yours are long; the view's own Refresh button reloads regardless."
       >
         <OptionSearchRefreshHours />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Search the works you've read"
         subtitle="Adds a “Search read items” button to your History and Marked for Later pages, collecting everything you have marked read — or with any finer verdict — into one view, with a Status filter to narrow it to one of them. Needs work marks on; each work's details come from your AO3 history."
       >
         <OptionSwitch option-id="searchReadWorks" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Search an uncommon tag's works"
         subtitle="AO3 only sorts and filters a tag's works once the tag has been made canonical; every other tag gets a plain paged list. Adds a “Search these works” link to those pages."
       >
         <OptionSwitch option-id="searchTagWorks" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Search a series' works"
         subtitle="AO3 gives a series page no way to sort or filter it, however long the series runs. Adds a “Search these works” button next to Bookmark Series."
       >
         <OptionSwitch option-id="searchSeriesWorks" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Search text-search results"
         subtitle="Adds a “Search these results” button to the results of a works search, so you can narrow them by things AO3's own results page can't filter on."
       >
         <OptionSwitch option-id="searchTextResults" />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Maximum works to load"
         subtitle="A ceiling on how many works the views above will load. Works come twenty to a page from AO3's donated servers, and a text search for a common word can match hundreds of thousands — so a bigger list loads only up to this ceiling, in the Archive's own order, and only after you confirm."
       >
         <OptionSearchMaxResults />
       </OptionRow>
-      <OptionDivider />
       <OptionRow
         title="Results per page"
         subtitle="How many works to show at a time in the views above. Lower values stay fast even on very large lists."
       >
         <OptionSearchPerPage />
       </OptionRow>
-      <OptionDivider />
       <OptionRowTrackedLists />
-    </OptionSubsection>
-
-    <OptionSubsection
-      title="Filter defaults"
-      subtitle="Values AO3's own Sort &amp; Filter sidebar and search forms should start with. Applied only when you haven't already chosen one, so anything in the URL wins."
-    >
-      <OptionRowSearchLanguage />
-      <OptionDivider />
-      <OptionRowSearchWordCount />
-      <OptionDivider />
-      <OptionRowSearchCompletion />
-      <OptionDivider />
-      <OptionRowSearchCrossovers />
-      <OptionDivider />
-      <OptionRowWordCountRanges />
-      <OptionDivider />
-      <OptionRow
-        title="Completion menu"
-        subtitle="Click a work’s chapter total in a listing — the 5 of 1/5, or the ? of 1/? — or its “Chapters:” label, for a menu offering completed or incomplete works only. On a normal listing your pick fills AO3's own Completion Status filter; inside an instant search view it filters the loaded list instead."
-      >
-        <OptionSwitch option-id="completionToolbar" />
-      </OptionRow>
-    </OptionSubsection>
-
-    <OptionSubsection
-      title="Hiding &amp; highlighting works"
-      subtitle="Keep works you don't want out of your listings, and make the ones you do want stand out. Applies anywhere works are listed — search results, a tag's works, bookmarks, your dashboard."
-    >
-      <OptionRowRules />
-      <OptionDivider />
-      <OptionRow
-        title="Exclude hidden works from the search"
-        subtitle="When a rule hides a work outright, add what hid it to the search itself — ticked in AO3's own Sort &amp; Filter exclusions, or typed in when it isn't listed — so a page of twenty stops arriving with one work left on it. Nothing is submitted for you; press Sort and Filter when you're ready. Anything still carried by a work you always-show is left alone."
-      >
-        <OptionSwitch option-id="autoExcludeHidden" />
-      </OptionRow>
-      <OptionDivider />
-      <OptionRowHideCrossovers />
-      <OptionDivider />
-      <OptionRowHideLanguages />
-      <OptionDivider />
-      <OptionRow
-        title="Collapse or hide"
-        subtitle="What to do with a work hidden by the crossover or language filter, or by a mark set to hide it. Collapsing leaves a line saying why, with a button to show the work anyway. Rules choose this for themselves, per rule."
-      >
-        <OptionHideReason />
-      </OptionRow>
-      <OptionDivider />
-      <OptionRow
-        title="Show what matched"
-        subtitle="On a collapsed work, name the tag, fandom or author that matched rather than the rule that hid it. Hover a value — or tap it on a touchscreen — to see its rule, and use its exclude (−) button to add it straight to the filter sidebar."
-      >
-        <OptionSwitch option-id="hideShowMatchedValues" />
-      </OptionRow>
     </OptionSubsection>
   </OptionCategory>
 </template>

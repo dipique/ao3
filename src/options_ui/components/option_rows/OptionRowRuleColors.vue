@@ -8,6 +8,8 @@ import { DEFAULT_RULE_COLORS, RULE_TARGETS, ruleTargetLabel } from '#common'
  * inherits when it sets no colour of its own, so they're one table rather than a
  * setting per list — which is what they were before tags, authors, works and
  * series became one Rules list.
+ *
+ * The default slot is what opens the dialog, in place of its own button.
  */
 const { colors } = useOption('rules')
 
@@ -40,9 +42,11 @@ function resetAll() {
 <template>
   <Dialog>
     <DialogTrigger as-child>
-      <Button variant="outline" size="sm">
-        Default highlight colors<span v-if="customCount" text="xs muted-fg">&nbsp;({{ customCount }} changed)</span>
-      </Button>
+      <slot>
+        <Button variant="outline" size="sm">
+          Default highlight colors<span v-if="customCount" text="xs muted-fg">&nbsp;({{ customCount }} changed)</span>
+        </Button>
+      </slot>
     </DialogTrigger>
     <DialogContent>
       <DialogTitle>

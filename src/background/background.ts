@@ -2,6 +2,7 @@ import { api, cache, logBanner, options, SYNC_SCHEMA_VERSION, syncMeta } from '#
 
 import { listBackups, restoreBackup } from './backups.ts'
 import { checkBuild } from './buildCheck.ts'
+import { watchSavedLists } from './savedLists.ts'
 import {
   clearSyncedData,
   getSyncStatus,
@@ -38,6 +39,9 @@ void current.then(async (isCurrent) => {
   if (isCurrent)
     await resumeSync()
 })
+// The saved-list records follow the synced entries and the stored lists, and
+// like the migrations, only on the code that's on disk.
+watchSavedLists(current)
 
 browser.runtime.onInstalled.addListener(async () => {
   // Never migrate with code that isn't the code on disk.

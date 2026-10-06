@@ -65,6 +65,9 @@ const { open: startImport, onChange: onImportFilesChanged } = useFileDialog({
 
 const sizeUsed = ref('')
 
+/** Names the Export menu's parts, so each variant reads as its title, described by its note. */
+const menuId = useId()
+
 onMounted(async () => {
   sizeUsed.value = (new TextEncoder().encode(
     Object.entries(await browser.storage.local.get())
@@ -137,27 +140,37 @@ async function startExport({ keyPrefixes, fileSuffix }: typeof EXPORT_VARIANTS[n
     title="Import &amp; export your settings"
     :subtitle="`Save every setting, rule and mark to a file, or load one back in. ~${sizeUsed}kB in use.`"
   >
-    <div flex="~ row items-center gap-3">
-      <Button variant="outline" @click.prevent="startImport">
+    <div flex="~ row wrap items-center justify-end gap-2">
+      <button type="button" class="outline-btn" @click.prevent="startImport()">
+        <span class="i-tabler-upload" text="[14px]" aria-hidden="true" />
         Import
-      </Button>
+      </button>
       <DropdownMenu :modal="false">
         <DropdownMenuTrigger>
-          <Button variant="outline">
+          <button type="button" class="outline-btn">
+            <span class="i-tabler-download" text="[14px]" aria-hidden="true" />
             Export
-          </Button>
+            <span class="i-tabler-chevron-down" text="[13px]" aria-hidden="true" />
+          </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem
-            v-for="variant in EXPORT_VARIANTS"
+        <DropdownMenuContent align="end" :aria-describedby="`${menuId}-never`" class="w-[330px] p-[5px]">
+          <RekaDropdownMenuItem
+            v-for="(variant, i) in EXPORT_VARIANTS"
             :key="variant.fileSuffix"
-            flex="~ col items-start gap-1"
-            px-4 py-3
-            @click="() => startExport(variant)"
+            :aria-labelledby="`${menuId}-${i}`"
+            :aria-describedby="`${menuId}-${i}-note`"
+            class="flex flex-col cursor-pointer select-none items-start gap-[3px] rounded-[7px] px-[11px] py-[9px] input-ring focus:bg-muted"
+            @select="startExport(variant)"
           >
-            <span text-sm font-medium leading-none>{{ variant.title }}</span>
-            <span line-clamp-2 text-sm text-muted-fg leading-snug>{{ variant.subtitle }}</span>
-          </DropdownMenuItem>
+            <span :id="`${menuId}-${i}`" text="[12.5px]" font-semibold>{{ variant.title }}</span>
+            <span :id="`${menuId}-${i}-note`" text="[11.5px] muted-fg" leading-4>{{ variant.subtitle }}</span>
+          </RekaDropdownMenuItem>
+          <p
+            :id="`${menuId}-never`"
+            class="mt-1 border-t border-hair border-t-solid px-[11px] pb-[5px] pt-2 text-[11px] text-muted-fg leading-[15px]"
+          >
+            Cached work text is never in any of the three: it is an order of magnitude larger than everything else, and can always be fetched again.
+          </p>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

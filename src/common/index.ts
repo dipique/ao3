@@ -13,6 +13,7 @@ export * from './data.ts'
 export { isContextInvalidatedError, isExtensionContextValid } from './extensionContext.ts'
 export { fandomCache } from './fandomCache.ts'
 export type { FandomCache, ScrapedTag, ScrapedTagType } from './fandomCache.ts'
+export { loadFandomIndex } from './fandomIndex.ts'
 export * from './listUrl.ts'
 
 export { type Logger as BaseLogger, createLogger, logBanner, logger } from './logger.ts'
@@ -21,6 +22,8 @@ export * from './markIcons.ts'
 
 export { options } from './options.ts'
 export type { Options, ThemeOption } from './options.ts'
+
+export * from './savedLists.ts'
 
 export * from './syncCodec.ts'
 

@@ -7,8 +7,10 @@ import { describe, test } from 'node:test'
 import {
   createDefaultMarks,
   hiddenByMarks,
+  listedMarkIds,
   localMarkIds,
   markClears,
+  markedWorkCount,
   markGroup,
   markHideMode,
   markHidePriority,
@@ -189,6 +191,34 @@ describe('the mark order', () => {
   test('normalizing a table already in order returns it untouched', () => {
     const marks = createDefaultMarks()
     assert.equal(normalizeMarkOrder(marks), marks)
+  })
+
+  test('the listed marks are the ones holding ids, in the order a move would leave them', () => {
+    assert.deepEqual(listedMarkIds(createDefaultMarks()), localMarkIds(createDefaultMarks()))
+    assert.deepEqual(listedMarkIds(moveMark(createDefaultMarks(), 'favorite', -1)), localMarkIds(moveMark(createDefaultMarks(), 'favorite', -1)))
+  })
+
+  test('the ongoing mark is listed after the verdicts, even where a stored slot puts it among them', () => {
+    const marks = createDefaultMarks()
+    marks.continue.order = 1.5
+    assert.equal(localMarkIds(marks).indexOf('continue'), 2, 'the slot read as it is stored')
+    assert.deepEqual(
+      listedMarkIds(marks),
+      ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'continue'],
+    )
+    assert.deepEqual(listedMarkIds(marks), localMarkIds(normalizeMarkOrder(marks)), 'where normalizing would put it')
+  })
+})
+
+describe('markedWorkCount', () => {
+  test('counts every work carrying a mark of its own, once however many it carries', () => {
+    const marks = marksWith({ read: ['1', '2'], favorite: ['3', '4'], hot: ['4', '5'], continue: ['6'] })
+    assert.equal(markedWorkCount(marks), 6)
+  })
+
+  test('a table with nothing marked counts nothing', () => {
+    assert.equal(markedWorkCount(createDefaultMarks()), 0)
+    assert.equal(markedWorkCount({}), 0)
   })
 })
 

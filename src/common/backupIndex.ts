@@ -14,8 +14,8 @@ export const EVENT_BACKUPS_PER_KIND = 5
 
 export const BACKUP_KIND_LABELS: Record<BackupKind, string> = {
   'daily': 'Daily backup',
-  'pre-restore': 'Before restore',
-  'pre-sync': 'Before sync adopt',
+  'pre-restore': 'Before a restore',
+  'pre-sync': 'Before turning on sync',
   'sync-held': 'Before a held sync update',
   'sync-declined': 'Sync update you declined',
 }

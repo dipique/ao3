@@ -25,6 +25,7 @@ const defaults = {
   theme: { chosen: 'inherit', current: 'light' },
   user: {},
   verbose: false,
+  savedLists: { lists: {} },
   big: [],
 }
 
@@ -35,6 +36,7 @@ const options = {
   theme: { chosen: 'dark', current: 'dark' },
   user: { userId: 'me' },
   verbose: true,
+  savedLists: { v: 1, lists: { a1: { id: 'a1', kind: 'series-works', url: '/series/1', title: 'Mine' } } },
 }
 
 /** Deterministic PRNG so the "large payload" test is reproducible. */
@@ -63,6 +65,7 @@ describe('pruneToSynced', () => {
     assert.equal('showTotalTime' in pruned, false, 'default-valued key dropped')
     assert.equal('user' in pruned, false, 'user is local-only')
     assert.equal('verbose' in pruned, false, 'verbose is local-only')
+    assert.equal('savedLists' in pruned, false, 'saved-list records are local-only')
     assert.equal('current' in pruned.theme, false, 'theme.current never synced')
   })
 
@@ -85,6 +88,7 @@ describe('buildLocalUpdate', () => {
     assert.deepEqual(rebuilt.theme, { chosen: 'inherit', current: 'dark' }, 'chosen reset, current kept')
     assert.deepEqual(rebuilt.user, { userId: 'me' }, 'user preserved from existing')
     assert.equal(rebuilt.verbose, true, 'verbose preserved from existing')
+    assert.deepEqual(rebuilt.savedLists, options.savedLists, 'saved-list records preserved from existing')
   })
 
   test('keeps options the writing device never heard of', () => {

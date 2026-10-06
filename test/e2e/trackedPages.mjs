@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import puppeteer from 'puppeteer-core'
 
 import { DIST, installMock, sleep } from './helpers.mjs'
+
+export { launch } from './helpers.mjs'
 
 /**
  * A stand-in archive for the tracked-list pill's refining and updating e2e tests,
@@ -84,10 +85,6 @@ async function contentScript() {
     js: await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8'),
   }
   return bundle
-}
-
-export function launch(chromePath) {
-  return puppeteer.launch({ executablePath: chromePath, headless: 'new', args: ['--no-first-run', '--no-default-browser-check'] })
 }
 
 /** Put the content script into the page on screen, and give it time to run. */

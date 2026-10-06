@@ -159,7 +159,11 @@ export interface TrackedFilter {
   words?: [number | null, number | null]
 }
 
-/** One tracked (or paused) query. */
+/**
+ * One tracked list's entry: what carries a saved list's title and query to
+ * every other browser while it is tracked. Its record on each browser, under
+ * the same id, is in `savedLists.ts`.
+ */
 export interface TrackedList {
   /**
    * Permanent short id (random, base 36). Keys the List source facet and the
@@ -205,15 +209,17 @@ export interface TrackedList {
    */
   filter?: TrackedFilter
   /**
-   * Off means kept but not reviewed: the entry, alias and all, stays. Any entry,
-   * tracked or paused, marks its list as one the reader wants kept.
+   * Always true on an entry: a list that isn't tracked has no entry, only its
+   * saved-list record. An entry that says otherwise comes from an older build,
+   * by a restore or an import, and the saved-list planner moves it into a
+   * record; until it has, the review leaves it out.
    */
   tracked: boolean
   /**
-   * The day tracking last started: set when the entry is created, and again
-   * whenever `tracked` goes from false to true, so a paused stretch is never
-   * backfilled. It's only ever a **floor** on this list's fetch
-   * ({@link reviewStart}, {@link listBase}) — never a second review cursor.
+   * The day tracking last started: set whenever the entry is made, so a
+   * stretch the list spent untracked is never backfilled. It's only ever a
+   * **floor** on this list's fetch ({@link reviewStart}, {@link listBase}) —
+   * never a second review cursor.
    */
   since: Day
   /**
@@ -1126,6 +1132,11 @@ export const REFINE_FRAGMENT = 'ao3e-list'
 /** What an id may look like on a link: {@link newTrackedListId}'s base 36, with room to spare. */
 const LINK_ID_RE = /^[0-9a-z]{1,32}$/i
 
+/** Whether `value` can be a list's id: what {@link newTrackedListId} makes, or could have. */
+export function isListId(value: unknown): value is string {
+  return typeof value === 'string' && LINK_ID_RE.test(value)
+}
+
 /**
  * The link that opens a list's page to refine it: the list's own page — its
  * stored URL, which for a filtered listing or a works search already carries
@@ -1666,6 +1677,91 @@ export interface TrackedListChange {
   scan?: boolean
 }
 
+/**
+ * The fields that say what a list searches: everything an update replaces, and
+ * everything a saved list shares with its tracked entry besides the title.
+ */
+export type TrackedQuery = Pick<TrackedList, 'kind' | 'url' | 'type' | 'entity' | 'filter' | 'scan'>
+
+const QUERY_FIELDS = ['kind', 'url', 'type', 'entity', 'filter', 'scan'] as const
+
+/** A list's query fields alone, leaving out the ones it doesn't have. */
+export function queryOf(list: TrackedQuery): TrackedQuery {
+  const query: Partial<TrackedQuery> = {}
+  for (const field of QUERY_FIELDS) {
+    if (list[field] !== undefined)
+      Object.assign(query, { [field]: list[field] })
+  }
+  return query as TrackedQuery
+}
+
+/**
+ * `list` searching `query` instead: every query field replaced, including the
+ * ones `query` leaves out, which go; everything else kept.
+ */
+export function withQueryOf<T extends object>(list: T, query: TrackedQuery): Omit<T, keyof TrackedQuery> & TrackedQuery {
+  const rest: Partial<TrackedQuery> = { ...list }
+  for (const field of QUERY_FIELDS)
+    delete rest[field]
+  return { ...rest, ...queryOf(query) } as Omit<T, keyof TrackedQuery> & TrackedQuery
+}
+
+/**
+ * The query a list has once it searches the page `change` describes, or null
+ * when that page isn't trackable.
+ *
+ * Its type and entity follow the query, because it may have moved to another
+ * tag or series, and a list still named for the old one would say the wrong
+ * thing. What the list had stored only carries over while it keeps its root (a
+ * series' title can't be checked against another series' id, so a move drops
+ * it); what the page knows fills the rest. `scan` stays unless the caller has
+ * checked the new tag.
+ */
+export function requery(before: Pick<TrackedList, 'url' | 'type' | 'entity' | 'scan'>, change: Omit<TrackedListChange, 'alias'>): TrackedQuery | null {
+  const normalized = normalizeTrackedUrl(change.url)
+  if (!normalized)
+    return null
+  const root = trackedRoot({ url: normalized.url })
+  const kept = root !== null && root === trackedRoot(before)
+    ? trackedMeta({ url: normalized.url, type: before.type, entity: before.entity })!
+    : trackedMeta({ url: normalized.url })!
+  const meta = change.meta ? fillMeta({ url: normalized.url, ...kept }, change.meta) ?? kept : kept
+
+  const query: TrackedQuery = { kind: normalized.kind, url: normalized.url, type: meta.type }
+  if (meta.entity)
+    query.entity = meta.entity
+  const filter = canonicalFilter(change.filter)
+  if (filter)
+    query.filter = filter
+  if (change.scan === true || (change.scan === undefined && before.scan === true))
+    query.scan = true
+  return query
+}
+
+/**
+ * The title an update offers a list: its own, unless it was the default for a
+ * root the new search has left, when the new root's default takes its place,
+ * made unique among `lists` — so "Search: coffee" refined into a search for tea
+ * isn't left calling itself coffee.
+ */
+export function titleAfterUpdate(
+  list: Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>,
+  url: string,
+  meta: TrackedMeta,
+  lists: readonly Pick<TrackedList, 'id' | 'alias'>[],
+): string {
+  const was = trackedMeta(list)
+  const moved = trackedRoot(list) !== trackedRoot({ url })
+  return was && moved && sameTitle(list.alias, defaultTitle(was))
+    ? uniqueTitle(defaultTitle(meta), lists, list.id)
+    : list.alias
+}
+
+/** Whether two titles are one, the way titles are compared: trimmed, in any case. */
+export function sameTitle(a: unknown, b: unknown): boolean {
+  return titleKey(a) === titleKey(b)
+}
+
 /** An update that can be made — the lists it leaves, and the entry before and after — or why it can't. */
 export type TrackedUpdatePlan
   = | { ok: true, lists: TrackedList[], before: TrackedList, after: TrackedList }
@@ -1676,11 +1772,9 @@ export type TrackedUpdatePlan
  * Replace list `id`'s query with the page's, in place.
  *
  * An update is the same list searching differently, so what makes it *that*
- * list stays: its id (what the review files its works and sources under), its
- * tracking start, and whether it's paused. Its query, view filter and title are
- * replaced, and its type and entity with them — the query may have moved to
- * another tag or series, and a list still named for the old one would say the
- * wrong thing. `scan` stays unless the caller has checked the new tag.
+ * list stays: its id (what the review files its works and sources under) and its
+ * tracking start. Its query, view filter and title are replaced, and its type
+ * and entity with them ({@link requery}).
  *
  * Refused, with the list responsible, when the result would be the same query as
  * another list (`duplicate`), or would take a title another list has (`title`).
@@ -1693,42 +1787,23 @@ export function planUpdate(lists: readonly TrackedList[], id: string, change: Tr
   const before = lists.find(list => list.id === id)
   if (!before)
     return { ok: false, reason: 'missing' }
-  const normalized = normalizeTrackedUrl(change.url)
-  if (!normalized)
+  const query = requery(before, change)
+  if (!query)
     return { ok: false, reason: 'invalid' }
 
-  const filter = canonicalFilter(change.filter)
-  const key = filteredKey(normalized.key, filter)
+  const key = trackedKey(query)
   const duplicate = lists.find(list => list.id !== id && trackedKey(list) === key)
   if (duplicate)
     return { ok: false, reason: 'duplicate', other: duplicate }
 
   const alias = typeof change.alias === 'string' ? change.alias.trim() : before.alias
-  if (titleKey(alias) !== titleKey(before.alias)) {
+  if (!sameTitle(alias, before.alias)) {
     const taken = titleTakenBy(alias, lists, id)
     if (taken)
       return { ok: false, reason: 'title', other: taken }
   }
 
-  // What's stored only carries over while the list keeps its root: a series'
-  // title can't be checked against another series' id, so a move drops it.
-  const root = trackedRoot({ url: normalized.url })
-  const kept = root !== null && root === trackedRoot(before)
-    ? trackedMeta({ url: normalized.url, type: before.type, entity: before.entity })!
-    : trackedMeta({ url: normalized.url })!
-  const meta = change.meta ? fillMeta({ url: normalized.url, ...kept }, change.meta) ?? kept : kept
-
-  const after: TrackedList = { ...before, kind: normalized.kind, url: normalized.url, alias, type: meta.type, entity: meta.entity }
-  if (!meta.entity)
-    delete after.entity
-  if (filter)
-    after.filter = filter
-  else
-    delete after.filter
-  if (change.scan === true)
-    after.scan = true
-  else if (change.scan === false)
-    delete after.scan
+  const after: TrackedList = { ...withQueryOf(before, query), alias }
   return { ok: true, lists: lists.map(list => (list.id === id ? after : list)), before, after }
 }
 
@@ -1741,8 +1816,8 @@ export type TrackedUndoPlan
 /**
  * Take back an update {@link planUpdate} made, putting `before` back in place of
  * `after`: only while the list is still exactly what the update left (`changed`
- * once it has been paused, renamed or updated again — here, in another tab, or
- * by a sync) and is there at all (`missing`), and only if that wouldn't now
+ * once it has been retitled or updated again — here, in another tab, or by a
+ * sync) and is still tracked at all (`missing`), and only if that wouldn't now
  * duplicate a query or a title another list has taken in the meantime.
  */
 export function planUndo(lists: readonly TrackedList[], before: TrackedList, after: TrackedList): TrackedUndoPlan {
@@ -1763,8 +1838,12 @@ export function planUndo(lists: readonly TrackedList[], before: TrackedList, aft
   return { ok: true, lists: lists.map(list => (list.id === before.id ? before : list)) }
 }
 
-/** An entry as one string, whatever order storage handed its fields back in. */
-function entrySignature(entry: TrackedList): string {
+/**
+ * An entry, or a saved list's record, as one string, whatever order storage
+ * handed its fields back in. Nested values are taken as they are: a view filter
+ * is always stored canonical, so its spelling is already one.
+ */
+export function entrySignature(entry: object): string {
   const fields = Object.entries(entry)
     .filter(([, value]) => value !== undefined)
     .sort(([a], [b]) => compareStrings(a, b))
@@ -1782,8 +1861,9 @@ function entrySignature(entry: TrackedList): string {
  * a list added while the reader is weeks behind doesn't pour weeks of its
  * backlog in.
  *
- * Paused lists don't count. A `since` or watermark that isn't a whole number
- * (storage the options layer hasn't repaired) is ignored rather than trusted.
+ * An entry that isn't tracked doesn't count. A `since` or watermark that isn't a
+ * whole number (storage the options layer hasn't repaired) is ignored rather
+ * than trusted.
  */
 export function reviewStart(option: Pick<TrackedListsOption, 'reviewedThrough' | 'lists'>): Day {
   const next = (wholeNumber(option.reviewedThrough) ?? 0) + 1

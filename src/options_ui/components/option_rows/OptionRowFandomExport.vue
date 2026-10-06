@@ -49,13 +49,14 @@ async function clearCache(): Promise<void> {
     title="Learned fandom ids"
     :subtitle="`${total} ids collected while browsing (${counts.fandoms} fandoms, ${counts.characters} characters, ${counts.relationships} relationships). Export them to contribute to the shared cross-reference.`"
   >
-    <div flex="~ row items-center gap-3">
-      <Button variant="outline" :disabled="total === 0" @click.prevent="startExport">
+    <div flex="~ row wrap items-center justify-end gap-2">
+      <button type="button" class="outline-btn" :disabled="total === 0" @click.prevent="startExport">
+        <span class="i-tabler-download" text="[14px]" aria-hidden="true" />
         Export ids
-      </Button>
-      <Button variant="ghost" :disabled="total === 0" @click.prevent="clearCache">
+      </button>
+      <button type="button" class="ghost-btn" :disabled="total === 0" @click.prevent="clearCache">
         Clear
-      </Button>
+      </button>
     </div>
   </OptionRow>
 </template>

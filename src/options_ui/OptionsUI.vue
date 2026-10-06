@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import OptionsUICategories from './categories/OptionsUICategories.vue'
+import { shownTheme } from './model/theme.ts'
 
 const ready = useOptionsReady()
 const themeOption = useOption('theme')
@@ -9,7 +10,7 @@ const themeOption = useOption('theme')
 useHashNav(ready)
 
 watch(() => themeOption, () => {
-  const current = themeOption.chosen.value === 'inherit' ? themeOption.current.value : themeOption.chosen.value
+  const current = shownTheme({ chosen: themeOption.chosen.value, current: themeOption.current.value })
   document.body.classList.toggle('dark', current === 'dark')
   document.body.classList.toggle('light', current === 'light')
 }, { deep: true, immediate: true })
@@ -20,16 +21,33 @@ watch(ready, () => document.body.classList.toggle('ready', ready.value), { immed
 <template>
   <RekaTooltipProvider :delay-duration="300">
     <template v-if="ready">
-      <OptionsUIHeader />
-      <main id="main" container mx-auto card shadow-md sm:pt-4>
-        <OptionsUICategories />
-      </main>
-      <OptionsUIFooter />
+      <TopBar />
+      <div class="md:grid md:grid-cols-[248px_minmax(0,1fr)]">
+        <Rail />
+        <main id="main" min-w-0 class="px-3 pb-5 pt-3.5 md:px-10 md:pb-10 md:pt-6.5">
+          <OptionsUICategories />
+          <div class="md:hidden" border="t-1" pt-3>
+            <PageFoot />
+          </div>
+        </main>
+      </div>
     </template>
   </RekaTooltipProvider>
 </template>
 
 <style>
+/* How far the sticky top bar reaches down the page — and, below 768 px, the
+   chip row under it. Every jump target keeps clear of it with
+   `scroll-margin-top`. */
+:root {
+  --shell-top: calc(3rem + 2.75rem);
+}
+@media (min-width: 768px) {
+  :root {
+    --shell-top: 52px;
+  }
+}
+
 body {
   overflow-y: auto;
   scroll-behavior: smooth;
@@ -46,12 +64,7 @@ body {
 
 body.ready {
   background-color: rgb(var(--color-default));
-  background-image: url(../img/options-background.svg);
-}
-
-.bg-ao3 {
-  background-color: rgb(var(--color-primary));
-  background-image: url(../img/red-ao3.png);
+  color: rgb(var(--color-default-fg));
 }
 
 h1,

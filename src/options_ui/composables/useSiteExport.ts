@@ -1,15 +1,17 @@
-import type { SnapshotDescriptor, TrackedList, TrackedMeta } from '#common'
+import type { SnapshotDescriptor, TrackedList } from '#common'
 import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { defaultTitle, fillMeta, getArchiveLink, newTrackedListId, normalizeTrackedUrl, toast, trackedKey, trackedMeta, uniqueTitle, utcToday } from '#common'
+import { getArchiveLink, normalizeTrackedUrl, planTrackCopy, SAVED_LIST_SOURCE_IDS, toast, trackedKey, utcToday } from '#common'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
 import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
 import { planOrphanDiscard, summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { discardOrphanedWorkText, purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
+
+import { useSavedLists } from './useSavedLists.ts'
 
 /**
  * The options page's view of the site export: one row per stored list, the job
@@ -86,19 +88,13 @@ const changeReport = shallowRef<ChangeImportReport | null>(null)
 const importingChanges = ref(false)
 
 /**
- * The tracked lists, read here so a stored list can say whether it is one of
- * them. Taken once, like the state above: the refs read through to the options
- * page's own reactive copy, so a rename made in Search → Tracked lists shows up
- * on these rows without a reload.
+ * The saved lists, read here so a stored list can say whether it is a tracked
+ * one, and tracked from its row. Taken once, like the state above: the refs read
+ * through to the options page's own reactive copy, so a rename made in Search →
+ * Tracked lists shows up on these rows without a reload.
  */
-const { lists: trackedEntries } = useOption('trackedLists')
-
-/**
- * Stored lists that can become tracked. Marked for Later and the read list can't:
- * their works are the reader's own choices, so "what's new since I last looked?"
- * isn't a question about them.
- */
-export const TRACKABLE_SOURCE_IDS: readonly string[] = ['text-search', 'tag-works', 'series-works']
+const savedLists = useSavedLists()
+const trackedEntries = savedLists.entries
 
 /**
  * The source id of the tracked-lists review's own stored window, which is a
@@ -155,22 +151,10 @@ export function listName(row: SiteExportListRow): string {
   return trackedEntryFor(row)?.alias.trim() || row.label
 }
 
-/**
- * What a stored list is, for the tracked list made from it: what its address
- * says, plus a series' title, which a stored series' own label carries
- * ("Series: …") and its address can't.
- */
-function storedListMeta(url: string, label: string): TrackedMeta {
-  const meta = trackedMeta({ url })!
-  const title = meta.type === 'series' ? /^Series: (.+)$/.exec(label.trim())?.[1] : undefined
-  const filled = title ? fillMeta({ url }, { type: 'series', entity: title }) : null
-  return filled ? { type: filled.type ?? meta.type, entity: filled.entity ?? meta.entity } : meta
-}
-
 /** Whether offering **Track** on this row makes sense at all. */
 export function canTrack(row: SiteExportListRow): boolean {
   return !!row.descriptor
-    && TRACKABLE_SOURCE_IDS.includes(row.descriptor.sourceId)
+    && SAVED_LIST_SOURCE_IDS.includes(row.descriptor.sourceId)
     && !!normalizeTrackedUrl(row.descriptor.listUrl)
 }
 
@@ -409,41 +393,46 @@ export function useSiteExport() {
       toast(`Removed “${listName(row)}”. The cached work text is still here.`, { type: 'success' })
     },
 
+    /** Delete the stored lists a removed saved list leaves behind, in turn, and draw the rows again. */
+    async deleteCopies(keys: readonly string[]) {
+      for (const key of keys)
+        await deleteSnapshot(key)
+      if (keys.length)
+        await reload()
+    },
+
     /**
      * Start tracking this list, so its new and updated works turn up in the
      * review stream. This is how a list the reader already has becomes tracked
      * without going back to AO3 to press a pill.
      *
-     * The stored snapshot is left exactly as it is. Tracking reads the archive by
-     * date from today onwards, so however many years of works the snapshot holds,
-     * none of them reaches the review — the two are separate things. The entry is
-     * titled the way a list tracked from its page is — "Type: entity", made
-     * unique — so the two ways in agree. A stored list has no view state, so the
-     * entry has no view filter.
+     * What is tracked is the saved list the stored one is, under its own id
+     * ({@link planTrackCopy}), and its title — or, for one with none, the title a
+     * list tracked from its page gets, "Type: entity" made unique, so the two
+     * ways in agree. The stored snapshot is left exactly as it is: tracking reads
+     * the archive by date from today onwards, so however many years of works the
+     * snapshot holds, none of them reaches the review.
      */
     track(row: SiteExportListRow) {
-      if (!canTrack(row)) {
+      const descriptor = row.descriptor
+      const before = savedLists.current()
+      const plan = canTrack(row) && descriptor
+        ? planTrackCopy(before, { key: row.key, sourceId: descriptor.sourceId, listUrl: descriptor.listUrl, label: descriptor.label, scrapedAt: row.scrapedAt }, utcToday())
+        : null
+      if (!plan) {
         toast('This list can\'t be tracked.', { type: 'error' })
         return
       }
-      const normalized = normalizeTrackedUrl(row.descriptor!.listUrl)!
-      if (trackedEntries.value.some(entry => trackedKey(entry) === normalized.key)) {
-        toast(`“${listName(row)}” is already tracked.`)
+      if (!plan.ok) {
+        if ('twin' in plan)
+          toast(`“${listName(row)}” is already tracked.`)
+        else
+          toast(`Another list is already called “${plan.takenBy.title.trim()}”. Give one of them another title under Search → Tracked lists first.`, { type: 'error' })
         return
       }
-      const meta = storedListMeta(normalized.url, row.descriptor!.label)
-      const alias = uniqueTitle(defaultTitle(meta), trackedEntries.value)
-      trackedEntries.value.push({
-        id: newTrackedListId(trackedEntries.value),
-        kind: normalized.kind,
-        url: normalized.url,
-        alias,
-        type: meta.type,
-        ...(meta.entity ? { entity: meta.entity } : {}),
-        tracked: true,
-        since: utcToday(),
-      })
-      toast(`Tracking “${alias}”. Works added or updated from today on will turn up in your review.`, { type: 'success' })
+      savedLists.apply(before, plan.state)
+      const title = plan.state.saved.lists[plan.id]?.title ?? ''
+      toast(`Tracking “${title}”. Works added or updated from today on will turn up in your review.`, { type: 'success' })
     },
 
     /**

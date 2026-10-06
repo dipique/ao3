@@ -4,19 +4,19 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock, serveDir, serveDist, sleep, storedListIds, storedLists } from './helpers.mjs'
-
-const chromePath = findChrome()
-const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
+import { serveDir, sleep, storedListIds, storedLists } from './helpers.mjs'
+import { captureDownloads, skip, startOptions } from './optionsPage.mjs'
 
 const ARCHIVE = 'https://archiveofourown.org'
 const CACHE_KEY = 'marked-for-later:tester'
+const OLD_KEY = 'marked-for-later:olduser'
 const LABEL = 'Marked for Later — tester'
+/** The stored lists, one row each. */
+const LISTS = 'stored-lists'
 /** The one row that isn't about a list: the way changes made in a file get back. */
-const CHANGES_ROW = 'Changes made in an export'
-const CACHE_ROW = 'Cached work text'
+const CHANGES_ROW = 'site-export-changes-made-in-an-export'
+const CACHE_ROW = 'site-export-cached-work-text'
 
 /**
  * The site export's Advanced section, driven end to end: a stored list, the
@@ -81,7 +81,7 @@ const SEED = {
   ...storedLists({
     // Written before descriptors existed: no address, no way to refresh it. Kept
     // here because it is the row the rebuilt-from-the-key link exists for.
-    'marked-for-later:olduser': {
+    [OLD_KEY]: {
       version: 1,
       scrapedAt: Date.now() - 40 * 24 * 60 * 60 * 1000,
       blurbsHtml: [blurb(21, 'Work number 21')],
@@ -132,57 +132,20 @@ const SEED = {
  */
 const rateLimitOnce = new Set(['12'])
 
-/**
- * Catch what `saveAs` hands the browser, instead of letting it hand it to the
- * browser. A detached `<a download>` still starts a real download in headless
- * Chrome, which this test has nowhere to put and nothing to say about; what it
- * wants is the Blob itself.
- */
-function captureDownloads() {
-  window.__downloads = []
-  const blobs = new Map()
-  const createObjectURL = URL.createObjectURL.bind(URL)
-  URL.createObjectURL = (object) => {
-    const url = createObjectURL(object)
-    blobs.set(url, object)
-    return url
-  }
-  const click = HTMLAnchorElement.prototype.click
-  HTMLAnchorElement.prototype.click = function () {
-    if (!this.hasAttribute('download'))
-      return click.call(this)
-    window.__downloads.push({ name: this.download, url: this.href })
-  }
-  window.__downloadBytes = async (url) => {
-    const bytes = new Uint8Array(await blobs.get(url).arrayBuffer())
-    let binary = ''
-    for (let i = 0; i < bytes.length; i += 0x8000)
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
-    return btoa(binary)
-  }
-}
-
 describe('options UI — site export', { skip }, () => {
-  let server
+  let session
   let browser
+  let options
   let page
   /** What the row was showing while it sat out the stub's 429. */
   let waitLine = ''
-  const problems = []
   /** Works the stub was asked to take off Marked for Later, and what was posted. */
   const marked = []
   /** The change file the exported page handed back, once it has handed one back. */
   let changeFile = null
 
-  before(async () => {
-    ensureBuilt()
-    server = await serveDist()
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
-    page = await browser.newPage()
+  /** AO3, as far as the options page can see it. */
+  const stubArchive = async (page) => {
     await page.setRequestInterception(true)
     page.on('request', (req) => {
       const url = req.url()
@@ -246,49 +209,33 @@ describe('options UI — site export', { skip }, () => {
         body: workId ? workPage(workId) : listingPage([11, 12, 13]),
       })
     })
-    // Chrome logs every non-2xx response as a console error of its own. The one
-    // 429 the stub serves on purpose is the subject of a test, not a fault.
-    const expected = /status of 429/
-    page.on('console', m => m.type() === 'error' && !expected.test(m.text()) && problems.push(m.text()))
-    page.on('pageerror', e => problems.push(e.message))
-    await page.evaluateOnNewDocument(installMock, SEED)
-    await page.evaluateOnNewDocument(captureDownloads)
-    await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
-    await sleep(1500)
+  }
+
+  before(async () => {
+    session = await startOptions()
+    browser = session.browser
+    options = await session.open({
+      seed: SEED,
+      hash: '#site-export',
+      prepare: async (page) => {
+        await stubArchive(page)
+        await page.evaluateOnNewDocument(captureDownloads)
+      },
+    })
+    page = options.page
   }, { timeout: 180000 })
 
-  after(async () => {
-    await browser?.close()
-    await server?.close()
-  })
+  after(() => session?.close())
 
-  /** The whole OptionRow for a title — its label and whatever sits under it. */
-  const rowHandle = async (title) => {
-    const handle = await page.evaluateHandle((t) => {
-      const span = [...document.querySelectorAll('label span')].find(el => el.textContent.trim() === t)
-      return span?.closest('label')?.parentElement ?? null
-    }, title)
-    const el = handle.asElement()
-    assert.ok(el, `option row "${title}" not found`)
-    return el
+  /** The stored list's row, with its name, its figures, its buttons and whatever sits under it. */
+  const listRow = (key = CACHE_KEY) => options.listRow(LISTS, key)
+
+  /** Click the button with this name on the stored list's row. */
+  const clickIn = async (key, name) => {
+    await (await options.control(await listRow(key), 'button', name)).click()
   }
 
-  /** Click the button with this exact label inside the named row. */
-  const clickIn = async (title, label) => {
-    const row = await rowHandle(title)
-    const handle = (await row.evaluateHandle(
-      (el, text) => [...el.querySelectorAll('button')].find(b => b.textContent.trim() === text) ?? null,
-      label,
-    )).asElement()
-    assert.ok(handle, `button "${label}" not found in row "${title}"`)
-    await handle.click()
-  }
-
-  /** The last value written to a storage key, or null. */
-  const lastWrite = key => page.evaluate(
-    k => window.__writes.filter(w => k in w).map(w => w[k]).at(-1) ?? null,
-    key,
-  )
+  const lastWrite = key => options.lastWrite(key)
 
   /** Wait until `check` reads true, or fail after `ms`. */
   const until = async (what, check, ms = 20000) => {
@@ -302,13 +249,16 @@ describe('options UI — site export', { skip }, () => {
     }
   }
 
+  /** Everything the stored list's row says: its name, its figures and whatever sits under it. */
+  const rowText = async (key = CACHE_KEY) => options.text(await listRow(key))
+
   test('a stored list gets a row, read out from the snapshot and the cache', async () => {
-    const row = await rowHandle(LABEL)
-    const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
-    assert.match(summary, /^2 works/)
-    assert.match(summary, /as of 3 hours ago/)
-    assert.match(summary, /0 cached/)
-    assert.match(summary, /2 uncached/)
+    assert.deepEqual((await options.listRowIds(LISTS)).sort(), [CACHE_KEY, OLD_KEY].sort())
+    const summary = await rowText()
+    assert.match(summary, new RegExp(LABEL))
+    assert.match(summary, /\b2 works as of 3 hours ago/)
+    assert.match(summary, /\b0 cached/)
+    assert.match(summary, /\b2 uncached/)
   })
 
   /**
@@ -317,16 +267,13 @@ describe('options UI — site export', { skip }, () => {
    * refreshable from this page.
    */
   test('each list links to itself on AO3, descriptor or not', async () => {
-    const link = async (title) => {
-      const row = await rowHandle(title)
-      return row.evaluate(el => ({
-        href: el.querySelector('label > span a')?.getAttribute('href') ?? null,
-        text: el.querySelector('label > span a')?.textContent?.trim() ?? null,
-        target: el.querySelector('label > span a')?.getAttribute('target') ?? null,
-      }))
-    }
+    const link = async key => (await options.control(await listRow(key), 'link')).evaluate(el => ({
+      href: el.getAttribute('href'),
+      text: el.textContent.trim(),
+      target: el.getAttribute('target'),
+    }))
 
-    const stored = await link(LABEL)
+    const stored = await link(CACHE_KEY)
     assert.equal(stored.href, `${ARCHIVE}/users/tester/readings?show=to-read`)
     assert.equal(stored.text, '(link)')
     // A new tab: the point is to come back here and press Refresh afterwards.
@@ -335,19 +282,18 @@ describe('options UI — site export', { skip }, () => {
     // The v1 row has no descriptor to read an address out of, so it is rebuilt
     // from the cache key — and this is the row that most needs it, since opening
     // the list is the only way to make its buttons work again.
-    const old = await link('marked-for-later:olduser')
+    const old = await link(OLD_KEY)
     assert.equal(old.href, `${ARCHIVE}/users/olduser/readings?show=to-read`)
   })
 
   test('"Works" fetches and stores each work\'s sanitized text', async () => {
-    await clickIn(LABEL, 'Works')
+    await clickIn(CACHE_KEY, 'Works')
 
     // Work 12 is refused once with `Retry-After: 3` (see `rateLimitOnce`), so
     // there is a window in which the row has to be counting down rather than
     // sitting mute. Caught here because it only exists while the run is in it.
     await until('the row to say what it is waiting for', async () => {
-      const row = await rowHandle(LABEL)
-      waitLine = await row.evaluate(el => el.textContent ?? '')
+      waitLine = await rowText()
       return /trying again in/.test(waitLine)
     })
 
@@ -390,27 +336,29 @@ describe('options UI — site export', { skip }, () => {
     assert.ok(index['12'].size > 0, 'the work was fetched after the wait')
     assert.equal(index['12'].failure, undefined, 'and nothing was held against it')
     // No failure recorded means no backoff earned: the next run treats it as an
-    // ordinary cached work rather than one to be retried.
-    assert.equal(index['12'].failedAt, undefined)
+    // ordinary cached work rather than one to be retried. Checked on every index
+    // the run wrote, since a success afterwards would wipe the count from the
+    // last one.
+    const attempts = await page.evaluate(() => window.__writes
+      .filter(w => 'workTextIndex' in w)
+      .map(w => w.workTextIndex['12']?.attempts)
+      .filter(n => n !== undefined))
+    assert.deepEqual(attempts, [], 'the wait never counted as a failed attempt')
 
-    const job = await page.evaluate(async () => (await browser.storage.local.get('siteExportJob')).siteExportJob ?? null)
+    const job = await options.stored('siteExportJob')
     assert.equal(job?.errorCount ?? 0, 0, 'a rate limit is not a work that could not be fetched')
     assert.equal(job?.blocked, undefined, 'and the run was not stopped by it')
   })
 
   test('the run finishes, clearing the job and updating the row', async () => {
-    await until('the job record to be cleared', async () => {
-      const job = await page.evaluate(async () => (await browser.storage.local.get('siteExportJob')).siteExportJob ?? null)
-      return job === null
-    })
-    const row = await rowHandle(LABEL)
-    const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
-    assert.match(summary, /2 cached \(/)
+    await until('the job record to be cleared', async () => await options.stored('siteExportJob') === null)
+    const summary = await rowText()
+    assert.match(summary, /\b2 cached \(/)
     assert.doesNotMatch(summary, /uncached/)
   })
 
   test('"List" re-scrapes the listing and its saved-work index', async () => {
-    await clickIn(LABEL, 'List')
+    await clickIn(CACHE_KEY, 'List')
     await until('the snapshot to be rewritten', async () => {
       const lists = await lastWrite('cache.searchLists')
       return storedListIds(lists?.[CACHE_KEY]).length === 3
@@ -420,10 +368,9 @@ describe('options UI — site export', { skip }, () => {
     assert.equal(marked.userId, 'tester')
     assert.ok(marked.ids.length > 0)
 
-    const row = await rowHandle(LABEL)
-    const summary = await row.evaluate(el => el.querySelector('label > div > span')?.textContent?.trim() ?? '')
-    assert.match(summary, /^3 works/)
-    assert.match(summary, /1 uncached/)
+    const summary = await rowText()
+    assert.match(summary, /\b3 works as of/)
+    assert.match(summary, /\b1 uncached/)
   })
 
   /** The exported page behind the last download `saveAs` asked for. */
@@ -449,7 +396,7 @@ describe('options UI — site export', { skip }, () => {
   }, entry)
 
   test('"Download" refreshes, caches and writes one HTML file', async () => {
-    await clickIn(LABEL, 'Download')
+    await clickIn(CACHE_KEY, 'Download')
     await until('the download to be handed over', () => page.evaluate(() => window.__downloads.length > 0), 40000)
 
     const { name, html, data } = await lastDownload()
@@ -544,7 +491,7 @@ describe('options UI — site export', { skip }, () => {
 
     // The split button: the label of an `Icon` renders as screen-reader text
     // inside its button, which is what makes it findable by name at all.
-    await clickIn(LABEL, 'More download options')
+    await clickIn(CACHE_KEY, 'More download options')
     await until('the menu to open', () => page.evaluate(
       () => [...document.querySelectorAll('[role="menuitem"]')]
         .some(el => el.textContent.includes('Download without refreshing')),
@@ -1090,19 +1037,11 @@ describe('options UI — site export', { skip }, () => {
      */
     const importFile = async (label = 'Import changes') => {
       await handOver()
-      const row = await rowHandle(CHANGES_ROW)
-      const pressed = await row.evaluate((el, text) => {
-        const button = [...el.querySelectorAll('button')].find(b => b.textContent.trim() === text)
-        button?.click()
-        return !!button
-      }, label)
-      assert.ok(pressed, `button "${label}" not found in the changes row`)
+      await options.press(await options.control(await options.row(CHANGES_ROW), 'button', label))
     }
 
-    const marks = () => page.evaluate(
-      async () => (await browser.storage.local.get('option.workMarks'))['option.workMarks'],
-    )
-    const reportLine = async () => (await rowHandle(CHANGES_ROW)).evaluate(el => el.textContent ?? '')
+    const marks = () => options.stored('option.workMarks')
+    const reportLine = async () => options.text(await options.row(CHANGES_ROW))
 
     // Nothing here knows about work 11 yet: the mark was made in a file, on
     // another origin, with no extension under it.
@@ -1127,9 +1066,7 @@ describe('options UI — site export', { skip }, () => {
     assert.match(await reportLine(), /applied 1 · 1 marked read on AO3/)
 
     // What the second import reads, and the only thing that makes it free.
-    const ledger = await page.evaluate(
-      async () => (await browser.storage.local.get('cache.appliedChangeOps'))['cache.appliedChangeOps'],
-    )
+    const ledger = await options.stored('cache.appliedChangeOps')
     assert.equal(ledger.length, 1)
 
     await importFile()
@@ -1146,15 +1083,8 @@ describe('options UI — site export', { skip }, () => {
    * copies. Deleting a row must leave every one of them alone.
    */
   test('the trash asks before it removes the list, and keeps the work text', async () => {
-    /** The row's last button is the trash; its name is the only one that varies. */
-    const trash = async () => {
-      const row = await rowHandle(LABEL)
-      const handle = (await row.evaluateHandle(
-        el => [...el.querySelectorAll('button')].find(b => b.textContent.includes('Remove ')) ?? null,
-      )).asElement()
-      assert.ok(handle, 'the row should offer to remove itself')
-      return handle
-    }
+    /** The row's trash, named for the list it removes. */
+    const trash = async () => options.control(await listRow(), 'button', `Remove ${LABEL}`)
 
     const dialogText = () => page.evaluate(
       () => document.querySelector('[role="dialog"]')?.textContent ?? '',
@@ -1174,29 +1104,19 @@ describe('options UI — site export', { skip }, () => {
     assert.match(await dialogText(), /cached work|Work text is held per work/i)
     assert.ok(await clickDialog('Cancel'))
     await until('the dialog to close', async () => !(await dialogText()))
-    assert.ok(await page.evaluate(async () => {
-      const lists = (await browser.storage.local.get('cache.searchLists'))['cache.searchLists']
-      return 'marked-for-later:tester' in lists
-    }), 'cancelling must not remove anything')
+    assert.ok(CACHE_KEY in await options.stored('cache.searchLists'), 'cancelling must not remove anything')
 
     // Confirming removes the list, and only the list.
-    const textBefore = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
+    const textBefore = await options.stored('workTextIndex')
     await (await trash()).click()
     await until('the confirmation again', async () => (await dialogText()).includes('Remove this list?'))
     assert.ok(await clickDialog('Remove list'))
 
-    await until('the row to go', async () => {
-      const titles = await page.evaluate(
-        () => [...document.querySelectorAll('label span')].map(el => el.textContent.trim()),
-      )
-      return !titles.includes(LABEL)
-    })
-    const snapshots = await page.evaluate(
-      async () => (await browser.storage.local.get('cache.searchLists'))['cache.searchLists'],
-    )
-    assert.deepEqual(Object.keys(snapshots), ['marked-for-later:olduser'], 'only the row asked for goes')
+    await until('the row to go', async () => !(await options.listRowIds(LISTS)).includes(CACHE_KEY))
+    const snapshots = await options.stored('cache.searchLists')
+    assert.deepEqual(Object.keys(snapshots), [OLD_KEY], 'only the row asked for goes')
 
-    const textAfter = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
+    const textAfter = await options.stored('workTextIndex')
     assert.deepEqual(Object.keys(textAfter).sort(), Object.keys(textBefore).sort())
     assert.equal(Object.keys(textAfter).length, 3)
   })
@@ -1212,7 +1132,7 @@ describe('options UI — site export', { skip }, () => {
    * the only snapshot left holds work 21, which was never cached.
    */
   test('what the deleted list stranded can be discarded on its own', async () => {
-    const cacheRow = () => rowHandle(CACHE_ROW).then(el => el.evaluate(node => node.textContent ?? ''))
+    const cacheRow = async () => options.text(await options.row(CACHE_ROW))
 
     /**
      * The row's first button is the discard, and everything about it that this
@@ -1221,20 +1141,18 @@ describe('options UI — site export', { skip }, () => {
      * counts the orphans, what the confirmation says — is copy, and pinning a
      * test to copy makes every rewrite a failing build.
      */
+    const discardButton = async () => options.control(await options.row(CACHE_ROW), 'button')
+
+    const offered = async () => !(await (await discardButton()).evaluate(button => button.disabled))
+
+    /** Press the discard, and say what it offered when it was pressed. */
     const discard = async () => {
-      const row = await rowHandle(CACHE_ROW)
-      const label = await row.evaluate((el) => {
-        const button = el.querySelector('button')
-        if (!button || button.disabled)
-          return null
-        button.click()
-        return button.textContent.trim()
-      })
-      assert.ok(label, 'the cache row should be offering an enabled discard button')
+      const button = await discardButton()
+      assert.ok(await offered(), 'the cache row should be offering an enabled discard button')
+      const label = await options.text(button)
+      await options.press(button)
       return label
     }
-
-    const offered = () => rowHandle(CACHE_ROW).then(el => el.evaluate(node => !node.querySelector('button')?.disabled))
 
     // Enabled only once the row has counted what the deleted list stranded.
     await until('the row to offer the discard', offered)
@@ -1252,11 +1170,11 @@ describe('options UI — site export', { skip }, () => {
     assert.notEqual(confirmed, asked, 'the second press should be a different offer from the first')
 
     await until('the cache to empty', async () => {
-      const store = await page.evaluate(async () => (await browser.storage.local.get('workTextIndex')).workTextIndex)
+      const store = await options.stored('workTextIndex')
       return !store || !Object.keys(store).length
     })
     const left = await page.evaluate(async () => {
-      const store = await browser.storage.local.get(null)
+      const store = await window.browser.storage.local.get(null)
       return {
         index: store.workTextIndex,
         texts: Object.keys(store).filter(key => key.startsWith('workText.')),
@@ -1265,13 +1183,15 @@ describe('options UI — site export', { skip }, () => {
     })
     assert.deepEqual(left.index, {})
     assert.deepEqual(left.texts, [], 'the text goes with the index entry')
-    assert.deepEqual(left.lists, ['marked-for-later:olduser'], 'the list that is left is untouched')
+    assert.deepEqual(left.lists, [OLD_KEY], 'the list that is left is untouched')
 
     // Nothing to offer any more, which is the other half of the button's state.
     await until('the discard to switch itself off', async () => !(await offered()))
   })
 
   test('nothing threw along the way', () => {
-    assert.deepEqual(problems, [])
+    // Chrome logs every non-2xx response as a console error of its own. The one
+    // 429 the stub serves on purpose is the subject of a test, not a fault.
+    assert.deepEqual(options.problems(/status of 429/), [])
   })
 })

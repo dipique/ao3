@@ -12,7 +12,7 @@ OptionRowRulesContext.provide({
     title="Rules"
     subtitle="Hide, highlight or always-show works by tag, fandom, author, work or series. When more than one rule matches a work, the highest priority wins — and always-show wins a tie."
   >
-    <OptionRowRulesTable />
+    <OptionRowRulesList />
 
     <div flex="~ items-center gap-3 justify-between" mt-3>
       <OptionRowRuleColors />
@@ -56,7 +56,7 @@ OptionRowRulesContext.provide({
               A rule marked <Icon i-mdi-cancel op40 label="Disabled" title="Disabled" /> is disabled: it is kept
               exactly as written — value, matcher, priority and colour — but does nothing at all, and leaves no
               indicator on the page. Use it to put a rule aside without losing it (or the work of writing its regex)
-              while you see how the site reads without it. Sorting by the action column brings the disabled rules
+              while you see how the site reads without it. Sorting the list by action brings the disabled rules
               together at the end.
             </p>
             <h2 mt-6 py-1>

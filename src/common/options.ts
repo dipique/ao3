@@ -1,4 +1,5 @@
 import type { Completion, Crossovers, Language, Rule, RuleColors, TextReplacement } from './data.ts'
+import type { SavedListsOption } from './savedLists.ts'
 import type { TrackedListsOption } from './trackedLists.ts'
 import type { WordCountRange } from './wordCount.ts'
 import type { WorkMarks } from './workMarks.ts'
@@ -54,7 +55,7 @@ export interface Options {
    */
   rules: {
     enabled: boolean
-    /** The rules themselves, in no particular order (the options table sorts for display). */
+    /** The rules themselves, in no particular order (the options list sorts for display). */
     filters: Rule[]
     /**
      * Default highlight colour per rule target, overriding
@@ -226,21 +227,26 @@ export interface Options {
    * range of days of that stream, marks whatever deserves marking, and then marks
    * the *range* reviewed; nothing is ever marked reviewed one work at a time.
    *
-   * `lists` is **data, not code** — each entry is a query plus what the reader
-   * decided about it, so adding, renaming, pausing or dropping one is an options
-   * edit rather than a code change. Entries are created from the page itself (the
-   * floating toolbar's "Track this search") or from a stored list in the options,
-   * and an entry whose `tracked` is off is kept exactly as it was, alias and all,
-   * and simply isn't reviewed. See {@link file://./trackedLists.ts} for what each
-   * field of an entry means.
+   * `lists` holds the saved lists tracked right now, one entry each under the
+   * list's own id (`savedLists` below), carrying its title and query to every
+   * other browser. Tracking a list adds its entry; stopping removes it, and the
+   * list stays saved on this browser. See {@link file://./trackedLists.ts} for
+   * what each field of an entry means.
    *
    * `reviewedThrough` is the entire review state: the last day marked reviewed,
    * as a UTC day number, so the next window starts the day after it. `0` means
    * nothing has been reviewed yet. It's one number, and reviewing on one browser
-   * should count on the others, which is why it syncs along with the aliases and
-   * the tracked/paused state.
+   * should count on the others, which is why it syncs along with the entries.
    */
   trackedLists: TrackedListsOption
+  /**
+   * Every saved list on this browser, by its permanent id: its title and what it
+   * searches ({@link file://./savedLists.ts}). Never synced — a list reaches
+   * another browser only as a tracked entry — but backed up and exported with
+   * the other options. The background keeps it in step with `trackedLists` and
+   * the stored lists.
+   */
+  savedLists: SavedListsOption
 
   styleWidthEnabled: boolean
   styleWidth: number
@@ -299,7 +305,10 @@ export const options = createStorage<Options>({
   area: 'local',
   name: 'Options',
   prefix: 'option.',
-  ignoredEvents: ['theme', 'user'],
+  // `savedLists` is written by the background as stored lists come and go, and
+  // re-running every unit for it would tear down an open search view the moment
+  // its list was first stored.
+  ignoredEvents: ['theme', 'user', 'savedLists'],
   defaults: OPTION_DEFAULTS,
 })
 

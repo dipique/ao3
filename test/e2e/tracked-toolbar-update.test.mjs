@@ -33,8 +33,8 @@ const HP_ID = 'Harry Potter - J*d* K*d* Rowling'
 const HP_PATH = '/tags/Harry%20Potter%20-%20J*d*%20K*d*%20Rowling/works'
 const HP_QUERY = 'tag_id=Harry+Potter+-+J*d*+K*d*+Rowling'
 
-/** Harry Potter without Draco Malfoy — paused, to show that an update leaves it so. */
-const NO_DRACO = { id: 'nodraco', kind: 'works-filter', url: `${HP_PATH}?exclude_work_search[character_ids][]=1234`, alias: 'Harry Potter, no Draco', type: 'fandom', entity: 'Harry Potter - J. K. Rowling', tracked: false, since: TODAY - 15 }
+/** Harry Potter without Draco Malfoy. */
+const NO_DRACO = { id: 'nodraco', kind: 'works-filter', url: `${HP_PATH}?exclude_work_search[character_ids][]=1234`, alias: 'Harry Potter, no Draco', type: 'fandom', entity: 'Harry Potter - J. K. Rowling', tracked: true, since: TODAY - 15 }
 /** Harry Potter, complete works only: the same root, filtered another way. */
 const COMPLETE = { id: 'hpdone', kind: 'works-filter', url: `${HP_PATH}?work_search[complete]=T`, alias: 'Harry Potter, complete', tracked: true, since: TODAY - 30 }
 /** Another fandom altogether, which no Harry Potter page is ever offered as. */
@@ -103,16 +103,15 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     await tab.select(`${TRACK_BOX} select`, 'nodraco')
     await sleep(200)
     assert.deepEqual(await diffLines(tab), ['Excludes: Ron Weasley'])
-    assert.match(await boxText(tab), /“Harry Potter, no Draco” is paused, and updating it leaves it paused/)
     assert.ok((await boxButtons(tab)).includes('Update “Harry Potter, no Draco”'))
   })
 
-  test('Update rewrites that list in place, and a paused list stays paused', async () => {
+  test('Update rewrites that list in place, keeping its tracking start', async () => {
     await clickBoxButton(tab, 'Update “Harry Potter, no Draco”')
     await sleep(1500)
     const updated = await list('nodraco')
     assert.equal(updated.url, normalizeTrackedUrl(BOTH_OUT).url)
-    assert.equal(updated.tracked, false)
+    assert.equal(updated.tracked, true)
     assert.equal(updated.since, NO_DRACO.since)
     assert.equal(updated.alias, NO_DRACO.alias)
     // The other list with the root keeps its query. The only thing that has
@@ -120,13 +119,13 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     // didn't know: that the tag is a fandom.
     assert.deepEqual(await list('hpdone'), { ...COMPLETE, type: 'fandom', entity: 'Harry Potter - J. K. Rowling' })
     assert.deepEqual(await list('sherl'), SHERLOCK)
-    assert.ok((await toasts(tab)).includes('Updated “Harry Potter, no Draco”. It stays paused.'))
+    assert.ok((await toasts(tab)).includes('Updated “Harry Potter, no Draco”.'))
     assert.equal(await refiningMark(tab), null, 'nothing was being refined, and nothing is now')
 
     // The page is that list now.
     await tab.click('.AO3E--filter-toolbar--fab')
     await sleep(300)
-    assert.equal(await pillText(tab), 'Resume tracking “Harry Potter, no Draco”')
+    assert.equal(await pillText(tab), 'Tracked as “Harry Potter, no Draco”')
   })
 
   test('Refine opens the chosen list\'s own page, refining it', async () => {

@@ -13,6 +13,15 @@ import 'uno.css'
 
 logBanner()
 
+/** A per-device key this page has no reader for, deleted so the browser doesn't keep it. */
+const UNREAD_LOCAL_KEY = 'ao3e:options:descriptions'
+try {
+  localStorage.removeItem(UNREAD_LOCAL_KEY)
+}
+catch {
+  // Storage is blocked, so there is nothing kept to delete.
+}
+
 if (process.env.NODE_ENV === 'development') {
   // Allow manual testing access to the option and cache object
   ;(globalThis as any).options = options

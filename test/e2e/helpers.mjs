@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import http from 'node:http'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import puppeteer from 'puppeteer-core'
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const REPO_ROOT = join(here, '..', '..')
@@ -35,6 +36,20 @@ export function findChrome() {
     '/usr/bin/chromium-browser',
   ]
   return candidates.find(p => p && existsSync(p))
+}
+
+/**
+ * Start headless Chrome from `chromePath`. Puppeteer hides headless Chrome's
+ * scrollbars, so they take no room; `scrollbars` keeps them, for a test of what
+ * a scrollbar does to a layout.
+ */
+export function launch(chromePath, { scrollbars = false } = {}) {
+  return puppeteer.launch({
+    executablePath: chromePath,
+    headless: 'new',
+    args: ['--no-first-run', '--no-default-browser-check'],
+    ...(scrollbars ? { ignoreDefaultArgs: ['--hide-scrollbars'] } : {}),
+  })
 }
 
 /**

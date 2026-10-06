@@ -1,6 +1,6 @@
-import type { NormalizedTrackedUrl, TagType, TrackedFilter, TrackedList, TrackedMeta, TrackedType } from '#common'
+import type { NormalizedTrackedUrl, TagType, TrackedFilter, TrackedMeta, TrackedQuery, TrackedType } from '#common'
 
-import { canonicalFilter, getArchiveLink, newTrackedListId, normalizeTrackedUrl, PAGE_SIZE, tagSearchUrl, tagTypeFromProfile, trackedMeta, trackedRoot, utcToday } from '#common'
+import { canonicalFilter, getArchiveLink, normalizeTrackedUrl, PAGE_SIZE, tagSearchUrl, tagTypeFromProfile, trackedMeta, trackedRoot } from '#common'
 import { getBlurb } from '#content_script/blurb.ts'
 import { checkboxTagName } from '#content_script/filterSidebar.tsx'
 import { detectFoundCount, detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
@@ -209,22 +209,18 @@ export async function needsScan(page: TrackablePage, signal?: AbortSignal): Prom
 }
 
 /**
- * A new entry for this page, tracked from today, with an id no sibling has, the
- * title given, what the page says it is, and the filter its custom search view
- * was set to, if any.
+ * The search this page is, as a list holds one: its query, what the page says
+ * it is, the filter its custom search view was set to, if any, and whether its
+ * tag has to be read from its own page ({@link needsScan}).
  */
-export function newEntry(page: TrackablePage, title: string, existing: readonly TrackedList[], scan: boolean, meta: TrackedMeta = page.meta, filter?: TrackedFilter): TrackedList {
+export function pageQuery(page: TrackablePage, scan: boolean, meta: TrackedMeta = page.meta, filter?: TrackedFilter): TrackedQuery {
   const view = canonicalFilter(filter)
   return {
-    id: newTrackedListId(existing),
     kind: page.normalized.kind,
     url: page.normalized.url,
-    alias: title.trim(),
     type: meta.type,
     ...(meta.entity ? { entity: meta.entity } : {}),
     ...(view ? { filter: view } : {}),
-    tracked: true,
-    since: utcToday(),
     ...(scan ? { scan: true as const } : {}),
   }
 }

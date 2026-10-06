@@ -1,8 +1,10 @@
 import { clamp } from '@antfu/utils'
 
-import type { SyncMeta, SyncPause } from '#common'
+import type { SyncMeta, SyncPause, SyncUsage } from '#common'
 
-import { api, syncMeta, syncRefusalMessage, toast } from '#common'
+import { api, SYNC_SCHEMA_VERSION, syncMeta, syncRefusalMessage, toast } from '#common'
+
+import { syncStatusView } from '../model/syncStatus.ts'
 
 /**
  * Options-page view of the device-local sync/backup settings ({@link syncMeta}).
@@ -11,7 +13,8 @@ import { api, syncMeta, syncRefusalMessage, toast } from '#common'
  * the engine runs its enable/disable flow (seed, adopt, stop). The plain backup
  * settings are written straight to `syncMeta`. A storage listener keeps this
  * reactive state aligned with whatever the background writes back — including
- * a pause, which the reader answers through the background too.
+ * a pause, which the reader answers through the background too. What the sync
+ * panel shows of it is {@link file://../model/syncStatus.ts}.
  */
 const state = reactive({
   loaded: false,
@@ -29,6 +32,8 @@ const state = reactive({
   staleBuild: null as SyncMeta['staleBuild'],
   /** The background didn't answer as this page's own build (see {@link checkBackgroundBuild}). */
   backgroundOutdated: false,
+  /** How full the synced storage is, while sync is on, once the background has said. */
+  usage: null as SyncUsage | null,
 })
 
 void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause', 'staleBuild']).then((m) => {
@@ -62,9 +67,27 @@ syncMeta.addListener((change) => {
   Object.assign(state, change)
 })
 
+async function readUsage(): Promise<void> {
+  try {
+    state.usage = await api.getSyncUsage.sendToBackground() ?? null
+  }
+  catch {
+    state.usage = null
+  }
+}
+// Read as sync turns on and again after each sync, rather than polled: sync
+// reads are quota'd.
+watch([() => state.enabled, () => state.lastSyncAt], ([enabled]) => {
+  if (enabled)
+    void readUsage()
+}, { immediate: true })
+
+const status = computed(() => syncStatusView({ ...state, staleBuild: !!state.staleBuild }, SYNC_SCHEMA_VERSION))
+
 export function useSync() {
   return {
     state,
+    status,
 
     async setEnabled(value: boolean) {
       state.enabled = value // optimistic

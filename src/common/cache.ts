@@ -133,7 +133,7 @@ export interface TrackedReviewCache {
   reviewedThrough: number
   /**
    * The tracked lists this was computed against — their ids, addresses and
-   * tracking dates, in one string. A list added, removed, paused, resumed or
+   * tracking dates, in one string. A list tracked, stopped, removed or
    * re-addressed changes which works belong in the window, so a mismatch means
    * the same thing a stale watermark does.
    */

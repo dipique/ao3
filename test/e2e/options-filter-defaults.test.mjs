@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
+import { sleep } from './helpers.mjs'
+import { skip, startOptions } from './optionsPage.mjs'
 
-const chromePath = findChrome()
-const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
+const COMPLETION = 'filter-defaults-default-completion-status'
+const CROSSOVERS = 'filter-defaults-default-crossovers'
 
 /**
  * The completion and crossover rows under Filter defaults. Switching one on
@@ -13,91 +13,60 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
  * picking another from its dropdown stores that.
  */
 describe('options UI — completion and crossover defaults', { skip }, () => {
-  let server
-  let browser
-  let page
-  const consoleMsgs = []
+  let session
+  let options
 
   before(async () => {
-    ensureBuilt()
-    server = await serveDist()
-    browser = await puppeteer.launch({ executablePath: chromePath, headless: 'new', args: ['--no-first-run', '--no-default-browser-check'] })
-    page = await browser.newPage()
-    await page.evaluateOnNewDocument(installMock, {})
-    page.on('console', m => consoleMsgs.push({ type: m.type(), text: m.text() }))
-    page.on('pageerror', e => consoleMsgs.push({ type: 'pageerror', text: e.message }))
-    await page.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
-    await sleep(1500)
+    session = await startOptions()
+    options = await session.open({ hash: '#filter-defaults' })
   }, { timeout: 180000 })
 
-  after(async () => {
-    await browser?.close()
-    await server?.close()
-  })
+  after(() => session?.close())
 
-  /** The whole OptionRow — its label and the expanded content below it. */
-  const rowHandle = async (title) => {
-    const handle = await page.evaluateHandle((t) => {
-      const span = [...document.querySelectorAll('label span')].find(el => el.textContent.trim() === t)
-      return span?.closest('label')?.parentElement ?? null
-    }, title)
-    const el = handle.asElement()
-    assert.ok(el, `option row "${title}" not found`)
-    return el
-  }
-
-  const lastWrite = key => page.evaluate(k => window.__writes.filter(w => k in w).map(w => w[k]).at(-1) ?? null, key)
-
-  const switchOn = async (title) => {
-    const row = await rowHandle(title)
-    const toggle = await row.$('[role="switch"]')
-    await toggle.click()
+  const switchOn = async (row) => {
+    await (await options.control(await options.row(row), 'switch')).click()
     await sleep(500)
   }
 
-  /** Open the row's dropdown and pick the option reading `label`. */
-  const choose = async (title, label) => {
-    const row = await rowHandle(title)
-    const trigger = await row.$('[role="combobox"]')
-    assert.ok(trigger, `no dropdown in "${title}"`)
-    await trigger.click()
+  /**
+   * Open the row's dropdown and pick the option reading `label`. The dropdown is
+   * brought to the middle of the window first: at the bottom, the "Options
+   * saved" toasts from the switch can be sitting over it.
+   */
+  const choose = async (row, label) => {
+    const combobox = await options.control(await options.row(row), 'combobox')
+    await combobox.evaluate(el => window.scrollBy({ top: el.getBoundingClientRect().top - window.innerHeight / 2, behavior: 'instant' }))
+    await combobox.click()
     await sleep(300)
-    const option = await page.evaluateHandle(l =>
-      [...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === l) ?? null, label)
-    assert.ok(option.asElement(), `no "${label}" option in "${title}"`)
-    await option.asElement().click()
+    await (await options.control(options.page, 'option', label)).click()
     await sleep(500)
   }
 
-  const shown = async (title) => {
-    const row = await rowHandle(title)
-    return row.$eval('[role="combobox"]', el => el.textContent.trim())
-  }
+  const shown = async row => options.text(await options.control(await options.row(row), 'combobox'))
 
   test('switching on the completion default stores its starting choice', async () => {
-    await switchOn('Default completion status')
-    assert.deepEqual(await lastWrite('option.searchCompletion'), { enabled: true, completion: 'complete' })
-    assert.equal(await shown('Default completion status'), 'Completed works only')
+    await switchOn(COMPLETION)
+    assert.deepEqual(await options.lastWrite('option.searchCompletion'), { enabled: true, completion: 'complete' })
+    assert.equal(await shown(COMPLETION), 'Completed works only')
   })
 
   test('picking works in progress stores it', async () => {
-    await choose('Default completion status', 'Incomplete works only')
-    assert.deepEqual(await lastWrite('option.searchCompletion'), { enabled: true, completion: 'incomplete' })
+    await choose(COMPLETION, 'Incomplete works only')
+    assert.deepEqual(await options.lastWrite('option.searchCompletion'), { enabled: true, completion: 'incomplete' })
   })
 
   test('switching on the crossover default stores its starting choice', async () => {
-    await switchOn('Default crossovers')
-    assert.deepEqual(await lastWrite('option.searchCrossovers'), { enabled: true, crossovers: 'exclude' })
-    assert.equal(await shown('Default crossovers'), 'No crossovers')
+    await switchOn(CROSSOVERS)
+    assert.deepEqual(await options.lastWrite('option.searchCrossovers'), { enabled: true, crossovers: 'exclude' })
+    assert.equal(await shown(CROSSOVERS), 'No crossovers')
   })
 
   test('picking crossovers only stores it', async () => {
-    await choose('Default crossovers', 'Crossovers only')
-    assert.deepEqual(await lastWrite('option.searchCrossovers'), { enabled: true, crossovers: 'only' })
+    await choose(CROSSOVERS, 'Crossovers only')
+    assert.deepEqual(await options.lastWrite('option.searchCrossovers'), { enabled: true, crossovers: 'only' })
   })
 
   test('no page errors along the way', () => {
-    const bad = consoleMsgs.filter(m => m.type === 'pageerror' || m.type === 'error')
-    assert.deepEqual(bad, [])
+    assert.deepEqual(options.problems(), [])
   })
 })

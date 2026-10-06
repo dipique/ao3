@@ -1,7 +1,20 @@
 <script setup lang="ts">
+import { MATCH_CASING_OFF, matchCasingOff } from '../../model/textReplacements.ts'
+
 const { enabled, tools, rules } = useOption('textReplacements')
 
-function add() {
+/**
+ * Each row is find → replace, the rule's five flags as toggles, and Remove. In
+ * a narrow frame the toggles and Remove take a line of their own under the pair.
+ */
+const ROW = '"identity actions" / minmax(0, 1fr) auto'
+const NARROW_ROW = '"identity" "actions" / minmax(0, 1fr)'
+
+const casingOffId = useId()
+
+const frame = useTemplateRef('frame')
+
+async function add() {
   rules.value.push({
     find: '',
     replace: '',
@@ -11,6 +24,8 @@ function add() {
     acrossFormatting: false,
     disabled: false,
   })
+  await nextTick()
+  frame.value?.reveal(rules.value.length - 1)
 }
 
 function remove(index: number) {
@@ -46,69 +61,80 @@ function remove(index: number) {
         <Switch id="ao3e-text-replacement-tools" v-model="tools" />
       </label>
 
-      <p v-if="rules.length === 0" text="sm muted-fg">
-        No replacements yet. Add one to rewrite words in the body of works you read.
-      </p>
-
-      <div
-        v-for="(rule, index) in rules"
-        :key="index"
-        :class="rule.disabled ? 'op-60' : ''"
-        flex="~ col gap-2"
-        border rounded-md p-3
+      <ListFrame
+        ref="frame"
+        list-id="text-replacements"
+        title="Text replacements"
+        :count="rules.length ? String(rules.length) : 'none yet'"
+        :empty="rules.length === 0"
+        add-label="Add a replacement"
+        @add="add"
       >
-        <div flex="~ gap-2 items-center wrap">
-          <Input
-            v-model="rule.find"
-            type="text"
-            placeholder="Find"
-            text="base" h-9 min-w-40 flex-1 py-2 pl-2
-          />
-          <Icon i-mdi-arrow-right shrink-0 text="muted-fg" />
-          <Input
-            v-model="rule.replace"
-            type="text"
-            placeholder="Replace with"
-            text="base" h-9 min-w-40 flex-1 py-2 pl-2
-          />
-          <button
-            class="input-ring"
-            text="4 muted-fg hover:default-fg"
-            shrink-0 cursor-pointer rounded-md p-1
-            title="Remove this replacement"
-            @click="remove(index)"
-          >
-            <Icon i-codicon-trash label="Remove" />
-          </button>
-        </div>
-        <div flex="~ gap-4 items-center wrap" pl-1 text="sm muted-fg">
-          <label flex="~ gap-1.5 items-center">
-            <input v-model="rule.caseSensitive" type="checkbox">
-            <span>Case sensitive</span>
-          </label>
-          <label flex="~ gap-1.5 items-center" :class="rule.caseSensitive ? 'op50' : ''">
-            <input v-model="rule.matchCasing" type="checkbox" :disabled="rule.caseSensitive">
-            <span>Match casing</span>
-          </label>
-          <label flex="~ gap-1.5 items-center">
-            <input v-model="rule.wholeWord" type="checkbox">
-            <span>Whole word</span>
-          </label>
-          <label
-            flex="~ gap-1.5 items-center"
-            title="Match even where the text is broken up by italics, a link or the like."
-          >
-            <input v-model="rule.acrossFormatting" type="checkbox">
-            <span>Across formatting</span>
-          </label>
-          <!-- Apart from the ones that shape the match, because it is the only
-               one that decides whether the rule runs at all. -->
-          <label flex="~ gap-1.5 items-center" ml-auto title="Keep the rule but stop it applying.">
-            <input v-model="rule.disabled" type="checkbox">
-            <span>Disabled</span>
-          </label>
-        </div>
-      </div>
+        <template #empty>
+          <b>No replacements yet</b>
+          Add one to rewrite words in the body of works you read.
+        </template>
+
+        <ListRow
+          v-for="(rule, index) in rules"
+          :key="index"
+          :row-id="index"
+          :template="ROW"
+          :narrow-template="NARROW_ROW"
+          :off="rule.disabled"
+        >
+          <div class="grid grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-2">
+            <Input
+              v-model="rule.find"
+              type="text"
+              placeholder="Find"
+              aria-label="Find"
+              class="h-[22px] w-full px-[7px] text-[12.5px]"
+            />
+            <span class="i-tabler-arrow-right justify-self-center text-[13px] text-muted-fg" aria-hidden="true" />
+            <Input
+              v-model="rule.replace"
+              type="text"
+              placeholder="Replace with"
+              aria-label="Replace with"
+              class="h-[22px] w-full px-[7px] text-[12.5px]"
+            />
+          </div>
+          <template #actions>
+            <div class="flex items-center gap-2">
+              <div class="flex gap-[2px]">
+                <IconToggle v-model="rule.caseSensitive" label="Case sensitive" icon="i-codicon-case-sensitive" />
+                <IconToggle
+                  v-model="rule.matchCasing"
+                  label="Match casing"
+                  icon="i-codicon-preserve-case"
+                  :tip="matchCasingOff(rule) ?? undefined"
+                  :disabled="!!matchCasingOff(rule)"
+                  :aria-describedby="matchCasingOff(rule) ? casingOffId : undefined"
+                />
+                <IconToggle v-model="rule.wholeWord" label="Whole word" icon="i-codicon-whole-word" />
+                <IconToggle
+                  v-model="rule.acrossFormatting"
+                  label="Match across formatting"
+                  tip="Across formatting"
+                  icon="i-tabler-code"
+                />
+                <IconToggle v-model="rule.disabled" label="Disable this replacement" tip="Disabled" icon="i-tabler-ban" />
+              </div>
+              <button
+                type="button"
+                class="icon-btn"
+                aria-label="Remove replacement"
+                title="Remove replacement"
+                @click="remove(index)"
+              >
+                <span class="i-tabler-trash" text="sm" aria-hidden="true" />
+              </button>
+            </div>
+          </template>
+        </ListRow>
+      </ListFrame>
+      <span :id="casingOffId" hidden>{{ MATCH_CASING_OFF }}</span>
 
       <p text="xs muted-fg" pl-1>
         "Match casing" matches any casing and capitalises the replacement when the match was capitalised, so one rule
@@ -116,12 +142,6 @@ function remove(index: number) {
         across markup; the replacement takes the formatting of wherever the match started. "Disabled" keeps a rule
         without applying it.
       </p>
-
-      <div>
-        <Button variant="outline" text="sm" @click="add">
-          <Icon i-mdi-plus mr-1 label="Add" /> Add replacement
-        </Button>
-      </div>
     </div>
   </OptionRowCollapsable>
 </template>

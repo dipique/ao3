@@ -63,6 +63,7 @@ export const OPTION_DEFAULTS: Options = {
   searchCrossovers: { enabled: false, crossovers: 'exclude' },
   completionToolbar: false,
   trackedLists: { enabled: true, target: 40, reviewedThrough: 0, lists: [] },
+  savedLists: { lists: {} },
 
   styleWidthEnabled: true,
   styleWidth: 40,

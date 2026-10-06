@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { ensureBuilt, findChrome, installMock, serveDist, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome, serveDist, sleep } from './helpers.mjs'
+import { openOptions } from './optionsPage.mjs'
 import {
   ARCHIVE,
   clickBoxButton,
@@ -184,11 +185,8 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
 
   test('the options row links to the list’s own page', async () => {
     const [list] = await lists()
-    const options = await browser.newPage()
-    await options.evaluateOnNewDocument(installMock, { 'option.trackedLists': await storedOption(tab) })
-    await options.goto(`${server.url}/options_ui/options_ui.html`, { waitUntil: 'networkidle2' })
-    await sleep(1500)
-    link = await options.evaluate(id => document.querySelector(`a[href$="#ao3e-list=${id}"]`)?.href ?? null, list.id)
+    const options = await openOptions(browser, server, { seed: { 'option.trackedLists': await storedOption(tab) }, hash: '#instant-search-views-tracked-lists' })
+    link = await (await options.control(await options.listRow('tracked-lists', list.id), 'link')).evaluate(a => a.href)
     await options.close()
     assert.equal(link, `${TAG_URL}#ao3e-list=${list.id}`)
   })

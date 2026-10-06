@@ -81,13 +81,13 @@ const showErrors = ref(false)
       {{ line }}
     </p>
 
-    <p v-if="status.error" text="sm" :style="{ color: '#dc2626' }">
-      {{ status.error }}
-    </p>
+    <Callout v-if="status.error" severity="destructive">
+      <p>{{ status.error }}</p>
+    </Callout>
 
-    <p v-for="warning in status.warnings" :key="warning" text="sm" :style="{ color: '#d97706' }">
-      {{ warning }}
-    </p>
+    <Callout v-for="warning in status.warnings" :key="warning" severity="warning">
+      <p>{{ warning }}</p>
+    </Callout>
 
     <div v-if="job.errorCount" flex="~ col gap-1">
       <Button variant="link" self-start p-0 @click.prevent="showErrors = !showErrors">

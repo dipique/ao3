@@ -1,0 +1,26 @@
+{
+  "/autocomplete/tag?term=potter": [
+    { "id": "Pottercest (Harry Potter)", "name": "Pottercest (Harry Potter)" },
+    { "id": "Henry Potter | James Potter's Grandfather", "name": "Henry Potter | James Potter's Grandfather" },
+    { "id": "Harry Potter & Lily Evans Potter's Father", "name": "Harry Potter & Lily Evans Potter's Father" },
+    { "id": "Quote: Scared Potter? (Harry Potter)", "name": "Quote: Scared Potter? (Harry Potter)" }
+  ],
+  "/autocomplete/fandom?term=potter": [
+    { "id": "Harry Potter - J. K. Rowling", "name": "Harry Potter - J. K. Rowling" },
+    { "id": "Harry Potter and the Cursed Child - Thorne & Rowling", "name": "Harry Potter and the Cursed Child - Thorne & Rowling" },
+    { "id": "Harry Potter: Hogwarts Mystery (Video Game)", "name": "Harry Potter: Hogwarts Mystery (Video Game)" }
+  ],
+  "/autocomplete/character?term=potter": [
+    { "id": "Henry Potter | James Potter's Grandfather", "name": "Henry Potter | James Potter's Grandfather" },
+    { "id": "Finch the Inventor on Potterwatch (Harry Potter)", "name": "Finch the Inventor on Potterwatch (Harry Potter)" },
+    { "id": "Harry Potter", "name": "Harry Potter" }
+  ],
+  "/autocomplete/relationship?term=potter": [
+    { "id": "Harry Potter & Lily Evans Potter's Father", "name": "Harry Potter & Lily Evans Potter's Father" },
+    { "id": "Harry Potter/Harry Potter's Firebolt", "name": "Harry Potter/Harry Potter's Firebolt" }
+  ],
+  "/autocomplete/freeform?term=a%20bit%20of%20romance": [
+    { "id": "Song: Just a Little Bit of Your Heart (Ariana Grande)", "name": "Song: Just a Little Bit of Your Heart (Ariana Grande)" },
+    { "id": "Aziraphale is \"just enough of a bastard to be worth knowing\" (Good Omens)", "name": "Aziraphale is \"just enough of a bastard to be worth knowing\" (Good Omens)" }
+  ]
+}

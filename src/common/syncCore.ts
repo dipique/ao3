@@ -72,6 +72,14 @@ export interface SyncDeps {
     /** Snapshot `snapshot`, or the current options when it's absent. */
     create: (kind: BackupKind, snapshot?: Partial<Options>) => Promise<void>
   }
+  /**
+   * Bring this browser's own options into line before a pull is weighed against
+   * them and applied: the saved-list planner, which moves an entry that isn't
+   * tracked out of `trackedLists` and into a record that never syncs. A pull
+   * replaces `trackedLists` whole, so one that arrived before the migration had
+   * moved them would take those lists, titles and all, with it.
+   */
+  prePull?: () => Promise<void>
   /** The sync version this build speaks. Defaults to {@link SYNC_SCHEMA_VERSION}. */
   version?: number
   now?: () => number
@@ -403,6 +411,7 @@ export function createSyncEngine(deps: SyncDeps) {
     }
     pullRetries = 0
 
+    await deps.prePull?.()
     // Back up the pre-pull state, then apply only the keys that actually change.
     await backups.maybeDaily()
     const current = await deps.readOptions()

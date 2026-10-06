@@ -79,11 +79,10 @@ function replacementKeys(options: Options): Set<string> {
 }
 
 /**
- * A tracked list is its id. Its title, its tracking date, whether it is paused
- * and even its query are edits to it: refining a list replaces its query and
- * view filter and keeps its id, so a pull that refined every list has lost
- * none of them. An entry with no usable id (storage nothing has repaired) falls
- * back to its query.
+ * A tracked list is its id. Its title, its tracking date and even its query are
+ * edits to it: refining a list replaces its query and view filter and keeps its
+ * id, so a pull that refined every list has lost none of them. An entry with no
+ * usable id (storage nothing has repaired) falls back to its query.
  */
 function trackedListKeys(options: Options): Set<string> {
   return new Set((options.trackedLists?.lists ?? []).map(entry =>
@@ -109,14 +108,14 @@ function lostMarks(current: Options, incoming: Options): string[] {
 }
 
 /**
- * The loss in words, for the options page and the page notice: "348 of your
- * 348 rules and 267 of your 282 marked works". Collections the update leaves
- * alone aren't mentioned.
+ * The loss as a list, one part for each collection the update would take from:
+ * "348 of your 348 rules", "the marks “Favorite”, “Ongoing”". Collections the
+ * update leaves alone aren't mentioned.
  *
  * A held pause is stored, so a loss written by an older build can be missing a
  * collection this one weighs; a missing one is simply not mentioned.
  */
-export function describePullLoss(loss: PullLoss): string {
+export function pullLossParts(loss: PullLoss): string[] {
   const parts: string[] = []
   const count = (collection: CollectionLoss | undefined, noun: string) => {
     if (collection && collection.removed > 0)
@@ -125,9 +124,18 @@ export function describePullLoss(loss: PullLoss): string {
   count(loss.rules, 'rules')
   count(loss.markedWorks, 'marked works')
   count(loss.textReplacements, 'text replacements')
-  count(loss.trackedLists, 'tracked lists')
+  // What leaves is the tracking, which is all that syncs. The list itself is
+  // this browser's saved list, and stays one when this browser holds a copy of
+  // it, or made or changed it here.
+  count(loss.trackedLists, 'tracked lists (they stay saved on this browser if you keep a copy)')
   if (loss.marks.length)
     parts.push(`${loss.marks.length === 1 ? 'the mark' : 'the marks'} ${loss.marks.map(label => `“${label}”`).join(', ')}`)
+  return parts
+}
+
+/** The loss as one phrase: "348 of your 348 rules and 267 of your 282 marked works". */
+export function describePullLoss(loss: PullLoss): string {
+  const parts = pullLossParts(loss)
   if (parts.length <= 1)
     return parts[0] ?? 'nothing'
   return `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`

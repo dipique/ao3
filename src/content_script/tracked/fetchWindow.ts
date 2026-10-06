@@ -77,9 +77,10 @@ const SERIES_BLURB_SELECTOR = 'ul.series.work.index.group > li.blurb'
 /** What {@link fetchWindow} is asked for. */
 export interface FetchWindowOptions {
   /**
-   * The lists to read — the reader's **tracked** ones. Paused entries are the
-   * caller's to leave out, exactly as they are for `reviewStart`, so that what
-   * this reads and what the window's start was worked out from can't disagree.
+   * The lists to read — the reader's **tracked** ones. An entry that isn't
+   * tracked is the caller's to leave out, exactly as it is for `reviewStart`, so
+   * that what this reads and what the window's start was worked out from can't
+   * disagree.
    */
   lists: readonly TrackedList[]
   /** The window's first day (`reviewStart`). */
