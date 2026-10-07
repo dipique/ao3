@@ -121,20 +121,25 @@ function scrollToAnchor(el: HTMLElement): void {
  * Show the category `hash` lands on, and jump to what it names. A hash that
  * names nothing, the empty one included, lands on the first category, so going
  * Back to the address the page opened with shows what the page opened on.
+ * Settles once the jump has scrolled.
  */
-function followHash(hash: string): void {
+async function followHash(hash: string): Promise<void> {
   const first = useNav().categories.value[0]?.id ?? ''
   useCurrentCategory().show(landingCategory(hash, anchorCategory, first))
   if (hash)
-    void jumpToHash(hash)
+    await jumpToHash(hash)
 }
 
 /**
  * Follow the address bar: the hash the page was opened with, and every one it is
  * given afterwards (the rail sets them, and so can the reader, or Back).
+ *
+ * Once the page has opened on what its address names, the body carries
+ * `data-landed`: until then the page may still scroll under whatever is
+ * pointing at it, which is what anything driving the page waits out.
  */
 export function useHashNav(ready: Ref<boolean>): void {
-  useEventListener(window, 'hashchange', () => followHash(location.hash))
+  useEventListener(window, 'hashchange', () => void followHash(location.hash))
 
   watch(ready, async (isReady) => {
     if (!isReady)
@@ -142,6 +147,7 @@ export function useHashNav(ready: Ref<boolean>): void {
     // The categories only render once the options have loaded, and they are what
     // register the categories and anchors this reads.
     await nextTick()
-    followHash(location.hash)
+    await followHash(location.hash)
+    document.body.dataset.landed = ''
   }, { immediate: true })
 }

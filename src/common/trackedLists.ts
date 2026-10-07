@@ -604,10 +604,13 @@ function listingOwner(path: string, criteria: readonly [string, string][]): List
 
 /**
  * The key a stored entry is matched by — to the page the reader is on (is it
- * already tracked?) and to a stored list (which entry is it?). Derived from the
- * entry's URL, the kind included, so an entry can't be matched under a kind its
- * URL doesn't have — plus its view filter, when it has one ({@link filteredKey}):
- * an exact match is the same query *and* the same view filter.
+ * already tracked?) and to another entry (would the two be twins?). Derived
+ * from the entry's URL, the kind included, so an entry can't be matched under a
+ * kind its URL doesn't have — plus its view filter, when it has one
+ * ({@link filteredKey}): an exact match is the same query *and* the same view
+ * filter. A stored list is joined to its list by address instead, which leaves
+ * the view filter out (`addressOf`, in `savedLists.ts`), since the copy of a
+ * page is the copy of every list filtering it.
  *
  * Null for an entry whose URL isn't trackable (a foreign host, say). Callers
  * comparing keys must treat a null as matching nothing — two broken entries

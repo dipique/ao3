@@ -3,7 +3,10 @@ import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 
 // Named rather than left to the auto-import: these are read from the template,
 // and auto-imports only reach `<script setup>`.
-import { canTrack, formatBytes, isReviewWindow, listName, NO_DESCRIPTOR_NOTE, REVIEW_WINDOW_NOTE, trackedEntryFor } from '../../composables/useSiteExport.ts'
+import { canTrack, formatBytes, isReviewWindow, listName, NO_DESCRIPTOR_NOTE, REVIEW_WINDOW_NOTE, savedListFor } from '../../composables/useSiteExport.ts'
+import { isRunning, offReason, removeOff } from '../../model/jobView.ts'
+import { sentence, withReason } from '../../model/phrases.ts'
+import { OFFLINE_OFF } from '../../model/savedListRows.ts'
 
 /**
  * One stored works list, as a row in Advanced → Site export.
@@ -11,7 +14,8 @@ import { canTrack, formatBytes, isReviewWindow, listName, NO_DESCRIPTOR_NOTE, RE
  * The buttons are state-dependent rather than always-available, because the job
  * runner is a singleton: while any list is being fetched, every other row's
  * actions are off — two runs would only double the request rate AO3 is asked to
- * carry.
+ * carry. Every control that is off says why, in its tooltip and its
+ * description.
  *
  * They are also **deliberately terse**. A list's name is the only thing here the
  * reader can't reconstruct, and every pixel the buttons take is a pixel it
@@ -22,8 +26,7 @@ import { canTrack, formatBytes, isReviewWindow, listName, NO_DESCRIPTOR_NOTE, RE
 const props = defineProps<{ row: SiteExportListRow }>()
 
 const {
-  status,
-  resumable,
+  view,
   refreshList,
   cacheWorks,
   refreshAndCache,
@@ -37,16 +40,17 @@ const {
 } = useSiteExport()
 
 /**
- * What to call this list. A tracked list's alias is the reader's own name for it
- * — the one the review's "List source" filter uses — so once there is one, it is
- * the name here too rather than a second name for the same thing.
+ * What to call this list. A saved list's title is the reader's own name for it
+ * — the one the review's "List source" filter uses while it is tracked — so
+ * once there is one, it is the name here too rather than a second name for the
+ * same thing.
  */
 const name = computed(() => listName(props.row))
 
-/** The tracked entry this list is, when it is one. */
-const tracked = computed(() => trackedEntryFor(props.row))
+/** Whether this stored list is a tracked list's. */
+const tracked = computed(() => !!savedListFor(props.row)?.entry)
 
-/** Offered only on a list that isn't already an entry — one entry per list. */
+/** Offered only on a list that isn't tracked already — one entry per list. */
 const trackable = computed(() => canTrack(props.row) && !tracked.value)
 
 /** The tracked review's own window, which is not read from a listing. */
@@ -62,13 +66,26 @@ const review = computed(() => isReviewWindow(props.row))
  */
 const refreshable = computed(() => !review.value)
 
-/** The job belongs to this list. Another list's job only greys this row out. */
-const mine = computed(() => status.value.job?.cacheKey === props.row.key)
-const running = computed(() => status.value.running && mine.value)
-/** Something else is running, so nothing here may start. */
-const busy = computed(() => status.value.running && !mine.value)
+/** The job belongs to this list. Another list's job only turns this row's actions off. */
+const mine = computed(() => view.value.key === props.row.key)
+const running = computed(() => mine.value && isRunning(view.value))
 /** A job of ours that stopped with work left — offer to carry on, not to restart. */
-const paused = computed(() => mine.value && resumable.value)
+const paused = computed(() => mine.value && view.value.state === 'stopped')
+
+/**
+ * Why refreshing, caching and downloading are off: a list saved before the
+ * extension could fetch it again, or the one job, running on another list.
+ */
+const offline = computed(() => (props.row.descriptor ? offReason(view.value, props.row.key) : OFFLINE_OFF.undescribed))
+/** Another list's job, said under the row as well as on the buttons it turns off. */
+const busyNote = computed(() => (props.row.descriptor && !running.value ? offline.value : null))
+const offlineId = useId()
+
+/** Why the trash is off: this list's own job is reading it. */
+const removeReason = computed(() => removeOff(view.value, props.row.key))
+const removeId = useId()
+
+const refreshLabel = computed(() => `Refresh the list of works in ${name.value}`)
 
 const cacheLabel = computed(() => (props.row.cached ? 'Update the cached works' : 'Cache this list\'s works'))
 
@@ -128,10 +145,10 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
       </Button>
 
       <template v-else-if="paused">
-        <Button :class="OFF" :disabled="busy" @click.prevent="resume()">
+        <Button @click.prevent="resume()">
           Continue
         </Button>
-        <Button variant="ghost" :class="OFF" :disabled="busy" @click.prevent="discard()">
+        <Button variant="ghost" @click.prevent="discard()">
           Discard
         </Button>
       </template>
@@ -158,8 +175,9 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
             <Button
               variant="outline"
               :class="JOINED"
-              :title="`Refresh the list of works in ${name}`"
-              :disabled="!row.descriptor || busy"
+              :title="withReason(refreshLabel, offline)"
+              :aria-describedby="offline ? offlineId : undefined"
+              :disabled="!!offline"
               @click.prevent="refreshList(row)"
             >
               List
@@ -168,8 +186,9 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
           <Button
             variant="outline"
             :class="refreshable ? JOINED : (hasMenu ? `${TIGHT} !rounded-r-none` : TIGHT)"
-            :title="cacheLabel"
-            :disabled="!row.descriptor || busy"
+            :title="withReason(cacheLabel, offline)"
+            :aria-describedby="offline ? offlineId : undefined"
+            :disabled="!!offline"
             @click.prevent="cacheWorks(row)"
           >
             Works
@@ -180,7 +199,9 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
                 variant="outline"
                 :class="JOINED_END"
                 size="icon"
-                :disabled="!row.descriptor || busy"
+                :title="withReason('More refresh options', offline)"
+                :aria-describedby="offline ? offlineId : undefined"
+                :disabled="!!offline"
               >
                 <Icon i-mdi-chevron-down label="More refresh options" />
               </Button>
@@ -219,8 +240,9 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
         <div flex="~ row items-center">
           <Button
             :class="row.cached ? `${TIGHT} !rounded-r-none` : TIGHT"
-            :title="downloadLabel"
-            :disabled="!row.descriptor || busy"
+            :title="withReason(downloadLabel, offline)"
+            :aria-describedby="offline ? offlineId : undefined"
+            :disabled="!!offline"
             @click.prevent="downloadSite(row)"
           >
             Download
@@ -230,7 +252,9 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
               <Button
                 :class="`${OFF} !rounded-l-none`"
                 size="icon"
-                :disabled="!row.descriptor || busy"
+                :title="withReason('More download options', offline)"
+                :aria-describedby="offline ? offlineId : undefined"
+                :disabled="!!offline"
               >
                 <Icon i-mdi-chevron-down label="More download options" />
               </Button>
@@ -275,7 +299,9 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
         variant="outline"
         :class="OFF"
         size="icon"
-        :disabled="running"
+        :title="removeReason ? withReason(`Remove ${name}`, removeReason) : undefined"
+        :aria-describedby="removeReason ? removeId : undefined"
+        :disabled="!!removeReason"
         @click.prevent="confirmingDelete = true"
       >
         <Icon i-mdi-trash-can-outline :label="`Remove ${name}`" />
@@ -286,6 +312,13 @@ const JOINED_END = `${OFF} !rounded-l-none -ml-px`
       <p v-if="!row.descriptor" text="sm muted-fg" pt-1>
         {{ NO_DESCRIPTOR_NOTE }}
       </p>
+      <!-- Said where the reader is looking, beside the buttons it turns off. -->
+      <p v-if="busyNote" flex="~ row items-start gap-1.5" pt-1 text="sm muted-fg">
+        <SeverityGlyph severity="neutral" glyph="i-tabler-circle" mt-0.5 shrink-0 />
+        <span :id="offlineId">{{ sentence(busyNote) }}.</span>
+      </p>
+      <span v-else-if="offline" :id="offlineId" hidden>{{ sentence(offline) }}.</span>
+      <span v-if="removeReason" :id="removeId" hidden>{{ sentence(removeReason) }}.</span>
       <!-- Said where the refresh buttons would have been, since it is about them. -->
       <p v-if="review" text="sm muted-fg" pt-1>
         {{ REVIEW_WINDOW_NOTE }}

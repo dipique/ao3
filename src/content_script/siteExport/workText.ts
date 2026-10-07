@@ -284,6 +284,50 @@ export function summarizeWorkText(index: WorkTextIndex): WorkTextUsage {
   return usage
 }
 
+/**
+ * How much of one list is cached, as buckets each of its works is in exactly
+ * one of, so `cached + failed + unfetched === total`.
+ */
+export interface CachingBuckets {
+  /** The list's works, each counted once. */
+  total: number
+  /** Works whose text is here, whatever their last attempt did. */
+  cached: number
+  /** Works with no text here, whose last attempt failed. */
+  failed: number
+  /** Works never fetched, or whose entry went with a purge: new to the cache. */
+  unfetched: number
+  /** Bytes of the cached works' text. */
+  bytes: number
+  /**
+   * Cached works whose last refetch failed. Counted among `cached` as well,
+   * since the text they hold is the copy from before, and is stale.
+   */
+  staleFailures: number
+}
+
+/** Sort one list's works into {@link CachingBuckets}, from the cache's index alone. */
+export function cachingBuckets(workIds: readonly string[], index: WorkTextIndex): CachingBuckets {
+  const buckets: CachingBuckets = { total: 0, cached: 0, failed: 0, unfetched: 0, bytes: 0, staleFailures: 0 }
+  for (const workId of new Set(workIds)) {
+    buckets.total++
+    const meta = Object.hasOwn(index, workId) ? index[workId] : undefined
+    if (meta && meta.size > 0) {
+      buckets.cached++
+      buckets.bytes += meta.size
+      if (meta.failure)
+        buckets.staleFailures++
+    }
+    else if (meta?.failure) {
+      buckets.failed++
+    }
+    else {
+      buckets.unfetched++
+    }
+  }
+  return buckets
+}
+
 /** What discarding orphans would take: which works, and what they come to. */
 export interface OrphanPlan {
   /** Index entries no stored list accounts for. Includes ones holding no text. */

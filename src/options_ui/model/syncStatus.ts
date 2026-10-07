@@ -5,6 +5,7 @@ import type { Severity } from './severity.ts'
 import { pullLossParts } from '../../common/syncGuard.ts'
 import { HELD_BACKUP_NOTE, staleBackgroundMessage, versionPauseReason } from '../../common/syncMessages.ts'
 import { formatMoment } from './moments.ts'
+import { sentence } from './phrases.ts'
 import { SEVERITIES } from './severity.ts'
 
 /**
@@ -213,8 +214,4 @@ function usageView(usage: SyncUsage): SyncUsageView {
 
 function kb(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`
-}
-
-function sentence(clause: string): string {
-  return clause.charAt(0).toUpperCase() + clause.slice(1)
 }

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
+import { SEARCH_PROMPT_TIMEOUT } from '../../src/common/constants.ts'
 import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
 
 const chromePath = findChrome()
@@ -79,8 +80,8 @@ describe('the pending-search prompt', { skip }, () => {
     await browser?.close()
   })
 
-  /** The prompt's message and button, or null when it isn't up. */
-  const prompt = () => page.evaluate(() => {
+  /** In the page: the prompt's message and button, or null when it isn't up. */
+  const findPrompt = () => {
     for (const el of document.body.children) {
       const toast = [...el.shadowRoot?.querySelectorAll('.toast') ?? []]
         .find(t => t.querySelector('.action')?.textContent.startsWith('Update results'))
@@ -88,7 +89,8 @@ describe('the pending-search prompt', { skip }, () => {
         return { message: toast.querySelector('.message').textContent, action: toast.querySelector('.action').textContent }
     }
     return null
-  })
+  }
+  const prompt = () => page.evaluate(findPrompt)
 
   const submits = () => page.evaluate(() => window.__submits)
 
@@ -128,8 +130,8 @@ describe('the pending-search prompt', { skip }, () => {
     await page.evaluate(() => browser.storage.local.set({
       'option.searchLanguage': { enabled: true, language: { value: 'en', label: 'English' } },
     }))
-    await sleep(1500)
-    assert.equal((await prompt())?.message, 'Language filter set to English.')
+    // Checked the moment it arrives: it fades on its own soon after.
+    await page.waitForFunction(`(${findPrompt})()?.message === 'Language filter set to English.'`, { timeout: 5000 })
   })
 
   test('Ctrl+Enter on a link outside the filter is left to the link', async () => {
@@ -166,6 +168,9 @@ describe('the pending-search prompt', { skip }, () => {
     assert.equal(await prompt(), null)
   })
 
+  /** Long enough that the prompt would have faded, were it going to. */
+  const outlastPrompt = () => sleep(SEARCH_PROMPT_TIMEOUT * 1.2)
+
   const toggleToolbar = async () => {
     await page.click('.AO3E--filter-toolbar--fab')
     await sleep(100)
@@ -174,21 +179,21 @@ describe('the pending-search prompt', { skip }, () => {
   test('fades by itself after a few seconds', async () => {
     await pick('Exclude')
     assert.ok(await prompt())
-    await sleep(3500)
+    await outlastPrompt()
     assert.equal(await prompt(), null)
   })
 
   test('opening the toolbar brings it back, and it stays while the toolbar is open', async () => {
     await toggleToolbar()
     assert.equal((await prompt())?.message, 'Your search filters have changed.')
-    await sleep(3500)
+    await outlastPrompt()
     assert.ok(await prompt(), 'still up with the toolbar open')
   })
 
   test('closing the toolbar lets it fade again', async () => {
     await toggleToolbar()
     assert.ok(await prompt(), 'not taken down at once, so a click on it still lands')
-    await sleep(3500)
+    await outlastPrompt()
     assert.equal(await prompt(), null)
   })
 

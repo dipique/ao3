@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { addressOf, aliasOf, planRemoveList, planRetitle, planSaveBack, planSavedLists, planStopTracking, planTrack, planTrackCopy, planTrackSearch, savedListAt, savedListsOf, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
-import { normalizeTrackedUrl, trackedKey } from '../../src/common/trackedLists.ts'
+import { addressOf, aliasOf, copyOwner, createSavedListsReconciler, joinSavedLists, planEntryEdit, planRemoveList, planRetitle, planSaveBack, planSavedLists, planStopTracking, planTrack, planTrackCopy, planTrackSearch, savedListAt, savedListsOf, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
+import { normalizeTrackedUrl, planUndo, planUpdate, trackedKey } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
 const DAY = 20_000
@@ -115,11 +115,20 @@ describe('planSavedLists, migrating a legacy state', () => {
     assert.equal(addressOf(state.saved.lists.p3.url), null)
   })
 
-  test('a paused entry with no title makes an untitled record', () => {
+  test('a paused entry with no title gets its search\'s default title', () => {
     const paused = entry('p4', TEA, { alias: '', tracked: false })
     const { state } = settle(stateOf([paused]))
     assert.deepEqual(state.tracked.lists, [])
-    assert.equal(state.saved.lists.p4.title, '')
+    assert.equal(state.saved.lists.p4.title, 'Search: tea')
+  })
+
+  test('a tracked entry with no title takes its default, and so does its record: the title syncs', () => {
+    const blank = entry('t4', TAG, { alias: '', type: 'freeform', entity: 'marriage problems' })
+    const missing = entry('t5', SERIES, { alias: undefined })
+    const { state, changed } = settle(stateOf([blank, missing]))
+    assert.deepEqual(changed, { tracked: true, saved: true })
+    assert.deepEqual(state.tracked.lists, [{ ...blank, alias: 'Tag: marriage problems' }, { ...missing, alias: 'Series: 123' }])
+    assert.deepEqual(state.saved.lists, { t4: recordOf(state.tracked.lists[0]), t5: recordOf(state.tracked.lists[1]) })
   })
 
   test('tracked entries stay, each with a record of the same id and title, a filtered one included', () => {
@@ -149,7 +158,7 @@ describe('planSavedLists, migrating a legacy state', () => {
     assert.deepEqual(state.saved.lists, { a: recordOf(a), b: recordOf(b) })
   })
 
-  test('a stored list with no entry gets a new, untitled record, described from its descriptor', () => {
+  test('a stored list with no entry gets a new record under its search\'s default title, described from its descriptor', () => {
     const tracked = entry('t1', TEA)
     const stored = [
       copy('text-search', 'work_search[query]=coffee+shop', { listUrl: `${AO3}${COFFEE}&page=1`, label: 'Search: coffee shop' }),
@@ -161,14 +170,23 @@ describe('planSavedLists, migrating a legacy state', () => {
     const made = records(state).filter(record => record.id !== 't1')
     const byKind = Object.fromEntries(made.map(({ id, ...record }) => [record.kind, record]))
     assert.deepEqual(byKind, {
-      'text-search': { kind: 'text-search', url: COFFEE, title: '', type: 'search', entity: 'coffee shop' },
-      'tag-works': { kind: 'tag-works', url: TAG, title: '', type: 'tag', entity: 'marriage problems' },
-      'series-works': { kind: 'series-works', url: SERIES, title: '', type: 'series', entity: 'The Long Way Round' },
+      'text-search': { kind: 'text-search', url: COFFEE, title: 'Search: coffee shop', type: 'search', entity: 'coffee shop' },
+      'tag-works': { kind: 'tag-works', url: TAG, title: 'Tag: marriage problems', type: 'tag', entity: 'marriage problems' },
+      'series-works': { kind: 'series-works', url: SERIES, title: 'Series: The Long Way Round', type: 'series', entity: 'The Long Way Round' },
     })
     const ids = records(state).map(record => record.id)
     assert.equal(new Set(ids).size, 4, 'every id is new, and none is an entry\'s')
     for (const record of made)
       assert.equal(state.saved.lists[record.id], record, 'filed under its own id')
+  })
+
+  test('two searches with one default title both take it: none is numbered or renamed', () => {
+    const stored = [
+      copy('text-search', 'tea', { listUrl: `${AO3}${TEA}` }),
+      copy('text-search', 'tea-complete', { listUrl: `${AO3}${TEA}&work_search[complete]=T` }),
+    ]
+    const { state } = settle(stateOf([]), stored)
+    assert.deepEqual(records(state).map(record => record.title), ['Search: tea', 'Search: tea'])
   })
 
   test('two stored lists at one address are one record, made from the newer', () => {
@@ -274,6 +292,22 @@ describe('planSavedLists, reconciling', () => {
     assert.deepEqual(state.saved.lists, { p: recordOf(paused) })
   })
 
+  test('a record with no title takes its default; one whose address gives none keeps none', () => {
+    const blank = { id: 'b', kind: 'text-search', url: TEA, title: '', type: 'search', entity: 'tea' }
+    const lone = recordOf(entry('lone', BROKEN, { kind: 'tag-works', alias: '' }))
+    const { state, changed } = settle(current([], [blank, lone]))
+    assert.deepEqual(changed, { tracked: false, saved: true })
+    assert.deepEqual(state.saved.lists, { b: { ...blank, title: 'Search: tea' }, lone })
+  })
+
+  test('an untitled entry from another browser takes its default here too, and it syncs back', () => {
+    const arrived = entry('new', TEA, { alias: '  ' })
+    const { state, changed } = settle(current([arrived], []))
+    assert.deepEqual(changed, { tracked: true, saved: true })
+    assert.deepEqual(state.tracked.lists, [{ ...arrived, alias: 'Search: tea' }])
+    assert.deepEqual(state.saved.lists, { new: recordOf(state.tracked.lists[0], { mirror: true }) })
+  })
+
   test('nothing else is deleted', () => {
     const lone = recordOf(entry('lone', BROKEN, { kind: 'tag-works', alias: '' }))
     const before = current([], [lone])
@@ -305,9 +339,15 @@ describe('planRetitle', () => {
     assert.equal(plan.takenBy.id, 't')
   })
 
-  test('untitled is never taken', () => {
-    const blank = recordOf(entry('b', TAG, { alias: '' }))
-    assert.equal(planRetitle(current([], [saved, blank]), 's', '  ').state.saved.lists.s.title, '')
+  test('a blank title is the list\'s default, refused like any other when another list has it', () => {
+    assert.equal(planRetitle(current([], [saved]), 's', '  ').state.saved.lists.s.title, 'Search: tea')
+    const other = recordOf(entry('o', `${TEA}&work_search[complete]=T`, { alias: 'Search: tea' }))
+    assert.equal(planRetitle(current([], [saved, other]), 's', '').takenBy.id, 'o')
+  })
+
+  test('a list whose address gives no default title may be left without one', () => {
+    const lone = recordOf(entry('lone', BROKEN, { kind: 'tag-works', alias: 'Elsewhere' }))
+    assert.equal(planRetitle(current([], [lone]), 'lone', ' ').state.saved.lists.lone.title, '')
   })
 
   test('never adds or removes an entry', () => {
@@ -362,6 +402,13 @@ describe('planTrack', () => {
     assert.equal(plan.state.saved, before.saved)
   })
 
+  test('a list with no title yet is tracked under its default, and its record takes it', () => {
+    const blank = { id: 'b', kind: 'tag-works', url: TAG, title: '', type: 'freeform', entity: 'marriage problems' }
+    const plan = planTrack(current([], [blank]), 'b', TODAY)
+    assert.equal(plan.state.tracked.lists[0].alias, 'Tag: marriage problems')
+    assert.equal(plan.state.saved.lists.b.title, 'Tag: marriage problems')
+  })
+
   test('refuses when another tracked list is the same search, and says which', () => {
     const twin = entry('twin', HP, { filter: NO_DRACO })
     const plan = planTrack(current([twin], [saved, recordOf(twin)]), 's', TODAY)
@@ -406,6 +453,103 @@ describe('planStopTracking', () => {
   })
 })
 
+describe('planEntryEdit', () => {
+  const adopted = entry('a', HP, { alias: 'HP, no Draco', type: 'fandom', entity: 'Harry Potter - J. K. Rowling', filter: NO_DRACO, since: DAY - 5 })
+  const other = entry('o', TEA, { alias: 'Tea' })
+  /** `adopted` updated here to search the complete works instead, as the toolbar's update does. */
+  const updated = planUpdate([adopted, other], 'a', { url: HP_COMPLETE }).after
+
+  test('the entry takes the edit, and its record follows it as this browser\'s own', () => {
+    const before = current([adopted, other], [recordOf(adopted, { mirror: true }), recordOf(other, { mirror: true })])
+    const state = planEntryEdit(before, updated)
+    assert.deepEqual(state.tracked, { ...before.tracked, lists: [updated, other] })
+    assert.deepEqual(state.saved.lists, { a: recordOf(updated), o: recordOf(other, { mirror: true }) })
+    assert.equal(settle(state).changed.saved, false, 'the planner finds the two in step')
+  })
+
+  test('so a list adopted from another browser and changed here stays saved when its tracking stops there', () => {
+    const edited = planEntryEdit(current([adopted, other], [recordOf(adopted, { mirror: true }), recordOf(other, { mirror: true })]), updated)
+    const { state } = settle({ ...edited, tracked: { ...edited.tracked, lists: [other] } })
+    assert.deepEqual(state.saved.lists.a, recordOf(updated))
+  })
+
+  test('an entry with no record yet gets one', () => {
+    assert.deepEqual(planEntryEdit(current([adopted], []), updated).saved.lists, { a: recordOf(updated) })
+  })
+
+  test('taking an update back is an edit like any other', () => {
+    const after = planEntryEdit(current([adopted, other], [recordOf(adopted, { mirror: true })]), updated)
+    const undo = planUndo(after.tracked.lists, adopted, updated)
+    const state = planEntryEdit(after, adopted)
+    assert.deepEqual(state.tracked.lists, undo.lists)
+    assert.deepEqual(state.saved.lists.a, recordOf(adopted))
+  })
+
+  test('a list with no entry is left as it is', () => {
+    const before = current([other], [recordOf(adopted)])
+    assert.equal(planEntryEdit(before, updated), before)
+  })
+})
+
+describe('createSavedListsReconciler', () => {
+  /** Storage as the reconciler sees it, logging each read and write. */
+  function storage({ tracked, saved, searchLists = {} }, { failWrites = 0 } = {}) {
+    const log = []
+    let held = { trackedLists: tracked, savedLists: saved, searchLists }
+    return {
+      log,
+      get held() { return held },
+      async read() {
+        log.push('read')
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return structuredClone(held)
+      },
+      async write(update) {
+        await new Promise(resolve => setTimeout(resolve, 5))
+        if (failWrites-- > 0)
+          throw new Error('quota')
+        log.push(`write ${Object.keys(update).sort().join(' ')}`)
+        held = { ...held, ...structuredClone(update) }
+      },
+    }
+  }
+
+  const legacy = () => stateOf([entry('t', TEA), entry('p', COFFEE, { alias: 'Coffee', tracked: false })])
+
+  test('migrates a legacy state in one write of both halves, and a run after it writes nothing', async () => {
+    const store = storage(legacy())
+    const reconcile = createSavedListsReconciler(store)
+    await reconcile()
+    assert.deepEqual(store.log, ['read', 'write savedLists trackedLists'])
+    assert.deepEqual(store.held.trackedLists.lists.map(one => one.id), ['t'])
+    assert.deepEqual(store.held.savedLists, { v: 1, lists: { t: recordOf(entry('t', TEA)), p: recordOf(entry('p', COFFEE, { alias: 'Coffee' })) } })
+    await reconcile()
+    assert.deepEqual(store.log, ['read', 'write savedLists trackedLists', 'read'])
+  })
+
+  test('one run at a time: a run asked for during another reads what that one wrote', async () => {
+    const store = storage(legacy())
+    const reconcile = createSavedListsReconciler(store)
+    await Promise.all([reconcile(), reconcile()])
+    assert.deepEqual(store.log, ['read', 'write savedLists trackedLists', 'read'])
+  })
+
+  test('a run that fails is reported, and the next runs all the same', async () => {
+    const store = storage(legacy(), { failWrites: 1 })
+    const reconcile = createSavedListsReconciler(store)
+    const [first, second] = await Promise.allSettled([reconcile(), reconcile()])
+    assert.equal(first.status, 'rejected')
+    assert.equal(second.status, 'fulfilled')
+    assert.deepEqual(store.log, ['read', 'read', 'write savedLists trackedLists'])
+  })
+
+  test('the stored lists are read as storage holds them', async () => {
+    const store = storage({ ...current([], []), searchLists: { 'text-search:tea': { v: 3, scrapedAt: 1, ids: '', descriptor: { sourceId: 'text-search', label: 'Search: tea', listUrl: `${AO3}${TEA}` } } } })
+    await createSavedListsReconciler(store)()
+    assert.deepEqual(Object.values(store.held.savedLists.lists).map(({ id, ...rest }) => rest), [{ kind: 'text-search', url: TEA, title: 'Search: tea', type: 'search', entity: 'tea' }])
+  })
+})
+
 describe('planRemoveList', () => {
   const tracked = entry('t', COFFEE, { alias: 'Coffee' })
   const older = copy('text-search', 'by-date', { listUrl: `${AO3}${COFFEE}`, scrapedAt: 1_000 })
@@ -445,7 +589,7 @@ describe('planSaveBack', () => {
   const coffee = recordOf(entry('c', COFFEE, { alias: 'Coffee', type: 'search', entity: 'coffee shop' }))
   const oldCopy = copy('text-search', 'coffee', { listUrl: `${AO3}${COFFEE}` })
   const newCopy = copy('text-search', 'tea', { listUrl: `${AO3}${TEA}`, scrapedAt: 3_000 })
-  const autoRecord = { id: 'auto', kind: 'text-search', url: TEA, title: '', type: 'search', entity: 'tea' }
+  const autoRecord = { id: 'auto', kind: 'text-search', url: TEA, title: 'Search: tea', type: 'search', entity: 'tea' }
 
   test('rewrites a saved list in place under its own id, and leaves what syncs alone', () => {
     const before = current([], [coffee])
@@ -464,10 +608,12 @@ describe('planSaveBack', () => {
     assert.deepEqual(plan.state.saved.lists.c, recordOf(plan.state.tracked.lists[0]), 'record and entry agree, and a save-back here ends the mirror')
   })
 
-  test('absorbs the untitled, untracked record made for the new address', () => {
-    const plan = planSaveBack(current([], [coffee, autoRecord]), 'c', { url: TEA, kind: 'text-search', meta }, [oldCopy, newCopy])
-    assert.deepEqual(plan.absorbed, autoRecord)
-    assert.deepEqual(Object.keys(plan.state.saved.lists), ['c'])
+  test('absorbs the record made for the new address: untracked, unfiltered, under its default title', () => {
+    for (const made of [autoRecord, { ...autoRecord, title: '' }]) {
+      const plan = planSaveBack(current([], [coffee, made]), 'c', { url: TEA, kind: 'text-search', meta }, [oldCopy, newCopy])
+      assert.deepEqual(plan.absorbed, made)
+      assert.deepEqual(Object.keys(plan.state.saved.lists), ['c'])
+    }
   })
 
   test('a titled, tracked or filtered list at the new address is a list of its own, and stays', () => {
@@ -589,6 +735,114 @@ describe('aliasOf', () => {
   })
 })
 
+describe('joinSavedLists', () => {
+  const byKudos = copy('text-search', 'by-kudos', { listUrl: `${AO3}${COFFEE_BY_KUDOS}`, scrapedAt: 2_000 })
+  const byDate = copy('text-search', 'by-date', { listUrl: `${AO3}${COFFEE}`, scrapedAt: 1_000 })
+  const marked = user => copy('marked-for-later', user, { listUrl: `${AO3}/users/${user}/readings?show=to-read` })
+  const read = user => copy('read-works', user, { listUrl: `${AO3}/users/${user}/readings` })
+  const review = copy('tracked-review', 'window', { key: 'tracked-review', listUrl: `${AO3}/users/me/readings#ao3e-tracked` })
+
+  /** Each list's id, and the key of the copy it claims. */
+  const claims = join => join.lists.map(one => [one.list.id, one.copy?.key ?? null])
+
+  test('a list claims the newest copy at its address; the older sort orders are its too, and no rows', () => {
+    const saved = recordOf(entry('s', COFFEE, { alias: 'Coffee' }))
+    const join = joinSavedLists(current([], [saved]), [byDate, byKudos])
+    assert.deepEqual(join.lists, [{ list: saved, entry: null, address: addressOf(COFFEE), copy: byKudos, sameAddress: [] }])
+    assert.deepEqual(join.copies, [])
+  })
+
+  test('a tracked list with a view filter claims the copy of its page: its address leaves the filter out', () => {
+    const filtered = entry('t', COFFEE, { alias: 'Coffee, slow', filter: SLOW_BURN })
+    const join = joinSavedLists(current([filtered], [recordOf(filtered)]), [byKudos])
+    assert.deepEqual(join.lists, [{ list: recordOf(filtered), entry: filtered, address: addressOf(COFFEE), copy: byKudos, sameAddress: [] }])
+    assert.deepEqual(join.copies, [])
+  })
+
+  test('two lists at one address share its copy, and each names the other', () => {
+    const tracked = entry('t', COFFEE, { alias: 'Theirs' })
+    const saved = recordOf(entry('s', COFFEE_BY_KUDOS, { alias: 'Mine', filter: NO_DRACO }))
+    const alone = recordOf(entry('a', TEA, { alias: 'Tea' }))
+    const join = joinSavedLists(current([tracked], [recordOf(tracked), saved, alone]), [byKudos])
+    assert.deepEqual(claims(join), [['t', byKudos.key], ['s', byKudos.key], ['a', null]])
+    assert.deepEqual(join.lists.map(one => one.sameAddress), [['s'], ['t'], []])
+  })
+
+  test('a list at no address on the archive claims nothing, and shares with nothing', () => {
+    const broken = recordOf(entry('b', BROKEN, { kind: 'tag-works' }))
+    const alsoBroken = recordOf(entry('c', BROKEN, { kind: 'tag-works' }))
+    const join = joinSavedLists(current([], [broken, alsoBroken]), [copy('tag-works', 'x', { listUrl: BROKEN })])
+    assert.deepEqual(join.lists.map(({ address, copy, sameAddress }) => ({ address, copy, sameAddress })), [
+      { address: null, copy: null, sameAddress: [] },
+      { address: null, copy: null, sameAddress: [] },
+    ])
+  })
+
+  test('an entry with no record yet is a list all the same', () => {
+    const tracked = entry('t', COFFEE, { alias: 'Coffee' })
+    assert.deepEqual(claims(joinSavedLists(current([tracked], []), [byKudos])), [['t', byKudos.key]])
+  })
+
+  test('a copy no list claims is a row of its own: undescribed, at no archive address, or not yet given its record', () => {
+    const undescribed = { key: 'text-search:work_search%5Bquery%5D=coffee+shop', scrapedAt: 3_000 }
+    const nowhere = copy('text-search', 'nowhere', { listUrl: BROKEN, scrapedAt: 500 })
+    const join = joinSavedLists(current([], []), [nowhere, byKudos, undescribed])
+    assert.deepEqual(join.lists, [])
+    assert.deepEqual(join.copies, [undescribed, byKudos, nowhere], 'newest first; an undescribed copy never joins by its key')
+  })
+
+  test('the reader\'s own profile lists are the built-ins; another account\'s are rows', () => {
+    const join = joinSavedLists(current([], []), [marked('me'), marked('them'), read('them'), review], 'me')
+    assert.deepEqual(join.builtins, { markedForLater: marked('me'), readWorks: null })
+    assert.deepEqual(join.copies.map(one => one.key).sort(), ['marked-for-later:them', 'read-works:them'])
+    assert.deepEqual(join.review, review)
+  })
+
+  test('with no account known, the newest described copy of each stands in', () => {
+    const old = marked('old')
+    const newer = { ...marked('new'), scrapedAt: 5_000 }
+    const undescribed = { key: 'read-works:me', scrapedAt: 9_000 }
+    const join = joinSavedLists(current([], []), [old, newer, undescribed, read('them')])
+    assert.deepEqual(join.builtins, { markedForLater: newer, readWorks: read('them') })
+    assert.deepEqual(join.copies.map(one => one.key), ['read-works:me', 'marked-for-later:old'])
+  })
+
+  test('an undescribed copy is a row, even the reader\'s own', () => {
+    const undescribed = { key: 'marked-for-later:me', scrapedAt: 1_000 }
+    const join = joinSavedLists(current([], []), [undescribed, marked('them')], 'me')
+    assert.equal(join.builtins.markedForLater, null)
+    assert.deepEqual(join.copies.map(one => one.key).sort(), ['marked-for-later:me', 'marked-for-later:them'])
+  })
+
+  test('nothing stored: no copies, no built-ins, no review', () => {
+    assert.deepEqual(joinSavedLists(current([], []), []), { lists: [], copies: [], builtins: { markedForLater: null, readWorks: null }, review: null })
+  })
+})
+
+describe('copyOwner', () => {
+  const stored = copy('text-search', 'tea', { listUrl: `${AO3}${TEA}` })
+  const owner = (state, one = stored) => copyOwner(joinSavedLists(state, []), one)?.list.id ?? null
+
+  test('of the lists at the copy\'s address, a tracked one', () => {
+    const tracked = entry('t', TEA, { alias: 'Theirs', filter: SLOW_BURN })
+    const saved = recordOf(entry('s', TEA, { alias: 'Mine' }))
+    assert.equal(owner(current([tracked], [saved, recordOf(tracked)])), 't')
+  })
+
+  test('else the one that is exactly its search, else the first', () => {
+    const filtered = recordOf(entry('f', TEA, { alias: 'Filtered', filter: SLOW_BURN }))
+    const exact = recordOf(entry('e', TEA, { alias: 'Exact' }))
+    assert.equal(owner(current([], [filtered, exact])), 'e')
+    assert.equal(owner(current([], [filtered])), 'f')
+  })
+
+  test('none for a copy no list is at, or with no address', () => {
+    assert.equal(owner(current([], [recordOf(entry('c', COFFEE))])), null)
+    assert.equal(owner(current([], [recordOf(entry('b', BROKEN, { kind: 'tag-works' }))]), { key: 'x', listUrl: BROKEN, scrapedAt: 1 }), null)
+    assert.equal(owner(current([], [recordOf(entry('c', COFFEE))]), { key: 'text-search:old', scrapedAt: 1 }), null)
+  })
+})
+
 describe('savedListsOf', () => {
   const tracked = entry('t', TEA, { alias: 'Tea' })
   const saved = recordOf(entry('s', COFFEE, { alias: 'Coffee' }))
@@ -598,6 +852,12 @@ describe('savedListsOf', () => {
       { list: recordOf(tracked), entry: tracked },
       { list: saved, entry: null },
     ])
+  })
+
+  test('a list with no title is read under its default, as the planner will file it', () => {
+    const blank = { id: 'b', kind: 'text-search', url: COFFEE, title: '', type: 'search', entity: 'coffee shop' }
+    const untitled = entry('u', TEA, { alias: '' })
+    assert.deepEqual(savedListsOf(current([untitled], [blank])).map(({ list }) => list.title), ['Search: coffee shop', 'Search: tea'])
   })
 
   test('an entry with no record yet is the record the planner will make of it', () => {
@@ -619,7 +879,7 @@ describe('savedListsOf', () => {
 describe('savedListAt', () => {
   const tracked = entry('t', HP, { alias: 'HP' })
   const filtered = recordOf(entry('f', HP, { alias: 'HP, no Draco', filter: NO_DRACO }))
-  const plain = recordOf(entry('p', COFFEE, { alias: '' }))
+  const plain = recordOf(entry('p', COFFEE, { alias: 'Search: coffee shop' }))
 
   test('the untracked saved list that searches exactly that, view filter and all', () => {
     const state = current([tracked], [recordOf(tracked), filtered, plain])
@@ -677,6 +937,20 @@ describe('planTrackSearch', () => {
     assert.equal(plan.takenBy.id, 's')
   })
 
+  test('a blank title is the search\'s default', () => {
+    const plan = planTrackSearch(current([], []), query, '  ', TODAY)
+    assert.equal(plan.state.saved.lists[plan.id].title, 'Search: tea')
+    assert.equal(plan.state.tracked.lists[0].alias, 'Search: tea')
+  })
+
+  test('a saved list keeps its own title as it is tracked, even one another list shares', () => {
+    const saved = recordOf(entry('s', TEA, { alias: 'Search: tea', type: 'search', entity: 'tea' }))
+    const other = recordOf(entry('o', `${TEA}&work_search[complete]=T`, { alias: 'Search: tea' }))
+    const plan = planTrackSearch(current([], [saved, other]), query, 'Search: tea', TODAY)
+    assert.equal(plan.ok, true)
+    assert.equal(plan.state.tracked.lists[0].alias, 'Search: tea')
+  })
+
   test('a saved list may keep its own title as it is tracked', () => {
     const saved = recordOf(entry('s', TEA, { alias: 'Morning', type: 'search', entity: 'tea' }))
     const plan = planTrackSearch(current([], [saved]), query, 'Morning', TODAY)
@@ -696,13 +970,28 @@ describe('planTrackCopy', () => {
     assert.deepEqual(plan.state.tracked.lists, [{ id: 's', kind: 'text-search', url: TEA, alias: 'Morning', type: 'search', entity: 'tea', scan: true, tracked: true, since: TODAY }])
   })
 
-  test('untitled, it takes the search\'s default, made unique', () => {
+  test('a list with no title yet is tracked under its default, though another list has it: nothing is numbered', () => {
     const auto = { id: 'auto', kind: 'text-search', url: TEA, title: '', type: 'search', entity: 'tea' }
     const taken = recordOf(entry('x', TAG, { alias: 'Search: tea' }))
     const plan = planTrackCopy(current([], [auto, taken]), stored, TODAY)
     assert.equal(plan.id, 'auto')
-    assert.equal(plan.state.saved.lists.auto.title, 'Search: tea (2)')
-    assert.equal(plan.state.tracked.lists[0].alias, 'Search: tea (2)')
+    assert.equal(plan.state.saved.lists.auto.title, 'Search: tea')
+    assert.equal(plan.state.tracked.lists[0].alias, 'Search: tea')
+  })
+
+  test('the saved list at the copy\'s address is the one tracked, a view filter and all', () => {
+    const filtered = recordOf(entry('f', TEA, { alias: 'Tea, slow', filter: SLOW_BURN }))
+    const plan = planTrackCopy(current([], [filtered]), stored, TODAY)
+    assert.equal(plan.id, 'f', 'no second list at the address')
+    assert.deepEqual(Object.keys(plan.state.saved.lists), ['f'])
+    assert.deepEqual(plan.state.tracked.lists, [{ id: 'f', kind: 'text-search', url: TEA, alias: 'Tea, slow', filter: SLOW_BURN, tracked: true, since: TODAY }])
+  })
+
+  test('a copy whose list is tracked already, with a view filter, is refused as that list', () => {
+    const filtered = entry('f', TEA, { alias: 'Tea, slow', filter: SLOW_BURN })
+    const plan = planTrackCopy(current([filtered], [recordOf(filtered)]), stored, TODAY)
+    assert.equal(plan.ok, false)
+    assert.equal(plan.twin.id, 'f')
   })
 
   test('a copy no record has yet gets one, as the planner would make it, under the default title', () => {

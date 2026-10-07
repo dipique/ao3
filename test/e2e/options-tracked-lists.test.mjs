@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { formatDay, utcToday } from '../../src/common/trackedLists.ts'
-import { sleep, storedLists } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { storedLists } from './helpers.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 const ARCHIVE = 'https://archiveofourown.org'
 const TODAY = utcToday()
@@ -27,15 +27,12 @@ function listsSeed(entries, saved, extra = {}) {
 
 /** Tracked and titled. */
 const COFFEE = { id: 'c0ffee', kind: 'text-search', url: '/works/search?work_search%5Bquery%5D=coffee', alias: 'Coffee shop AUs', tracked: true, since: TODAY - 5 }
-/** Saved and untitled. */
-const SERIES = { id: 'ser1es', kind: 'series-works', url: '/series/9991', title: '' }
+/** Saved, under its default title. */
+const SERIES = { id: 'ser1es', kind: 'series-works', url: '/series/9991', title: 'Series: 9991' }
 /** Saved and titled, with a copy of its search stored in two sort orders. */
 const LATTE_ART = { id: 'l4tte', kind: 'text-search', url: '/works/search?work_search[query]=latte', title: 'Latte art', type: 'search', entity: 'latte' }
-/** The record the background makes for a stored search nothing tracks: untitled. */
-const TEA = { id: 't3a', kind: 'text-search', url: '/works/search?work_search[query]=tea', title: '', type: 'search', entity: 'tea' }
-
-/** A list without a title is called by its URL's tail, here short enough to be all of it. */
-const SERIES_LABEL = '/series/9991'
+/** The record the background makes for a stored search nothing tracks: under the search's default title. */
+const TEA = { id: 't3a', kind: 'text-search', url: '/works/search?work_search[query]=tea', title: 'Search: tea', type: 'search', entity: 'tea' }
 
 /** The stored search nothing tracks yet: the row that offers **Track**. */
 const TEA_KEY = 'text-search:work_search%5Bquery%5D=tea'
@@ -113,7 +110,6 @@ describe('options UI — tracked lists', { skip }, () => {
       id: await row.evaluate(el => el.dataset.listRow),
       label: (await options.name(input)).slice('Title for '.length),
       title: await input.evaluate(el => el.value),
-      placeholder: await input.evaluate(el => el.placeholder),
       note: await options.text(row),
       tracked: await isOn(await options.control(row, 'switch')),
       links: (await options.controls(row, 'link')).length,
@@ -129,8 +125,7 @@ describe('options UI — tracked lists', { skip }, () => {
 
   test('every saved list gets a row, tracked or not', async () => {
     const got = await rows()
-    assert.deepEqual(got.slice(0, 2).map(r => r.label), ['Coffee shop AUs', 'Latte art'], 'titled lists first, by title')
-    assert.deepEqual(got.slice(2).map(r => r.id).sort(), ['ser1es', 't3a'], 'then the untitled')
+    assert.deepEqual(got.map(r => r.label), ['Coffee shop AUs', 'Latte art', 'Search: tea', 'Series: 9991'], 'by title')
 
     const coffee = await rowFor('c0ffee')
     assert.match(coffee.note, /Works search/)
@@ -139,8 +134,7 @@ describe('options UI — tracked lists', { skip }, () => {
     assert.equal(coffee.links, 1, 'a tracked list links to its search, to refine it')
 
     const series = await rowFor('ser1es')
-    assert.equal(series.title, '', 'no title, so the field is empty')
-    assert.equal(series.placeholder, SERIES_LABEL, 'and the URL tail stands in for one')
+    assert.equal(series.title, 'Series: 9991')
     assert.match(series.note, /Series/)
     assert.match(series.note, /Saved/)
     assert.doesNotMatch(series.note, /Paused/)
@@ -156,7 +150,7 @@ describe('options UI — tracked lists', { skip }, () => {
     const input = await options.control(await options.list(TRACKED), 'textbox', 'Title for Latte art')
     await input.click({ clickCount: 3 })
     await input.type('Latte love ')
-    await sleep(1200)
+    await until('the title to be written', async () => (await writtenRecords())?.lists.l4tte?.title === 'Latte love')
 
     const records = await writtenRecords()
     assert.equal(records.lists.l4tte.title, 'Latte love', 'trimmed')
@@ -173,27 +167,25 @@ describe('options UI — tracked lists', { skip }, () => {
     const input = await options.control(await options.list(TRACKED), 'textbox', 'Title for Coffee shop AUs')
     await input.click({ clickCount: 3 })
     await input.type('Caffeine')
-    await sleep(1200)
+    await until('the title to be written', async () => (await writtenEntries())?.lists[0]?.alias === 'Caffeine')
 
     const entries = await writtenEntries()
     assert.equal(entries.lists[0].alias, 'Caffeine')
     assert.equal(entries.lists[0].url, COFFEE.url, 'the entry is the same one, retitled')
     assert.equal((await writtenRecords()).lists.c0ffee.title, 'Caffeine')
     await options.page.evaluate(() => document.activeElement.blur())
-    await sleep(300)
     // The label follows the title, so the rest of the row now answers to it.
-    assert.equal((await rowFor('c0ffee')).label, 'Caffeine')
+    await until('the row to answer to its title', async () => (await rowFor('c0ffee'))?.label === 'Caffeine')
   })
 
   test('the switch stops tracking, keeping the list saved; and tracks it again from today', async () => {
     await pressIn(TRACKED, 'switch', 'Track Caffeine')
-    await sleep(1000)
-    assert.deepEqual((await writtenEntries()).lists, [], 'the entry goes, so it no longer syncs')
+    await until('the entry to go', async () => (await writtenEntries()).lists.length === 0)
     assert.deepEqual((await writtenRecords()).lists.c0ffee, { ...recordOf(COFFEE), title: 'Caffeine' }, 'the record stays')
     assert.match((await rowFor('c0ffee')).note, /Saved/)
 
     await pressIn(TRACKED, 'switch', 'Track Caffeine')
-    await sleep(1000)
+    await until('the entry to come back', async () => (await writtenEntries()).lists.length === 1)
     const [entry] = (await writtenEntries()).lists
     // Tracking again doesn't pour back what went unreviewed in between.
     assert.deepEqual(entry, { id: 'c0ffee', kind: 'text-search', url: COFFEE.url, alias: 'Caffeine', tracked: true, since: TODAY })
@@ -202,8 +194,9 @@ describe('options UI — tracked lists', { skip }, () => {
 
   test('removing a list asks first, then takes its record and every copy of its search', async () => {
     await pressIn(TRACKED, 'button', 'Remove Latte love')
-    await sleep(500)
-    const asked = await options.page.evaluate(() => document.querySelector('[role="dialog"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? null)
+    const dialog = () => options.page.evaluate(() => document.querySelector('[role="dialog"]')?.textContent?.replace(/\s+/g, ' ').trim() ?? null)
+    await until('the confirmation', async () => /Remove this list\?/.test(await dialog() ?? ''))
+    const asked = await dialog()
     assert.match(asked, /Remove this list\?/)
     assert.match(asked, /Latte love/)
     assert.match(asked, /stored cop/)
@@ -211,7 +204,10 @@ describe('options UI — tracked lists', { skip }, () => {
     await options.page.evaluate(() => {
       [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === 'Remove list').click()
     })
-    await sleep(1000)
+    await until('the record to go', async () => {
+      const records = await writtenRecords()
+      return !!records && !('l4tte' in records.lists)
+    })
 
     assert.deepEqual(Object.keys((await writtenRecords()).lists).sort(), ['c0ffee', 'ser1es', 't3a'])
     const stored = await options.stored('cache.searchLists')
@@ -224,7 +220,7 @@ describe('options UI — tracked lists', { skip }, () => {
 
   test('Track on a stored list tracks the saved list it is, from today, under the search\'s title', async () => {
     await pressIn(STORED, 'button', 'Track')
-    await sleep(1000)
+    await until('the entry to be written', async () => (await writtenEntries()).lists.length === 2)
 
     const entries = (await writtenEntries()).lists
     assert.equal(entries.length, 2)
@@ -234,8 +230,7 @@ describe('options UI — tracked lists', { skip }, () => {
 
     // The entry and the stored list are now the same list, so the row says so
     // and stops offering to track it a second time.
-    await sleep(500)
-    assert.equal((await storedButtons(TEA_KEY)).includes('Track'), false)
+    await until('the stored row to stop offering Track', async () => !(await storedButtons(TEA_KEY)).includes('Track'))
     assert.match(await options.text(await options.listRow(STORED, TEA_KEY)), /Tracked/)
     assert.equal((await rowFor('t3a')).tracked, true)
   })
@@ -259,6 +254,55 @@ describe('options UI — tracked lists', { skip }, () => {
   })
 })
 
+/** Tracked, and narrowed in its search view: the copy of its page is stored under the page's own key. */
+const SLOW_TEA = {
+  id: 'sl0wt3a',
+  kind: 'text-search',
+  url: '/works/search?work_search[query]=tea',
+  alias: 'Slow-burn tea',
+  type: 'search',
+  entity: 'tea',
+  filter: { text: 'slow burn' },
+  tracked: true,
+  since: TODAY - 4,
+}
+
+/**
+ * A list with a view filter and the copy of its page are one list: the copy is
+ * stored at the list's address, which leaves the filter out. So the stored row
+ * is the tracked list's, named by its title, and has nothing to track.
+ */
+describe('options UI — a filtered tracked list and its stored list', { skip }, () => {
+  let session
+  let options
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed: {
+        ...listsSeed([SLOW_TEA], [recordOf(SLOW_TEA)]),
+        ...storedLists({ [TEA_KEY]: searchCopy('tea', 3, `${ARCHIVE}/works/search?work_search%5Bquery%5D=tea`, 101) }),
+      },
+      hash: '#site-export',
+    })
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  test('are one list: the stored row is named by the list\'s title, offers no Track, and writes nothing', async () => {
+    const row = await options.listRow(STORED, TEA_KEY)
+    const buttons = await Promise.all((await options.controls(row, 'button')).map(b => options.name(b)))
+    assert.equal(buttons.includes('Track'), false)
+    assert.match(await options.text(await row.$('[data-row-part="title"]')), /^Slow-burn tea\b/)
+    assert.match(await options.text(row), /Tracked/)
+    assert.deepEqual(await options.page.evaluate(() => window.__writes.filter(w => 'option.trackedLists' in w || 'option.savedLists' in w)), [])
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(options.problems(), [])
+  })
+})
+
 /**
  * Four lists, three of them titled, two of those alike but for case — the pair a
  * sync can bring together from two browsers.
@@ -266,8 +310,8 @@ describe('options UI — tracked lists', { skip }, () => {
 const DRACO = { id: 'dr4c0', kind: 'works-filter', url: '/tags/Draco%20Malfoy/works', alias: 'Character: Draco Malfoy', type: 'character', entity: 'Draco Malfoy', tracked: true, since: TODAY - 2 }
 const LATTE = { id: 'l4tte', kind: 'text-search', url: '/works/search?work_search[query]=latte', alias: 'coffee shop', tracked: true, since: TODAY - 2 }
 const TWIN = { id: 'tw1n', kind: 'series-works', url: '/series/9991', alias: 'character: draco malfoy', type: 'series', entity: 'The Long Way Round', tracked: true, since: TODAY - 2 }
-/** Saved, not tracked, and untitled. */
-const UNTITLED = { id: 'unt1t', kind: 'tag-works', url: '/tags/marriage%20problems', title: '' }
+/** Saved, not tracked, under its default title. */
+const MARRIAGE = { id: 'm4rr', kind: 'tag-works', url: '/tags/marriage%20problems', title: 'Tag: marriage problems' }
 
 /**
  * What the row says about each list beyond its title — a badge for what it is,
@@ -282,7 +326,7 @@ describe('options UI — tracked lists\' titles, badges and links', { skip }, ()
   before(async () => {
     session = await startOptions()
     options = await session.open({
-      seed: listsSeed([DRACO, LATTE, TWIN], [...[DRACO, LATTE, TWIN].map(recordOf), UNTITLED]),
+      seed: listsSeed([DRACO, LATTE, TWIN], [...[DRACO, LATTE, TWIN].map(recordOf), MARRIAGE]),
       hash: '#instant-search-views-tracked-lists',
     })
   }, { timeout: 180000 })
@@ -313,8 +357,8 @@ describe('options UI — tracked lists\' titles, badges and links', { skip }, ()
     }
   }))
 
-  test('rows sort by title, and a list with none goes last', async () => {
-    assert.deepEqual((await rows()).map(r => r.title), ['Character: Draco Malfoy', 'character: draco malfoy', 'coffee shop', ''])
+  test('rows sort by title', async () => {
+    assert.deepEqual((await rows()).map(r => r.title), ['Character: Draco Malfoy', 'character: draco malfoy', 'coffee shop', 'Tag: marriage problems'])
   })
 
   test('each carries a badge for what it is, whatever it\'s titled', async () => {
@@ -344,10 +388,16 @@ describe('options UI — tracked lists\' titles, badges and links', { skip }, ()
       input.value = '  CHARACTER: Draco Malfoy '
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    await sleep(800)
-    // Nothing may have been written at all, which is as good.
-    const stored = await storedEntries()
-    assert.equal(stored?.find(l => l.id === 'l4tte')?.alias ?? LATTE.alias, 'coffee shop', 'nothing is saved')
+    await until('the refusal', async () => (await rows()).find(r => r.badge === 'Search').alert)
+    // A change to another setting is saved with whatever else is waiting to be,
+    // so once it is written, the refused title would have been too.
+    const works = await options.control(options.page, 'spinbutton', 'Works per review')
+    await works.click({ clickCount: 3 })
+    await works.type('41')
+    await works.press('Enter')
+    await until('the other setting to be written', async () => (await options.lastWrite('option.trackedLists'))?.target === 41)
+    assert.equal((await storedEntries()).find(l => l.id === 'l4tte').alias, 'coffee shop', 'nothing is saved')
+    assert.equal(await options.lastWrite('option.savedLists'), null)
     const row = (await rows()).find(r => r.badge === 'Search')
     assert.equal(row.title, '  CHARACTER: Draco Malfoy ', 'the field keeps what was typed')
     assert.match(row.alert, /Another list is already called “Character: Draco Malfoy”/)
@@ -358,17 +408,17 @@ describe('options UI — tracked lists\' titles, badges and links', { skip }, ()
     const input = await titleField('coffee shop')
     await input.click({ clickCount: 3 })
     await input.type('Aardvark AUs')
-    await sleep(1000)
+    await until('the title to be written', async () => (await storedEntries()).find(l => l.id === 'l4tte').alias === 'Aardvark AUs')
     const stored = await storedEntries()
     assert.equal(stored.find(l => l.id === 'l4tte').alias, 'Aardvark AUs')
     // Still in its old place while it's being typed in…
-    assert.deepEqual((await rows()).map(r => r.title), ['Character: Draco Malfoy', 'character: draco malfoy', 'Aardvark AUs', ''])
+    assert.deepEqual((await rows()).map(r => r.title), ['Character: Draco Malfoy', 'character: draco malfoy', 'Aardvark AUs', 'Tag: marriage problems'])
     assert.equal((await rows())[2].alert, null, 'and the refusal is gone')
 
     // …and sorted once it isn't.
     await options.page.evaluate(() => document.activeElement.blur())
-    await sleep(500)
-    assert.deepEqual((await rows()).map(r => r.title), ['Aardvark AUs', 'Character: Draco Malfoy', 'character: draco malfoy', ''])
+    await until('the rows to sort', async () => (await rows())[0].title === 'Aardvark AUs')
+    assert.deepEqual((await rows()).map(r => r.title), ['Aardvark AUs', 'Character: Draco Malfoy', 'character: draco malfoy', 'Tag: marriage problems'])
   })
 
   test('nothing threw along the way', () => {

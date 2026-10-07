@@ -13,7 +13,7 @@ import MdiPlaylistPlus from '~icons/mdi/playlist-plus.jsx'
 import type { ListState, SavedList, TrackedFilter, TrackedList, TrackedMeta, TrackedUndoPlan, TrackedUpdatePlan } from '#common'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, aliasOf, api, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planStopTracking, planTrack, planTrackSearch, planUndo, planUpdate, sameRoot, sameTitle, savedListAt, savedListsOf, savedListsWrite, sourceLabel, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, aliasOf, api, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planEntryEdit, planStopTracking, planTrack, planTrackSearch, planUndo, planUpdate, sameRoot, sameTitle, savedListAt, savedListsOf, savedListsWrite, sourceLabel, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { holdSearchPrompt } from '#content_script/pendingSearch.ts'
@@ -1010,10 +1010,12 @@ export class FilterToolbar extends Unit {
 
   /**
    * Replace `list`'s query with this page's ({@link planUpdate}), then offer to
-   * take it back. `alias` is the title box's, where there is one; blank, it's the
-   * page's default. A title is unique among every saved list's (`titles`),
-   * tracked or not. `refining` ends the tab's refining mark: the list it was
-   * for has become what the reader made of it.
+   * take it back. The list's record takes the change with its entry, and is
+   * this browser's own from then on ({@link planEntryEdit}). `alias` is the
+   * title box's, where there is one; blank, it's the page's default. A title is
+   * unique among every saved list's (`titles`), tracked or not. `refining` ends
+   * the tab's refining mark: the list it was for has become what the reader
+   * made of it.
    */
   private async updateList(page: TrackablePage, list: TrackedList, titles: readonly ListTitle[], button: HTMLButtonElement, opts: { alias?: string, refining: boolean }): Promise<void> {
     if (button.disabled || !extensionAlive())
@@ -1041,7 +1043,10 @@ export class FilterToolbar extends Unit {
         if (plan.ok) {
           if (opts.refining)
             endRefining()
-          await this.writeLists(plan.lists)
+          // The records as storage holds them now: the background files them as
+          // the page is used.
+          const before: ListState = { tracked: this.options.trackedLists, saved: (await readListState()).saved }
+          await writeListState(before, planEntryEdit(before, plan.after))
           offerUndo(plan.before, plan.after, opts.refining)
           return
         }
@@ -1191,7 +1196,7 @@ function trackRow(page: TrackablePage, state: ListState): TrackRow {
   if (entry)
     return { kind: 'exact', entry }
   const saved = savedListAt(state, pageKey)
-  if (saved && typeof saved.title === 'string' && saved.title.trim())
+  if (saved)
     return { kind: 'saved', list: saved }
   const candidates = lists.filter(one => sameRoot(one, page.normalized))
   return candidates.length ? { kind: 'same-root', candidates } : { kind: 'new' }
@@ -1389,8 +1394,8 @@ async function undoUpdate(before: TrackedList, after: TrackedList, wasRefining: 
     return
   const label = sourceLabel(after)
   try {
-    const option = await options.get('trackedLists')
-    const plan = planUndo(option.lists, before, after)
+    const state = await readListState()
+    const plan = planUndo(state.tracked.lists, before, after)
     if (!plan.ok) {
       toast(undoRefusal(plan, label), { type: 'error' })
       return
@@ -1398,7 +1403,7 @@ async function undoUpdate(before: TrackedList, after: TrackedList, wasRefining: 
     // Back to where the reader was: refining the list, from the page as it is.
     if (wasRefining)
       startRefining(before.id, false)
-    await options.set({ trackedLists: { ...option, lists: plan.lists } })
+    await writeListState(state, planEntryEdit(state, before))
     toast(`Put “${sourceLabel(before)}” back as it was.`, { type: 'success' })
   }
   catch (err) {

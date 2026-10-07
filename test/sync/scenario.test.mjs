@@ -457,7 +457,7 @@ describe('sync scenarios', () => {
       const records = Object.values(desktop.options.savedLists.lists)
       const atAddress = records.filter(record => addressOf(record.url) === addressOf(trackedListsFixture(2).lists[1].url))
       assert.equal(atAddress.length, 2, 'nothing is merged')
-      assert.deepEqual(atAddress.map(record => record.title).sort(), ['', 'Search 1'])
+      assert.deepEqual(atAddress.map(record => record.title).sort(), ['Search 1', 'Search: word 1'], 'the copy\'s list under its search\'s default title')
       assert.deepEqual(ids(desktop.options.trackedLists.lists), ['l0', 'l1'])
     })
 

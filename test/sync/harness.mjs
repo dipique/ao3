@@ -3,7 +3,7 @@
 // a scripted stand-in for an outdated build. Not a test file itself.
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
-import { planSavedLists, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
+import { createSavedListsReconciler } from '../../src/common/savedLists.ts'
 import { decode, encode, MANIFEST_KEY } from '../../src/common/syncCodec.ts'
 import { createSyncEngine } from '../../src/common/syncCore.ts'
 import { SYNC_META_DEFAULTS } from '../../src/common/syncMetaDefaults.ts'
@@ -191,14 +191,15 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     randomId: () => `${name}-${++seq}`,
   }
 
-  /** The planner's run, after any already under way: writes only what it changed. */
+  /** The background's reconciler, over this browser's storage. */
+  const reconciler = createSavedListsReconciler({
+    read: async () => clone({ trackedLists: opts.trackedLists, savedLists: opts.savedLists, searchLists }),
+    write: update => deps.writeOptions(update),
+  })
+
+  /** The planner's run, after any already under way; `settle` waits for the last one asked for. */
   function reconcile() {
-    const run = planner.then(async () => {
-      const state = { tracked: opts.trackedLists, saved: opts.savedLists }
-      const update = savedListsWrite(state, planSavedLists(state, storedListRefs(searchLists)).state)
-      if (Object.keys(update).length)
-        await deps.writeOptions(update)
-    })
+    const run = reconciler()
     planner = run.catch(() => {})
     return run
   }

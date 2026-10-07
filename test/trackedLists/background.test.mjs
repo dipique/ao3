@@ -42,8 +42,8 @@ const STORED = storedLists({
   'tracked-review': { scrapedAt: 5_000, blurbsHtml: [blurb(6)], descriptor: { sourceId: 'tracked-review', label: 'Tracked review', listUrl: `${AO3}/users/me/readings#ao3e-tracked` } },
 })
 
-/** The record the planner makes for the stored search no entry is. */
-const TEA = { kind: 'text-search', url: '/works/search?work_search[query]=tea', title: '', type: 'search', entity: 'tea' }
+/** The record the planner makes for the stored search no entry is, under the search's default title. */
+const TEA = { kind: 'text-search', url: '/works/search?work_search[query]=tea', title: 'Search: tea', type: 'search', entity: 'tea' }
 
 /** A legacy install's storage: tracked and paused entries, stored lists, and no saved-list records. */
 const LEGACY = {
@@ -97,10 +97,10 @@ describe('saved lists in the background', { skip }, () => {
     assert.deepEqual(lists, {
       hp1: recordOf(HP),
       c0ffee: recordOf(COFFEE),
-      ser1es: recordOf(SERIES),
+      ser1es: { ...recordOf(SERIES), title: 'Series: 9991' },
       e1sew: recordOf(ELSEWHERE),
       [made[0]?.id]: { id: made[0]?.id, ...TEA },
-    }, 'one record more, for the stored search no entry is; none for the copies of a list, the built-ins, the window or an undescribed list')
+    }, 'one record more, for the stored search no entry is; none for the copies of a list, the built-ins, the window or an undescribed list; the list never titled takes its default')
     assert.equal(Object.values(lists).some(record => 'mirror' in record), false, 'a migrated record is this browser\'s own')
     assert.deepEqual(Object.keys(result.lists), Object.keys(STORED['cache.searchLists']), 'the stored lists are left as they were')
     assert.deepEqual(result.again, [], 'a second run writes nothing')
@@ -152,7 +152,7 @@ describe('saved lists in the background', { skip }, () => {
     assert.equal(steps.left, null, 'a mirror with nothing held here goes with its entry')
     assert.deepEqual(steps.restoredTracked, ['hp1'], 'the restored paused entry leaves what syncs')
     assert.deepEqual(steps.restored, { id: 'r3st0', kind: 'tag-works', url: '/tags/marriage%20problems', title: 'Marriage' }, 'and keeps its title as a saved list')
-    assert.deepEqual(steps.stored && { ...steps.stored, id: undefined }, { id: undefined, kind: 'series-works', url: '/series/88', title: '', type: 'series', entity: 'Eighty-Eight' })
+    assert.deepEqual(steps.stored && { ...steps.stored, id: undefined }, { id: undefined, kind: 'series-works', url: '/series/88', title: 'Series: Eighty-Eight', type: 'series', entity: 'Eighty-Eight' })
     assert.equal(steps.recordCount, 7, 'every record from before is kept')
     assert.deepEqual(steps.quiet, ['option.wordsPerMinute'])
   })

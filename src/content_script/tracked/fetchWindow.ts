@@ -3,7 +3,7 @@ import type { Work } from '#content_script/blurb.js'
 import type { FilterState } from '#content_script/searchView/engine.ts'
 
 import { canonicalFilter, dayOf, getArchiveLink, listBase, mergeItems, PAGE_SIZE, pageUrl, planWindow, sourceLabel, toShortId } from '#common'
-import { archiveWaitRemaining, onArchiveWait, PATIENCE, WAIT_BUDGET, waitForArchive } from '#content_script/archiveFetch.js'
+import { archiveWaitRemaining, countdown, onArchiveWait, PATIENCE, WAIT_BUDGET, WAIT_WORDS, waitForArchive } from '#content_script/archiveFetch.js'
 import { matches } from '#content_script/searchView/engine.ts'
 import { applyHidden } from '#content_script/searchView/hidden.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
@@ -241,13 +241,6 @@ function sessionSig(lists: readonly TrackedList[], start: Day): string {
   ].join('\u0000'))].join('\u0001')
 }
 
-/** `2:05`, or `9s` under a minute. */
-function countdown(ms: number): string {
-  const total = Math.ceil(ms / 1000)
-  const seconds = total % 60
-  return total >= 60 ? `${Math.floor(total / 60)}:${String(seconds).padStart(2, '0')}` : `${seconds}s`
-}
-
 /** Where a list's works sit on the page it is read from. */
 function blurbSelectorFor(entry: TrackedList): string {
   if (entry.kind === 'series-works')
@@ -330,7 +323,7 @@ export async function fetchWindow(opts: FetchWindowOptions): Promise<FetchedWind
   // caller at once, so it is one thing happening, and saying it once is right.
   const unwatch = onArchiveWait((until, reason) => {
     waitUntil = until
-    waitText = reason === 'refused' ? 'AO3 asked us to slow down' : 'Giving AO3 a moment'
+    waitText = WAIT_WORDS[reason]
     report()
   })
 

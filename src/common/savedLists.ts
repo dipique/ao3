@@ -31,7 +31,13 @@ export interface SavedList {
   kind: TrackedKind
   /** As an entry's: the archive path and normalized query. Kept as it came when it doesn't normalize, and the list is then pending. */
   url: string
-  /** Unique among the records, compared trimmed and in any case. `''` is untitled, shown by a placeholder. */
+  /**
+   * Unique among the records, compared trimmed and in any case, except where
+   * sync, or two searches with one default title, have brought two together.
+   * Never blank: a list is made under its search's default title
+   * ({@link defaultTitleOf}), and a blank title is that default. Only a list
+   * whose address yields none can be without one.
+   */
   title: string
   type?: TrackedType
   entity?: string
@@ -147,6 +153,18 @@ export function savedListsWrite(before: ListState, next: ListState): { trackedLi
   }
 }
 
+/**
+ * A list's default title: what it is a search of, "Type: entity"
+ * ({@link defaultTitle}), as every list is titled when it is made, and wherever
+ * it has no title of its own. Not made unique: two searches of one thing share
+ * it until the reader retitles one. `''` for an address that isn't a list on
+ * the archive, which yields none.
+ */
+export function defaultTitleOf(list: Pick<SavedList, 'url' | 'type' | 'entity'>): string {
+  const meta = trackedMeta(list)
+  return meta ? defaultTitle(meta) : ''
+}
+
 /** A saved list as the title and label helpers of `trackedLists.ts` read a list: its title as an alias. */
 export function aliasOf(list: SavedList): Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'> {
   return { id: list.id, alias: list.title, url: list.url, type: list.type, entity: list.entity }
@@ -166,8 +184,11 @@ export function aliasOf(list: SavedList): Pick<TrackedList, 'id' | 'alias' | 'ur
  *    removed, on another browser) stays as a saved list here if this browser
  *    holds a copy at its address, and no longer as a mirror. Otherwise it goes.
  * 4. A stored list from a search view that keeps saved lists, at an address no
- *    record has, gets a record: a new id, untitled. Of several copies at one
- *    address, the newest says what the record searches.
+ *    record has, gets a record: a new id, under its search's default title. Of
+ *    several copies at one address, the newest says what the record searches.
+ * 5. A list with no title, entry or record, takes its default
+ *    ({@link defaultTitleOf}); an entry's syncs. Two lists may so share one: the
+ *    reader tells them apart, since nothing is numbered or renamed here.
  *
  * Nothing else is removed. A legacy state (no `v`) is migrated: it makes no
  * mirrors, because its entries may well have been made on this browser, and
@@ -176,7 +197,8 @@ export function aliasOf(list: SavedList): Pick<TrackedList, 'id' | 'alias' | 'ur
 export function planSavedLists(state: ListState, stored: readonly StoredListRef[]): SavedListsPlan {
   const legacy = typeof state.saved?.v !== 'number'
   const before = recordsOf(state)
-  const entries = entriesOf(state)
+  const given = entriesOf(state)
+  const entries = given.map(withDefaultAlias)
   const next: { [id: string]: SavedList } = { ...before }
 
   const synced = entries.filter(entry => !isEntry(entry) || entry.tracked === true)
@@ -204,24 +226,62 @@ export function planSavedLists(state: ListState, stored: readonly StoredListRef[
       delete next[id]
   }
 
+  for (const [id, record] of Object.entries(next)) {
+    if (isListId(id) && isRecord(record))
+      next[id] = withDefaultTitle(record)
+  }
+
   const taken = new Set(Object.values(next).map(record => addressOf(record?.url)))
   const ids = [...Object.keys(next), ...entries.filter(isEntry).map(entry => entry.id)].map(id => ({ id }))
   for (const { copy, address } of [...copies].sort(newestFirst)) {
     if (address === null || taken.has(address) || !SAVED_LIST_SOURCE_IDS.includes(copy.sourceId ?? ''))
       continue
     const id = newTrackedListId(ids)
-    next[id] = { id, ...copyQuery(normalizeTrackedUrl(copy.listUrl!)!, copy.label), title: '' }
+    const query = copyQuery(normalizeTrackedUrl(copy.listUrl!)!, copy.label)
+    next[id] = { id, ...query, title: defaultTitleOf(query) }
     ids.push({ id })
     taken.add(address)
   }
 
-  const changed = { tracked: synced.length !== entries.length, saved: legacy || !sameRecords(before, next) }
+  const changed = {
+    tracked: synced.length !== given.length || synced.some((entry, at) => entry !== given[at]),
+    saved: legacy || !sameRecords(before, next),
+  }
   return {
     state: {
       tracked: changed.tracked ? { ...state.tracked, lists: synced } : state.tracked,
       saved: changed.saved ? { ...state.saved, v: legacy ? SAVED_LISTS_VERSION : state.saved.v, lists: next } : state.saved,
     },
     changed,
+  }
+}
+
+/** Where {@link createSavedListsReconciler} reads the lists from, and writes back what the planner changed. */
+export interface SavedListsStorage {
+  read: () => Promise<{ trackedLists: TrackedListsOption, savedLists: SavedListsOption, searchLists: unknown }>
+  write: (update: { trackedLists?: TrackedListsOption, savedLists?: SavedListsOption }) => Promise<void>
+}
+
+/**
+ * The planner as a background runs it: against what `storage` holds at the
+ * time, writing back only the halves it changed, and nothing when nothing did.
+ * One run at a time, since each is a read, a plan and a write, and two at once
+ * would each write what the other hadn't seen. A run that fails rejects its own
+ * promise and leaves the next to run.
+ */
+export function createSavedListsReconciler(storage: SavedListsStorage): () => Promise<void> {
+  let chain: Promise<unknown> = Promise.resolve()
+  async function reconcile(): Promise<void> {
+    const { trackedLists, savedLists, searchLists } = await storage.read()
+    const state = { tracked: trackedLists, saved: savedLists }
+    const update = savedListsWrite(state, planSavedLists(state, storedListRefs(searchLists)).state)
+    if (Object.keys(update).length)
+      await storage.write(update)
+  }
+  return () => {
+    const run = chain.then(reconcile, reconcile)
+    chain = run.then(() => {}, () => {})
+    return run
   }
 }
 
@@ -235,12 +295,14 @@ export interface SavedListState {
  * Every saved list, each with its entry while it is tracked: the records, then
  * any entry the planner hasn't filed a record for yet, read as the record it
  * will make of it. An entry that isn't tracked is a saved list's, not a
- * tracked one's.
+ * tracked one's. A list with no title is read under its default, as the
+ * planner will file it.
  */
 export function savedListsOf(state: ListState): SavedListState[] {
   const records = recordsOf(state)
+  const entries = entriesOf(state).map(withDefaultAlias)
   const tracked = new Map<string, TrackedList>()
-  for (const entry of entriesOf(state)) {
+  for (const entry of entries) {
     if (isEntry(entry) && entry.tracked === true && !tracked.has(entry.id))
       tracked.set(entry.id, entry)
   }
@@ -250,9 +312,9 @@ export function savedListsOf(state: ListState): SavedListState[] {
     if (!isListId(id) || !isRecord(record))
       continue
     seen.add(id)
-    out.push({ list: record, entry: tracked.get(id) ?? null })
+    out.push({ list: withDefaultTitle(record), entry: tracked.get(id) ?? null })
   }
-  for (const entry of entriesOf(state)) {
+  for (const entry of entries) {
     if (!isEntry(entry) || seen.has(entry.id))
       continue
     seen.add(entry.id)
@@ -272,21 +334,103 @@ export function savedListAt(state: ListState, key: string | null): SavedList | n
   return savedListsOf(state).find(({ list, entry }) => !entry && trackedKey(list) === key)?.list ?? null
 }
 
+/** A saved list as it is shown: its entry while tracked, its address, and the offline copy it has there. */
+export interface JoinedSavedList {
+  list: SavedList
+  entry: TrackedList | null
+  /** Null for a URL that isn't a list on the archive, which shares an address with nothing. */
+  address: string | null
+  /** The newest stored list at its address: the list's offline copy, shared with every other list there. */
+  copy: StoredListRef | null
+  /** The ids of the other saved lists at the same address. */
+  sameAddress: string[]
+}
+
+/** Every saved list with its copy, and what else is stored: {@link joinSavedLists}. */
+export interface SavedListJoin {
+  lists: JoinedSavedList[]
+  /**
+   * Stored lists no saved list is at, the review's window and the profile lists
+   * shown on their own aside, newest first: each a list of its own, with no
+   * record. An undescribed one, which no visit has given an address; one at no
+   * address on the archive; another account's profile list; and a search the
+   * planner has yet to give its record.
+   */
+  copies: StoredListRef[]
+  /** The reader's own profile lists ({@link joinSavedLists} says which are theirs). */
+  builtins: { markedForLater: StoredListRef | null, readWorks: StoredListRef | null }
+  /** The review's own window. */
+  review: StoredListRef | null
+}
+
+/** The source id of the review's own stored window: gathered from every tracked list at once, it is no saved list. */
+export const REVIEW_SOURCE_ID = 'tracked-review'
+
+/**
+ * Join the saved lists to what is stored. A list's copy is whatever is stored
+ * at its address, which leaves its view filter out: so a filtered list has the
+ * copy of its page, and every list at one address shares it. Of several copies
+ * there (one search in several sort orders), the newest is the list's, and the
+ * rest are its too, so none of them is a list of its own.
+ *
+ * Marked for Later and Read works are the reader's own when stored under
+ * `userId`; with no `userId`, the newest copy of each stands in. Either way an
+ * undescribed copy is left among the copies, with any other account's: it can't
+ * be refreshed or cached until a visit describes it.
+ */
+export function joinSavedLists(state: ListState, stored: readonly StoredListRef[], userId?: string): SavedListJoin {
+  const known = savedListsOf(state).map(({ list, entry }) => ({ list, entry, address: addressOf(list.url) }))
+  const copies = addressed(stored)
+  const lists = known.map(one => ({
+    ...one,
+    copy: copiesAt(one.address, copies)[0] ?? null,
+    sameAddress: one.address === null ? [] : known.filter(other => other !== one && other.address === one.address).map(other => other.list.id),
+  }))
+
+  const claimed = new Set(known.map(one => one.address))
+  const loose = [...copies].sort(newestFirst).filter(one => one.address === null || !claimed.has(one.address)).map(one => one.copy)
+  const builtin = (sourceId: string): StoredListRef | null => {
+    const all = loose.filter(copy => sourceOf(copy) === sourceId)
+    const described = all.filter(copy => copy.sourceId !== undefined)
+    return (userId ? described.find(copy => copy.key === `${sourceId}:${userId}`) : described[0]) ?? null
+  }
+  const builtins = { markedForLater: builtin('marked-for-later'), readWorks: builtin('read-works') }
+  const review = loose.find(copy => sourceOf(copy) === REVIEW_SOURCE_ID) ?? null
+  const shown = new Set([builtins.markedForLater, builtins.readWorks, review])
+  return { lists, copies: loose.filter(copy => !shown.has(copy)), builtins, review }
+}
+
+/**
+ * The saved list a stored copy stands for, where the copy is shown as a list
+ * of its own: of the lists at its address, a tracked one, else the one that is
+ * exactly its search, else the first. Null when it is at no list's address.
+ */
+export function copyOwner(join: SavedListJoin, copy: Pick<StoredListRef, 'listUrl'>): JoinedSavedList | null {
+  const address = addressOf(copy.listUrl)
+  if (address === null)
+    return null
+  const at = join.lists.filter(one => one.address === address)
+  return at.find(one => one.entry) ?? at.find(one => trackedKey(one.list) === address) ?? at[0] ?? null
+}
+
 /**
  * Give list `id` a title, trimmed: on its record, and on its entry while it is
  * tracked, since the entry is what carries a title to the other browsers. It
  * never tracks or stops tracking anything. An entry with no record yet gets one.
+ * A blank title is the list's default ({@link defaultTitleOf}).
  *
- * Refused, naming the list, when another list has the title. Untitled (`''`)
- * is never taken. Committing the title the list already has changes nothing, so
- * a mirror stays one; and a list that is gone is left gone.
+ * Refused, naming the list, when another list has the title. Committing the
+ * title the list already has changes nothing, so a mirror stays one; and a list
+ * that is gone is left gone.
  */
 export function planRetitle(state: ListState, id: string, title: string): { ok: true, state: ListState } | { ok: false, takenBy: SavedList } {
   const entries = entriesOf(state)
   const entry = entries.find(one => isEntry(one) && one.id === id)
   const record = own(recordsOf(state), id) ?? (entry ? recordFrom(entry, undefined, false) : undefined)
-  const trimmed = typeof title === 'string' ? title.trim() : ''
-  if (!record || record.title === trimmed)
+  if (!record)
+    return { ok: true, state }
+  const trimmed = (typeof title === 'string' ? title.trim() : '') || defaultTitleOf(record)
+  if (record.title === trimmed)
     return { ok: true, state }
   const taken = titleTakenBy(trimmed, titled(allLists(state)), id)
   if (taken)
@@ -298,8 +442,9 @@ export function planRetitle(state: ListState, id: string, title: string): { ok: 
 }
 
 /**
- * Track list `id`: an entry made from its record, tracked from `today`, so
- * nothing from before is backfilled. The record already holds everything else.
+ * Track list `id`: an entry made from its record, under its title, tracked from
+ * `today`, so nothing from before is backfilled. The record already holds
+ * everything else; one with no title yet takes its default, as the entry does.
  *
  * Refused, naming it, when another tracked list is the same search with the same
  * view filter: the review would read it twice. A list already tracked, or gone,
@@ -314,12 +459,13 @@ export function planTrack(state: ListState, id: string, today: Day): { ok: true,
   const twin = key === null ? undefined : entries.find(entry => isEntry(entry) && trackedKey(entry) === key)
   if (twin)
     return { ok: false, twin }
-  const entry: TrackedList = { id, ...queryOf(record), alias: record.title, tracked: true, since: today }
+  const titled = withDefaultTitle(record)
+  const entry: TrackedList = { id, ...queryOf(titled), alias: titled.title, tracked: true, since: today }
   return {
     ok: true,
     state: {
       tracked: { ...state.tracked, lists: [...entries, entry] },
-      saved: record.mirror ? withRecord(state, withoutMirror(record)) : state.saved,
+      saved: record.mirror || titled !== record ? withRecord(state, withoutMirror(titled)) : state.saved,
     },
   }
 }
@@ -331,19 +477,21 @@ export type TrackSearchPlan
     | { ok: false, takenBy: SavedList }
 
 /**
- * Track the search `query` under `title`, trimmed. The saved list that is
- * exactly that search ({@link savedListAt}) is the one tracked, under its own
- * id, taking `query` and the title; with none, it is a new list, a record and
- * its entry under one new id. Either way the record is this browser's own.
+ * Track the search `query` under `title`, trimmed, or blank, its default. The
+ * saved list that is exactly that search ({@link savedListAt}) is the one
+ * tracked, under its own id, taking `query` and the title; with none, it is a
+ * new list, a record and its entry under one new id. Either way the record is
+ * this browser's own.
  *
- * Refused when another tracked list is the same search (`twin`), and when
- * another list has the title (`takenBy`).
+ * Refused when another tracked list is the same search (`twin`), and when the
+ * title is a new one for the list and another list has it (`takenBy`): a list
+ * keeps its own title as it is tracked, even one it shares.
  */
 export function planTrackSearch(state: ListState, query: TrackedQuery, title: string, today: Day): TrackSearchPlan {
   const existing = savedListAt(state, trackedKey(query))
   const id = existing?.id ?? newTrackedListId(allLists(state))
-  const trimmed = typeof title === 'string' ? title.trim() : ''
-  const taken = titleTakenBy(trimmed, titled(allLists(state)), id)
+  const trimmed = (typeof title === 'string' ? title.trim() : '') || defaultTitleOf(query)
+  const taken = existing && sameTitle(trimmed, existing.title) ? null : titleTakenBy(trimmed, titled(allLists(state)), id)
   if (taken)
     return { ok: false, takenBy: taken.list }
   const record: SavedList = withoutMirror({ ...withQueryOf(existing ?? {}, query), id, title: trimmed })
@@ -352,10 +500,11 @@ export function planTrackSearch(state: ListState, query: TrackedQuery, title: st
 }
 
 /**
- * Track the list a stored copy is: the saved list that is exactly its search,
- * under its own id, title and query — or with none, a new one, made as the
- * planner makes one for a copy. A list with no title takes the search's
- * default, made unique.
+ * Track the list a stored copy is ({@link copyOwner}), under its own id, title
+ * and query, its view filter included — or with none, a new one, made as the
+ * planner makes one for a copy, under the search's default made unique, so the
+ * click isn't refused for a title the reader never typed. Refused, naming it,
+ * when that list is tracked already.
  *
  * Null for a copy that isn't a saved list's: undescribed, from a view that
  * keeps no saved lists, or not at an address on the archive.
@@ -364,11 +513,31 @@ export function planTrackCopy(state: ListState, copy: StoredListRef, today: Day)
   const normalized = SAVED_LIST_SOURCE_IDS.includes(copy.sourceId ?? '') ? normalizeTrackedUrl(copy.listUrl ?? '') : null
   if (!normalized)
     return null
-  const existing = savedListAt(state, normalized.key)
+  const owner = copyOwner(joinSavedLists(state, []), copy)
+  if (owner?.entry)
+    return { ok: false, twin: owner.entry }
+  const existing = owner?.list ?? null
   const query = existing ? queryOf(existing) : copyQuery(normalized, copy.label)
   const title = (typeof existing?.title === 'string' ? existing.title.trim() : '')
     || uniqueTitle(defaultTitle(trackedMeta(query) ?? storedListMeta(normalized.url, copy.label ?? '')), titled(allLists(state)), existing?.id)
   return planTrackSearch(state, query, title, today)
+}
+
+/**
+ * Put `entry` in place of its list's entry: an edit made on this browser to
+ * the entry itself, such as the floating toolbar's update and its undo. The
+ * record takes the entry's query and title with it, as the planner would copy
+ * them, and is this browser's own from then on, so the list stays saved here if
+ * its tracking stops on another browser. A list with no entry is left as it is.
+ */
+export function planEntryEdit(state: ListState, entry: TrackedList): ListState {
+  const entries = entriesOf(state)
+  if (!isEntry(entry) || !entries.some(one => isEntry(one) && one.id === entry.id))
+    return state
+  return {
+    tracked: { ...state.tracked, lists: entries.map(one => (isEntry(one) && one.id === entry.id ? entry : one)) },
+    saved: withRecord(state, recordFrom(entry, own(recordsOf(state), entry.id), false)),
+  }
 }
 
 /**
@@ -393,7 +562,7 @@ export function planStopTracking(state: ListState, id: string): ListState {
  * keys of every stored list at its address, newest first, for the caller to
  * delete, unless another record at that address still claims them. One search
  * stored in several sort orders is several copies at one address, and a copy
- * left behind would come back as an untitled list of its own.
+ * left behind would come back as a list of its own.
  */
 export function planRemoveList(state: ListState, id: string, stored: readonly StoredListRef[]): { state: ListState, dropCopies: string[] } {
   const records = recordsOf(state)
@@ -446,13 +615,13 @@ export type SaveBackPlan
  * - **The title** stays, unless it was the default for a root the search has
  *   left ({@link titleAfterUpdate}), or the caller passes one.
  * - **`absorbed`**: opening the search view on the refined page stored a copy
- *   at its address, and that copy got a record of its own — untitled, untracked,
- *   with no view filter. That record is removed, so the list doesn't show twice.
- *   A record at the address that is any more than that is a list of its own,
- *   and stays.
+ *   at its address, and that copy got a record of its own — under its default
+ *   title, untracked, with no view filter. That record is removed, so the list
+ *   doesn't show twice. A record at the address that is any more than that is a
+ *   list of its own, and stays.
  * - **`dropCopies`**: when the address changed, every copy at the old one,
  *   newest first, for the caller to detach, unless another list is still there.
- *   A copy left behind would come back as an untitled list at the old address.
+ *   A copy left behind would come back as a list of its own at the old address.
  *   A change of view filter alone keeps the address, so it drops nothing.
  *
  * Refused when the list is gone (`missing`), when the page isn't a list of the
@@ -462,9 +631,10 @@ export type SaveBackPlan
  */
 export function planSaveBack(state: ListState, id: string, page: SaveBackPage, stored: readonly StoredListRef[]): SaveBackPlan {
   const records = recordsOf(state)
-  const before = own(records, id)
-  if (!before)
+  const filed = own(records, id)
+  if (!filed)
     return { ok: false, reason: 'missing' }
+  const before = withDefaultTitle(filed)
   const query = requery(before, { url: page.url, filter: page.filter, meta: page.meta, scan: page.scan })
   if (!query || query.kind !== page.kind)
     return { ok: false, reason: 'invalid' }
@@ -484,7 +654,7 @@ export function planSaveBack(state: ListState, id: string, page: SaveBackPage, s
     ? null
     : listed(records).find(other => other.id !== id
       && addressOf(other.url) === newAddress
-      && sameTitle(other.title, '')
+      && (sameTitle(other.title, '') || sameTitle(other.title, defaultTitleOf(other)))
       && !other.filter
       && !entries.some(one => isEntry(one) && one.id === other.id)) ?? null
 
@@ -546,6 +716,14 @@ function isRecord(value: unknown): value is SavedList {
   return typeof value === 'object' && value !== null
 }
 
+/** Which search view stored a copy: its descriptor's say, else the start of its key, which every view keys its copies by. */
+function sourceOf(copy: StoredListRef): string {
+  if (copy.sourceId !== undefined)
+    return copy.sourceId
+  const colon = copy.key.indexOf(':')
+  return colon < 0 ? copy.key : copy.key.slice(0, colon)
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -566,10 +744,26 @@ function own(records: { [id: string]: SavedList }, id: string): SavedList | unde
   return Object.hasOwn(records, id) ? records[id] : undefined
 }
 
-/** The record an entry makes: its query and title, over whatever else `existing` holds. */
+/** The record an entry makes: its query and title, or its default title, over whatever else `existing` holds. */
 function recordFrom(entry: TrackedList, existing: SavedList | undefined, mirror: boolean): SavedList {
-  const record: SavedList = withQueryOf({ ...existing, id: entry.id, title: typeof entry.alias === 'string' ? entry.alias : '' }, entry)
+  const record: SavedList = withDefaultTitle(withQueryOf({ ...existing, id: entry.id, title: typeof entry.alias === 'string' ? entry.alias : '' }, entry))
   return mirror ? { ...record, mirror: true } : withoutMirror(record)
+}
+
+/** The record itself when it has a title, else with its default ({@link defaultTitleOf}), where there is one. */
+function withDefaultTitle(record: SavedList): SavedList {
+  if (typeof record.title === 'string' && record.title.trim())
+    return record
+  const title = defaultTitleOf(record)
+  return title ? { ...record, title } : record
+}
+
+/** The entry itself when it has a title, else with its default, where there is one. Anything that isn't an entry, as it is. */
+function withDefaultAlias<T>(entry: T): T {
+  if (!isEntry(entry) || (typeof entry.alias === 'string' && entry.alias.trim()))
+    return entry
+  const alias = defaultTitleOf(entry)
+  return alias ? { ...entry, alias } : entry
 }
 
 function withoutMirror(record: SavedList): SavedList {

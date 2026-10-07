@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import type { SavedList, TrackedKind, TrackedList } from '#common'
+import type { SavedList, TrackedList } from '#common'
 
 import { cache, defaultTitle, describeFilters, formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, planRemoveList, planRetitle, planStopTracking, planTrack, refineLink, savedListsOf, sourceLabel, storedListRefs, toast, toEpochDays, TRACKED_TYPE_LABELS, trackedMeta, utcToday } from '#common'
 
 import { useSavedLists } from '../../composables/useSavedLists.ts'
+import { KIND_LABELS, titlePlaceholder } from '../../model/savedListRows.ts'
 
 /**
  * Tracked lists: every saved list on this browser, each tracked or not, plus
@@ -23,14 +24,6 @@ import { useSavedLists } from '../../composables/useSavedLists.ts'
 const { enabled, target, reviewedThrough } = useOption('trackedLists')
 const { entries, records, current, apply } = useSavedLists()
 const { deleteCopies } = useSiteExport()
-
-/** What each kind of query is called in the reader's words. */
-const KIND_LABELS: Record<TrackedKind, string> = {
-  'works-filter': 'Filtered listing',
-  'text-search': 'Works search',
-  'tag-works': 'Uncommon tag',
-  'series-works': 'Series',
-}
 
 // ---------------------------------------------------------------------------
 // Works per review
@@ -180,8 +173,8 @@ const rows = computed(() => {
        */
       label: sourceLabel(aliased(list), all),
       titled: !!titleKey(list.title),
-      /** The tail of the URL — what the facet falls back to when there's no title. */
-      placeholder: sourceLabel({ id: list.id, alias: '', url: list.url }),
+      /** What an emptied field shows: the default title it commits to. */
+      placeholder: titlePlaceholder(list),
       /** What's in the field: the stored title, or what is being typed over it. */
       title: draft ?? list.title,
       refusal: plan && !plan.ok

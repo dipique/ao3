@@ -14,7 +14,6 @@ declare global {
   const OptionRowOff: typeof import('../options_ui/composables/context').OptionRowOff
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
-  const REVIEW_SOURCE_ID: typeof import('../options_ui/composables/useSiteExport').REVIEW_SOURCE_ID
   const REVIEW_WINDOW_NOTE: typeof import('../options_ui/composables/useSiteExport').REVIEW_WINDOW_NOTE
   const anchorCategory: typeof import('../options_ui/composables/useAnchors').anchorCategory
   const askAutocomplete: typeof import('../options_ui/composables/useTagSuggestions').askAutocomplete
@@ -110,6 +109,7 @@ declare global {
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveRef: typeof import('@vueuse/core').resolveRef
   const resolveUnref: typeof import('@vueuse/core').resolveUnref
+  const savedListFor: typeof import('../options_ui/composables/useSiteExport').savedListFor
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
@@ -123,7 +123,6 @@ declare global {
   const toRef: typeof import('vue').toRef
   const toRefs: typeof import('vue').toRefs
   const toValue: typeof import('vue').toValue
-  const trackedEntryFor: typeof import('../options_ui/composables/useSiteExport').trackedEntryFor
   const triggerRef: typeof import('vue').triggerRef
   const tryOnBeforeMount: typeof import('@vueuse/core').tryOnBeforeMount
   const tryOnBeforeUnmount: typeof import('@vueuse/core').tryOnBeforeUnmount

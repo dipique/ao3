@@ -2,7 +2,7 @@ import type { Options, SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS, logger, toast } from '#common'
-import { onArchiveWait } from '#content_script/archiveFetch.js'
+import { countdown, onArchiveWait, WAIT_WORDS } from '#content_script/archiveFetch.js'
 import { hasNode } from '#content_script/blurb.js'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
@@ -649,13 +649,6 @@ function mountContainer(source: SearchSource): HTMLElement {
   return container
 }
 
-/** `2:05`, or `9s` under a minute — a wait too short to need the colon. */
-function countdown(ms: number): string {
-  const total = Math.ceil(ms / 1000)
-  const seconds = total % 60
-  return total >= 60 ? `${Math.floor(total / 60)}:${String(seconds).padStart(2, '0')}` : `${seconds}s`
-}
-
 interface ProgressPanel {
   onProgress: (done: number, total: number) => void
   /** Fetching works one page each, after the listing (see `SearchSource.recover`). */
@@ -712,7 +705,7 @@ function mountProgress(container: HTMLElement): ProgressPanel {
   // rather than once per worker sitting inside it.
   const unwatch = onArchiveWait((until, reason) => {
     waitUntil = until
-    waitText = reason === 'refused' ? 'AO3 asked us to slow down' : 'Giving AO3 a moment'
+    waitText = WAIT_WORDS[reason]
     if (until && ticker === undefined)
       ticker = setInterval(draw, 1000)
     draw()

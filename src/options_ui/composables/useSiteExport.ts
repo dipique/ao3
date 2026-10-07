@@ -1,16 +1,17 @@
-import type { SnapshotDescriptor, TrackedList } from '#common'
+import type { JoinedSavedList, SnapshotDescriptor } from '#common'
 import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { getArchiveLink, normalizeTrackedUrl, planTrackCopy, SAVED_LIST_SOURCE_IDS, toast, trackedKey, utcToday } from '#common'
+import { copyOwner, getArchiveLink, joinSavedLists, normalizeTrackedUrl, planTrackCopy, REVIEW_SOURCE_ID, SAVED_LIST_SOURCE_IDS, toast, utcToday } from '#common'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
 import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
-import { planOrphanDiscard, summarizeWorkText } from '#content_script/siteExport/workText.js'
+import { cachingBuckets, planOrphanDiscard, summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { discardOrphanedWorkText, purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
 
+import { jobView } from '../model/jobView.ts'
 import { useSavedLists } from './useSavedLists.ts'
 
 /**
@@ -88,21 +89,18 @@ const changeReport = shallowRef<ChangeImportReport | null>(null)
 const importingChanges = ref(false)
 
 /**
- * The saved lists, read here so a stored list can say whether it is a tracked
- * one, and tracked from its row. Taken once, like the state above: the refs read
+ * The saved lists, read here so a stored list can say which saved list it is,
+ * and be tracked from its row. Taken once, like the state above: the refs read
  * through to the options page's own reactive copy, so a rename made in Search →
  * Tracked lists shows up on these rows without a reload.
  */
 const savedLists = useSavedLists()
-const trackedEntries = savedLists.entries
+const joined = computed(() => joinSavedLists(savedLists.current(), []))
 
 /**
- * The source id of the tracked-lists review's own stored window, which is a
- * stored list like any other and the one that can't be re-read from here.
+ * Whether this row is the review's own stored window, which is a stored list
+ * like any other and the one that can't be re-read from here.
  */
-export const REVIEW_SOURCE_ID = 'tracked-review'
-
-/** Whether this row is that window. */
 export function isReviewWindow(row: SiteExportListRow): boolean {
   return row.descriptor?.sourceId === REVIEW_SOURCE_ID
 }
@@ -128,27 +126,23 @@ export const REVIEW_WINDOW_NOTE
     + 'up to date, and marking the range reviewed replaces it with the next one.'
 
 /**
- * The tracked-list entry this stored list is, if any.
- *
- * Matched on the entry's key and nothing else — never by comparing the two
- * addresses — so the options page and the content script agree about what counts
- * as the same list however the reader reached it (a different parameter order, a
- * different sort).
+ * The saved list this stored list is, if any ({@link copyOwner}): one at its
+ * address, which is the list's own key with its view filter left out, so a list
+ * narrowed in its search view still finds the copy of its page, whatever order
+ * or sort the page's address was in.
  */
-export function trackedEntryFor(row: SiteExportListRow): TrackedList | undefined {
-  const key = row.descriptor?.listUrl ? normalizeTrackedUrl(row.descriptor.listUrl)?.key : undefined
-  if (!key)
-    return undefined
-  return trackedEntries.value.find(entry => trackedKey(entry) === key)
+export function savedListFor(row: SiteExportListRow): JoinedSavedList | null {
+  return row.descriptor ? copyOwner(joined.value, row.descriptor) : null
 }
 
-/** A stored list's name: the alias its tracked entry carries, else the list's own label. */
+/** A stored list's name: the title of the saved list it is, else the list's own label. */
 export function listName(row: SiteExportListRow): string {
   // Not one of the tracked lists but the review over all of them, and a name
   // that says which of the two it is.
   if (isReviewWindow(row))
     return 'Tracked review window'
-  return trackedEntryFor(row)?.alias.trim() || row.label
+  const title = savedListFor(row)?.list.title
+  return (typeof title === 'string' ? title.trim() : '') || row.label
 }
 
 /** Whether offering **Track** on this row makes sense at all. */
@@ -162,11 +156,31 @@ subscribeJob((next) => {
   status.value = next
 })
 
-/** A job that stopped short leaves a queue behind; that is the whole resume test. */
-const resumable = computed(() => {
-  const job = status.value.job
-  return !!job && !status.value.running && (job.steps.length > 0 || job.queue.length > 0)
+/**
+ * A clock, ticking only while the job sits out a pause, so its countdown goes
+ * down. The runner reports when it may next ask AO3 for something rather than
+ * how long that is, and a permanent interval would be a poor trade for a line
+ * that is usually absent.
+ */
+const now = ref(Date.now())
+watchEffect((onCleanup) => {
+  if (!status.value.waitingUntil)
+    return
+  now.value = Date.now()
+  const timer = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+  onCleanup(() => clearInterval(timer))
 })
+
+/** A stored list's name by its key, for the job; `''` for one with no row. */
+function nameOf(key: string): string {
+  const row = rows.value.find(one => one.key === key)
+  return row ? listName(row) : ''
+}
+
+/** The job as the page shows it ({@link jobView}): every control it turns off, and its own line, read it from here. */
+const view = computed(() => jobView(status.value, nameOf, now.value))
 
 /** Re-read the lists and the cache index. Cheap enough to run after every action. */
 async function reload(): Promise<void> {
@@ -184,20 +198,7 @@ async function reload(): Promise<void> {
     blurbBytes: blurbs.bytes,
   }
   rows.value = snapshots.map((snapshot) => {
-    let cached = 0
-    let failed = 0
-    let bytes = 0
-    for (const workId of snapshot.workIds) {
-      const meta = index[workId]
-      if (!meta)
-        continue
-      if (meta.size > 0) {
-        cached++
-        bytes += meta.size
-      }
-      if (meta.failure)
-        failed++
-    }
+    const { cached, failed, staleFailures, bytes } = cachingBuckets(snapshot.workIds, index)
     const row: SiteExportListRow = {
       key: snapshot.key,
       label: snapshot.descriptor?.label ?? snapshot.key,
@@ -206,7 +207,7 @@ async function reload(): Promise<void> {
       scrapedAt: snapshot.scrapedAt,
       count: snapshot.count,
       cached,
-      failed,
+      failed: failed + staleFailures,
       uncached: Math.max(0, snapshot.count - cached),
       bytes,
       unstored: snapshot.unstored,
@@ -315,8 +316,7 @@ export function useSiteExport() {
     usage,
     orphans,
     loading,
-    status,
-    resumable,
+    view,
     reload,
     changeReport,
     importingChanges,

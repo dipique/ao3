@@ -78,8 +78,9 @@ export async function startOptions({ scrollbars = false } = {}) {
  *   request interception or a script of its own. It runs after the storage mock
  *   is installed, so a script can build on the mock.
  *
- * @returns {Promise<OptionsPage>} the page, once it has had time to read its
- *   options and draw them.
+ * @returns {Promise<OptionsPage>} the page, once it has read its options, drawn
+ *   them, and opened on what `hash` names (the body's `data-landed`): nothing
+ *   is left to scroll under a test's first click.
  */
 export async function openOptions(browser, server, { seed = {}, hash = '', viewport = DEFAULT_VIEWPORT, theme, prepare } = {}) {
   const page = await browser.newPage()
@@ -96,9 +97,24 @@ export async function openOptions(browser, server, { seed = {}, hash = '', viewp
     window.browser.runtime.getURL = path => new URL(path, location.origin).href
   })
   await prepare?.(page)
-  await page.goto(`${server.url}/options_ui/options_ui.html${hash}`, { waitUntil: 'networkidle2' })
-  await sleep(1500)
+  await page.goto(`${server.url}/options_ui/options_ui.html${hash}`)
+  await page.waitForFunction(() => document.body?.dataset.landed !== undefined)
   return new OptionsPage(page, messages)
+}
+
+/**
+ * Wait until `check` (which may be async) holds, asking again every 50 ms, or
+ * fail naming `what` once `ms` have gone by: for a test to wait on what it is
+ * waiting for, such as a write landing, rather than on a guess at how long that
+ * takes.
+ */
+export async function until(what, check, ms = 20000) {
+  const deadline = Date.now() + ms
+  while (!(await check())) {
+    if (Date.now() > deadline)
+      assert.fail(`timed out waiting for ${what}`)
+    await sleep(50)
+  }
 }
 
 /** Where every request the options page makes of AO3 goes. */

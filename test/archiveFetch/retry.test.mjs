@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 // Node strips the TS types on import; archiveFetch.ts imports nothing at all, so
 // it loads under a plain `node --test`. `fetch` is stubbed per test and the
 // clock is mocked, which is the only way a fifteen-minute budget is testable.
-import { archivePause, archiveWaitRemaining, fetchWithRetry, onArchiveWait, PATIENCE } from '../../src/content_script/archiveFetch.ts'
+import { archivePause, archiveWaitRemaining, countdown, fetchWithRetry, onArchiveWait, PATIENCE, WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
 
 const MINUTE = 60_000
 
@@ -480,5 +480,19 @@ describe('archiveFetch — for a request that won\'t wait', () => {
       await fetchWithRetry(url, undefined, PATIENCE.suggestion)
 
     assert.deepEqual(archivePause(), { reason: 'refused', until: calls[19].at + 5000 })
+  })
+})
+
+describe('archiveFetch — a pause, as a reader watches it', () => {
+  test('each kind of pause has words of its own, so the reader can tell them apart', () => {
+    assert.deepEqual(WAIT_WORDS, { refused: 'AO3 asked us to slow down', pacing: 'Giving AO3 a moment' })
+  })
+
+  test('the time left reads in seconds under a minute, and in minutes and seconds from one', () => {
+    assert.equal(countdown(8_100), '9s')
+    assert.equal(countdown(59_000), '59s')
+    assert.equal(countdown(60_000), '1:00')
+    assert.equal(countdown(296_000), '4:56')
+    assert.equal(countdown(0), '0s')
   })
 })

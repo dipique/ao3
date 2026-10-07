@@ -40,8 +40,14 @@ const COMPLETE = { id: 'hpdone', kind: 'works-filter', url: `${HP_PATH}?work_sea
 /** Another fandom altogether, which no Harry Potter page is ever offered as. */
 const SHERLOCK = { id: 'sherl', kind: 'works-filter', url: '/tags/Sherlock%20(TV)/works', alias: 'Sherlock', tracked: true, since: TODAY - 3 }
 
+/** The record a browser keeps of a list it took from another browser's entry and has done nothing to. */
+function mirrorOf({ id, kind, url, alias, type, entity }) {
+  return { id, kind, url, title: alias, type, entity, mirror: true }
+}
+
 const SEED = {
   'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [NO_DRACO, COMPLETE, SHERLOCK] },
+  'option.savedLists': { v: 1, lists: { nodraco: mirrorOf(NO_DRACO) } },
 }
 
 function route(url) {
@@ -126,6 +132,18 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     await tab.click('.AO3E--filter-toolbar--fab')
     await sleep(300)
     assert.equal(await pillText(tab), 'Tracked as “Harry Potter, no Draco”')
+  })
+
+  /**
+   * The list came from another browser, so its record here was only a mirror,
+   * which goes when tracking stops over there. Changed here, it is this
+   * browser's own list too, and stays saved.
+   */
+  test('the update is this browser\'s own: the list\'s record follows it, and is no longer a mirror', async () => {
+    const updated = await list('nodraco')
+    const { mirror, ...record } = mirrorOf(updated)
+    assert.equal(mirror, true)
+    assert.deepEqual((await storedOption(tab, 'savedLists')).lists.nodraco, record)
   })
 
   test('Refine opens the chosen list\'s own page, refining it', async () => {

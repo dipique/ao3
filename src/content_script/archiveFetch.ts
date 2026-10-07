@@ -138,6 +138,23 @@ let lastRefusedAt = 0
 /** Why everything has stopped: the archive refused us, or we are pacing ourselves. */
 export type WaitReason = 'refused' | 'pacing'
 
+/**
+ * What each kind of pause is called wherever a reader is left waiting on one.
+ * The two are worded apart on purpose: one is the archive complaining, the
+ * other is us being polite, and only the first is worth worrying about.
+ */
+export const WAIT_WORDS: Readonly<Record<WaitReason, string>> = {
+  refused: 'AO3 asked us to slow down',
+  pacing: 'Giving AO3 a moment',
+}
+
+/** The time a pause has left, as a reader watches it: `2:05`, or `9s` under a minute — a wait too short to need the colon. */
+export function countdown(ms: number): string {
+  const total = Math.ceil(ms / 1000)
+  const seconds = total % 60
+  return total >= 60 ? `${Math.floor(total / 60)}:${String(seconds).padStart(2, '0')}` : `${seconds}s`
+}
+
 type WaitListener = (until: number, reason: WaitReason) => void
 
 const waitListeners = new Set<WaitListener>()

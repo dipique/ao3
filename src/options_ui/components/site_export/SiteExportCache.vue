@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { cachedTextOff } from '../../model/jobView.ts'
+import { sentence, withReason } from '../../model/phrases.ts'
+
 /**
  * The cache read-out and its two deletions, under the list of lists — in the
  * shape of the "~X kB in use" line in
@@ -18,8 +21,11 @@
  * it is pressed, which is the whole difference between the two buttons: one is
  * measurable in advance, the other is everything. Blurbs are stored by work as
  * well, and strand the same way, so the one button takes both.
+ *
+ * Both are off while a job runs, since it is writing the text they would
+ * delete, and each then says so.
  */
-const { usage, orphans, status, purge, discardOrphans } = useSiteExport()
+const { usage, orphans, view, purge, discardOrphans } = useSiteExport()
 
 /**
  * What no list holds any more, said only when there is some — and said in terms
@@ -52,6 +58,12 @@ const subtitle = computed(() => {
   return `${usage.value.cached.toLocaleString()} works (${formatBytes(usage.value.bytes)}) cached.${failed}${stranded.value}`
 })
 
+/** Why the job keeps both buttons off, said only on a button that would otherwise be on. */
+const jobOff = computed(() => cachedTextOff(view.value))
+const discardOff = computed(() => (orphanCount.value ? jobOff.value : null))
+const deleteOff = computed(() => (usage.value.cached ? jobOff.value : null))
+const jobOffId = useId()
+
 const confirm = useConfirmInPlace()
 const DISCARD = 'site-export-cache-discard-orphans'
 const DELETE = 'site-export-cache-delete-all'
@@ -68,7 +80,9 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
       <Button
         :variant="confirm.armed(DISCARD) ? 'destructive' : 'outline'"
         class="disabled:cursor-default disabled:op-50"
-        :disabled="!orphanCount || status.running"
+        :title="discardOff ? withReason('Discard orphans', discardOff) : undefined"
+        :aria-describedby="discardOff ? jobOffId : undefined"
+        :disabled="!orphanCount || !!jobOff"
         @click.prevent="press(DISCARD)"
       >
         {{ confirm.armed(DISCARD) ? `Discard ${orphanCount.toLocaleString()}?` : 'Discard orphans' }}
@@ -76,11 +90,14 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
       <Button
         :variant="confirm.armed(DELETE) ? 'destructive' : 'outline'"
         class="disabled:cursor-default disabled:op-50"
-        :disabled="!usage.cached || status.running"
+        :title="deleteOff ? withReason('Delete cached text', deleteOff) : undefined"
+        :aria-describedby="deleteOff ? jobOffId : undefined"
+        :disabled="!usage.cached || !!jobOff"
         @click.prevent="press(DELETE)"
       >
         {{ confirm.armed(DELETE) ? 'Delete it all?' : 'Delete cached text' }}
       </Button>
+      <span v-if="jobOff" :id="jobOffId" hidden>{{ sentence(jobOff) }}.</span>
     </div>
   </OptionRow>
 </template>

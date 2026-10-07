@@ -1,4 +1,5 @@
 import type { SnapshotDescriptor } from '#common'
+import type { WaitReason } from '#content_script/archiveFetch.js'
 import type { Work } from '#content_script/blurb.js'
 import type { RefreshOptions } from '#content_script/searchView/refresh.js'
 
@@ -119,6 +120,8 @@ export interface JobStatus {
    * here would be a minute stale a minute later. The view holds the clock.
    */
   waitingUntil: number | null
+  /** Which kind of pause {@link waitingUntil} is: the archive refusing us, or us pacing ourselves. */
+  waitReason: WaitReason | null
 }
 
 type Listener = (status: JobStatus) => void
@@ -132,15 +135,16 @@ let message = ''
 let error: string | null = null
 let warnings: string[] = []
 let waitingUntil: number | null = null
+let waitReason: WaitReason | null = null
 let controller: AbortController | null = null
 
-let status: JobStatus = { job: null, running: false, message: '', error: null, warnings: [], waitingUntil: null }
+let status: JobStatus = { job: null, running: false, message: '', error: null, warnings: [], waitingUntil: null, waitReason: null }
 
 function publish(): void {
   // A fresh outer object each time, so a `shallowRef` on the Vue side sees the
   // change; `queue` and `errors` stay shared, since a run mutates them per work
   // and copying a thousand-id queue that often would be the expensive part.
-  status = { job: current ? { ...current } : null, running, message, error, warnings, waitingUntil }
+  status = { job: current ? { ...current } : null, running, message, error, warnings, waitingUntil, waitReason }
   for (const listener of listeners)
     listener(status)
 }
@@ -187,6 +191,7 @@ export async function loadJob(): Promise<ExportJob | null> {
   error = null
   warnings = []
   waitingUntil = null
+  waitReason = null
   publish()
   return current
 }
@@ -257,6 +262,7 @@ export async function discardJob(): Promise<void> {
   error = null
   warnings = []
   waitingUntil = null
+  waitReason = null
   await forget()
   publish()
 }
@@ -269,15 +275,15 @@ async function drive(job: ExportJob): Promise<void> {
   error = null
   warnings = []
   waitingUntil = null
+  waitReason = null
   publish()
 
   // A pause can run to minutes, and every worker is inside it, so without this
-  // the run looks like it has hung. Nothing else publishes while it holds, which
-  // is what lets this stand until a fetch actually resumes.
+  // the run looks like it has hung. The deadline and its kind are reported as
+  // facts, and the page words them: the line it shows has to count down.
   const unwatch = onArchiveWait((until, reason) => {
     waitingUntil = until || null
-    if (until)
-      message = reason === 'refused' ? 'AO3 asked us to slow down' : 'Giving AO3 a moment'
+    waitReason = until ? reason : null
     publish()
   })
 
@@ -308,6 +314,7 @@ async function drive(job: ExportJob): Promise<void> {
     running = false
     message = ''
     waitingUntil = null
+    waitReason = null
     if (job.blocked === 'rate-limited' && !error) {
       error = 'AO3 kept asking us to wait, so the run stopped after waiting it out for as long as is sensible. '
         + 'Everything fetched so far is saved, and nothing is held against the works that were still queued — press Continue when you like.'

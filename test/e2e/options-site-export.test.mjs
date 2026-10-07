@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { serveDir, sleep, storedListIds, storedLists } from './helpers.mjs'
-import { captureDownloads, skip, startOptions } from './optionsPage.mjs'
+import { serveDir, storedListIds, storedLists } from './helpers.mjs'
+import { captureDownloads, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
 
 const ARCHIVE = 'https://archiveofourown.org'
 const CACHE_KEY = 'marked-for-later:tester'
@@ -137,8 +137,9 @@ describe('options UI — site export', { skip }, () => {
   let browser
   let options
   let page
-  /** What the row was showing while it sat out the stub's 429. */
+  /** What the row was showing while it sat out the stub's 429, and the state its job line was in. */
   let waitLine = ''
+  let waitState = null
   /** Works the stub was asked to take off Marked for Later, and what was posted. */
   const marked = []
   /** The change file the exported page handed back, once it has handed one back. */
@@ -237,18 +238,6 @@ describe('options UI — site export', { skip }, () => {
 
   const lastWrite = key => options.lastWrite(key)
 
-  /** Wait until `check` reads true, or fail after `ms`. */
-  const until = async (what, check, ms = 20000) => {
-    const deadline = Date.now() + ms
-    for (;;) {
-      if (await check())
-        return
-      if (Date.now() > deadline)
-        assert.fail(`timed out waiting for ${what}`)
-      await sleep(200)
-    }
-  }
-
   /** Everything the stored list's row says: its name, its figures and whatever sits under it. */
   const rowText = async (key = CACHE_KEY) => options.text(await listRow(key))
 
@@ -294,6 +283,10 @@ describe('options UI — site export', { skip }, () => {
     // sitting mute. Caught here because it only exists while the run is in it.
     await until('the row to say what it is waiting for', async () => {
       waitLine = await rowText()
+      waitState = await (await listRow()).evaluate((el) => {
+        const line = el.querySelector('[data-job-state]')
+        return line ? { state: line.dataset.jobState, wait: line.dataset.jobWait ?? null } : null
+      })
       return /trying again in/.test(waitLine)
     })
 
@@ -329,8 +322,10 @@ describe('options UI — site export', { skip }, () => {
     assert.equal(rateLimitOnce.size, 0, 'the stub should have refused work 12 once')
 
     // A pause of minutes with every worker inside it is indistinguishable from
-    // a hang, so the row says why it is quiet and how long for.
+    // a hang, so the row says why it is quiet and how long for — and that it is
+    // AO3 refusing us, not the extension pacing itself.
     assert.match(waitLine, /AO3 asked us to slow down — trying again in [0-9:]+/)
+    assert.deepEqual(waitState, { state: 'waiting', wait: 'refused' })
 
     const index = await lastWrite('workTextIndex')
     assert.ok(index['12'].size > 0, 'the work was fetched after the wait')
@@ -1193,5 +1188,191 @@ describe('options UI — site export', { skip }, () => {
     // Chrome logs every non-2xx response as a console error of its own. The one
     // 429 the stub serves on purpose is the subject of a test, not a fault.
     assert.deepEqual(options.problems(/status of 429/), [])
+  })
+})
+
+/**
+ * One job at a time, for the whole extension, and every control the job turns
+ * off says why: the other lists' refresh, cache and download, the trash on the
+ * job's own list, and the cache's two deletions. A list saved before it could
+ * be fetched again says why its controls are off too.
+ *
+ * The stand-in for AO3 holds every work page until the last test lets them go,
+ * so the job is caught running for as long as a test needs it to be, and its
+ * Stop, Continue and Discard are each seen in the stored job.
+ */
+describe('options UI — site export, one job at a time', { skip }, () => {
+  const MINE = 'marked-for-later:reader'
+  const OTHER = 'tag-works:Coffee%20Shop%20AU'
+  /** Stored before descriptors existed: nothing here can fetch it again. */
+  const UNDESCRIBED = 'tag-works:Old%20Tag'
+  const JOB_OFF = 'off for now: one job at a time, and Marked for Later is caching'
+  const HOURS_AGO = Date.now() - 3 * 60 * 60 * 1000
+
+  const seed = {
+    ...storedLists({
+      [MINE]: {
+        scrapedAt: HOURS_AGO,
+        blurbsHtml: [blurb(31, 'Work number 31'), blurb(32, 'Work number 32')],
+        descriptor: { sourceId: 'marked-for-later', label: 'Marked for Later', listUrl: `${ARCHIVE}/users/reader/readings?show=to-read` },
+      },
+      [OTHER]: {
+        scrapedAt: HOURS_AGO,
+        blurbsHtml: [blurb(41, 'Work number 41')],
+        descriptor: { sourceId: 'tag-works', label: 'Coffee Shop AU', listUrl: `${ARCHIVE}/tags/Coffee%20Shop%20AU/works` },
+      },
+      [UNDESCRIBED]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(51, 'Work number 51')] },
+    }),
+    // A cached work no list holds, so the cache's two deletions both have
+    // something to offer while no job runs.
+    workTextIndex: { 99: { size: 120, updatedAt: 0, chapters: 1, words: 100, fetchedAt: HOURS_AGO, v: 1 } },
+  }
+
+  let session
+  let options
+  let page
+  let release
+  /** Every work page waits on this. */
+  const held = new Promise((resolve) => {
+    release = resolve
+  })
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed,
+      hash: '#site-export',
+      prepare: p => standInForArchive(p, async (url) => {
+        const workId = /^\/works\/(\d+)$/.exec(new URL(url).pathname)?.[1]
+        if (!workId)
+          return { status: 404 }
+        await held
+        return { body: workPage(workId) }
+      }),
+    })
+    page = options.page
+  }, { timeout: 180000 })
+
+  after(() => {
+    release()
+    return session?.close()
+  })
+
+  const row = key => options.listRow(LISTS, key)
+  const button = async (key, name) => options.control(await row(key), 'button', name)
+  const cacheButton = async name => options.control(await options.row(CACHE_ROW), 'button', name)
+  const jobState = async key => (await row(key)).evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
+  const jobWrites = () => page.evaluate(() => window.__writes.filter(w => 'siteExportJob' in w).length)
+
+  /** The control is off, and says why in its tooltip, after its own label, and in what describes it. */
+  async function saysOff(control, label, reason) {
+    assert.equal(await control.evaluate(el => el.disabled), true, `${label} should be off`)
+    assert.equal(await control.evaluate(el => el.title), `${label} — ${reason}`)
+    assert.equal(await options.description(control), `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`)
+  }
+
+  /** The control is on, with no reason to give. */
+  async function saysOn(control, label) {
+    assert.equal(await control.evaluate(el => el.disabled), false, `${label} should be on`)
+    assert.equal(await control.evaluate(el => el.getAttribute('aria-describedby')), null)
+  }
+
+  /** The other list's offline controls, by name, with the label each one's tooltip starts with. */
+  const OTHER_CONTROLS = [
+    ['List', 'Refresh the list of works in Coffee Shop AU'],
+    ['Works', 'Cache this list\'s works'],
+    ['More refresh options', 'More refresh options'],
+    ['Download', 'Refresh, cache, then save this list as one HTML file'],
+  ]
+
+  test('a list saved before it could be fetched again says what brings its controls back', async () => {
+    for (const name of ['List', 'Works', 'More refresh options', 'Download']) {
+      const control = await button(UNDESCRIBED, name)
+      assert.equal(await control.evaluate(el => el.disabled), true, `${name} should be off`)
+      assert.match(await control.evaluate(el => el.title), / — off until you open it on AO3 and press its search button/)
+      assert.match(await options.description(control), /^Off until you open it on AO3 and press its search button/)
+    }
+  })
+
+  test('while one list caches, every other list\'s offline controls name the list that holds the job', async () => {
+    await options.press(await button(MINE, 'Works'))
+    await until('the job to be running', async () => await jobState(MINE) === 'running')
+
+    for (const [name, label] of OTHER_CONTROLS)
+      await saysOff(await button(OTHER, name), label, JOB_OFF)
+    // Said under the row as well, where the reader is looking.
+    assert.match(await options.text(await row(OTHER)), /Off for now: one job at a time, and Marked for Later is caching\./)
+    // Tracking asks AO3 for nothing, so no job turns it off.
+    await saysOn(await button(OTHER, 'Track'), 'Track')
+
+    // A list nothing can fetch keeps its own reason.
+    assert.match(await options.description(await button(UNDESCRIBED, 'Works')), /^Off until you open it on AO3/)
+
+    // The list the job is on can't be removed from under it.
+    await saysOff(await button(MINE, 'Remove Marked for Later'), 'Remove Marked for Later', 'off while this list is caching')
+
+    // Nor can the work text it is writing.
+    for (const name of ['Discard orphans', 'Delete cached text'])
+      await saysOff(await cacheButton(name), name, 'off while Marked for Later is caching')
+  })
+
+  test('Stop leaves the job stored, offering to continue or discard it, and frees every other control', async () => {
+    const before = await jobWrites()
+    await options.press(await button(MINE, 'Stop'))
+    await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(MINE) === 'stopped')
+
+    // As written: the storage stand-in keeps the runner's own object, which a
+    // running job goes on changing, while a write is copied as it lands.
+    const job = await options.lastWrite('siteExportJob')
+    assert.equal(job.cacheKey, MINE)
+    assert.deepEqual(job.steps, ['caching'])
+    assert.deepEqual([...job.queue].sort(), ['31', '32'], 'the works it was fetching go back on the queue')
+    assert.equal(job.done, 0)
+
+    await button(MINE, 'Continue')
+    await button(MINE, 'Discard')
+    for (const [name, label] of OTHER_CONTROLS)
+      await saysOn(await button(OTHER, name), label)
+    assert.doesNotMatch(await options.text(await row(OTHER)), /one job at a time/)
+    await saysOn(await button(MINE, 'Remove Marked for Later'), 'Remove Marked for Later')
+    for (const name of ['Discard orphans', 'Delete cached text'])
+      await saysOn(await cacheButton(name), name)
+  })
+
+  test('Discard throws the stopped job away', async () => {
+    await options.press(await button(MINE, 'Discard'))
+    await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
+    await until('the row to stop offering it', async () => await jobState(MINE) === null)
+    assert.deepEqual(await options.controls(await row(MINE), 'button', 'Continue'), [])
+  })
+
+  test('Continue picks a stopped job up where it left off, and finishing it clears it', async () => {
+    await options.press(await button(MINE, 'Works'))
+    await until('the job to be running', async () => await jobState(MINE) === 'running')
+    const before = await jobWrites()
+    await options.press(await button(MINE, 'Stop'))
+    await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(MINE) === 'stopped')
+    const stopped = await options.lastWrite('siteExportJob')
+
+    await options.press(await button(MINE, 'Continue'))
+    await until('the job to run again', async () => await jobState(MINE) === 'running')
+    await saysOff(await button(OTHER, 'Works'), 'Cache this list\'s works', JOB_OFF)
+
+    release()
+    await until('the finished job to be cleared', async () => await options.stored('siteExportJob') === null)
+    await until('the row to say it finished', async () => await jobState(MINE) === 'finished')
+    // The job it wrote on its way to the end is the one that stopped, carried on.
+    const finished = await options.lastWrite('siteExportJob')
+    assert.equal(finished.startedAt, stopped.startedAt)
+    assert.deepEqual(finished.steps, [])
+    assert.deepEqual(finished.queue, [])
+    assert.equal(finished.done, 2)
+    const index = await options.stored('workTextIndex')
+    assert.ok(index['31']?.size > 0 && index['32']?.size > 0, 'both works were fetched')
+    await saysOn(await button(OTHER, 'Works'), 'Cache this list\'s works')
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(options.problems(), [])
   })
 })
