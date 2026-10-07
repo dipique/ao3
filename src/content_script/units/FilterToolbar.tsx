@@ -16,6 +16,7 @@ import type { TrackablePage } from '#content_script/tracked/createList.ts'
 import { ADDON_CLASS, aliasOf, api, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planStopTracking, planTrack, planTrackSearch, planUndo, planUpdate, sameRoot, sameTitle, savedListAt, savedListsOf, savedListsWrite, sourceLabel, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
+import { holdSearchPrompt } from '#content_script/pendingSearch.ts'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { activeSearchFilter } from '#content_script/searchView/host.tsx'
 import { findWorkText } from '#content_script/textReplaceScope.ts'
@@ -346,6 +347,7 @@ export class FilterToolbar extends Unit {
       const label = open ? 'Hide extension controls' : 'Show extension controls'
       fab.title = label
       fab.setAttribute('aria-label', label)
+      holdSearchPrompt(open)
       // Opening changes what counts as taken without changing the box the
       // observer above is watching, so it has nothing to say about this one.
       syncReserve()

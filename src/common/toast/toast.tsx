@@ -21,6 +21,8 @@ export interface ToastHandle {
   setMessage: (message: string) => void
   /** Take it down now. Safe to call more than once. */
   hide: () => void
+  /** Keep it up regardless of its timeout, or let go of it — its full timeout then starts over. */
+  hold: (held: boolean) => void
 }
 
 let toastContainer: HTMLElement | null = null
@@ -64,6 +66,7 @@ class Toast {
   private readonly type: ToastOptions['type']
   private timeoutId: number | null = null
   private hidden = false
+  private held = false
   private readonly onHide: ToastOptions['onHide']
 
   constructor(message: string, { timeout = 5000, type, action, onHide }: ToastOptions = {}) {
@@ -150,13 +153,23 @@ class Toast {
     }, 150)
   }
 
+  hold(held: boolean): void {
+    if (this.held === held)
+      return
+    this.held = held
+    if (held)
+      this.stop()
+    else
+      this.start()
+  }
+
   stop() {
     if (this.timeoutId !== null)
       globalThis.clearTimeout(this.timeoutId)
   }
 
   start() {
-    if (this.timeout === 0 || this.hidden)
+    if (this.timeout === 0 || this.hidden || this.held)
       return
     this.stop()
     this.timeoutId = globalThis.setTimeout(() => this.hide(), this.timeout) as unknown as number

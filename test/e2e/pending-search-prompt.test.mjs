@@ -165,4 +165,44 @@ describe('the pending-search prompt', { skip }, () => {
     assert.equal(await submits(), 2)
     assert.equal(await prompt(), null)
   })
+
+  const toggleToolbar = async () => {
+    await page.click('.AO3E--filter-toolbar--fab')
+    await sleep(100)
+  }
+
+  test('fades by itself after a few seconds', async () => {
+    await pick('Exclude')
+    assert.ok(await prompt())
+    await sleep(3500)
+    assert.equal(await prompt(), null)
+  })
+
+  test('opening the toolbar brings it back, and it stays while the toolbar is open', async () => {
+    await toggleToolbar()
+    assert.equal((await prompt())?.message, 'Your search filters have changed.')
+    await sleep(3500)
+    assert.ok(await prompt(), 'still up with the toolbar open')
+  })
+
+  test('closing the toolbar lets it fade again', async () => {
+    await toggleToolbar()
+    assert.ok(await prompt(), 'not taken down at once, so a click on it still lands')
+    await sleep(3500)
+    assert.equal(await prompt(), null)
+  })
+
+  test('opening the toolbar raises nothing when the form matches the results', async () => {
+    // Put the form back as the page arrived.
+    await page.evaluate(() => {
+      for (const id of ['work_search_language_id', 'work_search_other_tag_names', 'work_search_excluded_tag_names'])
+        document.getElementById(id).value = ''
+      document.getElementById('work_search_language_id').dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await sleep(100)
+    assert.equal(await prompt(), null)
+    await toggleToolbar()
+    assert.equal(await prompt(), null)
+    await toggleToolbar()
+  })
 })

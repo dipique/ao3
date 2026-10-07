@@ -1,6 +1,6 @@
 import type { ToastHandle } from '#common'
 
-import { toast } from '#common'
+import { SEARCH_PROMPT_TIMEOUT, toast } from '#common'
 
 import { onFilterChange } from './filterSidebar.tsx'
 
@@ -20,9 +20,10 @@ import { onFilterChange } from './filterSidebar.tsx'
  * Whether there *is* anything to say is decided by comparison, not by who
  * called: the form as the page arrived (the search the results came from) is
  * captured before any unit touches it — see {@link captureSearchBaseline} — and
- * the toast is up exactly while the form differs from that. So picking "exclude"
+ * the toast is raised only while the form differs from that. So picking "exclude"
  * twice leaves nothing to report, and a default the URL already carried reports
- * nothing either.
+ * nothing either. It fades after a few seconds, and opening the toolbar brings
+ * it back for as long as the search is still pending.
  *
  * Only a listing's own filter form counts. The advanced search page fills the
  * same kind of fields, but has no results beside them to be out of step with.
@@ -41,6 +42,9 @@ export const RESUBMIT_SHORTCUT_LABEL = IS_MAC ? '⌘+Enter' : 'Ctrl+Enter'
 
 let baseline: { form: HTMLFormElement, state: string } | null = null
 let prompt: ToastHandle | null = null
+/** What the prompt last said, so bringing it back from the toolbar says it again. */
+let message = DEFAULT_MESSAGE
+let held = false
 
 function filterForm(): HTMLFormElement | null {
   const form = document.querySelector<HTMLFormElement>(FILTER_FORM_SELECTOR)
@@ -88,29 +92,51 @@ export function isSearchPending(): boolean {
  */
 export function searchFilterChanged(reason?: string): void {
   if (!isSearchPending()) {
+    message = DEFAULT_MESSAGE
     prompt?.hide()
     return
   }
 
   if (prompt) {
-    if (reason)
+    if (reason) {
+      message = reason
       prompt.setMessage(reason)
+    }
     return
   }
 
-  const handle: ToastHandle = toast(reason ?? DEFAULT_MESSAGE, {
-    timeout: 0,
+  message = reason ?? DEFAULT_MESSAGE
+  showPrompt()
+}
+
+function showPrompt(): void {
+  const handle: ToastHandle = toast(message, {
+    timeout: SEARCH_PROMPT_TIMEOUT,
     action: {
       label: `Update results (${RESUBMIT_SHORTCUT_LABEL})`,
       onClick: () => void resubmitSearch(),
     },
-    // Closed by hand, or by its own button: the next change raises a fresh one.
+    // Faded, or gone by its own button: the next change raises a fresh one.
     onHide: () => {
       if (prompt === handle)
         prompt = null
     },
   })
+  handle.hold(held)
   prompt = handle
+}
+
+/**
+ * The extension's toolbar opened or closed. Open, it brings back the prompt the
+ * reader let fade, saying what it last said, and keeps it up; closed, the prompt
+ * fades as it would have — not at once, since closing on a click outside the
+ * toolbar is what a click on the prompt itself does.
+ */
+export function holdSearchPrompt(next: boolean): void {
+  held = next
+  if (held && !prompt && isSearchPending())
+    showPrompt()
+  prompt?.hold(held)
 }
 
 /**
