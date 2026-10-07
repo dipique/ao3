@@ -23,31 +23,25 @@
  * Run by `pnpm run lint`, and so by CI.
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
+import { staleDeclarations } from './generated-types.mjs'
+
 const TYPES_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', 'src', 'types')
 const FILES = ['auto-imports.d.ts', 'components.d.ts']
-
-/**
- * The two shapes the generators emit:
- *
- *     const Foo: typeof import('../mod').Foo          // auto-imports.d.ts
- *     Foo: typeof import('./../Foo.vue')['default']   // components.d.ts
- */
-const DECLARATION = /^\s*(?:const\s+|readonly\s+)?(\w+)\s*:\s*typeof\s+import\('([^']+)'\)(?:\['(\w+)'\]|\.(\w+))?/gm
 
 /** Extensions to try for a relative import, in resolution order. */
 const EXTENSIONS = ['', '.ts', '.tsx', '.vue', '.d.ts', '/index.ts']
 
 /** The module's source, or null when no file answers to the specifier. */
-async function readModule(spec) {
+function readModule(spec) {
   const base = join(TYPES_DIR, spec)
   for (const ext of EXTENSIONS) {
     try {
-      return await readFile(base + ext, 'utf8')
+      return readFileSync(base + ext, 'utf8')
     }
     catch {
       continue
@@ -56,55 +50,17 @@ async function readModule(spec) {
   return null
 }
 
-/**
- * Whether `source` exports `name`.
- *
- * Generous on purpose: named declarations, export clauses with or without `as`,
- * and — where a file re-exports everything from somewhere else — a shrug. The
- * case this exists to catch is a name that appears nowhere as an export at all.
- */
-function exportsName(source, name) {
-  if (new RegExp(`\\bexport\\s+(?:declare\\s+)?(?:async\\s+)?(?:const|let|var|function|class|type|interface|enum)\\s+${name}\\b`).test(source))
-    return true
-  for (const block of source.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
-    for (const clause of block[1].split(',')) {
-      if ((clause.split(/\s+as\s+/).at(-1) ?? '').trim() === name)
-        return true
-    }
-  }
-  return /\bexport\s+\*/.test(source)
-}
-
 const problems = []
 
 for (const file of FILES) {
   let source
   try {
-    source = await readFile(join(TYPES_DIR, file), 'utf8')
+    source = readFileSync(join(TYPES_DIR, file), 'utf8')
   }
   catch {
     continue // Not every generated stub exists in every checkout.
   }
-
-  for (const [, declared, spec, bracketed, dotted] of source.matchAll(DECLARATION)) {
-    // A bare specifier is a package, whose exports are its own business.
-    if (!spec.startsWith('.'))
-      continue
-
-    const module = await readModule(spec)
-    if (module === null) {
-      problems.push(`${file}: '${declared}' points at '${spec}', and no file answers to it`)
-      continue
-    }
-
-    // An SFC's default export is the component; that the file resolves is the
-    // whole of the question. Anything else is checked by name.
-    const name = bracketed ?? dotted ?? declared
-    if (name === 'default' || spec.endsWith('.vue'))
-      continue
-    if (!exportsName(module, name))
-      problems.push(`${file}: declares '${declared}', but '${spec}' does not export '${name}'`)
-  }
+  problems.push(...staleDeclarations(file, source, readModule))
 }
 
 if (problems.length) {
