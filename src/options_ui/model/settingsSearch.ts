@@ -75,16 +75,53 @@ function folded(text: string): { hay: string, from: number[], to: number[] } {
  * can come out of it and the result is safe to hand to `v-html`.
  */
 export function highlight(text: string, terms: readonly string[]): string {
-  if (!terms.length)
-    return escapeHtml(text)
+  return markSpans(text, hits(text, terms))
+}
 
+/** Where each term is found in `text`, as `[start, end)` spans of it. */
+function hits(text: string, terms: readonly string[]): Array<[number, number]> {
+  if (!terms.length)
+    return []
   const { hay, from, to } = folded(text)
   const spans: Array<[number, number]> = []
   for (const term of terms.filter(Boolean)) {
     for (let at = hay.indexOf(term); at !== -1; at = hay.indexOf(term, at + term.length))
       spans.push([from[at]!, to[at + term.length - 1]!])
   }
-  return markSpans(text, spans)
+  return spans
+}
+
+/**
+ * {@link highlight}, with `strong`'s phrases drawn bold: the first of each,
+ * found in turn from where the last ended, wrapped in `<strong>`. A hit can run
+ * into a bold phrase or out of it; the marks are drawn inside the bold.
+ */
+export function highlightWithStrong(text: string, terms: readonly string[], strong: readonly string[]): string {
+  const bold: Array<[number, number]> = []
+  let after = 0
+  for (const phrase of strong) {
+    const at = text.indexOf(phrase, after)
+    if (at === -1)
+      continue
+    bold.push([at, at + phrase.length])
+    after = at + phrase.length
+  }
+  const marks = hits(text, terms)
+  let out = ''
+  let at = 0
+  for (const [start, end] of bold) {
+    out += markSpans(text.slice(at, start), within(marks, at, start))
+    out += `<strong>${markSpans(text.slice(start, end), within(marks, start, end))}</strong>`
+    at = end
+  }
+  return out + markSpans(text.slice(at), within(marks, at, text.length))
+}
+
+/** The parts of `spans` between `start` and `end`, counted from `start`. */
+function within(spans: readonly (readonly [number, number])[], start: number, end: number): Array<[number, number]> {
+  return spans
+    .map(([from, to]): [number, number] => [Math.max(from, start) - start, Math.min(to, end) - start])
+    .filter(([from, to]) => from < to)
 }
 
 /**

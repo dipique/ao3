@@ -320,6 +320,69 @@ describe('searchView/blurbStore', { skip }, () => {
     assert.deepEqual(result.deleted, ['blurb.1'], 'and goes with list b')
   })
 
+  test('a detached list comes out whole, with what it missed, pruning nothing; restored, the store is as it was', async () => {
+    const result = await page.evaluate(async ({ descriptor, HOUR }) => {
+      const { writeSnapshot, writeMisses, detachSnapshot, restoreSnapshot } = window.Store
+      const old = Date.now() - HOUR
+      await window.reset({ 'option.pruneOrphanedBlurbs': true })
+      await writeSnapshot('a', [window.scraped('1', { seenAt: old }), window.scraped('2', { seenAt: old })], descriptor)
+      await writeSnapshot('b', [window.scraped('2', { seenAt: old })], descriptor)
+      await writeMisses('a', ['9'])
+      await writeMisses('b', ['8'])
+      const before = await window.store()
+      const detached = await detachSnapshot('a')
+      const gone = await window.store()
+      const restored = await restoreSnapshot(detached)
+      const back = await window.store()
+      return { before, detached, gone, restored, back, nothing: await detachSnapshot('never-stored') }
+    }, { descriptor: DESCRIPTOR, HOUR })
+
+    assert.deepEqual(result.detached, { key: 'a', list: result.before['cache.searchLists'].a, misses: result.before['cache.searchMisses'].a })
+    assert.deepEqual(Object.keys(result.gone['cache.searchLists']), ['b'])
+    assert.deepEqual(result.gone['cache.searchMisses'], { b: result.before['cache.searchMisses'].b })
+    assert.ok('blurb.1' in result.gone, 'its blurbs stay, though nothing else holds one of them and pruning is on')
+    assert.equal(result.restored, true)
+    assert.deepEqual(result.back, result.before, 'byte for byte')
+    assert.equal(result.nothing, null)
+  })
+
+  test('letting a detached list go prunes what it stranded, as deleting it would', async () => {
+    const result = await page.evaluate(async ({ descriptor, HOUR }) => {
+      const { writeSnapshot, detachSnapshot, pruneDetached } = window.Store
+      const old = Date.now() - HOUR
+      const blurbKeys = async () => Object.keys(await window.store()).filter(key => key.startsWith('blurb.')).sort()
+      const run = async (prune) => {
+        await window.reset({ 'option.pruneOrphanedBlurbs': prune })
+        await writeSnapshot('a', [window.scraped('1', { seenAt: old }), window.scraped('2', { seenAt: old })], descriptor)
+        await writeSnapshot('b', [window.scraped('2', { seenAt: old })], descriptor)
+        await pruneDetached([await detachSnapshot('a')])
+        return blurbKeys()
+      }
+      return { on: await run(true), off: await run(false) }
+    }, { descriptor: DESCRIPTOR, HOUR })
+
+    assert.deepEqual(result.on, ['blurb.2'], '1 went; 2 is on list b')
+    assert.deepEqual(result.off, ['blurb.1', 'blurb.2'], 'left for the discard button')
+  })
+
+  test('a list stored again under a detached key is the newer, and restoring leaves it be', async () => {
+    const result = await page.evaluate(async (descriptor) => {
+      const { writeSnapshot, writeMisses, detachSnapshot, restoreSnapshot } = window.Store
+      await window.reset()
+      await writeSnapshot('a', [window.scraped('1')], descriptor)
+      await writeMisses('a', ['9'])
+      const detached = await detachSnapshot('a')
+      await writeSnapshot('a', [window.scraped('3')], descriptor)
+      const restored = await restoreSnapshot(detached)
+      const all = await window.store()
+      return { restored, ids: all['cache.searchLists'].a.ids, misses: all['cache.searchMisses'] }
+    }, DESCRIPTOR)
+
+    assert.equal(result.restored, false)
+    assert.equal(result.ids, '3')
+    assert.deepEqual(result.misses, {}, 'nor what the older one missed')
+  })
+
   test('stored works stand in for a fetch only while they are recent', async () => {
     const result = await page.evaluate(async ({ descriptor, HOUR }) => {
       const { writeSnapshot, readStoredWorks } = window.Store

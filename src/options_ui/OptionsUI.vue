@@ -101,6 +101,38 @@ h6 {
   }
 }
 
+/* Below 768 px the page is touched rather than pointed at, so every control
+   answers a touch anywhere in a 44 px square around it, however small it is
+   drawn: an invisible hit area. It lies under the controls themselves, so one
+   control drawn close beside another keeps the whole of its own box. The
+   shortcuts' classes are named here because a shortcut can't add a class of
+   its own. */
+@media (max-width: 767.98px) {
+  :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn) {
+    position: relative;
+  }
+  :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn)::after {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+  :has(> :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn)) {
+    isolation: isolate;
+  }
+}
+
+/* A placeholder is text too: the browser's own grey is under AA on the dark
+   ground. */
+::placeholder {
+  color: rgb(var(--color-muted-fg));
+  opacity: 1;
+}
+
 /* Search hits. The reset zeroes `mark`'s background along with everything else's,
    so the highlight has to be restated — as a tint of the accent colour, which is
    already defined for both themes. */

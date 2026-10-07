@@ -1,17 +1,22 @@
 import type { Options } from '#common'
 import type { OpenOptions } from '#content_script/searchView/host.tsx'
 
+import { savedListsOf } from '#common'
 import { isOpening } from '#content_script/searchView/host.tsx'
 
 import { pendingRestore, restoreDone } from './refining.ts'
 import { filterStateOf } from './viewFilter.ts'
 
 /**
- * Put a tracked list's view filter back on screen, for a tab that has just
+ * Put a saved list's view filter back on screen, for a tab that has just
  * arrived on the list's own page by its refining link — the step that lets the
  * reader refine a custom search where they left it, instead of from a blank
- * view. Each custom search unit (an uncommon tag's works, a series, a works
- * search) calls this from `ready()` when it has no view of its own to reopen.
+ * view. Each search view of a saved list's kind (an uncommon tag's works, a
+ * series, a works search, a filtered listing) calls this from `ready()` when it
+ * has no view of its own to reopen and no open URL to answer
+ * ({@link file://../lists/openLink.ts}). The list may be tracked or not, and
+ * the reader may have *Tracked lists* switched on or off, and its kind's page
+ * button too: refining belongs to saved lists.
  *
  * `open` opens the unit's view with the options it is given, and `cacheKey` is
  * that view's, to tell its opens apart from anyone else's.
@@ -34,9 +39,7 @@ import { filterStateOf } from './viewFilter.ts'
  * the page left as the archive drew it.
  */
 export async function restoreListFilter(options: Options, cacheKey: string, open: (opts: OpenOptions) => Promise<void>): Promise<void> {
-  if (!options.trackedLists.enabled)
-    return
-  const list = pendingRestore(options.trackedLists.lists)
+  const list = pendingRestore(savedListsOf({ tracked: options.trackedLists, saved: options.savedLists }).map(one => one.list))
   if (!list)
     return
   const seed = filterStateOf(list.filter)

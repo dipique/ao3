@@ -12,7 +12,7 @@ const forwarded = useForwardPropsEmits(props, emits)
     class="input-ring"
     cursor="pointer data-[disabled]:default data-[disabled]:pointer-events-none"
     op="data-[disabled]:50"
-    relative select-none rounded-sm text-sm transition-colors focus:bg-muted
+    relative select-none rounded-[7px] text-sm transition-colors data-[highlighted]:bg-[var(--row-hover)]
   >
     <slot />
   </RekaDropdownMenuItem>

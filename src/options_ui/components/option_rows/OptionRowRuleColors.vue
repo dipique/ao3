@@ -43,9 +43,9 @@ function resetAll() {
   <Dialog>
     <DialogTrigger as-child>
       <slot>
-        <Button variant="outline" size="sm">
-          Default highlight colors<span v-if="customCount" text="xs muted-fg">&nbsp;({{ customCount }} changed)</span>
-        </Button>
+        <button type="button" class="outline-btn">
+          Default highlight colors<span v-if="customCount" text-muted-fg>&nbsp;({{ customCount }} changed)</span>
+        </button>
       </slot>
     </DialogTrigger>
     <DialogContent>

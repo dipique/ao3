@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { BUILD_CHECK_TIMEOUT_MS } from '../../src/common/constants.ts'
 import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { sleep } from './helpers.mjs'
-import { scriptBackground, skip, startOptions } from './optionsPage.mjs'
+import { scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
 
 /** This build's sync version, and a newer build's. */
 const V = SYNC_SCHEMA_VERSION
@@ -53,9 +54,9 @@ function readCallouts(selector) {
 
 /**
  * In the page: the panel's status line, or null while the panel is the switch
- * alone. `chip` is the chip's state and what a screen reader reads of it (the
- * glyph's word, then the chip's), `detail` the sentence beside it, and `last`
- * when sync last succeeded.
+ * alone. `chip` is the chip's state and what a screen reader reads of it: its
+ * word alone, which says what the glyph's colour does. `detail` is the
+ * sentence beside it, and `last` when sync last succeeded.
  */
 function readStatus() {
   const squash = text => (text ?? '').replace(/\s+/g, ' ').trim()
@@ -180,7 +181,7 @@ describe('options UI — the sync panel', { skip }, () => {
     const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now() - 60000 }, usage(68))
     try {
       const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'syncing', text: `${WORDS.success} Syncing` })
+      assert.deepEqual(status.chip, { state: 'syncing', text: 'Syncing' })
       assert.equal(status.detail, null)
       assert.match(status.last, /^Last synced \S/)
       assert.deepEqual(await options.page.evaluate(readCallouts, '[data-sync-panel] [data-callout]'), [])
@@ -209,13 +210,13 @@ describe('options UI — the sync panel', { skip }, () => {
     try {
       const toggle = await syncSwitch(options)
       await options.press(toggle)
-      await sleep(400)
+      await options.page.waitForSelector('[data-sync-refusal]')
 
       await assertCallout(options, '[data-sync-refusal]', 'destructive', new RegExp(`^Can't turn on sync: .*sync version ${NEWER}; this browser has ${V}\\)`))
       assert.equal(await toggle.evaluate(el => el.getAttribute('aria-checked')), 'false')
       assert.deepEqual(await options.sent('setSyncEnabled'), [[true]])
       const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'off', text: `${WORDS.neutral} Off` })
+      assert.deepEqual(status.chip, { state: 'off', text: 'Off' })
       assert.equal(status.last, null, 'nothing has synced while it is off')
     }
     finally {
@@ -228,7 +229,7 @@ describe('options UI — the sync panel', { skip }, () => {
       const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now(), 'sync.pause': HELD })
       try {
         const status = await options.page.evaluate(readStatus)
-        assert.deepEqual(status.chip, { state: 'held', text: `${WORDS.warning} On hold` })
+        assert.deepEqual(status.chip, { state: 'held', text: 'On hold' })
         assert.equal(status.detail, 'An update from another browser is waiting for your answer.')
         assert.match(status.last, /^Last synced /)
 
@@ -258,11 +259,11 @@ describe('options UI — the sync panel', { skip }, () => {
       const options = await open({ 'sync.enabled': true, 'sync.pause': HELD }, { resolveHeldSync: { resolved: true } })
       try {
         await options.press(await options.page.$('[data-sync-keep]'))
-        await sleep(300)
+        await until('the answer to be sent', async () => (await options.sent('resolveHeldSync')).length === 1)
         assert.deepEqual(await options.sent('resolveHeldSync'), [['keep']])
 
         await options.press(await options.page.$('[data-sync-accept]'))
-        await sleep(300)
+        await until('the second answer to be sent', async () => (await options.sent('resolveHeldSync')).length === 2)
         assert.deepEqual((await options.sent('resolveHeldSync')).map(args => args[0]), ['keep', 'accept'])
       }
       finally {
@@ -291,7 +292,7 @@ describe('options UI — the sync panel', { skip }, () => {
     try {
       await assertCallout(options, '[data-sync-pause="newer-version"]', 'warning', new RegExp(`^Your synced settings were saved by a newer version .*sync version ${NEWER}; this browser has ${V}\\)`))
       const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'newer-version', text: `${WORDS.warning} Paused` })
+      assert.deepEqual(status.chip, { state: 'newer-version', text: 'Paused' })
       assert.equal(status.detail, 'This browser is older than your synced settings. It lifts by itself once updated.')
       assert.equal(await options.page.$('[data-sync-keep]'), null)
       assert.equal(await options.page.$('[data-sync-answer]'), null)
@@ -305,7 +306,7 @@ describe('options UI — the sync panel', { skip }, () => {
     const options = await open({ 'sync.enabled': true, 'sync.pause': { reason: 'older-cloud', remoteVersion: OLDER } })
     try {
       await assertCallout(options, '[data-sync-pause="older-cloud"]', 'warning', new RegExp(`^Your synced settings were saved by an older version .*sync version ${OLDER}; this browser has ${V}\\)`))
-      assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'older-cloud', text: `${WORDS.warning} Waiting` })
+      assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'older-cloud', text: 'Waiting' })
     }
     finally {
       await options.close()
@@ -344,7 +345,7 @@ describe('options UI — the sync panel', { skip }, () => {
     try {
       await assertCallout(options, '[data-sync-error]', 'destructive', /^QUOTA_BYTES quota exceeded$/)
       const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'error', text: `${WORDS.destructive} Couldn't sync` })
+      assert.deepEqual(status.chip, { state: 'error', text: 'Couldn\'t sync' })
       assert.equal(status.detail, 'It will be tried again.')
       assert.equal(status.last, null)
     }
@@ -357,7 +358,7 @@ describe('options UI — the sync panel', { skip }, () => {
     const options = await open({ 'sync.enabled': true, 'sync.staleBuild': { running: 'old', onDisk: 'new' } })
     try {
       await assertCallout(options, '[data-sync-stale]', 'destructive', /Reload AO3 Enhancements .*Sync is paused until then\.$/)
-      assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'stale', text: `${WORDS.destructive} Reload needed` })
+      assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'stale', text: 'Reload needed' })
     }
     finally {
       await options.close()
@@ -378,7 +379,7 @@ describe('options UI — the sync panel', { skip }, () => {
     const options = await open({ 'sync.enabled': true }, { getBuildInfo: 'never' })
     try {
       assert.equal(await options.page.$('[data-sync-stale]'), null, 'not before the wait is up')
-      await sleep(5500)
+      await until('the background to be called out of date', () => options.page.$('[data-sync-stale]'))
       await assertCallout(options, '[data-sync-stale]', 'destructive', /Sync may not work until then\.$/)
     }
     finally {
@@ -389,13 +390,35 @@ describe('options UI — the sync panel', { skip }, () => {
   test('a current background, or none at all, raises nothing', async () => {
     const options = await open({ 'sync.enabled': true })
     try {
-      await sleep(5500)
+      // Past the wait, by a margin, so a background that never answered would have been called out of date.
+      await sleep(BUILD_CHECK_TIMEOUT_MS * 1.2)
       assert.equal(await options.page.$('[data-sync-stale]'), null)
     }
     finally {
       await options.close()
     }
   }, { timeout: 30000 })
+
+  test('on a phone, the switch sits beside the title, and the description runs under both', async () => {
+    const options = await open({ 'sync.enabled': true }, {}, NARROW)
+    try {
+      const boxes = await options.page.evaluate(() => {
+        const head = document.querySelector('[data-sync-panel] [id="sync-sync-settings-across-devices"]')
+        const box = (selector) => {
+          const { top, bottom, left, right } = head.querySelector(selector).getBoundingClientRect()
+          return { top: Math.round(top), bottom: Math.round(bottom), left: Math.round(left), right: Math.round(right) }
+        }
+        return { title: box('[data-row-part="title"]'), description: box('[data-row-part="description"]'), control: box('[data-row-part="control"]') }
+      })
+      const layout = JSON.stringify(boxes)
+      assert.ok(boxes.control.top < boxes.title.bottom && boxes.control.bottom > boxes.title.top, `the switch beside the title: ${layout}`)
+      assert.ok(boxes.description.top >= Math.max(boxes.title.bottom, boxes.control.bottom) - 1, `the description under both: ${layout}`)
+      assert.ok(boxes.description.right > boxes.control.left, `and across the switch's column: ${layout}`)
+    }
+    finally {
+      await options.close()
+    }
+  })
 
   test('states stack: the chip names the most severe, and the callouts follow in severity order', async () => {
     const options = await open({

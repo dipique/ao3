@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { utcToday } from '../../src/common/trackedLists.ts'
-import { ensureBuilt, findChrome, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
 import {
   ARCHIVE,
   blurb,
@@ -11,7 +12,9 @@ import {
   listingPage,
   openBox,
   openTab,
+  openToolbar,
   pillText,
+  rerun,
   searchPage,
   seriesPage,
   storedOption,
@@ -109,12 +112,9 @@ describe('tracked lists: what a list is, from its page', { skip }, () => {
       el.value = '  character: DRACO malfoy '
     })
     await clickBoxButton(tab, 'Track')
-    await sleep(800)
+    const refusal = 'Another list is already called “Character: Draco Malfoy” (Search: Draco Malfoy). Choose a different title.'
+    await until('the refusal, which names the list by its title, and by what it is', async () => (await toasts(tab)).includes(refusal))
     assert.deepEqual(await storedOption(tab), before, 'nothing is written')
-    assert.ok(
-      (await toasts(tab)).includes('Another list is already called “Character: Draco Malfoy” (Search: Draco Malfoy). Choose a different title.'),
-      'the refusal names the list by its title, and by what it is',
-    )
     // The box is still there to try again.
     assert.equal(await tab.$eval(`${TRACK_BOX} button`, el => el.disabled), false)
   })
@@ -123,8 +123,7 @@ describe('tracked lists: what a list is, from its page', { skip }, () => {
     await tab.$eval(TITLE_INPUT, (el) => {
       el.value = 'Character: Draco Malfoy (2)'
     })
-    await clickBoxButton(tab, 'Track')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Track'))
     const added = (await storedOption(tab)).lists.at(-1)
     assert.equal(added.alias, 'Character: Draco Malfoy (2)')
     assert.equal(added.type, 'character')
@@ -137,17 +136,15 @@ describe('tracked lists: what a list is, from its page', { skip }, () => {
     assert.equal(asked(PAIRING_PAGE), 0, 'nothing is asked just for opening the page')
 
     await openBox(tab)
-    await sleep(500)
-    assert.equal(asked(PAIRING_PAGE), 1)
     // Until then the title said "Tag"; the page's answer replaces it, since the
     // reader hadn't typed over it.
-    assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Relationship: Draco Malfoy/Harry Potter')
+    await until('the answer from the tag\'s page', async () => await tab.$eval(TITLE_INPUT, el => el.value) === 'Relationship: Draco Malfoy/Harry Potter')
+    assert.equal(asked(PAIRING_PAGE), 1)
 
     // Closing and opening again asks nothing more, and neither does tracking.
     await tab.click(TRACK_PILL)
     await tab.click(TRACK_PILL)
-    await clickBoxButton(tab, 'Track')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Track'))
     assert.equal(asked(PAIRING_PAGE), 1)
     const added = (await storedOption(tab)).lists.at(-1)
     assert.equal(added.type, 'relationship')
@@ -162,8 +159,7 @@ describe('tracked lists: what a list is, from its page', { skip }, () => {
     // Titled as readers name an additional tag, so only what's stored shows the category was read.
     assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Tag: marriage problems')
     assert.deepEqual(requests.slice(before).map(url => new URL(url).pathname), ['/tags/marriage%20problems'], 'only the page itself')
-    await clickBoxButton(tab, 'Track')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Track'))
     const added = (await storedOption(tab)).lists.at(-1)
     assert.equal(added.type, 'freeform')
     assert.equal(added.alias, 'Tag: marriage problems')
@@ -178,20 +174,17 @@ describe('tracked lists: what a list is, from its page', { skip }, () => {
   test('a list that reads "Tag" learns its category on its own page, with nothing fetched', async () => {
     const before = requests.length
     await visit(tab, `${ARCHIVE}/tags/Ron%20Weasley/works`)
-    await sleep(800)
     const ron = await list('ron')
     assert.equal(ron.type, 'character')
     assert.equal(ron.entity, 'Ron Weasley')
     assert.equal(ron.alias, 'Ron', 'the title is the reader\'s, and stays')
     assert.deepEqual(requests.slice(before).map(url => new URL(url).pathname), ['/tags/Ron%20Weasley/works'])
-    await tab.click('.AO3E--filter-toolbar--fab')
-    await sleep(300)
+    await openToolbar(tab)
     assert.equal(await pillText(tab), 'Tracked as “Ron”')
   })
 
   test('a series that reads as its id learns its title on its own page', async () => {
     await visit(tab, `${ARCHIVE}/series/4242`)
-    await sleep(800)
     const series = await list('lway')
     assert.equal(series.type, 'series')
     assert.equal(series.entity, 'The Long Way Round')

@@ -13,7 +13,7 @@ import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import type { MarkConfig, MarkId } from '#common'
 
-import { ADDON_CLASS, isExtensionContextValid, markIds, toast } from '#common'
+import { ADDON_CLASS, isExtensionContextValid, markIds, REOPEN_GUARD_MS, toast } from '#common'
 import { markIcon } from '#content_script/markIcons.js'
 import React from '#dom'
 
@@ -41,8 +41,6 @@ const INDICATOR_CLASS = `${ADDON_CLASS}--indicator`
 
 const LONG_PRESS_MS = 450
 const MOVE_CANCEL_PX = 10
-/** Collapse a right-click + long-press for one physical gesture into one open. */
-const REOPEN_GUARD_MS = 250
 
 /**
  * Shift means "stand back": for one gesture, the extension gets out of the way

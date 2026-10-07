@@ -2,8 +2,9 @@
 /**
  * An on/off setting of one list row, drawn as a glyph: a quiet glyph at 60%
  * while off, a tinted chip while on. The shape changes as well as the colour,
- * so the state reads in greyscale too. A toggle button (`aria-pressed`) named
- * by `label`, with `tip`, or else the label, as its tooltip.
+ * so the state reads in greyscale too. A toggle button (`aria-pressed`), or
+ * with `asSwitch` a switch (`aria-checked`), named by `label`, with `tip`, or
+ * else the label, as its tooltip.
  *
  * Attributes go on the button, so a `disabled` toggle is inert and an
  * `aria-describedby` says why.
@@ -15,6 +16,8 @@ defineProps<{
   /** The glyph's icon class, such as `i-tabler-eye-off`. */
   icon: string
   tip?: string
+  /** A state of the row's own, such as whether a list is tracked, rather than a setting of it. */
+  asSwitch?: boolean
 }>()
 
 /** A flag stored without a value reads as off. */
@@ -35,9 +38,11 @@ function given(attrs: Record<string, unknown>) {
     <button
       v-bind="given($attrs)"
       type="button"
-      class="icon-toggle input-ring"
+      class="icon-toggle touch-target input-ring"
+      :role="asSwitch ? 'switch' : undefined"
       :aria-label="label"
-      :aria-pressed="pressed"
+      :aria-pressed="asSwitch ? undefined : pressed"
+      :aria-checked="asSwitch ? pressed : undefined"
       @click="pressed = !pressed"
     >
       <span :class="icon" aria-hidden="true" />
@@ -64,7 +69,8 @@ function given(attrs: Record<string, unknown>) {
   background-color: var(--row-hover);
   opacity: 1;
 }
-.icon-toggle[aria-pressed='true'] {
+.icon-toggle[aria-pressed='true'],
+.icon-toggle[aria-checked='true'] {
   border-color: rgb(var(--color-brand-fg) / 0.32);
   background-color: rgb(var(--color-brand-fg) / 0.1);
   color: rgb(var(--color-brand-fg));

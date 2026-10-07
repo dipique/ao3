@@ -7,7 +7,7 @@ import { HIGHLIGHT_PRESETS, isTagTarget, MAX_PRIORITY, MIN_PRIORITY, RULE_TARGET
 
 import type { RuleAction, Swatch } from '../../model/ruleEditor.ts'
 
-import { canSave, describeRule, draftRule, HIDE_TAG_OFF, openDraft, regexTester, RULE_ACTIONS, RULE_OFF_HELP, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../model/ruleEditor.ts'
+import { canSave, draftRule, HIDE_TAG_OFF, openDraft, regexTester, RULE_ACTIONS, RULE_OFF_HELP, ruleSummary, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../model/ruleEditor.ts'
 
 const context = OptionRowRulesContext.inject()
 const { filters, colors } = useOption('rules')
@@ -20,6 +20,22 @@ const draft = ref(openDraft(undefined, {}))
 const testSubject = ref('')
 const suggest = useTagSuggestions(draft, open)
 const canonical = useCanonicalTags(draft, open)
+
+/*
+  What the editor says of its own accord is said in live regions that are
+  there before the words come: a screen reader may say nothing of a region
+  added with its words already in it. The suggestions' note is said in a
+  region of its own, in place while the editor is open, since the box it shows
+  in comes and goes. The canonical preview's note fills its region a frame
+  after the region is drawn.
+*/
+const suggestNote = computed(() => (suggest.box.kind === 'paused' || suggest.box.kind === 'unavailable' ? suggest.box.text : ''))
+const canonicalNote = ref('')
+watch(() => canonical.preview?.note ?? '', (note) => {
+  requestAnimationFrame(() => {
+    canonicalNote.value = note
+  })
+}, { immediate: true })
 
 const valueId = useId()
 const testId = useId()
@@ -51,7 +67,7 @@ const actionHelp = computed(() => draft.value.enabled
   ? RULE_ACTIONS.find(action => action.value === draft.value.action)!.help
   : RULE_OFF_HELP)
 const noHighlight = computed(() => draft.value.action === 'invert' && draft.value.noHighlight)
-const sentence = computed(() => describeRule(draftRule(draft.value, colors.value)))
+const sentence = computed(() => ruleSummary(draftRule(draft.value, colors.value)))
 
 context.edit = (rule?: Rule) => {
   editing.value = rule ?? null
@@ -144,30 +160,33 @@ function save() {
                   <Icon v-bind="{ [matcher.icon]: '' }" />{{ matcher.label }}
                 </RekaRadioGroupItem>
               </RekaRadioGroupRoot>
+              <!-- A press in the box would take the focus out of the field, and the box with it. -->
+              <div v-if="suggest.shown" class="suggest" :data-suggest="suggest.box.kind" @mousedown.prevent>
+                <ul v-if="suggest.box.kind === 'names'" :id="suggest.listId" role="listbox" aria-label="Suggestions" class="suggest__list">
+                  <li
+                    v-for="(option, index) in suggest.box.options"
+                    :id="suggest.optionId(index)"
+                    :key="option.name"
+                    role="option"
+                    :aria-selected="index === suggest.active"
+                    class="suggest__option"
+                    :class="{ 'ring-inset input-ring-visible': index === suggest.active }"
+                    @click="suggest.pick(option.name)"
+                  >
+                    <!-- v-html is safe here: `highlight` escapes the name and only ever adds <mark>. -->
+                    <!-- eslint-disable-next-line vue/no-v-html -->
+                    <span class="suggest__name" v-html="option.html" />
+                    <span class="suggest__kind" aria-hidden="true">canonical</span>
+                  </li>
+                </ul>
+                <p v-else-if="suggest.box.kind !== 'none'" class="suggest__note">
+                  {{ suggest.box.text }}
+                </p>
+              </div>
             </div>
-            <!-- A press in the box would take the focus out of the field, and the box with it. -->
-            <div v-if="suggest.shown" class="suggest" :data-suggest="suggest.box.kind" @mousedown.prevent>
-              <ul v-if="suggest.box.kind === 'names'" :id="suggest.listId" role="listbox" aria-label="Suggestions" class="suggest__list">
-                <li
-                  v-for="(option, index) in suggest.box.options"
-                  :id="suggest.optionId(index)"
-                  :key="option.name"
-                  role="option"
-                  :aria-selected="index === suggest.active"
-                  class="suggest__option"
-                  :class="{ 'ring-inset input-ring-visible': index === suggest.active }"
-                  @click="suggest.pick(option.name)"
-                >
-                  <!-- v-html is safe here: `highlight` escapes the name and only ever adds <mark>. -->
-                  <!-- eslint-disable-next-line vue/no-v-html -->
-                  <span class="suggest__name" v-html="option.html" />
-                  <span class="suggest__kind" aria-hidden="true">canonical</span>
-                </li>
-              </ul>
-              <p v-else-if="suggest.box.kind !== 'none'" role="status" class="suggest__note">
-                {{ suggest.box.text }}
-              </p>
-            </div>
+            <p role="status" class="sr-only">
+              {{ suggestNote }}
+            </p>
           </template>
           <template #help>
             {{ field.help }}
@@ -224,8 +243,13 @@ function save() {
                 <p v-if="canonical.preview.empty" class="canon__line" data-canonical-part="empty">
                   {{ canonical.preview.empty }}
                 </p>
-                <p v-if="canonical.preview.note" role="status" class="canon__line" data-canonical-part="note">
-                  {{ canonical.preview.note }}
+                <p
+                  role="status"
+                  class="canon__line"
+                  :class="{ 'canon__line--waiting': !canonicalNote }"
+                  :data-canonical-part="canonicalNote ? 'note' : undefined"
+                >
+                  {{ canonicalNote }}
                 </p>
               </div>
             </template>
@@ -333,28 +357,21 @@ function save() {
 
         <DialogField v-if="usesPriority(draft.action)" label="Priority" :label-for="priorityId">
           <div class="priority-row">
-            <RekaNumberFieldRoot
-              :model-value="draft.priority"
+            <Stepper
+              :id="priorityId"
+              v-model="draft.priority"
               :min="MIN_PRIORITY"
               :max="MAX_PRIORITY"
-              class="stepper"
-              @update:model-value="draft.priority = $event ?? draft.priority"
-            >
-              <RekaNumberFieldDecrement class="stepper__button" aria-label="Lower priority">
-                <span class="i-tabler-minus" aria-hidden="true" />
-              </RekaNumberFieldDecrement>
-              <RekaNumberFieldInput :id="priorityId" class="stepper__value input-ring" />
-              <RekaNumberFieldIncrement class="stepper__button" aria-label="Raise priority">
-                <span class="i-tabler-plus" aria-hidden="true" />
-              </RekaNumberFieldIncrement>
-            </RekaNumberFieldRoot>
+              decrement-label="Lower priority"
+              increment-label="Raise priority"
+            />
             <span class="priority-row__note">When rules disagree about a work, the highest priority wins; always-show wins a tie.</span>
           </div>
         </DialogField>
 
         <p class="summary" aria-live="polite">
           <span class="summary__icon i-tabler-info-circle" aria-hidden="true" />
-          <span>{{ sentence }}</span>
+          <span><template v-for="(part, index) in sentence" :key="index"><b v-if="part.kind === 'verb'">{{ part.text }}</b><span v-else-if="part.kind === 'value'" class="summary__value">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
         </p>
       </div>
 
@@ -441,8 +458,12 @@ function save() {
   font-size: 12.5px;
 }
 
+/* Under the field and the matcher beside it; on a narrow dialog, where the
+   matcher goes under the field, between the two. */
 .suggest {
-  margin-top: 4px;
+  flex-basis: 100%;
+  order: 3;
+  margin-top: -4px;
   overflow: hidden;
   border: 1px solid rgb(var(--color-border));
   border-radius: 8px;
@@ -581,6 +602,11 @@ function save() {
   color: rgb(var(--color-muted-fg));
   font-size: 12px;
   line-height: 16px;
+}
+/* The note's region, in place with nothing to say yet. */
+.canon > .canon__line--waiting {
+  padding: 0;
+  border-top: none;
 }
 
 .rule-editor__body :deep(.seg) {
@@ -736,46 +762,6 @@ function save() {
   font-size: 11.5px;
   line-height: 16px;
 }
-.rule-editor__body :deep(.stepper) {
-  display: inline-flex;
-  align-items: center;
-  height: 30px;
-  border: 1px solid rgb(var(--color-input));
-  border-radius: 7px;
-  background-color: rgb(var(--color-default));
-}
-.rule-editor__body :deep(.stepper__button) {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: rgb(var(--color-muted-fg));
-  font-size: 13px;
-  cursor: pointer;
-}
-.rule-editor__body :deep(.stepper__button:hover:where(:enabled)) {
-  background-color: var(--row-hover);
-  color: rgb(var(--color-default-fg));
-}
-.rule-editor__body :deep(.stepper__button:disabled) {
-  cursor: default;
-  opacity: 0.48;
-}
-.rule-editor__body :deep(.stepper__value) {
-  width: 44px;
-  height: 100%;
-  border: none;
-  border-right: 1px solid rgb(var(--color-hair));
-  border-left: 1px solid rgb(var(--color-hair));
-  background: transparent;
-  color: rgb(var(--color-default-fg));
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 .summary {
   display: flex;
   gap: 9px;
@@ -792,6 +778,12 @@ function save() {
   margin-top: 1px;
   color: rgb(var(--color-muted-fg));
   font-size: 15px;
+}
+.summary b {
+  font-weight: 700;
+}
+.summary__value {
+  color: rgb(var(--color-brand-fg));
 }
 
 .rule-editor__foot :deep(.cancel-button) {
@@ -844,6 +836,15 @@ function save() {
 @container (max-width: 480px) {
   .save-button {
     min-width: 0;
+  }
+  .text-field {
+    flex-basis: 100%;
+  }
+  .suggest {
+    order: 1;
+  }
+  .rule-editor__body :deep(.seg) {
+    order: 2;
   }
 }
 </style>

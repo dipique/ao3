@@ -371,7 +371,7 @@ function statusPanel(storage: SiteStorage): StatusPanel {
       journal.save().then(
         (written) => {
           said.textContent = written.ops
-            ? `Saved ${written.ops.toLocaleString('en-US')} ${written.ops === 1 ? 'change' : 'changes'} as ${written.fileName} — open it from the extension's options, under Site export.`
+            ? `Saved ${written.ops.toLocaleString('en-US')} ${written.ops === 1 ? 'change' : 'changes'} as ${written.fileName} — open it from the extension's options, under Lists → Offline reading.`
             : 'Nothing has been changed here yet.'
         },
         (error: unknown) => {

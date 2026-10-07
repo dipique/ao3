@@ -5,6 +5,9 @@ const backupCountModel = computed({
   get: () => state.backupCount,
   set: v => setBackupCount(Number(v)),
 })
+
+/** On a phone the snapshots stand bare under the row; wider, they sit in its inset. */
+const phone = useMediaQuery('(max-width: 767.98px)')
 </script>
 
 <template>
@@ -38,7 +41,15 @@ const backupCountModel = computed({
           subtitle="Older daily backups beyond this count are deleted automatically. Backups taken around turning on sync, a restore, or a sync update you held back are kept separately: the newest five of each."
         >
           <template #default="{ id }">
-            <NumberInput :id="id" v-model="backupCountModel" :min="1" :max="90" />
+            <Stepper
+              :id="id"
+              v-model="backupCountModel"
+              :min="1"
+              :max="90"
+              size="row"
+              decrement-label="Keep fewer daily backups"
+              increment-label="Keep more daily backups"
+            />
           </template>
         </OptionRow>
       </OptionDependents>
@@ -48,7 +59,10 @@ const backupCountModel = computed({
         subtitle="Roll back to an earlier snapshot. Your current settings are backed up first, so a restore can itself be undone."
       >
         <template #extra>
-          <OptionRowInset>
+          <div v-if="phone" pb-1 pt-2>
+            <SyncBackupList />
+          </div>
+          <OptionRowInset v-else tight>
             <SyncBackupList />
           </OptionRowInset>
         </template>

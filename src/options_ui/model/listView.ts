@@ -1,4 +1,5 @@
 import type { Rule } from '../../common/data.ts'
+import type { SavedListRow } from './savedListRows.ts'
 
 import { DEFAULT_BEHAVIOR_PRIORITY, rulePriority, ruleTargetLabel } from '../../common/data.ts'
 import { searchTerms, textMatches } from './settingsSearch.ts'
@@ -186,6 +187,128 @@ export const MARK_ORDER_OFF = 'Sort by your order to rearrange'
  */
 export function markOrderOff(sort: MarkSort): string | null {
   return sort === 'order' ? null : MARK_ORDER_OFF
+}
+
+/** How the saved lists can be shown: by name, which is where they start, by status, or by how recently their offline copy was read. */
+export type SavedListSort = 'name' | 'status' | 'refreshed'
+
+export const SAVED_LIST_SORTS: readonly { value: SavedListSort, label: string }[] = [
+  { value: 'name', label: 'Name' },
+  { value: 'status', label: 'Status' },
+  { value: 'refreshed', label: 'Last refreshed' },
+]
+
+/** What of a saved list's row the frame reads. */
+type ShownSavedList = Pick<SavedListRow, 'id' | 'title' | 'placeholder' | 'type' | 'typeTip' | 'kind' | 'status' | 'pending' | 'caching'>
+
+/** What a saved list is called on screen: its title, or what its emptied field shows in its place. */
+function savedListName(row: ShownSavedList): string {
+  return row.title || row.placeholder
+}
+
+/**
+ * The saved lists that every term of `query` appears in: in what a list is
+ * called, what it is of, what kind of search it is, or the tag or name it
+ * searches (`typeTip`, "Character: Draco Malfoy"). Read as the settings search
+ * reads a query.
+ */
+export function filterSavedLists<T extends ShownSavedList>(rows: readonly T[], query: string): T[] {
+  return filterRows(rows, query, row => [savedListName(row), row.type ?? '', row.typeTip ?? '', row.kind ?? ''])
+}
+
+const bySavedListName: Compare<ShownSavedList> = (a, b) => savedListName(a).localeCompare(savedListName(b), undefined, { sensitivity: 'base', numeric: true })
+
+/** Tracked, then saved, then whatever is waiting on the reader, tracked or not. */
+function statusRank(row: ShownSavedList): number {
+  if (row.pending)
+    return 2
+  return row.status === 'tracked' ? 0 : 1
+}
+
+/** When a list's offline copy was read, or null with none. */
+function refreshedAt(row: ShownSavedList): number | null {
+  return row.caching.kind === 'copy' ? row.caching.scrapedAt : null
+}
+
+/**
+ * The saved lists in a new array, by `sort`: A to Z by name, ignoring case and
+ * accents; by status, by name within each; or the newest offline copy first,
+ * the lists with none last, by name.
+ */
+export function sortSavedLists<T extends ShownSavedList>(rows: readonly T[], sort: SavedListSort): T[] {
+  if (sort === 'status')
+    return sortRows(rows, (a, b) => statusRank(a) - statusRank(b), { then: bySavedListName })
+  if (sort === 'refreshed') {
+    return sortRows(rows, (a, b) => {
+      const [at, bt] = [refreshedAt(a), refreshedAt(b)]
+      if (at === null || bt === null)
+        return Number(at === null) - Number(bt === null)
+      return bt - at
+    }, { then: bySavedListName })
+  }
+  return sortRows(rows, bySavedListName)
+}
+
+/**
+ * The order the rows had when a title took focus, and whose title it is. A
+ * title is typed in place, and a row that moved or vanished under the reader's
+ * typing would take the field with it, so the rows hold still until focus
+ * leaves the titles.
+ */
+export interface SavedListHold {
+  order: readonly string[]
+  focused: string
+}
+
+/**
+ * The saved lists the frame shows, in the order it shows them: the ones the
+ * filter keeps, by the sort. While `hold` holds, they keep the order they had,
+ * any list that arrived since after them, and the list being retitled stays
+ * whatever the filter says.
+ */
+export function shownSavedLists<T extends ShownSavedList>(rows: readonly T[], { query, sort, hold }: { query: string, sort: SavedListSort, hold: SavedListHold | null }): T[] {
+  const kept = new Set(filterSavedLists(rows, query))
+  const sorted = sortSavedLists(rows.filter(row => kept.has(row) || row.id === hold?.focused), sort)
+  if (!hold)
+    return sorted
+  const at = (row: T): number => {
+    const index = hold.order.indexOf(row.id)
+    return index === -1 ? hold.order.length : index
+  }
+  return sortRows(sorted, (a, b) => at(a) - at(b))
+}
+
+/**
+ * Which row focus goes to when the row it was in, `gone`, leaves: the one now
+ * where it stood (the next, or what replaced it), else the new last row; null
+ * with none left. `before` is the order the rows had, by id.
+ */
+export function focusSuccessor(before: readonly string[] | undefined, after: readonly string[], gone: string): string | null {
+  if (!after.length)
+    return null
+  const at = Math.max(0, before?.indexOf(gone) ?? 0)
+  return after[Math.min(at, after.length - 1)]!
+}
+
+/**
+ * The saved lists' header: how many there are, how many are tracked and how
+ * many have an offline copy (or just how many, where the header is narrow);
+ * while the filter holds a query, how many of them it shows; and the filter's
+ * placeholder.
+ */
+export function savedListsHead(rows: readonly ShownSavedList[], shown: readonly ShownSavedList[], query: string): { count: string, shortCount: string, placeholder: string } {
+  const total = rows.length
+  if (!total)
+    return { count: 'none yet', shortCount: 'none yet', placeholder: 'Filter lists' }
+  const lists = `${total.toLocaleString()} ${total === 1 ? 'list' : 'lists'}`
+  const placeholder = `Filter ${lists}`
+  if (searchTerms(query).length) {
+    const of = `${shown.length.toLocaleString()} of ${total.toLocaleString()}`
+    return { count: of, shortCount: of, placeholder }
+  }
+  const tracked = rows.filter(row => row.status === 'tracked').length
+  const cached = rows.filter(row => row.caching.kind === 'copy').length
+  return { count: `${lists} · ${tracked.toLocaleString()} tracked · ${cached.toLocaleString()} cached`, shortCount: total.toLocaleString(), placeholder }
 }
 
 /**

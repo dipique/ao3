@@ -2,10 +2,14 @@ import { debounce } from '@antfu/utils'
 
 import { ADDON_CLASS, api, isExtensionContextValid, logBanner, logger, options, toast } from '#common'
 
+import type { RunProgress } from './runProgress.ts'
+
 import { setMenusEnabled } from './contextTrigger.tsx'
 import { applyDarkSkin, applyRememberedDarkSkin } from './darkSkin.ts'
+import { readListLinks } from './lists/openLink.ts'
 import { serveMarkRequests } from './markForLater.ts'
 import { captureSearchBaseline, installPendingSearch } from './pendingSearch.ts'
+import { NO_RUNS, runAsked, runFinished, runProgressMarks, runStarted } from './runProgress.ts'
 import { applySurfaceTheme } from './theme.ts'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
@@ -29,6 +33,34 @@ async function clean() {
   }
 }
 
+let progress: RunProgress = NO_RUNS
+
+/** Move the page's run progress on, and say where it stands on `<html>` ({@link runProgressMarks}). */
+function stepProgress(step: (progress: RunProgress) => RunProgress): void {
+  progress = step(progress)
+  const html = document.documentElement
+  if (!html)
+    return
+  const { runs, busy } = runProgressMarks(progress)
+  if (runs !== null)
+    html.dataset.ao3eRuns = runs
+  if (busy)
+    html.dataset.ao3eBusy = ''
+  else
+    delete html.dataset.ao3eBusy
+}
+
+/** {@link run}, with the page's run progress kept around it. */
+async function runTracked(): Promise<void> {
+  stepProgress(runStarted)
+  try {
+    await run()
+  }
+  finally {
+    stepProgress(runFinished)
+  }
+}
+
 async function run() {
   // Bail before touching the page if the extension was reloaded, updated, or
   // disabled under this tab. Storage answers from defaults once that happens
@@ -48,6 +80,9 @@ async function run() {
   applyDarkSkin(opts.darkSkin)
   // Seed the context-menu enable flag before any unit decorates the page.
   setMenusEnabled(opts.contextMenusEnabled)
+  // Before any unit is built: a list's own link can switch on the unit that
+  // opens its view. A no-op on every run after the first.
+  readListLinks(opts)
   const units = UNITS.map(U => new U(opts))
   const enabled = units.filter(u => u.enabled)
 
@@ -81,13 +116,14 @@ function waitForReady(): Promise<void> {
 }
 
 const debouncedRun = debounce(500, () => {
-  run().catch((err) => {
+  runTracked().catch((err) => {
     logger.error(err)
   })
 })
 
 options.addListener(() => {
   logger.info('Options have changed, reloading.')
+  stepProgress(runAsked)
   debouncedRun()
 })
 
@@ -113,6 +149,6 @@ serveMarkRequests()
 // The "your search filters changed" prompt and its Ctrl/⌘+Enter shortcut.
 installPendingSearch()
 
-run().catch((err) => {
+runTracked().catch((err) => {
   logger.error(err)
 })

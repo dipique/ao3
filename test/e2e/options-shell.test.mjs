@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 const SEARCH = 'Search settings by name or description'
 const WIDE = { width: 1280, height: 800 }
@@ -49,8 +48,7 @@ describe('options UI — the top bar and the rail', { skip }, () => {
       }
       try {
         await holds()
-        await options.page.reload({ waitUntil: 'networkidle2' })
-        await sleep(1500)
+        await options.reload()
         await holds()
       }
       finally {
@@ -80,8 +78,7 @@ describe('options UI — the top bar and the rail', { skip }, () => {
         assert.equal(await appearanceChoice(options), 'Light')
 
         await options.press(button)
-        await sleep(600)
-        assert.equal((await options.stored('option.theme')).chosen, 'dark')
+        await until('the choice to be written', async () => (await options.stored('option.theme')).chosen === 'dark')
         assert.equal(await bodyTheme(options), 'dark')
         assert.equal(await options.name(await themeSwitch(options)), 'Switch to light theme')
         assert.equal(await appearanceChoice(options), 'Dark')
@@ -96,8 +93,7 @@ describe('options UI — the top bar and the rail', { skip }, () => {
       try {
         assert.equal(await options.name(await themeSwitch(options)), 'Switch to light theme')
         await options.press(await options.control(await options.row(THEME_ROW), 'radio', 'Light'))
-        await sleep(600)
-        assert.equal((await options.stored('option.theme')).chosen, 'light')
+        await until('the choice to be written', async () => (await options.stored('option.theme')).chosen === 'light')
         assert.equal(await options.name(await themeSwitch(options)), 'Switch to dark theme')
       }
       finally {
@@ -117,7 +113,7 @@ describe('options UI — the top bar and the rail', { skip }, () => {
         assert.equal(await appearanceChoice(options), 'AO3')
 
         await options.press(await themeSwitch(options))
-        await sleep(600)
+        await until('the choice to be written', async () => (await options.stored('option.theme')).chosen === 'light')
         assert.deepEqual(await options.stored('option.theme'), { chosen: 'light', current: 'dark' })
         assert.equal(await appearanceChoice(options), 'Light')
       }
@@ -157,14 +153,14 @@ describe('options UI — the top bar and the rail', { skip }, () => {
 
     test('the categories are a row of chips, with their shortest names', async () => {
       const chips = await options.railItems()
-      assert.deepEqual(chips.map(c => c.kind), ['category', 'category', 'category', 'category', 'category'], 'no sub-sections on the chip row')
-      assert.deepEqual(chips.map(c => c.name), ['Site features', 'Search', 'Reading', 'Sync', 'Advanced'])
+      assert.deepEqual(chips.map(c => c.kind), ['category', 'category', 'category', 'category', 'category', 'category'], 'no sub-sections on the chip row')
+      assert.deepEqual(chips.map(c => c.name), ['Site features', 'Search', 'Lists', 'Reading', 'Sync', 'Advanced'])
       assert.deepEqual(chips.filter(c => c.current).map(c => c.name), ['Reading'])
     })
 
     test('a chip opens its category', async () => {
-      await options.press(await (await options.rail()).$('[data-rail-item][href="#sync-backups"]'))
-      await sleep(1600)
+      const chip = await (await options.rail()).$('[data-rail-item][href="#sync-backups"]')
+      await options.land(() => options.press(chip))
       assert.deepEqual(await options.shownCategories(), ['sync-backups'])
       assert.deepEqual((await options.railItems()).filter(c => c.current).map(c => c.name), ['Sync'])
     })
@@ -174,18 +170,14 @@ describe('options UI — the top bar and the rail', { skip }, () => {
       assert.equal(await field.evaluate(el => el.checkVisibility()), false)
 
       await (await options.control(options.page, 'button', 'Search settings')).click()
-      await sleep(300)
-      assert.equal(await field.evaluate(el => el.checkVisibility()), true)
-      assert.equal(await field.evaluate(el => el === document.activeElement), true, 'the field takes the focus')
+      await until('the field to show, with the focus', () => field.evaluate(el => el.checkVisibility() && el === document.activeElement))
 
       await field.type('collapse')
-      await sleep(400)
-      assert.deepEqual(await options.shownCategories(), ['site-features-appearance', 'search'])
+      await until('the query to filter the pane', async () => (await options.shownCategories()).join() === 'site-features-appearance,search')
 
       await options.page.keyboard.press('Escape')
-      await sleep(400)
+      await until('the field to close', () => field.evaluate(el => !el.checkVisibility()))
       assert.equal(await field.evaluate(el => el.value), '')
-      assert.equal(await field.evaluate(el => el.checkVisibility()), false)
       assert.deepEqual(await options.shownCategories(), ['sync-backups'])
     })
 
@@ -196,17 +188,18 @@ describe('options UI — the top bar and the rail', { skip }, () => {
     })
 
     test('closing the search hands the focus back to the icon that opened it', async () => {
-      await (await options.control(options.page, 'button', 'Search settings')).click()
-      await sleep(300)
-      await options.page.keyboard.press('Escape')
-      await sleep(400)
-      assert.equal(await focused(), 'Search settings', 'after Escape')
+      const field = await options.control(options.page, 'textbox', SEARCH)
+      const opened = () => until('the field to show, with the focus', () => field.evaluate(el => el.checkVisibility() && el === document.activeElement))
 
       await (await options.control(options.page, 'button', 'Search settings')).click()
-      await sleep(300)
+      await opened()
+      await options.page.keyboard.press('Escape')
+      await until('the focus back on the icon after Escape', async () => await focused() === 'Search settings')
+
+      await (await options.control(options.page, 'button', 'Search settings')).click()
+      await opened()
       await (await options.control(options.page, 'button', 'Close the settings search')).click()
-      await sleep(400)
-      assert.equal(await focused(), 'Search settings', 'after the close button')
+      await until('the focus back on the icon after the close button', async () => await focused() === 'Search settings')
     })
 
     test('a query typed on a wide window keeps its field in view when the window narrows', async () => {
@@ -214,9 +207,9 @@ describe('options UI — the top bar and the rail', { skip }, () => {
       try {
         const field = await wide.control(wide.page, 'textbox', SEARCH)
         await field.type('collapse')
-        await sleep(400)
+        await until('the query to filter the pane', async () => (await wide.shownCategories()).join() === 'site-features-appearance,search')
         await wide.page.setViewport(NARROW)
-        await sleep(400)
+        await until('the narrow layout, with no rail beside the pane', () => wide.page.evaluate(() => matchMedia('(max-width: 767.98px)').matches))
         assert.deepEqual(await wide.shownCategories(), ['site-features-appearance', 'search'], 'the query still filters the pane')
         assert.equal(await field.evaluate(el => el.checkVisibility()), true, 'so the field that holds it shows')
       }

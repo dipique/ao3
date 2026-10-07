@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import Advanced from './Advanced.vue'
+import Lists from './Lists.vue'
 import Reading from './Reading.vue'
 import Search from './Search.vue'
 import SiteFeatures from './SiteFeatures.vue'
@@ -21,6 +22,7 @@ const { query, searching, matchCount, total } = useOptionSearch()
     <!-- Rendered in rail order: the rail lists the categories in the order they register. -->
     <SiteFeatures />
     <Search />
+    <Lists />
     <Reading />
     <SyncBackups />
     <Advanced />

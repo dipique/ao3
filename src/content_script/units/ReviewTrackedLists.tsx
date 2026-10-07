@@ -30,6 +30,7 @@ import {
   utcToday,
 } from '#common'
 import { extensionAlive } from '#content_script/extensionAlive.js'
+import { linkedTo, openLinked } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, markedForLaterIds } from '#content_script/markedForLaterIndex.js'
 import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
@@ -60,7 +61,10 @@ const SOURCE_ID = 'tracked-review'
  */
 const CACHE_KEY = 'tracked-review'
 
-/** The address that opens the review straight away — what the toolbar's pill links to. */
+/**
+ * The review's own link, which opens it straight away — what the toolbar's
+ * pill links to. Another spelling of its open URL.
+ */
 const HASH = '#ao3e-tracked'
 
 /**
@@ -178,10 +182,11 @@ export class ReviewTrackedLists extends Unit {
   static override get name() { return 'ReviewTrackedLists' }
 
   // Nothing to review with no list tracked, and nothing the entry point could
-  // honestly offer.
+  // honestly offer. Its open URL opens it whatever *Tracked lists* says
+  // ({@link file://./../lists/openLink.ts}).
   override get enabled() {
     const tracked = this.options.trackedLists
-    return tracked.enabled && tracked.lists.some(list => list.tracked)
+    return (tracked.enabled || linkedTo('review')) && tracked.lists.some(list => list.tracked)
   }
 
   static override async clean(): Promise<void> {
@@ -208,7 +213,7 @@ export class ReviewTrackedLists extends Unit {
     const host = anchorItem()
     // Nowhere to put the entry point, but a reopen is still owed — the review may
     // be on screen with the subnav hidden behind it.
-    if (host && !host.parentElement?.querySelector(`.${BUTTON_CLASS}`))
+    if (this.options.trackedLists.enabled && host && !host.parentElement?.querySelector(`.${BUTTON_CLASS}`))
       this.addEntryPoint(host, pageUser)
 
     // A global re-run closed an open view: put it back where the reader left
@@ -222,9 +227,7 @@ export class ReviewTrackedLists extends Unit {
       void this.openView(pageUser, { initialState: pending, refresh: false, reuseWorks: !moved })
       return
     }
-    // Linkable, and safe to reload onto.
-    if (location.hash === HASH)
-      void this.openView(pageUser)
+    void openLinked('review', CACHE_KEY, opts => this.openView(pageUser, opts))
   }
 
   /** The **Tracked** subnav item, after the read list's own. */
@@ -261,9 +264,10 @@ export class ReviewTrackedLists extends Unit {
   /** Everything the shared host needs to know about a review window. */
   source(userId: string): SearchSource {
     const history = onHistoryPage()
-    // Where the list lives, for the options page's stored-list row. A review is
-    // gathered from several queries at once, so there is no listing behind it —
-    // which is also why `load` replaces the whole scrape.
+    // Where the list lives: the page the review opens on, which This review's
+    // Start Review on the options page falls back on. A review is gathered
+    // from several queries at once, so there is no listing behind it — which
+    // is also why `load` replaces the whole scrape.
     const home = getArchiveLink(`/users/${encodeURIComponent(userId)}/readings${HASH}`)
     return {
       id: SOURCE_ID,
@@ -909,7 +913,8 @@ async function undoReviewed(previous: Day, expected: Day): Promise<void> {
 }
 
 /**
- * Where the options page's stored-list row points. A review is gathered from
+ * Where This review lives, which its Start Review on the options page opens it
+ * on when the reader's account isn't known there. A review is gathered from
  * several queries at once, so there is no listing address to give it — the page
  * the review itself opens on is the honest answer.
  */
@@ -1073,7 +1078,8 @@ function listChrome(): Element[] {
 /**
  * Stand in for {@link listChrome} while the view is up, the way AO3 draws its
  * own lists: a heading naming the review, its subnav item as the current one in
- * place of our button, and the item that *was* current turned back into a link.
+ * place of our button (or where it would be), and the item that *was* current
+ * turned back into a link.
  */
 function showReviewChrome(userId: string): void {
   const hidden = `.${NATIVE_HIDDEN_CLASS}`
@@ -1089,7 +1095,8 @@ function showReviewChrome(userId: string): void {
       <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><a href={href}>{current.textContent?.trim() ?? ''}</a></li>,
     )
   }
-  nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li')?.after(
+  const place = nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li') ?? anchorItem()
+  place?.after(
     <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><span class="current">{LIST_NAME}</span></li>,
   )
 }

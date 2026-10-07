@@ -66,7 +66,7 @@ function consequenceId(answer: SyncAnswer): string {
     <div v-if="status.chip" class="sync-panel__body">
       <div class="sync-panel__status">
         <span :data-sync-chip="status.chip.state" :class="CHIP_TONES[status.chip.severity]" class="sync-chip">
-          <SeverityGlyph :severity="status.chip.severity" :glyph="GLYPHS[status.chip.state]" text-sm />
+          <SeverityGlyph :severity="status.chip.severity" :glyph="GLYPHS[status.chip.state]" wordless text-sm />
           {{ status.chip.word }}
         </span>
         <span v-if="status.chip.detail" data-sync-detail>{{ status.chip.detail }}</span>
@@ -188,6 +188,20 @@ function consequenceId(answer: SyncAnswer): string {
   color: rgb(var(--color-muted-fg));
   font-size: 11.5px;
   line-height: 16px;
+}
+/* On a phone the switch sits beside the title, and the description runs under both. */
+@media (max-width: 767.98px) {
+  .sync-panel__head :deep(.option-row__text) {
+    display: contents;
+  }
+  .sync-panel__head :deep(.option-row__title) {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .sync-panel__head :deep(.option-row__description) {
+    flex-basis: 100%;
+    order: 1;
+  }
 }
 @media (min-width: 768px) {
   .sync-panel__head :deep(.option-row) {

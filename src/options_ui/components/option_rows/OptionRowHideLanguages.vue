@@ -16,17 +16,17 @@ const oneLanguage = computed(() => show.value.length === 1)
     title="Languages"
     subtitle="Hide works that are not in a language you read."
   >
-    <label for="hideWorks-languages" py-1 flex="~ row items-center gap-1">
-      <span font="leading-none" text="sm muted-fg">Hide works written in languages other than</span>
+    <label for="hideWorks-languages" py-1 flex="~ row wrap items-center gap-2.5" text="[12.5px] muted-fg" leading="[18px]">
+      <span>Hide works written in languages other than</span>
       <OptionLanguage />
     </label>
 
     <!-- Grid, not flex: the switch has no text content, so as a flex item its
          min-width resolves to 0 and it gets squashed. -->
-    <label :for="applyId" grid="~ cols-[1fr_min-content] items-center" gap-3 py-1 text="sm">
+    <label :for="applyId" grid="~ cols-[1fr_min-content] items-center" gap-3 py-1 text="[12.5px]" leading="[18px]">
       <span flex="~ col gap-0.5">
         <span>Also set AO3's own language filter</span>
-        <span text="xs muted-fg">
+        <span text="[11.5px] muted-fg" leading="[16px]">
           Pre-selects the language in the Sort &amp; Filter sidebar, so the archive filters server-side instead of
           sending works we then hide. A language already chosen on the page is left alone.
           <template v-if="!oneLanguage">

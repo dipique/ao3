@@ -16,7 +16,8 @@ import { capFor } from '../../model/listView.ts'
  * scroll, and a shadow shows at an edge only while there is more past it.
  *
  * The rows are the default slot's direct children, since the cap measures
- * them.
+ * them. `bands` goes between the header and the rows: notes about the whole
+ * list, and column heads.
  */
 const props = withDefaults(defineProps<{
   /** The list's `data-list`. */
@@ -25,6 +26,8 @@ const props = withDefaults(defineProps<{
   title: string
   /** The header's count, as it should read. */
   count: string
+  /** The count where the frame is too narrow for all of `count`. */
+  shortCount?: string
   /** Show the empty state in place of the rows. */
   empty?: boolean
   cap?: ListCap
@@ -76,7 +79,10 @@ defineExpose({ reveal })
     <div class="list-frame__head">
       <span :id="titleId" class="list-frame__title" :class="{ 'sr-only': $slots.filter }">{{ title }}</span>
       <slot name="filter" />
-      <span data-list-count class="list-frame__count">{{ count }}</span>
+      <span data-list-count class="list-frame__count">
+        <span :class="{ 'list-frame__count--wide': shortCount !== undefined }">{{ count }}</span>
+        <span v-if="shortCount !== undefined" class="list-frame__count--narrow">{{ shortCount }}</span>
+      </span>
       <slot name="controls" />
       <button
         v-if="addLabel"
@@ -89,6 +95,7 @@ defineExpose({ reveal })
         <span class="i-tabler-plus" text="[15px]" aria-hidden="true" />
       </button>
     </div>
+    <slot name="bands" />
     <div v-if="empty" class="list-frame__empty">
       <slot name="empty" />
     </div>
@@ -140,6 +147,26 @@ defineExpose({ reveal })
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.list-frame__count--narrow {
+  display: none;
+}
+/* Below 768 px, where it is touched, as tall as its buttons' hit areas, and
+   with room beside the last for its hit area inside the frame. */
+@media (max-width: 767.98px) {
+  .list-frame__head {
+    min-height: 44px;
+    padding-right: 10px;
+  }
+}
+@container (max-width: 560px) {
+  .list-frame__count--wide {
+    display: none;
+  }
+  .list-frame__count--narrow {
+    display: inline;
+  }
 }
 
 .list-frame__empty {

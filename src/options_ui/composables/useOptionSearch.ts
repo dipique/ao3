@@ -1,7 +1,7 @@
 import type { SettingsRow } from '../model/settingsSearch.ts'
 
 import { anchorSlug } from '../model/anchors.ts'
-import { entryMatches, highlight as highlightTerms, searchTerms } from '../model/settingsSearch.ts'
+import { entryMatches, highlight as highlightTerms, highlightWithStrong, searchTerms } from '../model/settingsSearch.ts'
 import { registerAnchor } from './useAnchors.ts'
 
 /**
@@ -20,6 +20,8 @@ import { registerAnchor } from './useAnchors.ts'
 
 const query = ref('')
 const rows = ref(new Map<string, SettingsRow>())
+/** Which row each id in {@link rows} is, so a row lets go only of an id that is still its own. */
+const owners = new Map<string, symbol>()
 
 const terms = computed(() => searchTerms(query.value))
 const searching = computed(() => terms.value.length > 0)
@@ -33,11 +35,17 @@ function highlight(text: string): string {
   return highlightTerms(text, terms.value)
 }
 
+/** {@link highlight}, with `strong`'s phrases drawn bold. */
+function highlightStrong(text: string, strong: readonly string[]): string {
+  return highlightWithStrong(text, terms.value, strong)
+}
+
 export function useOptionSearch() {
   return {
     query,
     searching,
     highlight,
+    highlightStrong,
     /** Every row on the page, in the order they registered. */
     entries: computed(() => [...rows.value.values()]),
     total: computed(() => rows.value.size),
@@ -61,31 +69,52 @@ export function useOptionSearch() {
  *
  * The id is a slug of the sub-section plus the title, so the two rows called
  * "Reading time" (work stats and chapter stats) get distinct, readable anchors.
+ * A row whose title is the reader's, which two rows can share, passes an
+ * `anchor` of its own, which follows the title as the reader changes it: the
+ * row is indexed and found under the anchor it has now. `id` is the one it
+ * started with.
  */
-export function useSearchableRow(source: () => { title: string, subtitle: string }) {
+export function useSearchableRow(source: () => { title: string, subtitle: string }, anchor?: () => string) {
   const category = OptionCategoryName.inject(null)
   const subsection = OptionSubsectionName.inject(null)
-  const id = anchorSlug(subsection ? `${subsection} ${source().title}` : source().title)
+  const fixed = anchorSlug(subsection ? `${subsection} ${source().title}` : source().title)
+  const current = computed(() => anchor?.() ?? fixed)
+  const id = current.value
 
   if (process.env.NODE_ENV === 'development' && rows.value.has(id))
     console.warn(`[options] duplicate option row id "${id}" — give one of them a distinct title or sub-section`)
 
   // Unlike the search index above, the anchor registry keeps the row after it
-  // unmounts; see {@link registerAnchor}.
-  registerAnchor({ id, kind: 'row', name: source().title, category, subsection })
+  // unmounts, and under an anchor it has left; see {@link registerAnchor}.
+  watchEffect(() => registerAnchor({ id: current.value, kind: 'row', name: source().title, category, subsection }))
 
   // A watcher rather than a one-shot write: a few descriptions are computed
-  // (the fandom export counts its ids), so the index has to follow them.
+  // (the fandom export counts its ids), so the index has to follow them. An
+  // anchor left behind is taken out only while it is still this row's, since
+  // another row may have taken it up in the same update.
+  const owner = Symbol(id)
+  let indexed: string | null = null
+  const unindex = (): void => {
+    if (indexed !== null && owners.get(indexed) === owner) {
+      rows.value.delete(indexed)
+      owners.delete(indexed)
+    }
+  }
   watchEffect(() => {
-    rows.value.set(id, { category, subsection, ...source() })
+    const key = current.value
+    if (key !== indexed)
+      unindex()
+    indexed = key
+    owners.set(key, owner)
+    rows.value.set(key, { category, subsection, ...source() })
   })
-  onUnmounted(() => rows.value.delete(id))
+  onUnmounted(unindex)
 
   return {
     id,
     /** Id of the row's control, kept distinct from the row's own anchor id. */
     controlId: `${id}-input`,
-    visible: computed(() => rowKept(rows.value.get(id))),
+    visible: computed(() => rowKept(rows.value.get(current.value))),
     titleHtml: computed(() => highlight(source().title)),
     subtitleHtml: computed(() => highlight(source().subtitle)),
   }

@@ -70,10 +70,11 @@ export const COLORS = {
 } as const
 
 /**
- * Neutral overlays a token can't carry, each a colour at an alpha of its own in
- * each theme, set beside the tokens as plain CSS variables (`var(--row-hover)`):
- * a list's scrollbar thumb, at rest and hovered; the shade at an edge a list
- * scrolls past; and the tint under a hovered row.
+ * Neutral overlays a token can't carry, each at an alpha of its own in each
+ * theme, set beside the tokens as plain CSS variables (`var(--row-hover)`): a
+ * list's scrollbar thumb, at rest and hovered; the shade at an edge a list
+ * scrolls past; the tint under a hovered row; the shadow under a menu, and
+ * under a dialog; and the scrim a dialog dims the page with.
  */
 export const OVERLAYS = {
   light: {
@@ -81,12 +82,18 @@ export const OVERLAYS = {
     'scroll-thumb-hover': 'rgb(113 113 122 / 0.55)',
     'scroll-shade': 'rgb(9 9 11 / 0.1)',
     'row-hover': 'rgb(9 9 11 / 0.028)',
+    'pop-shadow': '0 12px 32px rgb(9 9 11 / 0.14), 0 2px 6px rgb(9 9 11 / 0.08)',
+    'dlg-shadow': '0 24px 60px rgb(9 9 11 / 0.22), 0 4px 14px rgb(9 9 11 / 0.1)',
+    'scrim': 'rgb(9 9 11 / 0.38)',
   },
   dark: {
     'scroll-thumb': 'rgb(161 161 170 / 0.3)',
     'scroll-thumb-hover': 'rgb(161 161 170 / 0.55)',
     'scroll-shade': 'rgb(0 0 0 / 0.55)',
     'row-hover': 'rgb(255 255 255 / 0.035)',
+    'pop-shadow': '0 12px 32px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.4)',
+    'dlg-shadow': '0 24px 60px rgb(0 0 0 / 0.6), 0 4px 14px rgb(0 0 0 / 0.4)',
+    'scrim': 'rgb(0 0 0 / 0.62)',
   },
 } as const satisfies Record<keyof typeof COLORS, Record<string, string>>
 
@@ -214,13 +221,17 @@ const OTHER_SHORTCUTS: UserShortcuts<PresetWind3Theme> = {
   // 48% while inert.
   'icon-btn': 'input-ring size-6 inline-grid shrink-0 place-items-center rounded-md bg-transparent p-0 text-muted-fg cursor-pointer enabled:hover:bg-[var(--row-hover)] enabled:hover:text-default-fg disabled:cursor-default disabled:op-48',
   // A button with words, and a glyph before them if it has one, at the height
-  // of a settings row's other controls (28 px), and at 48% while inert. Its
-  // look is one of the two below: `outline-btn` is framed on the page's
-  // ground; `ghost-btn` has no frame, and recedes to the muted colour until
-  // hovered.
-  'label-btn': 'input-ring h-7 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-solid px-[11px] text-[12.5px] cursor-pointer disabled:cursor-default disabled:op-48',
+  // of a settings row's other controls (28 px), and at 48% while inert; below
+  // 768 px, where it is touched, 36 px. `small-btn` makes it the 26 px of a
+  // list's or a tile's own actions (34 px below 768 px). Its look is one of the
+  // three below: `outline-btn` is framed on the page's ground; `ghost-btn` has
+  // no frame, and recedes to the muted colour until hovered; `primary-btn` is
+  // filled, for the one thing a place most wants pressed.
+  'label-btn': 'input-ring h-7 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-solid px-[11px] text-[12.5px] cursor-pointer disabled:cursor-default disabled:op-48 lt-md:h-9 lt-md:rounded-lg lt-md:px-[13px] lt-md:text-[13px]',
+  'small-btn': 'h-[26px]! px-[9px]! text-[12px]! lt-md:h-[34px]! lt-md:px-[13px]! lt-md:text-[13px]!',
   'outline-btn': 'label-btn border-input bg-default text-default-fg enabled:hover:border-muted-fg enabled:hover:bg-[var(--row-hover)]',
   'ghost-btn': 'label-btn border-transparent bg-transparent text-muted-fg enabled:hover:text-default-fg',
+  'primary-btn': 'label-btn border-primary bg-primary text-primary-fg font-600 enabled:hover:bg-primary/90',
 }
 
 function presetAnimations(): Preset {

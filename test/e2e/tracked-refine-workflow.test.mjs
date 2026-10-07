@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { SAVE_BACK_UNDO_TIMEOUT } from '../../src/common/constants.ts'
+import { addressOf, planSavedLists, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
 import { normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
-import { ensureBuilt, findChrome, serveDist, sleep } from './helpers.mjs'
-import { openOptions } from './optionsPage.mjs'
+import { ensureBuilt, findChrome, serveDist, storedLists } from './helpers.mjs'
+import { openOptions, until } from './optionsPage.mjs'
 import {
   ARCHIVE,
+  blurb,
   boxButtons,
   boxText,
   clickBoxButton,
@@ -18,10 +21,13 @@ import {
   openTab,
   pillText,
   refiningMark,
+  rerun,
   searchPage,
+  stored,
   storedOption,
   TITLE_INPUT,
   toasts,
+  TRACK_PILL,
   visit,
 } from './trackedPages.mjs'
 
@@ -36,8 +42,14 @@ const HP = { id: 'hp1', kind: 'works-filter', url: '/tags/Harry%20Potter%20-%20J
 /** A works search, still called by its default title. */
 const COFFEE = { id: 'cof1', kind: 'text-search', url: '/works/search?work_search[query]=coffee', alias: 'Search: coffee', type: 'search', entity: 'coffee', tracked: true, since: TODAY - 9 }
 
+/** A saved list's record, as the background files it for an entry: its id, query and title. */
+function recordOf({ id, kind, url, alias, type, entity, filter }) {
+  return Object.fromEntries(Object.entries({ id, kind, url, title: alias, type, entity, filter }).filter(([, value]) => value !== undefined))
+}
+
 const SEED = {
   'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [HP, COFFEE] },
+  'option.savedLists': { v: 1, lists: { hp1: recordOf(HP), cof1: recordOf(COFFEE) } },
 }
 
 /** Both of Harry Potter's spellings are one listing, and searches answer whatever they're asked. */
@@ -53,6 +65,12 @@ function route(url) {
 
 const keyOf = url => normalizeTrackedUrl(url).key
 
+/** The toolbar's Undo, as long as its toast is up. */
+function undoShown(tab) {
+  return tab.evaluate(() => [...document.querySelectorAll('body > div')]
+    .some(el => [...el.shadowRoot?.querySelectorAll('.toast button.action') ?? []].some(button => button.textContent.trim() === 'Undo')))
+}
+
 /**
  * Refining a list — the workflow the pill's update rows are built for:
  *
@@ -66,6 +84,9 @@ const keyOf = url => normalizeTrackedUrl(url).key
  * its query form. The works search half is the case where the mark is the only
  * thing that connects the page to its list: once the words change, nothing
  * about the address says which list it was.
+ *
+ * A tracked list's update rewrites both of its homes, the entry that syncs and
+ * the record this browser keeps, and each write re-runs the page.
  */
 describe('tracked lists: refining a list from its link', { skip }, () => {
   let server
@@ -80,9 +101,9 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     browser = await launch(chromePath)
 
     // Step 1 happens on the options page: the links are read off its rows.
-    const options = await openOptions(browser, server, { seed: SEED, hash: '#instant-search-views-tracked-lists' })
-    for (const id of await options.listRowIds('tracked-lists'))
-      links[id] = await (await options.control(await options.listRow('tracked-lists', id), 'link')).evaluate(a => a.href)
+    const options = await openOptions(browser, server, { seed: SEED, hash: '#saved-lists' })
+    for (const id of await options.savedListIds())
+      links[id] = await (await options.control(await options.savedList(id), 'link', /^View or edit /)).evaluate(a => a.href)
     await options.close()
 
     tab = await openTab(browser, { seed: SEED, route })
@@ -94,6 +115,7 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
   })
 
   const list = async id => (await storedOption(tab)).lists.find(one => one.id === id)
+  const record = async id => (await storedOption(tab, 'savedLists')).lists[id]
 
   test('the options page links each list to its own page, with its id', () => {
     assert.equal(links.hp1, `${ARCHIVE}/tags/Harry%20Potter%20-%20J*d*%20K*d*%20Rowling/works#ao3e-list=hp1`)
@@ -134,10 +156,9 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     assert.deepEqual(await boxButtons(tab), ['Update “Harry Potter”', 'Track as a new list instead', 'Stop refining'])
   })
 
-  test('Update replaces the query in place, and ends the mark', async () => {
+  test('Update rewrites the entry and the record in place, keeps the tracking start, and ends the mark', async () => {
     const pageUrl = await tab.evaluate(() => location.href)
-    await clickBoxButton(tab, 'Update “Harry Potter”')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Update “Harry Potter”'))
 
     const lists = (await storedOption(tab)).lists
     assert.equal(lists.length, 2, 'no list was added')
@@ -151,20 +172,18 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     assert.equal(updated.alias, 'Harry Potter')
     assert.equal(updated.type, 'fandom')
     assert.equal(updated.entity, 'Harry Potter - J. K. Rowling')
+    assert.deepEqual(Object.keys((await storedOption(tab, 'savedLists')).lists).sort(), ['cof1', 'hp1'])
+    assert.deepEqual(await record('hp1'), recordOf(updated), 'the record says what the entry does')
 
     assert.equal(await refiningMark(tab), null, 'the mark ends with the update')
-    await tab.click('.AO3E--filter-toolbar--fab')
-    await sleep(300)
     assert.equal(await pillText(tab), 'Tracked as “Harry Potter”')
     assert.ok((await toasts(tab)).includes('Updated “Harry Potter”.'))
   })
 
-  test('Undo puts the old query back, and the tab back to refining it', async () => {
-    assert.equal(await clickToastAction(tab, 'Undo'), true)
-    await sleep(1500)
-    const restored = await list('hp1')
-    assert.equal(restored.url, HP.url)
-    assert.equal(restored.since, HP.since)
+  test('Undo puts the old query back in both, and the tab back to refining it', async () => {
+    await rerun(tab, async () => assert.equal(await clickToastAction(tab, 'Undo'), true))
+    assert.deepEqual(await list('hp1'), HP)
+    assert.deepEqual(await record('hp1'), recordOf(HP))
     assert.deepEqual(await refiningMark(tab), { id: 'hp1', restore: false })
     await openBox(tab)
     assert.equal(await pillText(tab), 'Update “Harry Potter”')
@@ -173,7 +192,6 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
   test('Stop refining ends the mark and writes nothing', async () => {
     const before = await storedOption(tab)
     await clickBoxButton(tab, 'Stop refining')
-    await sleep(500)
     assert.equal(await refiningMark(tab), null)
     assert.deepEqual(await storedOption(tab), before)
     // Without the mark the page is what it is: the same fandom, filtered otherwise.
@@ -201,16 +219,24 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
   })
 
   test('and Update moves the list to the new words, keeping its place', async () => {
-    await clickBoxButton(tab, 'Update “Search: coffee”')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Update “Search: coffee”'))
     const updated = await list('cof1')
     assert.equal(updated.url, '/works/search?work_search[query]=tea+shop')
     assert.equal(updated.alias, 'Search: tea shop')
     assert.equal(updated.entity, 'tea shop')
     assert.equal(updated.since, COFFEE.since)
+    assert.deepEqual(await record('cof1'), recordOf(updated))
     assert.equal(await refiningMark(tab), null)
     // The other list is as the Undo left it.
     assert.equal((await list('hp1')).url, HP.url)
+  })
+
+  test('a mark a tab already held refines its list, as one taken from a link does', async () => {
+    await tab.evaluate(() => sessionStorage.setItem('ao3e:refining', JSON.stringify({ id: 'cof1', restore: false })))
+    await visit(tab, `${ARCHIVE}/works/search?work_search%5Bquery%5D=chai`)
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Update “Search: tea shop”')
+    await clickBoxButton(tab, 'Stop refining')
   })
 
   test('Track as a new list instead leaves the list alone, and ends the mark', async () => {
@@ -219,8 +245,7 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     await navigateBy(tab, () => tab.click('#work-filters input[type="submit"]'))
     await openBox(tab)
     assert.equal(await pillText(tab), 'Update “Harry Potter”')
-    await clickBoxButton(tab, 'Track as a new list instead')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Track as a new list instead'))
 
     const lists = (await storedOption(tab)).lists
     assert.equal(lists.length, 3)
@@ -232,6 +257,7 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     assert.match(added.url, /exclude_work_search\[character_ids\]\[\]=5678/)
     assert.equal(added.since, TODAY)
     assert.equal((await list('hp1')).url, HP.url, 'the list being refined is untouched')
+    assert.deepEqual(await record('hp1'), recordOf(HP))
     assert.equal(await refiningMark(tab), null)
   })
 
@@ -241,5 +267,286 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     await openBox(tab)
     assert.equal(await pillText(tab), 'Tracked as “Search: tea shop”')
     assert.equal(await refiningMark(tab), null)
+  })
+})
+
+/** A saved list nothing tracks: a works search, titled. */
+const LATTE = { id: 'l4tte', kind: 'text-search', url: '/works/search?work_search[query]=latte', title: 'Latte art', type: 'search', entity: 'latte' }
+/** Its search's copy, stored by the search view, and the same search stored in an older sort order. */
+const LATTE_KEY = 'text-search:work_search%5Bquery%5D=latte'
+const LATTE_BY_KUDOS = 'text-search:work_search%5Bquery%5D=latte&work_search%5Bsort_column%5D=kudos_count'
+/** What the newer copy failed to find, as the search view packs it. */
+const LATTE_MISSES = '7d'
+/** The search the list is refined into, as the search form submits it. */
+const MACCHIATO_URL = `${ARCHIVE}/works/search?utf8=%E2%9C%93&commit=Search&work_search%5Bquery%5D=latte+macchiato`
+const MACCHIATO = normalizeTrackedUrl(MACCHIATO_URL).url
+/** The works the old copies hold, which no other list does. */
+const OLD_WORKS = [301, 302, 303]
+
+const HOUR = 60 * 60 * 1000
+const latteCopy = (listUrl, hours, ids) => ({
+  version: 2,
+  scrapedAt: Date.now() - hours * HOUR,
+  blurbsHtml: ids.map(id => blurb(id)),
+  descriptor: { sourceId: 'text-search', label: 'Works search: latte', listUrl },
+})
+
+const UNTRACKED_SEED = {
+  'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [] },
+  'option.savedLists': { v: 1, lists: { l4tte: LATTE } },
+  // So that what the old copies held, once they are let go, goes with them.
+  'option.pruneOrphanedBlurbs': true,
+  ...storedLists({
+    [LATTE_KEY]: latteCopy(`${ARCHIVE}/works/search?work_search%5Bquery%5D=latte`, 5, OLD_WORKS.slice(0, 2)),
+    [LATTE_BY_KUDOS]: latteCopy(`${ARCHIVE}/works/search?work_search%5Bquery%5D=latte&work_search%5Bsort_column%5D=kudos_count`, 6, OLD_WORKS.slice(2)),
+  }),
+  'cache.searchMisses': { [LATTE_KEY]: LATTE_MISSES },
+}
+
+/** Searches, each with the search view's button; the latte macchiato one has characters to filter by. */
+function untrackedRoute(url) {
+  if (url.pathname !== '/works/search')
+    return null
+  const query = url.searchParams.get('work_search[query]')
+  const blurbs = query === 'latte macchiato'
+    ? [blurb(201, { characters: ['Draco Malfoy'] }), blurb(202, { characters: ['Ron Weasley'] })]
+    : undefined
+  return searchPage(url, blurbs, { subnav: true })
+}
+
+/**
+ * What the background does whenever the stored lists change, which a tab has
+ * no background to do: the planner, over what the tab's storage holds, written
+ * back where it changed. Returns what it wrote.
+ */
+async function reconcile(tab) {
+  const held = await tab.evaluate(() => window.browser.storage.local.get(['option.trackedLists', 'option.savedLists', 'cache.searchLists']))
+  const state = { tracked: held['option.trackedLists'], saved: held['option.savedLists'] }
+  const update = savedListsWrite(state, planSavedLists(state, storedListRefs(held['cache.searchLists'])).state)
+  const items = Object.fromEntries(Object.entries(update).map(([name, value]) => [`option.${name}`, value]))
+  if (Object.keys(items).length)
+    await tab.evaluate(set => window.browser.storage.local.set(set), items)
+  return update
+}
+
+/** The key the search view stored a copy of `url`'s search under, or null. */
+function copyKeyOf(lists, url) {
+  return Object.entries(lists ?? {}).find(([, list]) => addressOf(list.descriptor?.listUrl) === addressOf(url))?.[0] ?? null
+}
+
+/** Exclude a value in the open search view, as its facet's toggle does. */
+function exclude(tab, value) {
+  return tab.evaluate((want) => {
+    const row = [...document.querySelectorAll('.AO3E--search-view--row')]
+      .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent?.trim() === want)
+    row.querySelector('.AO3E--search-view--toggle-exclude').click()
+  }, value)
+}
+
+/**
+ * Saving a refined search back to a saved list that nothing tracks: its record,
+ * the one home it has, is rewritten in place under its own id, and nothing
+ * syncs. Its old copies at the old address go — every sort order of them, or
+ * one left behind would come back as a list of its own — until Undo puts them
+ * back as they were. The copy the search view stored on the refined page, which
+ * the background had given a record of its own, becomes the list's.
+ *
+ * Writing only this browser's records re-runs nothing on the page, so the pill
+ * is rebuilt where it is.
+ */
+describe('saved lists: saving a refined search back', { skip }, () => {
+  let server
+  let browser
+  let tab
+  let link
+  /** The view's copy of the latte macchiato search, once it has stored one. */
+  let newKey = null
+  /** What storage held just before the first Update. */
+  let held = null
+
+  before(async () => {
+    ensureBuilt()
+    server = await serveDist()
+    browser = await launch(chromePath)
+    const options = await openOptions(browser, server, { seed: UNTRACKED_SEED, hash: '#saved-lists' })
+    link = await (await options.control(await options.savedList('l4tte'), 'link', /^View or edit /)).evaluate(a => a.href)
+    await options.close()
+    tab = await openTab(browser, { seed: UNTRACKED_SEED, route: untrackedRoute })
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+    await server?.close()
+  })
+
+  const latte = async () => (await storedOption(tab, 'savedLists')).lists.l4tte
+
+  test('the options page links a list nothing tracks to its page, with its id', () => {
+    assert.equal(link, `${ARCHIVE}/works/search?work_search[query]=latte#ao3e-list=l4tte`)
+  })
+
+  test('following the link marks the tab as refining it', async () => {
+    await visit(tab, link)
+    // Its page has nothing to put back: the list has no view filter.
+    assert.deepEqual(await refiningMark(tab), { id: 'l4tte', restore: false })
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Refining “Latte art”')
+  })
+
+  test('a changed search offers the update, under the list\'s own title', async () => {
+    await visit(tab, MACCHIATO_URL)
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Update “Latte art”')
+    assert.deepEqual(await diffLines(tab), ['Search words: “latte” → “latte macchiato”'])
+    assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Latte art')
+    assert.deepEqual(await boxButtons(tab), ['Update “Latte art”', 'Track as a new list instead', 'Stop refining'])
+  })
+
+  test('the search view opened there stores a copy, which the background gives a record of its own', async () => {
+    await tab.click('.AO3E--search-text-results--button')
+    await until('the view to store its copy', async () => {
+      newKey = copyKeyOf(await stored(tab, 'cache.searchLists'), MACCHIATO_URL)
+      return newKey !== null
+    })
+    const update = await reconcile(tab)
+    const made = Object.values(update.savedLists.lists).filter(one => one.id !== 'l4tte')
+    assert.deepEqual(made.map(({ id, ...rest }) => rest), [{ kind: 'text-search', url: MACCHIATO, title: 'Search: latte macchiato', type: 'search', entity: 'latte macchiato' }])
+  })
+
+  test('Update rewrites the list\'s record in place, absorbs that record, and drops every old copy', async () => {
+    held = {
+      lists: await stored(tab, 'cache.searchLists'),
+      misses: await stored(tab, 'cache.searchMisses'),
+      records: await storedOption(tab, 'savedLists'),
+    }
+    await openBox(tab)
+    await clickBoxButton(tab, 'Update “Latte art”')
+    await until('the list to be saved back', async () => (await latte()).url === MACCHIATO)
+
+    assert.deepEqual((await storedOption(tab, 'savedLists')).lists, { l4tte: { ...LATTE, url: MACCHIATO, entity: 'latte macchiato' } }, 'one list, its id and title kept')
+    const lists = await stored(tab, 'cache.searchLists')
+    assert.deepEqual(Object.keys(lists), [newKey], 'both old copies are gone, and the view\'s is the list\'s now')
+    assert.equal(LATTE_KEY in await stored(tab, 'cache.searchMisses'), false, 'with what the old one missed')
+    assert.equal(await tab.evaluate(() => window.__writes.filter(write => 'option.trackedLists' in write).length), 0, 'nothing that syncs is written')
+    assert.deepEqual(await storedOption(tab), UNTRACKED_SEED['option.trackedLists'])
+    assert.deepEqual(await reconcile(tab), {}, 'the background finds no list left to file at the old address')
+
+    assert.equal(await refiningMark(tab), null)
+    assert.equal(await pillText(tab), 'Track “Latte art”', 'the page is the saved list now')
+    assert.ok((await toasts(tab)).includes('Updated “Latte art”.'))
+  })
+
+  test('Undo puts back exactly what Update changed: the record, the absorbed one, both old copies and what they missed', async () => {
+    assert.equal(await clickToastAction(tab, 'Undo'), true)
+    await until('the copies to be back', async () => {
+      const lists = await stored(tab, 'cache.searchLists')
+      return LATTE_KEY in lists && LATTE_BY_KUDOS in lists
+    })
+    assert.deepEqual(await storedOption(tab, 'savedLists'), held.records)
+    assert.deepEqual(await stored(tab, 'cache.searchLists'), held.lists, 'byte for byte, the view\'s copy still there')
+    assert.deepEqual(await stored(tab, 'cache.searchMisses'), held.misses)
+    assert.deepEqual(await storedOption(tab), UNTRACKED_SEED['option.trackedLists'])
+    assert.deepEqual(await reconcile(tab), {}, 'nothing for the background to do')
+
+    assert.deepEqual(await refiningMark(tab), { id: 'l4tte', restore: false })
+    assert.equal(await pillText(tab), 'Update “Latte art”')
+    assert.ok((await toasts(tab)).includes('Put “Latte art” back as it was.'))
+  })
+
+  test('once Undo\'s time is up, the blurbs only the old copies held go, as a deleted list\'s do', async () => {
+    await openBox(tab)
+    await clickBoxButton(tab, 'Update “Latte art”')
+    await until('the list to be saved back again', async () => (await latte()).url === MACCHIATO)
+    // A pointer resting on a toast holds it up.
+    await tab.mouse.move(0, 0)
+    await until('Undo to time out', async () => !(await undoShown(tab)), SAVE_BACK_UNDO_TIMEOUT * 2)
+
+    const blurbKeys = async () => Object.keys(await tab.evaluate(() => browser.storage.local.get(null))).filter(key => key.startsWith('blurb.'))
+    const oldKeys = OLD_WORKS.map(id => `blurb.${id.toString(36)}`)
+    await until('the old copies\' blurbs to go', async () => !(await blurbKeys()).some(key => oldKeys.includes(key)))
+    for (const id of [201, 202])
+      assert.ok((await blurbKeys()).includes(`blurb.${id.toString(36)}`), `the view's work ${id} stays`)
+  })
+
+  test('a change of view filter alone keeps the list\'s copy', async () => {
+    await visit(tab, `${ARCHIVE}${MACCHIATO}#ao3e-list=l4tte`)
+    await tab.click('.AO3E--search-text-results--button')
+    // This page's address spells the search without the form's extra fields,
+    // so the view keeps a second copy of it, at the same address.
+    await until('the view to store its copy', async () => Object.values(await stored(tab, 'cache.searchLists'))
+      .filter(list => addressOf(list.descriptor?.listUrl) === addressOf(MACCHIATO_URL))
+      .length === 2)
+    await until('the view to be up', () => tab.evaluate(() => document.querySelector('.AO3E--search-view--row') !== null))
+    await exclude(tab, 'Draco Malfoy')
+    await until('the pill to follow the view', async () => await pillText(tab) === 'Update “Latte art”')
+    await openBox(tab)
+    assert.deepEqual(await diffLines(tab), ['Excludes: Draco Malfoy'])
+
+    const before = Object.keys(await stored(tab, 'cache.searchLists'))
+    await clickBoxButton(tab, 'Update “Latte art”')
+    await until('the filter to be saved back', async () => !!(await latte()).filter)
+    assert.deepEqual(await latte(), { ...LATTE, url: MACCHIATO, entity: 'latte macchiato', filter: { facets: { characters: { ex: ['Draco Malfoy'] } } } })
+    assert.deepEqual(Object.keys(await stored(tab, 'cache.searchLists')), before, 'no copy is dropped')
+  })
+
+  test('a list removed while it is being refined is refused as missing, and the refining ends', async () => {
+    await visit(tab, `${ARCHIVE}${MACCHIATO}#ao3e-list=l4tte`)
+    await visit(tab, `${ARCHIVE}/works/search?work_search%5Bquery%5D=flat+white`)
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Update “Latte art”')
+    // Removed on the options page meanwhile: a write the page doesn't re-run on.
+    await tab.evaluate(() => browser.storage.local.set({ 'option.savedLists': { v: 1, lists: {} } }))
+    await clickBoxButton(tab, 'Update “Latte art”')
+    await until('the refusal', async () => (await toasts(tab)).includes('“Latte art” no longer exists — it was removed on the options page, or by a sync.'))
+    assert.equal(await refiningMark(tab), null)
+    assert.deepEqual(await storedOption(tab, 'savedLists'), { v: 1, lists: {} }, 'nothing is written')
+    assert.equal(await pillText(tab), 'Track this search')
+  })
+})
+
+/**
+ * Saving back belongs to saved lists, not to tracking: with *Tracked lists*
+ * switched off, the refining link and the update still work, and only the offer
+ * to track a page is gone.
+ */
+describe('saved lists: saving back with Tracked lists switched off', { skip }, () => {
+  let browser
+  let tab
+  const seed = {
+    ...UNTRACKED_SEED,
+    'option.trackedLists': { enabled: false, target: 40, reviewedThrough: 0, lists: [] },
+  }
+
+  before(async () => {
+    ensureBuilt()
+    browser = await launch(chromePath)
+    tab = await openTab(browser, { seed, route: untrackedRoute })
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  test('the link still marks the tab, and the pill says it is refining', async () => {
+    await visit(tab, `${ARCHIVE}${LATTE.url}#ao3e-list=l4tte`)
+    assert.deepEqual(await refiningMark(tab), { id: 'l4tte', restore: false })
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Refining “Latte art”')
+  })
+
+  test('a changed search offers the update, and no tracking', async () => {
+    await visit(tab, MACCHIATO_URL)
+    await openBox(tab)
+    assert.equal(await pillText(tab), 'Update “Latte art”')
+    assert.deepEqual(await boxButtons(tab), ['Update “Latte art”', 'Stop refining'])
+  })
+
+  test('Update saves the list back, and with nothing left to refine the pill goes', async () => {
+    await clickBoxButton(tab, 'Update “Latte art”')
+    await until('the list to be saved back', async () => (await storedOption(tab, 'savedLists')).lists.l4tte.url === MACCHIATO)
+    assert.deepEqual(Object.keys(await stored(tab, 'cache.searchLists')), [], 'its old copies went with its old address')
+    assert.deepEqual(await storedOption(tab), seed['option.trackedLists'], 'and nothing that syncs changed')
+    assert.equal(await refiningMark(tab), null)
+    assert.equal(await tab.$(TRACK_PILL), null)
   })
 })

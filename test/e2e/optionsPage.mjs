@@ -16,6 +16,10 @@ import { ensureBuilt, findChrome, installMock, launch, serveDist, sleep } from '
  *   `data-list-row`, and the count in its header by `data-list-count`
  *   ({@link OptionsPage.list}, {@link OptionsPage.listRows},
  *   {@link OptionsPage.listCount});
+ * - a row under Lists → Saved lists by its `data-saved-list`, with its
+ *   details opened or not ({@link OptionsPage.savedList},
+ *   {@link OptionsPage.savedListDetails});
+ * - a profile list's tile by its `data-tile` ({@link OptionsPage.tile});
  * - a control inside either by its role and accessible name
  *   ({@link OptionsPage.control}), and what it is described by
  *   ({@link OptionsPage.description});
@@ -26,7 +30,9 @@ import { ensureBuilt, findChrome, installMock, launch, serveDist, sleep } from '
  *   ({@link OptionsPage.colourAt}), and colours as styles give them: an
  *   element's, a token's, and how well an element's text stands out from what
  *   is behind it ({@link OptionsPage.colour}, {@link OptionsPage.token},
- *   {@link OptionsPage.contrast}).
+ *   {@link OptionsPage.contrast}), and all the text that reads under AA
+ *   ({@link OptionsPage.illegibleText}), once the page holds still
+ *   ({@link OptionsPage.calm}).
  *
  * It also stands in for AO3 ({@link stubArchive}), for a page that would ask
  * the archive for something, and for the background
@@ -320,9 +326,11 @@ function over(top, under) {
  * page.
  */
 function colourStack(el) {
+  // A colour mixed in sRGB (`color-mix`) is written `color(srgb r g b / a)`, each channel 0–1.
   const rgba = (css) => {
     const [r, g, b, a = 1] = css.match(/[\d.]+/g).map(Number)
-    return [r, g, b, a]
+    const scale = css.startsWith('color(srgb') ? 255 : 1
+    return [r * scale, g * scale, b * scale, a]
   }
   const grounds = []
   for (let at = el; at; at = at.parentElement) {
@@ -333,6 +341,61 @@ function colourStack(el) {
       break
   }
   return { text: rgba(getComputedStyle(el).color), grounds }
+}
+
+/**
+ * Every piece of text drawn in what `scope` selects, and every placeholder
+ * showing there, bar what `skip` selects, as `{ text, size, bold, opacity,
+ * colours, off }`: `colours` is the text's colour and what is behind it
+ * ({@link colourStack}, handed in), `opacity` what its own and its ancestors'
+ * opacity leave of it, and `off` whether it is part of a control that is
+ * switched off. Runs in the page.
+ */
+function textSamples(colourStack, scope, skip) {
+  const root = document.querySelector(scope)
+  const samples = []
+  const opacityOf = (el) => {
+    let opacity = 1
+    for (let at = el; at; at = at.parentElement)
+      opacity *= Number(getComputedStyle(at).opacity)
+    return opacity
+  }
+  const off = el => !!el.closest(':disabled, [aria-disabled="true"], [data-disabled]')
+  const skipped = el => !!skip && !!el.closest(skip)
+  const seen = new Set()
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const el = node.parentElement
+    if (!node.textContent.trim() || seen.has(el) || skipped(el) || !el.checkVisibility({ visibilityProperty: true }))
+      continue
+    seen.add(el)
+    const { width, height } = el.getBoundingClientRect()
+    if (!width || !height || el.closest('.sr-only'))
+      continue
+    const style = getComputedStyle(el)
+    samples.push({
+      text: node.textContent.replace(/\s+/g, ' ').trim(),
+      size: Number.parseFloat(style.fontSize),
+      bold: Number(style.fontWeight) >= 700,
+      opacity: opacityOf(el),
+      colours: colourStack(el),
+      off: off(el),
+    })
+  }
+  for (const field of root.querySelectorAll('input[placeholder], textarea[placeholder]')) {
+    if (field.value || skipped(field) || !field.checkVisibility({ visibilityProperty: true }))
+      continue
+    const [r, g, b, a = 1] = getComputedStyle(field, '::placeholder').color.match(/[\d.]+/g).map(Number)
+    samples.push({
+      text: `placeholder “${field.placeholder}”`,
+      size: Number.parseFloat(getComputedStyle(field).fontSize),
+      bold: false,
+      opacity: opacityOf(field),
+      colours: { ...colourStack(field), text: [r, g, b, a] },
+      off: off(field),
+    })
+  }
+  return samples
 }
 
 /**
@@ -413,11 +476,45 @@ export class OptionsPage {
     return (await this.list(id)).$$eval('[data-list-row]', els => els.map(el => el.dataset.listRow))
   }
 
-  /** The count in the list's header, as it reads. */
+  /**
+   * One row under Lists → Saved lists, by its `data-saved-list`: a saved list's
+   * id, or `copy:<key>` for a stored list no saved list is at.
+   */
+  async savedList(id) {
+    const handle = await this.page.$(`[data-list="saved-lists"] [data-saved-list="${id}"]`)
+    assert.ok(handle, `no saved list "${id}"`)
+    return handle
+  }
+
+  /** A saved list's row with its details open, opened if they aren't: where its offline copy's and its tracking's actions are. */
+  async savedListDetails(id) {
+    const row = await this.savedList(id)
+    const chevron = await row.$('button[aria-expanded]')
+    if (await chevron.evaluate(el => el.getAttribute('aria-expanded') !== 'true')) {
+      await this.press(chevron)
+      await this.page.waitForFunction(el => !!el.querySelector('[data-saved-list-part="details"]'), {}, row)
+    }
+    return row
+  }
+
+  /** The saved lists' rows, by their `data-saved-list`, in the order they are drawn. */
+  savedListIds() {
+    return this.listRowIds('saved-lists')
+  }
+
+  /** One of the reader's own profile lists' tiles, by its `data-tile`: `marked-for-later` or `read-works`. */
+  async tile(id) {
+    const handle = await this.page.$(`[data-tile="${id}"]`)
+    assert.ok(handle, `no tile "${id}"`)
+    return handle
+  }
+
+  /** The count in the list's header, as it reads: the frame's short count where it is too narrow for the whole. */
   async listCount(id) {
     const handle = await (await this.list(id)).$('[data-list-count]')
     assert.ok(handle, `no count in list "${id}"`)
-    return this.text(handle)
+    // eslint-disable-next-line unicorn/prefer-dom-node-text-content
+    return handle.evaluate(el => el.innerText.replace(/\s+/g, ' ').trim())
   }
 
   /**
@@ -453,6 +550,28 @@ export class OptionsPage {
     const { text, grounds } = await handle.evaluate(colourStack)
     const ground = grounds.reduceRight((under, layer) => over(layer, under), [255, 255, 255])
     return contrastRatio(over(text, ground), ground)
+  }
+
+  /**
+   * The text drawn in what the selector `scope` picks (the whole page unless
+   * it says otherwise) that reads under WCAG's AA against what is behind it,
+   * as `{ text, ratio, needs }`: under 4.5:1, or 3:1 for large text (24 px, or
+   * bold from 18.66 px). Placeholders count. Text faded by an opacity is read
+   * as faded. A control that is switched off is left out, as AA leaves it out;
+   * so is whatever the selector `skip` picks.
+   */
+  async illegibleText(scope = 'body', skip = null) {
+    // Handed over as one expression, so the page's sampler has the colour stack to call.
+    const samples = await this.page.evaluate(`(${textSamples})(${colourStack}, ${JSON.stringify(scope)}, ${JSON.stringify(skip)})`)
+    return samples
+      .filter(sample => !sample.off)
+      .map(({ text, size, bold, opacity, colours }) => {
+        const ground = colours.grounds.reduceRight((under, layer) => over(layer, under), [255, 255, 255])
+        const [r, g, b, a] = colours.text
+        const ratio = contrastRatio(over([r, g, b, a * opacity], ground), ground)
+        return { text, ratio: Math.round(ratio * 100) / 100, needs: size >= 24 || (bold && size >= 18.66) ? 3 : 4.5 }
+      })
+      .filter(({ ratio, needs }) => ratio < needs)
   }
 
   /** Every control in `scope` with this role (and, given one, this name), in document order. */
@@ -493,6 +612,49 @@ export class OptionsPage {
   /** Click the element from inside the page, where nothing drawn over it can take the click instead. */
   press(handle) {
     return handle.evaluate(el => el.click())
+  }
+
+  /**
+   * Do `move`, which sends the page to another hash (a rail link, a hash
+   * written to the address, Back), and wait until the page has landed there:
+   * its category shown, and what the hash names scrolled to. The body's
+   * `data-landed` names the hash the page last landed on.
+   */
+  async land(move) {
+    await this.page.evaluate(() => {
+      delete document.body.dataset.landed
+    })
+    await move()
+    await this.page.waitForFunction(() => document.body.dataset.landed !== undefined && document.body.dataset.landed === location.hash)
+  }
+
+  /**
+   * Wait until nothing on the page is changing how it looks: the flash that
+   * marks where a jump landed, a menu or dialog opening. A spinner, which
+   * turns for as long as its job runs, doesn't count.
+   */
+  calm() {
+    return until('the page to hold still', () => this.page.evaluate(() => document.getAnimations()
+      .every(animation => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity)))
+  }
+
+  /** Reload the page, and wait until it has read its options and landed on its hash again, as `openOptions` does. */
+  async reload() {
+    await this.page.reload({ waitUntil: 'load' })
+    await this.page.waitForFunction(() => document.body?.dataset.landed !== undefined)
+  }
+
+  /**
+   * Go to `hash` as the address bar would, and wait until the page has landed
+   * there. A hash the page is on already is cleared first, since setting it
+   * again would change nothing.
+   */
+  goTo(hash) {
+    return this.land(() => this.page.evaluate((h) => {
+      if (location.hash === h)
+        location.hash = ''
+      location.hash = h
+    }, hash))
   }
 
   /** The element's text, its whitespace collapsed. */

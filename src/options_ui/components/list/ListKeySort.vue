@@ -46,7 +46,7 @@ function press(event: Event, key: K) {
         :key="choice.value"
         :aria-label="itemName(choice)"
         :title="sortHint(sort, choice.value)"
-        class="relative flex cursor-pointer select-none items-center rounded-sm py-1.5 pl-7 pr-3 text-[12.5px] input-ring focus:bg-muted"
+        class="relative flex cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-3 text-[12.5px] input-ring data-[highlighted]:bg-[var(--row-hover)]"
         @select="press($event, choice.value)"
       >
         <span

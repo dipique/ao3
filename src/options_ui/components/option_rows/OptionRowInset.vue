@@ -3,15 +3,18 @@
   What a settings row reveals, or keeps under its line, recessed into a panel
   across the whole row: for the row's `extra` slot. The space above the panel
   is padding rather than a margin, so an open/close animation, which clips,
-  carries it too.
+  carries it too. `tight` pads it by 10 px at every width, for a list that
+  brings its own frame.
 */
+defineProps<{ tight?: boolean }>()
 </script>
 
 <template>
   <div pb-1 pt-2>
     <div
       data-row-inset
-      bg-sunken border="1 solid hair" rounded="[10px]" p="2.5 md:3.5"
+      bg-sunken border="1 solid hair" rounded="[10px]"
+      :class="tight ? 'p-2.5' : 'p-2.5 md:p-3.5'"
     >
       <slot />
     </div>

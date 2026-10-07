@@ -159,7 +159,7 @@ async function startExport({ keyPrefixes, fileSuffix }: typeof EXPORT_VARIANTS[n
             :key="variant.fileSuffix"
             :aria-labelledby="`${menuId}-${i}`"
             :aria-describedby="`${menuId}-${i}-note`"
-            class="flex flex-col cursor-pointer select-none items-start gap-[3px] rounded-[7px] px-[11px] py-[9px] input-ring focus:bg-muted"
+            class="flex flex-col cursor-pointer select-none items-start gap-[3px] rounded-[7px] px-[11px] py-[9px] input-ring data-[highlighted]:bg-[var(--row-hover)]"
             @select="startExport(variant)"
           >
             <span :id="`${menuId}-${i}`" text="[12.5px]" font-semibold>{{ variant.title }}</span>

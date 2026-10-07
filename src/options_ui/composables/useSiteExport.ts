@@ -1,9 +1,9 @@
-import type { JoinedSavedList, SnapshotDescriptor } from '#common'
+import type { JoinedSavedList, SnapshotDescriptor, StoredListRef } from '#common'
 import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
-import type { WorkTextUsage } from '#content_script/siteExport/workText.js'
+import type { CachingBuckets, WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { copyOwner, getArchiveLink, joinSavedLists, normalizeTrackedUrl, planTrackCopy, REVIEW_SOURCE_ID, SAVED_LIST_SOURCE_IDS, toast, utcToday } from '#common'
+import { cache, copyOwner, getArchiveLink, joinSavedLists, listCopies, listUrlFor, planRemoveList, planTrackCopy, REVIEW_SOURCE_ID, storedListRefs, toast, utcToday } from '#common'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
@@ -11,20 +11,33 @@ import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribe
 import { cachingBuckets, planOrphanDiscard, summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { discardOrphanedWorkText, purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
 
-import { jobView } from '../model/jobView.ts'
+import type { ProfileList, ProfileListId } from '../model/profileLists.ts'
+
+import { formatBytes } from '../model/buckets.ts'
+import { jobView, offReason } from '../model/jobView.ts'
+import { timeAgo } from '../model/moments.ts'
+import { PROFILE_LISTS } from '../model/profileLists.ts'
+import { REVIEW_NAME } from '../model/review.ts'
+import { copyTitle, savedListRows, titlePlaceholder } from '../model/savedListRows.ts'
 import { useSavedLists } from './useSavedLists.ts'
 
 /**
- * The options page's view of the site export: one row per stored list, the job
- * runner's live status, the cache read-out underneath, and the way back in for
- * the changes a reader made inside an exported file.
+ * The options page's view of the site export: every stored list, the saved
+ * lists they are the offline copies of, the job runner's live status, the
+ * cache read-out underneath, and the way back in for the changes a reader made
+ * inside an exported file.
  *
  * Module-level state, like {@link file://./useSync.ts}, because the runner it
  * mirrors is itself a singleton — there is one job for the whole extension, so
  * two components asking for it must see the same one.
  */
 
-/** One stored list, as a row in Advanced → Site export. */
+/**
+ * One stored list: a saved list's offline copy, or a row of its own, under
+ * Lists → Saved lists; one of the reader's own profile lists, a tile under
+ * Lists → User profile lists; or the review's window, This review under
+ * Lists → Review.
+ */
 export interface SiteExportListRow {
   /** Snapshot key — also what a job names the list by. */
   key: string
@@ -36,6 +49,8 @@ export interface SiteExportListRow {
   scrapedAt: number
   /** Works in the list. */
   count: number
+  /** Its works in the cache's buckets: cached, failed and new. */
+  buckets: CachingBuckets
   /** Works in this list whose text is cached. */
   cached: number
   /** Works in this list whose last fetch failed. */
@@ -91,18 +106,60 @@ const importingChanges = ref(false)
 /**
  * The saved lists, read here so a stored list can say which saved list it is,
  * and be tracked from its row. Taken once, like the state above: the refs read
- * through to the options page's own reactive copy, so a rename made in Search →
- * Tracked lists shows up on these rows without a reload.
+ * through to the options page's own reactive copy, so a list retitled under
+ * Saved lists is called by its new title everywhere at once.
  */
 const savedLists = useSavedLists()
-const joined = computed(() => joinSavedLists(savedLists.current(), []))
+
+/** Whether Tracked lists is on, which tracking from a row waits on. */
+const reviewing = computed(() => useOption('trackedLists').enabled.value)
 
 /**
- * Whether this row is the review's own stored window, which is a stored list
- * like any other and the one that can't be re-read from here.
+ * The reader's AO3 account, which says whose profile lists are theirs. Read
+ * through the option afresh each time, since this module runs before the
+ * options are loaded, and the extension can learn the account later still.
+ */
+const userId = computed(() => useOption('user').userId?.value)
+
+/** A stored list as the saved-list join reads it. */
+function refOf(row: SiteExportListRow): StoredListRef {
+  const { key, descriptor, scrapedAt } = row
+  return descriptor ? { key, sourceId: descriptor.sourceId, listUrl: descriptor.listUrl, label: descriptor.label, scrapedAt } : { key, scrapedAt }
+}
+
+const joined = computed(() => joinSavedLists(savedLists.current(), rows.value.map(refOf), userId.value))
+
+/**
+ * The reader's own profile lists' copies, as the join chose them, each shown
+ * as a tile under Lists → User profile lists. Another account's copy, or one
+ * no visit has described, stays a row.
+ */
+const profileRows = computed((): Record<ProfileListId, SiteExportListRow | null> => {
+  const { markedForLater, readWorks } = joined.value.builtins
+  const rowOf = (ref: StoredListRef | null): SiteExportListRow | null => (ref && rows.value.find(row => row.key === ref.key)) || null
+  return { 'marked-for-later': rowOf(markedForLater), 'read-works': rowOf(readWorks) }
+})
+
+/** The profile list a stored list is shown as, if it is one. */
+function profileListOf(row: SiteExportListRow): ProfileList | null {
+  return PROFILE_LISTS.find(list => profileRows.value[list.id]?.key === row.key) ?? null
+}
+
+/**
+ * Whether this is the review's own stored window, which is stored like a list,
+ * and the one that can't be re-read from here. It is This review, under
+ * Lists → Review, rather than a row of its own.
  */
 export function isReviewWindow(row: SiteExportListRow): boolean {
   return row.descriptor?.sourceId === REVIEW_SOURCE_ID
+}
+
+/** The review's stored window, or null before the first review is gathered. */
+const review = computed(() => rows.value.find(isReviewWindow) ?? null)
+
+/** A stored list by its key. */
+function rowFor(key: string): SiteExportListRow | null {
+  return rows.value.find(row => row.key === key) ?? null
 }
 
 /**
@@ -119,37 +176,31 @@ export function canRefresh(row: SiteExportListRow): boolean {
   return !!row.descriptor && !isReviewWindow(row)
 }
 
-/** Why the review's row has no refresh, said where the missing buttons were. */
-export const REVIEW_WINDOW_NOTE
-  = 'The range your tracked lists are being reviewed over, stored like any other list. It is gathered from all of '
-    + 'them at once rather than from one listing, so there is nothing to refresh here — open the review to bring it '
-    + 'up to date, and marking the range reviewed replaces it with the next one.'
-
 /**
  * The saved list this stored list is, if any ({@link copyOwner}): one at its
  * address, which is the list's own key with its view filter left out, so a list
  * narrowed in its search view still finds the copy of its page, whatever order
  * or sort the page's address was in.
  */
-export function savedListFor(row: SiteExportListRow): JoinedSavedList | null {
+function savedListFor(row: SiteExportListRow): JoinedSavedList | null {
   return row.descriptor ? copyOwner(joined.value, row.descriptor) : null
 }
 
-/** A stored list's name: the title of the saved list it is, else the list's own label. */
-export function listName(row: SiteExportListRow): string {
-  // Not one of the tracked lists but the review over all of them, and a name
-  // that says which of the two it is.
+/**
+ * A stored list's name, as the place it is shown calls it: the review's, a
+ * profile list's tile's, the title of the saved list it is, else what its own
+ * row under Saved lists is called ({@link copyTitle}).
+ */
+function listName(row: SiteExportListRow): string {
   if (isReviewWindow(row))
-    return 'Tracked review window'
-  const title = savedListFor(row)?.list.title
-  return (typeof title === 'string' ? title.trim() : '') || row.label
-}
-
-/** Whether offering **Track** on this row makes sense at all. */
-export function canTrack(row: SiteExportListRow): boolean {
-  return !!row.descriptor
-    && SAVED_LIST_SOURCE_IDS.includes(row.descriptor.sourceId)
-    && !!normalizeTrackedUrl(row.descriptor.listUrl)
+    return REVIEW_NAME
+  const profile = profileListOf(row)
+  if (profile)
+    return profile.name
+  const owner = savedListFor(row)
+  if (owner)
+    return (typeof owner.list.title === 'string' ? owner.list.title.trim() : '') || titlePlaceholder(owner.list)
+  return copyTitle(refOf(row))
 }
 
 subscribeJob((next) => {
@@ -182,6 +233,19 @@ function nameOf(key: string): string {
 /** The job as the page shows it ({@link jobView}): every control it turns off, and its own line, read it from here. */
 const view = computed(() => jobView(status.value, nameOf, now.value))
 
+/** What a key with no stored list holds. */
+const NO_WORKS: CachingBuckets = { total: 0, cached: 0, failed: 0, unfetched: 0, bytes: 0, staleFailures: 0 }
+
+/** The saved lists as the rows under Lists → Saved lists ({@link savedListRows}), in the join's order. */
+const savedRows = computed(() => savedListRows(joined.value, {
+  copy: (key) => {
+    const row = rowFor(key)
+    return { buckets: row?.buckets ?? NO_WORKS, unstored: row?.unstored ?? 0 }
+  },
+  review: reviewing.value,
+  jobOff: key => offReason(view.value, key),
+}))
+
 /** Re-read the lists and the cache index. Cheap enough to run after every action. */
 async function reload(): Promise<void> {
   const [snapshots, index, listed] = await Promise.all([listSnapshots(), readWorkTextIndex(), snapshotWorkIds()])
@@ -198,14 +262,17 @@ async function reload(): Promise<void> {
     blurbBytes: blurbs.bytes,
   }
   rows.value = snapshots.map((snapshot) => {
-    const { cached, failed, staleFailures, bytes } = cachingBuckets(snapshot.workIds, index)
+    const buckets = cachingBuckets(snapshot.workIds, index)
+    const { cached, failed, staleFailures, bytes } = buckets
+    const listUrl = listUrlFor(snapshot.key, snapshot.descriptor)
     const row: SiteExportListRow = {
       key: snapshot.key,
       label: snapshot.descriptor?.label ?? snapshot.key,
       descriptor: snapshot.descriptor,
-      listUrl: listUrlFor(snapshot.key, snapshot.descriptor),
+      listUrl: listUrl && getArchiveLink(listUrl),
       scrapedAt: snapshot.scrapedAt,
       count: snapshot.count,
+      buckets,
       cached,
       failed: failed + staleFailures,
       uncached: Math.max(0, snapshot.count - cached),
@@ -219,54 +286,11 @@ async function reload(): Promise<void> {
   loading.value = false
 }
 
-/**
- * Where a stored list lives on AO3 — the descriptor's own address, or, failing
- * that, one rebuilt from the cache key.
- *
- * The fallback is the point rather than a nicety. A snapshot written before
- * descriptors existed has no address, and it is exactly the row that needs one:
- * the only way to make it refreshable again is to open the list on AO3 and press
- * its search button. What makes rebuilding honest is that every `SearchSource`
- * keys its snapshot on precisely the part of the address that identifies the
- * list — a username, a tag's path segment, a search's own query — so the three
- * shapes invert cleanly and a key that fits none of them simply gets no link.
- */
-function listUrlFor(key: string, descriptor?: SnapshotDescriptor): string | undefined {
-  if (descriptor?.listUrl)
-    return descriptor.listUrl
-
-  const split = key.indexOf(':')
-  const rest = split < 0 ? '' : key.slice(split + 1)
-  if (!rest)
-    return undefined
-
-  switch (key.slice(0, split)) {
-    case 'marked-for-later':
-      return getArchiveLink(`/users/${rest}/readings?show=to-read`)
-    // Already escaped the way AO3 escapes a tag in a path, which is why the key
-    // holds the raw segment rather than the tag's name.
-    case 'tag-works':
-      return getArchiveLink(`/tags/${rest}`)
-    case 'series-works':
-      return getArchiveLink(`/series/${rest}`)
-    // The search's own query string, minus the page it was read from.
-    case 'text-search':
-      return getArchiveLink(`/works/search?${rest}`)
-    default:
-      return undefined
-  }
-}
-
 function summarize(row: SiteExportListRow): string {
   const parts = [
-    // "as of" is when the list was last read; for the review that is when the
-    // window was last gathered, which is the same fact about a different shape
-    // of list — so it is said the same way, after what the row is.
-    `${row.count.toLocaleString()} ${row.count === 1 ? 'work' : 'works'} as of ${ago(row.scrapedAt)}`,
+    `${row.count.toLocaleString()} ${row.count === 1 ? 'work' : 'works'} as of ${timeAgo(row.scrapedAt, Date.now())}`,
     `${(row.cached || 0).toLocaleString()} cached (${formatBytes(row.bytes)})`,
   ]
-  if (isReviewWindow(row))
-    parts.unshift('The range you are reviewing now')
   if (row.uncached)
     parts.push(`${row.uncached.toLocaleString()} uncached`)
   if (row.failed)
@@ -277,19 +301,19 @@ function summarize(row: SiteExportListRow): string {
 }
 
 /**
- * What to do about a list stored before descriptors existed, in the reader's
- * words — shown under the row's buttons, since it is about the buttons being
- * off rather than about the list's contents.
- *
- * It has to name the *view*, not the page. Opening the listing on AO3 does
- * nothing at all: the descriptor is written when the search view scrapes, which
- * is a button the reader has to press. The old wording ("open this list on AO3
- * once") sent people to the page, where they could follow it exactly and see
- * nothing change.
+ * Forget the stored lists `keys`, in turn, and draw the rows again. A stopped
+ * job on one of them goes first: its list would be gone, and with it the row
+ * that offers to continue it.
  */
-export const NO_DESCRIPTOR_NOTE
-  = 'Needs user help. Open on AO3 using the link beside its name and press the search button. From then '
-    + 'on, future refreshes can be done from here.'
+async function forget(keys: readonly string[]): Promise<void> {
+  const { key, state } = view.value
+  if (state === 'stopped' && key !== null && keys.includes(key))
+    await run('discard the job', discardJob)
+  for (const one of keys)
+    await deleteSnapshot(one)
+  if (keys.length)
+    await reload()
+}
 
 /**
  * Run one job and report it. The runner keeps the interesting failures in its
@@ -313,6 +337,11 @@ void loadJob().then(reload)
 export function useSiteExport() {
   return {
     rows,
+    rowFor,
+    savedRows,
+    profileRows,
+    userId,
+    review,
     usage,
     orphans,
     loading,
@@ -383,28 +412,49 @@ export function useSiteExport() {
     },
 
     /**
-     * Forget one list. The work text it held stays — it is keyed by work, may
-     * belong to another list, and is the expensive half; the row underneath is
-     * where what this strands is discarded, or where all of it is.
+     * Forget one list's offline copy, and a stopped job on it. The work text it
+     * held stays — it is keyed by work, may belong to another list, and is the
+     * expensive half; *Cached work text* is where what this strands is
+     * discarded, or where all of it is. A saved list whose copy it was stays,
+     * not cached.
      */
     async deleteList(row: SiteExportListRow) {
-      await deleteSnapshot(row.key)
-      await reload()
-      toast(`Removed “${listName(row)}”. The cached work text is still here.`, { type: 'success' })
-    },
-
-    /** Delete the stored lists a removed saved list leaves behind, in turn, and draw the rows again. */
-    async deleteCopies(keys: readonly string[]) {
-      for (const key of keys)
-        await deleteSnapshot(key)
-      if (keys.length)
-        await reload()
+      const name = listName(row)
+      await forget([row.key])
+      toast(`Removed the offline copy of “${name}”. Its cached work text is still here.`, { type: 'success' })
     },
 
     /**
-     * Start tracking this list, so its new and updated works turn up in the
-     * review stream. This is how a list the reader already has becomes tracked
-     * without going back to AO3 to press a pill.
+     * Forget saved list `id`'s offline copy: every copy stored at its address
+     * ({@link listCopies}), so no older sort order of its search stands in for
+     * it, and a stopped job on any of them. The list stays, not cached, and so
+     * does the work text, as `deleteList` leaves it.
+     */
+    async removeListCopies(id: string) {
+      const keys = listCopies(savedLists.current(), id, storedListRefs(await cache.get('searchLists')))
+      const row = savedRows.value.find(one => one.id === id)
+      const name = row?.title || row?.placeholder || ''
+      await forget(keys)
+      toast(`Removed the offline copy of “${name}”. Its cached work text is still here.`, { type: 'success' })
+    },
+
+    /**
+     * Remove saved list `id`: its record, its entry, and every copy stored at
+     * its address, unless another list there still claims them. The copies go
+     * first, so that no moment has copies at an address with no record, which
+     * the background would make a list of its own.
+     */
+    async removeList(id: string) {
+      const { dropCopies } = planRemoveList(savedLists.current(), id, storedListRefs(await cache.get('searchLists')))
+      await forget(dropCopies)
+      const before = savedLists.current()
+      savedLists.apply(before, planRemoveList(before, id, []).state)
+    },
+
+    /**
+     * Start tracking the stored list `key`, which no saved list is at yet, so
+     * its new and updated works turn up in the review stream: a list the reader
+     * already has becomes tracked without going back to AO3 to press a pill.
      *
      * What is tracked is the saved list the stored one is, under its own id
      * ({@link planTrackCopy}), and its title — or, for one with none, the title a
@@ -413,13 +463,11 @@ export function useSiteExport() {
      * the archive by date from today onwards, so however many years of works the
      * snapshot holds, none of them reaches the review.
      */
-    track(row: SiteExportListRow) {
-      const descriptor = row.descriptor
+    trackCopy(key: string) {
+      const row = rowFor(key)
       const before = savedLists.current()
-      const plan = canTrack(row) && descriptor
-        ? planTrackCopy(before, { key: row.key, sourceId: descriptor.sourceId, listUrl: descriptor.listUrl, label: descriptor.label, scrapedAt: row.scrapedAt }, utcToday())
-        : null
-      if (!plan) {
+      const plan = row ? planTrackCopy(before, refOf(row), utcToday()) : null
+      if (!row || !plan) {
         toast('This list can\'t be tracked.', { type: 'error' })
         return
       }
@@ -427,7 +475,7 @@ export function useSiteExport() {
         if ('twin' in plan)
           toast(`“${listName(row)}” is already tracked.`)
         else
-          toast(`Another list is already called “${plan.takenBy.title.trim()}”. Give one of them another title under Search → Tracked lists first.`, { type: 'error' })
+          toast(`Another list is already called “${plan.takenBy.title.trim()}”. Give one of them another title under Saved lists first.`, { type: 'error' })
         return
       }
       savedLists.apply(before, plan.state)
@@ -541,44 +589,4 @@ export function describeChangeReport(report: ChangeImportReport): string {
   if (report.unreadable)
     parts.push(`${report.unreadable.toLocaleString()} unreadable`)
   return report.total ? parts.join(' · ') : 'That file had no changes in it.'
-}
-
-const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
-
-/** Largest unit first would read "0 years ago"; smallest first stops at the right one. */
-const RELATIVE_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-  ['second', 60],
-  ['minute', 60],
-  ['hour', 24],
-  ['day', 7],
-  ['week', 4.345],
-  ['month', 12],
-  ['year', Number.POSITIVE_INFINITY],
-]
-
-/** "2 hours ago", from an epoch. Not exported: a global called `ago` is a trap. */
-function ago(timestamp: number): string {
-  if (!timestamp)
-    return 'never'
-  let value = (timestamp - Date.now()) / 1000
-  for (const [unit, span] of RELATIVE_STEPS) {
-    if (Math.abs(value) < span)
-      return RELATIVE.format(Math.round(value), unit)
-    value /= span
-  }
-  return RELATIVE.format(Math.round(value), 'year')
-}
-
-/** Bytes at a readable scale — the cache runs to tens of megabytes. */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024)
-    return `${bytes} B`
-  const units = ['kB', 'MB', 'GB']
-  let value = bytes / 1024
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`
 }

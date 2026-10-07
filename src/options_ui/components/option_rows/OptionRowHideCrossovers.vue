@@ -1,17 +1,5 @@
 <script setup lang="ts">
-import { debounce } from '@antfu/utils'
-
-const { enabled, maxFandoms: optionValue } = useOption('hideCrossovers')
-
-const inputValue = ref(optionValue.value)
-
-watch(optionValue, () => inputValue.value = optionValue.value)
-
-const [min, max] = [1, 10]
-
-const update = debounce(100, () => {
-  optionValue.value = Math.min(Math.max(inputValue.value, min), max)
-})
+const { enabled, maxFandoms } = useOption('hideCrossovers')
 </script>
 
 <template>
@@ -20,34 +8,18 @@ const update = debounce(100, () => {
     title="Crossovers"
     subtitle="Hide works listing more than a set number of fandoms — usually crossovers, anthologies or gift collections."
   >
-    <label for="hideWorks-crossovers" py-1 flex="~ row items-center gap-1">
-      <span font="leading-none" text="sm muted-fg">Hide when work has more than</span>
-      <div flex="~ row justify-center items-center gap-0.5">
-        <button
-          class="btn"
-          text="5 primary"
-          z-10 h-6 w-5
-          @click="inputValue--;update()"
-        >
-          <Icon i-mdi-minus label="Decrease" />
-        </button>
-        <NumberInput
-          id="hideWorks-crossovers"
-          v-bind="$attrs"
-          v-model="inputValue"
-          unit="&nbsp;fandoms"
-          @blur="update"
-          @keydown="update"
-        />
-        <button
-          class="btn"
-          text="5 primary"
-          z-10 h-6 w-5
-          @click="inputValue++;update()"
-        >
-          <Icon i-mdi-plus label="Increase" />
-        </button>
-      </div>
-    </label>
+    <div py-1 flex="~ row wrap items-center gap-2.5" text="[12.5px] muted-fg" leading="[18px]">
+      <label for="hideWorks-crossovers">Hide when work has more than</label>
+      <Stepper
+        id="hideWorks-crossovers"
+        v-model="maxFandoms"
+        :min="1"
+        :max="10"
+        size="row"
+        decrement-label="Fewer fandoms"
+        increment-label="More fandoms"
+      />
+      <span>fandoms</span>
+    </div>
   </OptionRowCollapsable>
 </template>

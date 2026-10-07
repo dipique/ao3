@@ -7,20 +7,17 @@
 export {}
 declare global {
   const EffectScope: typeof import('vue').EffectScope
-  const NO_DESCRIPTOR_NOTE: typeof import('../options_ui/composables/useSiteExport').NO_DESCRIPTOR_NOTE
   const OptionCategoryName: typeof import('../options_ui/composables/context').OptionCategoryName
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionMasterState: typeof import('../options_ui/composables/context').OptionMasterState
   const OptionRowOff: typeof import('../options_ui/composables/context').OptionRowOff
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
-  const REVIEW_WINDOW_NOTE: typeof import('../options_ui/composables/useSiteExport').REVIEW_WINDOW_NOTE
   const anchorCategory: typeof import('../options_ui/composables/useAnchors').anchorCategory
   const askAutocomplete: typeof import('../options_ui/composables/useTagSuggestions').askAutocomplete
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
   const autoResetRef: typeof import('@vueuse/core').autoResetRef
   const canRefresh: typeof import('../options_ui/composables/useSiteExport').canRefresh
-  const canTrack: typeof import('../options_ui/composables/useSiteExport').canTrack
   const computed: typeof import('vue').computed
   const computedAsync: typeof import('@vueuse/core').computedAsync
   const computedEager: typeof import('@vueuse/core').computedEager
@@ -49,7 +46,6 @@ declare global {
   const eagerComputed: typeof import('@vueuse/core').eagerComputed
   const effectScope: typeof import('vue').effectScope
   const extendRef: typeof import('@vueuse/core').extendRef
-  const formatBytes: typeof import('../options_ui/composables/useSiteExport').formatBytes
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
@@ -64,7 +60,6 @@ declare global {
   const isReviewWindow: typeof import('../options_ui/composables/useSiteExport').isReviewWindow
   const isShallow: typeof import('vue').isShallow
   const jumpToHash: typeof import('../options_ui/composables/useHashNav').jumpToHash
-  const listName: typeof import('../options_ui/composables/useSiteExport').listName
   const makeDestructurable: typeof import('@vueuse/core').makeDestructurable
   const markRaw: typeof import('vue').markRaw
   const nextTick: typeof import('vue').nextTick
@@ -109,7 +104,6 @@ declare global {
   const resolveComponent: typeof import('vue').resolveComponent
   const resolveRef: typeof import('@vueuse/core').resolveRef
   const resolveUnref: typeof import('@vueuse/core').resolveUnref
-  const savedListFor: typeof import('../options_ui/composables/useSiteExport').savedListFor
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
@@ -134,6 +128,7 @@ declare global {
   const until: typeof import('@vueuse/core').until
   const useActiveElement: typeof import('@vueuse/core').useActiveElement
   const useAddNav: typeof import('../options_ui/composables/useNav').useAddNav
+  const useAddSubsection: typeof import('../options_ui/composables/useNav').useAddSubsection
   const useAnimate: typeof import('@vueuse/core').useAnimate
   const useArrayDifference: typeof import('@vueuse/core').useArrayDifference
   const useArrayEvery: typeof import('@vueuse/core').useArrayEvery
@@ -222,6 +217,7 @@ declare global {
   const useKeyModifier: typeof import('@vueuse/core').useKeyModifier
   const useLastChanged: typeof import('@vueuse/core').useLastChanged
   const useLocalStorage: typeof import('@vueuse/core').useLocalStorage
+  const useLostFocus: typeof import('../options_ui/composables/useLostFocus').useLostFocus
   const useMagicKeys: typeof import('@vueuse/core').useMagicKeys
   const useManualRefHistory: typeof import('@vueuse/core').useManualRefHistory
   const useMediaControls: typeof import('@vueuse/core').useMediaControls

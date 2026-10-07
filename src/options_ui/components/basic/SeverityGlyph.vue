@@ -8,9 +8,10 @@ import type { Severity } from '../../model/severity.ts'
  * ground.
  *
  * `glyph`, an icon class, draws a state that has a glyph of its own in place of
- * the severity's, keeping the severity's colour and word.
+ * the severity's, keeping the severity's colour and word. `wordless` leaves the
+ * word out, where the words beside the glyph already say what its colour does.
  */
-defineProps<{ severity: Severity, glyph?: string }>()
+defineProps<{ severity: Severity, glyph?: string, wordless?: boolean }>()
 
 const GLYPHS = {
   destructive: { word: 'Error:', icon: 'i-tabler-circle-x', colour: 'text-destructive' },
@@ -21,5 +22,5 @@ const GLYPHS = {
 </script>
 
 <template>
-  <Icon :class="[glyph ?? GLYPHS[severity].icon, GLYPHS[severity].colour]" :label="GLYPHS[severity].word" data-glyph />
+  <Icon :class="[glyph ?? GLYPHS[severity].icon, GLYPHS[severity].colour]" :label="wordless ? undefined : GLYPHS[severity].word" data-glyph />
 </template>

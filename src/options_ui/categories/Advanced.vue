@@ -4,15 +4,14 @@
 <template>
   <OptionCategory
     title="Advanced"
-    subtitle="Your data, offline exports, and settings most people never need to touch."
+    subtitle="Your data, and settings most people never need to touch."
     icon="i-mdi-alert-decagram-outline"
   >
     <!--
       Every row here sits in a sub-section, including the two that would happily
       stand alone. A row left at the category's top level renders identically to
       one inside a sub-section, so a lone row after a sub-section reads as the
-      last item *of* it — which is how "Debug mode" spent its life looking like
-      part of Site export.
+      last item *of* it.
     -->
     <OptionSubsection
       title="Your data"
@@ -20,21 +19,6 @@
     >
       <OptionRowImportExport />
       <OptionRowFandomExport />
-    </OptionSubsection>
-
-    <OptionSubsection
-      title="Site export"
-      subtitle="Save a works list and the text of its works as one self-contained HTML file — readable anywhere, including a device with no extensions."
-    >
-      <SiteExportLists />
-      <SiteExportChanges />
-      <SiteExportCache />
-      <OptionRow
-        title="Discard unneeded blurbs automatically"
-        subtitle="When a refresh drops a work from a stored list, or a list is deleted, forget that work's blurb straight away if no other list holds it — instead of waiting for Discard orphans. Cached work text is never touched."
-      >
-        <OptionSwitch option-id="pruneOrphanedBlurbs" />
-      </OptionRow>
     </OptionSubsection>
 
     <OptionSubsection

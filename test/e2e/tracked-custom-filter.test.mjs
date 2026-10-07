@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { ensureBuilt, findChrome, serveDist, sleep } from './helpers.mjs'
-import { openOptions } from './optionsPage.mjs'
+import { ensureBuilt, findChrome, serveDist } from './helpers.mjs'
+import { openOptions, until } from './optionsPage.mjs'
 import {
   ARCHIVE,
   clickBoxButton,
@@ -12,6 +12,7 @@ import {
   persistentMock,
   pillText,
   refiningMark,
+  rerun,
   storedOption,
   tagPage,
   TITLE_INPUT,
@@ -79,8 +80,14 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
   let tab
   /** Every archive URL the tab asked for. */
   const fetched = []
-  /** How long the tag page takes to answer a scrape (`?page=`), to catch a re-run mid-load. */
-  let scrapeDelay = 0
+  /**
+   * While set, the tag page holds its first scrape (`?page=`) unanswered until
+   * the next one is asked for: a view started again by a re-run asks again, so
+   * the re-run is sure to land while the first view is still loading.
+   */
+  let holdScrape = false
+  /** The answer to the scrape being held, once one is. */
+  let heldScrape = null
   let link = null
 
   /** The archive, as far as this tab can see it: the tag's page, and every search and readings page the review asks for. */
@@ -94,10 +101,16 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
       const body = tagPage(TAG, 'Additional Tags', TAG_WORKS.map(work => blurbHtml(work)))
       const respond = () => req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body }).catch(() => {})
       // The scrape is the view's own request; the page load is the reader's.
-      if (url.searchParams.has('page') && scrapeDelay)
-        setTimeout(respond, scrapeDelay)
-      else
-        void respond()
+      if (url.searchParams.has('page') && holdScrape) {
+        if (!heldScrape) {
+          heldScrape = respond
+          return
+        }
+        holdScrape = false
+        void heldScrape()
+        heldScrape = null
+      }
+      void respond()
     }
   }
 
@@ -137,20 +150,27 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     return row?.querySelector('.AO3E--search-view--toggle-exclude')?.getAttribute('aria-pressed') === 'true'
   }, value)
 
-  /** Click a facet value's exclude toggle — to exclude it, or to lift the exclusion. */
+  /**
+   * Click a facet value's exclude toggle — to exclude it, or to lift the
+   * exclusion. The view redraws as it is clicked, and the toolbar follows it on
+   * the next frame, so this waits for that frame.
+   */
   const toggleExclude = async (value) => {
-    await tab.evaluate((want) => {
+    await tab.evaluate(async (want) => {
       const row = [...document.querySelectorAll('.AO3E--search-view--row')]
         .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent?.trim() === want)
       row.querySelector('.AO3E--search-view--toggle-exclude').click()
+      await new Promise(resolve => requestAnimationFrame(() => resolve()))
     }, value)
-    await sleep(400)
   }
+
+  /** Wait for the view to be up with its works drawn. */
+  const viewDrawn = () => tab.waitForSelector('.AO3E--search-view--row')
 
   test('tracking from a filtered view stores the view’s filter', async () => {
     await visit(tab, TAG_URL)
     await tab.click('.AO3E--search-tag-works--link')
-    await sleep(1500)
+    await viewDrawn()
     assert.equal(await viewOpen(), true)
     assert.equal(await pillText(tab), 'Track this search')
 
@@ -158,8 +178,7 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     assert.deepEqual(await shownIds(), idsWithout('Draco Malfoy'))
 
     await openBox(tab)
-    await clickBoxButton(tab, 'Track')
-    await sleep(2500)
+    await rerun(tab, () => clickBoxButton(tab, 'Track'))
 
     const [list] = await lists()
     assert.equal(list.kind, 'tag-works')
@@ -170,6 +189,7 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
   })
 
   test('the write re-runs the page, and the view comes back as the list it now is', async () => {
+    await viewDrawn()
     assert.equal(await viewOpen(), true)
     assert.equal(await excluded('Draco Malfoy'), true)
     assert.equal(await pillText(tab), `Tracked as “${TITLE}”`)
@@ -185,8 +205,8 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
 
   test('the options row links to the list’s own page', async () => {
     const [list] = await lists()
-    const options = await openOptions(browser, server, { seed: { 'option.trackedLists': await storedOption(tab) }, hash: '#instant-search-views-tracked-lists' })
-    link = await (await options.control(await options.listRow('tracked-lists', list.id), 'link')).evaluate(a => a.href)
+    const options = await openOptions(browser, server, { seed: { 'option.trackedLists': await storedOption(tab) }, hash: '#saved-lists' })
+    link = await (await options.control(await options.savedList(list.id), 'link', /^View or edit /)).evaluate(a => a.href)
     await options.close()
     assert.equal(link, `${TAG_URL}#ao3e-list=${list.id}`)
   })
@@ -207,13 +227,16 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     }, bare)
 
     fetched.length = 0
-    scrapeDelay = 2000
+    holdScrape = true
     try {
       await visit(tab, link)
-      await sleep(5000)
+      await until('the view to be back with the list’s filter', async () => await excluded('Draco Malfoy')
+        && (await refiningMark(tab))?.restore === false)
     }
     finally {
-      scrapeDelay = 0
+      holdScrape = false
+      void heldScrape?.()
+      heldScrape = null
     }
 
     const scrapes = fetched.filter(url => url.startsWith(`${TAG_PATH}?page=`))
@@ -252,8 +275,7 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     assert.deepEqual(await diffLines(tab), ['Excludes: Ron Weasley'])
     assert.deepEqual(await tab.$eval(TITLE_INPUT, input => [input.value, input.dataset.e2eMarker]), [renamed, 'same box'])
 
-    await clickBoxButton(tab, `Update “${TITLE}”`)
-    await sleep(2000)
+    await rerun(tab, () => clickBoxButton(tab, `Update “${TITLE}”`))
 
     const [updated] = await lists()
     assert.deepEqual(updated.filter, { facets: { characters: { ex: ['Draco Malfoy', 'Ron Weasley'] } } })
@@ -267,7 +289,7 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
   test('the filter is put back once per arrival, never over what the reader does next', async () => {
     const [list] = await lists()
     await visit(tab, link)
-    await sleep(1500)
+    await until('the view to be back with the list’s filter', async () => (await refiningMark(tab))?.restore === false)
     assert.equal(await viewOpen(), true)
     assert.equal(await excluded('Ron Weasley'), true, 'the updated filter is the one put back')
     assert.deepEqual(await shownIds(), idsWithout('Draco Malfoy', 'Ron Weasley'))
@@ -275,18 +297,15 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     // The reader goes back to the tag's own list. A re-run — any options write —
     // leaves it there.
     await tab.click('.AO3E--search-view--back')
-    await sleep(300)
-    assert.equal(await viewOpen(), false)
-    await tab.evaluate(async () => {
+    await until('the view to close', async () => !(await viewOpen()))
+    await rerun(tab, () => tab.evaluate(async () => {
       const option = (await browser.storage.local.get('option.trackedLists'))['option.trackedLists']
       await browser.storage.local.set({ 'option.trackedLists': { ...option, target: option.target + 1 } })
-    })
-    await sleep(1500)
+    }))
     assert.equal(await viewOpen(), false, 'a re-run doesn’t put the filter back')
 
     // Nor does loading the page again, in the same tab, still refining.
     await visit(tab, TAG_URL)
-    await sleep(800)
     assert.equal(await viewOpen(), false, 'nor does a reload')
     assert.deepEqual(await refiningMark(tab), { id: list.id, restore: false })
   })
@@ -294,7 +313,8 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
   test('the review leaves out the works the filter rejects, and asks the archive to', async () => {
     fetched.length = 0
     await visit(tab, REVIEW_URL)
-    await sleep(3000)
+    const expected = idsWithout('Draco Malfoy', 'Ron Weasley').sort()
+    await until('the review to show its works', async () => JSON.stringify((await shownIds()).sort()) === JSON.stringify(expected))
     assert.ok(await tab.$('.AO3E--search-host.AO3E--tracked-review'), 'the review is up')
 
     const reads = fetched.filter(url => url.startsWith('/works/search?'))

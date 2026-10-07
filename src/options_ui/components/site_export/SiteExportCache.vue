@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatBytes } from '../../model/buckets.ts'
 import { cachedTextOff } from '../../model/jobView.ts'
 import { sentence, withReason } from '../../model/phrases.ts'
 
@@ -77,27 +78,39 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
 <template>
   <OptionRow title="Cached work text" :subtitle="subtitle">
     <div flex="~ row wrap items-center justify-end gap-2">
-      <Button
-        :variant="confirm.armed(DISCARD) ? 'destructive' : 'outline'"
-        class="disabled:cursor-default disabled:op-50"
+      <button
+        type="button"
+        class="outline-btn"
+        :class="{ armed: confirm.armed(DISCARD) }"
         :title="discardOff ? withReason('Discard orphans', discardOff) : undefined"
         :aria-describedby="discardOff ? jobOffId : undefined"
         :disabled="!orphanCount || !!jobOff"
         @click.prevent="press(DISCARD)"
       >
         {{ confirm.armed(DISCARD) ? `Discard ${orphanCount.toLocaleString()}?` : 'Discard orphans' }}
-      </Button>
-      <Button
-        :variant="confirm.armed(DELETE) ? 'destructive' : 'outline'"
-        class="disabled:cursor-default disabled:op-50"
+      </button>
+      <button
+        type="button"
+        class="outline-btn"
+        :class="{ armed: confirm.armed(DELETE) }"
         :title="deleteOff ? withReason('Delete cached text', deleteOff) : undefined"
         :aria-describedby="deleteOff ? jobOffId : undefined"
         :disabled="!usage.cached || !!jobOff"
         @click.prevent="press(DELETE)"
       >
         {{ confirm.armed(DELETE) ? 'Delete it all?' : 'Delete cached text' }}
-      </Button>
+      </button>
       <span v-if="jobOff" :id="jobOffId" hidden>{{ sentence(jobOff) }}.</span>
     </div>
   </OptionRow>
 </template>
+
+<style scoped>
+/* Armed: the next press deletes. */
+.armed {
+  border-color: rgb(var(--color-destructive));
+  background-color: rgb(var(--color-destructive));
+  color: rgb(var(--color-destructive-fg));
+  font-weight: 600;
+}
+</style>

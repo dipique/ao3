@@ -138,6 +138,14 @@ defineProps<{
   gap: 1px;
 }
 
+/* Below 768 px, where it is touched, as tall as Canvas 1's phone rows, so a
+   button's hit area stays inside its row. */
+@media (max-width: 767.98px) {
+  .list-row {
+    min-height: 48px;
+  }
+}
+
 @container (max-width: 440px) {
   .list-row--narrowable {
     grid-template: var(--row-template-narrow);

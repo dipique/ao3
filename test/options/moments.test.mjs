@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { formatMoment } from '../../src/options_ui/model/moments.ts'
+import { formatMoment, timeAgo } from '../../src/options_ui/model/moments.ts'
 
 const NOW = new Date(2026, 9, 3, 18, 4).getTime()
 
@@ -46,5 +46,30 @@ describe('formatMoment', () => {
   test('dates a moment on a later day, as a clock set wrong gives', () => {
     const at = new Date(2026, 9, 4, 9, 0).getTime()
     assert.equal(formatMoment(at, NOW), dated(at))
+  })
+})
+
+describe('timeAgo', () => {
+  const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  const MINUTE = 60_000
+  const DAY = 24 * 60 * MINUTE
+
+  test('says how long ago, in the largest unit that holds it', () => {
+    assert.equal(timeAgo(NOW - 30_000, NOW), relative.format(-30, 'second'))
+    assert.equal(timeAgo(NOW - 22 * MINUTE, NOW), relative.format(-22, 'minute'))
+    assert.equal(timeAgo(NOW - 3 * 60 * MINUTE, NOW), relative.format(-3, 'hour'))
+    assert.equal(timeAgo(NOW - 2 * DAY, NOW), relative.format(-2, 'day'))
+    assert.equal(timeAgo(NOW - 14 * DAY, NOW), relative.format(-2, 'week'))
+    assert.equal(timeAgo(NOW - 91 * DAY, NOW), relative.format(-3, 'month'))
+    assert.equal(timeAgo(NOW - 730 * DAY, NOW), relative.format(-2, 'year'))
+  })
+
+  test('in words where a number would read oddly', () => {
+    assert.equal(timeAgo(NOW, NOW), relative.format(0, 'second'))
+    assert.equal(timeAgo(NOW - DAY, NOW), relative.format(-1, 'day'))
+  })
+
+  test('a moment that never happened is never', () => {
+    assert.equal(timeAgo(0, NOW), 'never')
   })
 })

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { entryMatches, highlight, markSpans, normalize, searchTerms } from '../../src/options_ui/model/settingsSearch.ts'
+import { entryMatches, highlight, highlightWithStrong, markSpans, normalize, searchTerms } from '../../src/options_ui/model/settingsSearch.ts'
 
 const row = (title, subtitle = '') => ({ title, subtitle })
 
@@ -104,5 +104,30 @@ describe('markSpans', () => {
 
   test('with no spans the text is only escaped', () => {
     assert.equal(markSpans('Fluff & Angst', []), 'Fluff &amp; Angst')
+  })
+})
+
+describe('highlightWithStrong', () => {
+  const TEXT = 'Every row is Saved: its works can be cached, and downloaded as an Offline copy. A Tracked list does all that too.'
+  const STRONG = ['Saved', 'Offline copy', 'Tracked']
+
+  test('draws the first of each phrase bold, in turn', () => {
+    assert.equal(
+      highlightWithStrong(TEXT, [], STRONG),
+      'Every row is <strong>Saved</strong>: its works can be cached, and downloaded as an <strong>Offline copy</strong>. A <strong>Tracked</strong> list does all that too.',
+    )
+  })
+
+  test('marks the hits as highlight does, a hit that runs into a bold phrase included', () => {
+    assert.equal(
+      highlightWithStrong('A row is Saved, saved.', ['is sa'], ['Saved']),
+      'A row <mark>is </mark><strong><mark>Sa</mark>ved</strong>, saved.',
+    )
+    assert.equal(highlightWithStrong(TEXT, ['tracked'], STRONG), highlightWithStrong(TEXT, [], STRONG).replace('<strong>Tracked</strong>', '<strong><mark>Tracked</mark></strong>'))
+  })
+
+  test('escapes the text, and a phrase it doesn’t hold draws nothing bold', () => {
+    assert.equal(highlightWithStrong('<b> & Saved', [], ['Saved', 'Missing']), '&lt;b&gt; &amp; <strong>Saved</strong>')
+    assert.equal(highlightWithStrong('Plain', ['zz'], []), highlight('Plain', ['zz']))
   })
 })

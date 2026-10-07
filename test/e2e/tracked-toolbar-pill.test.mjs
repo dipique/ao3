@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { openToolbar, rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -113,14 +114,17 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     await tab.goto(url, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(tab)
     return tab
   }
 
   /** Open the collapsed toolbar. Every re-run rebuilds it shut. */
-  const openPanel = async (tab) => {
-    await tab.click('.AO3E--filter-toolbar--fab')
-    await sleep(300)
+  const openPanel = openToolbar
+
+  /** Press the pill, and wait for its box to open or shut as it says. */
+  const pressPill = async (tab, open) => {
+    await tab.click(TRACK_PILL)
+    await tab.waitForFunction((selector, shown) => document.querySelector(selector)?.hidden === !shown, {}, TRACK_BOX, open)
   }
 
   /** An option as it was last written, or null: `trackedLists` unless told otherwise. */
@@ -154,9 +158,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   test('the pill grows a title box, filled in from the page', async () => {
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), true, 'the box starts closed')
-    await tab.click(TRACK_PILL)
-    await sleep(200)
-    assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), false)
+    await pressPill(tab, true)
     // What kind of list it is, and the words the reader searched for — a name
     // they have just seen.
     assert.equal(await tab.$eval(ALIAS_INPUT, el => el.value), 'Search: coffee')
@@ -164,21 +166,18 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   test('Cancel closes it again, having written nothing', async () => {
     await tab.click(`${TRACK_BOX} button:last-of-type`)
-    await sleep(200)
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), true)
     assert.equal(await savedOption(tab), null)
     // …and it reopens with the name still there.
-    await tab.click(TRACK_PILL)
-    await sleep(200)
-    assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), false)
+    await pressPill(tab, true)
+    assert.equal(await tab.$eval(ALIAS_INPUT, el => el.value), 'Search: coffee')
   })
 
   test('Track stores the list under the reader\'s own name for it', async () => {
     await tab.$eval(ALIAS_INPUT, (el) => {
       el.value = 'Coffee shop AUs'
     })
-    await tab.click(`${TRACK_BOX} button:first-of-type`)
-    await sleep(1500)
+    await rerun(tab, () => tab.click(`${TRACK_BOX} button:first-of-type`))
 
     const saved = await savedOption(tab)
     assert.ok(saved, 'the option should have been written')
@@ -212,8 +211,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
   })
 
   test('it offers a way to stop, and a way through to the review', async () => {
-    await tab.click(TRACK_PILL)
-    await sleep(200)
+    await pressPill(tab, true)
     const actions = await tab.$$eval(`${TRACK_BOX} a, ${TRACK_BOX} button`, els =>
       els.map(el => ({ text: el.textContent.trim(), href: el.getAttribute('href') })))
     assert.deepEqual(actions.map(a => a.text), ['Stop tracking', 'Review…'])
@@ -225,8 +223,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   test('Stop tracking takes the list out of what syncs, and keeps it saved', async () => {
     id = (await savedOption(tab)).lists[0].id
-    await tab.click(`${TRACK_BOX} button`)
-    await sleep(1500)
+    await rerun(tab, () => tab.click(`${TRACK_BOX} button`))
     assert.deepEqual((await savedOption(tab)).lists, [], 'the entry goes')
     assert.equal((await savedOption(tab, 'savedLists')).lists[id].title, 'Coffee shop AUs', 'and the saved list keeps its title')
     assert.ok((await toasts(tab)).includes('Stopped tracking “Coffee shop AUs”. It stays a saved list on this browser.'))
@@ -239,8 +236,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     // No box: the list already has its title.
     assert.equal(await tab.$(TRACK_BOX), null)
 
-    await tab.click(TRACK_PILL)
-    await sleep(1500)
+    await rerun(tab, () => tab.click(TRACK_PILL))
     const [entry] = (await savedOption(tab)).lists
     assert.equal(entry.id, id)
     assert.equal(entry.alias, 'Coffee shop AUs')
@@ -259,13 +255,10 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     // record — after the page was drawn, and without drawing it again.
     const auto = { id: 'aut0', kind: 'text-search', url: '/works/search?work_search[query]=coffee', title: '', type: 'search', entity: 'coffee' }
     await page.evaluate(record => window.browser.storage.local.set({ 'option.savedLists': { v: 1, lists: { [record.id]: record } } }), auto)
-    await sleep(800)
     await openPanel(page)
     assert.equal(await pillText(page), 'Track this search')
-    await page.click(TRACK_PILL)
-    await sleep(200)
-    await page.click(`${TRACK_BOX} button:first-of-type`)
-    await sleep(1500)
+    await pressPill(page, true)
+    await rerun(page, () => page.click(`${TRACK_BOX} button:first-of-type`))
 
     assert.deepEqual((await savedOption(page)).lists.map(entry => entry.id), ['aut0'], 'no second list at its address')
     assert.deepEqual((await savedOption(page, 'savedLists')).lists, { aut0: { ...auto, title: 'Search: coffee' } })

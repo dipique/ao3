@@ -47,16 +47,16 @@ const selectedCode = computed<string>({
       <button
         role="combobox"
         :aria-expanded="open"
-        class="btn default"
+        class="touch-target btn default"
         border="1 input"
-        min-w="200px"
+        min-w="168px"
         flex="justify-between"
-        text="sm muted-fg"
-        min-h-8 px-2 py-2
+        text="[12.5px] default-fg"
+        h-7 gap-1.5 rounded="[7px]" px-2
       >
         {{ language?.label || 'Any language' }}
-        <Icon v-if="open" i-mdi-chevron-up />
-        <Icon v-else i-mdi-chevron-down />
+        <Icon v-if="open" i-mdi-chevron-up text="[13px]" op50 />
+        <Icon v-else i-mdi-chevron-down text="[13px]" op50 />
       </button>
     </RekaPopoverTrigger>
     <RekaPopoverPortal>

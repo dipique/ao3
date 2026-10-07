@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 
 import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_PRESETS, RULE_TARGETS, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, ruleValueMatches, TagType } from '../../src/common/data.ts'
-import { canSave, describeRule, draftRule, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, suggestSource, swatchFor, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
+import { canSave, describeRule, draftRule, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, ruleSummary, suggestSource, swatchFor, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
 
 /** AO3's answers to its tag autocomplete, recorded signed out and trimmed to a few names each, keyed by request. */
 const RECORDED = JSON.parse(readFileSync(new URL('./ao3-autocomplete.json', import.meta.url), 'utf8'))
@@ -578,5 +578,51 @@ describe('parseAutocomplete', () => {
       { id: 'Angst', name: 'Angst' },
     ]
     assert.deepEqual(parseAutocomplete(answer), ['Fluff', 'Angst'])
+  })
+})
+
+describe('ruleSummary', () => {
+  const rule = fields => ({ target: 'F', value: 'Fluff', matcher: 'exact', ...fields })
+
+  test('the sentence in parts: the action, drawn bold, and the value, drawn as a quote', () => {
+    assert.deepEqual(ruleSummary(rule({})), [
+      { text: 'Hide', kind: 'verb' },
+      { text: ' every work tagged ' },
+      { text: '“Fluff”', kind: 'value' },
+      { text: ' in Additional Tags.' },
+    ])
+    assert.deepEqual(ruleSummary(rule({ behavior: 'invert', target: 'author', value: 'someone', pseud: 'sideblog' })), [
+      { text: 'Always show', kind: 'verb' },
+      { text: ' every work by ' },
+      { text: '“someone”', kind: 'value' },
+      { text: ' writing as “sideblog”.' },
+    ])
+    assert.deepEqual(ruleSummary(rule({ behavior: 'none' }))[0], { text: 'Off', kind: 'verb' })
+    assert.deepEqual(ruleSummary(rule({ behavior: 'hideFilter' }))[0], { text: 'Hide', kind: 'verb' })
+    assert.deepEqual(ruleSummary(rule({ behavior: 'highlight' }))[0], { text: 'Highlight', kind: 'verb' })
+  })
+
+  test('an id is no quote, and an untyped value is the ellipsis alone', () => {
+    assert.deepEqual(ruleSummary(rule({ target: 'work', value: '123' })), [{ text: 'Hide', kind: 'verb' }, { text: ' the work with id 123.' }])
+    assert.deepEqual(ruleSummary(rule({ value: '', target: 'author' })), [{ text: 'Hide', kind: 'verb' }, { text: ' every work by …' }])
+  })
+
+  test('its parts read as the sentence', () => {
+    const rules = [
+      rule({}),
+      rule({ behavior: 'collapse', priority: 6 }),
+      rule({ behavior: 'invert', priority: 2 }),
+      rule({ behavior: 'highlight' }),
+      rule({ behavior: 'hideFilter' }),
+      rule({ target: 'tag', matcher: 'regex', value: '^OC', behavior: 'hideFilter' }),
+      rule({ behavior: 'none' }),
+      rule({ target: 'R', matcher: 'contains', value: 'Steve Rogers/' }),
+      rule({ target: 'author', value: 'some', matcher: 'contains' }),
+      rule({ target: 'work', value: 'Tit', matcher: 'contains' }),
+      rule({ target: 'series', value: '4232377' }),
+      rule({ value: '' }),
+    ]
+    for (const each of rules)
+      assert.equal(ruleSummary(each).map(part => part.text).join(''), describeRule(each))
   })
 })

@@ -45,7 +45,7 @@ import type { Options } from './options.ts'
  * adopting such a copy would drop the untracked lists it still holds as
  * entries, titles and all; at a version it doesn't speak, it waits instead.
  */
-export const SYNC_SCHEMA_VERSION = 9
+export const SYNC_SCHEMA_VERSION = 10
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400

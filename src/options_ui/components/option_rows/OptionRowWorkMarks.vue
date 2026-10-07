@@ -310,25 +310,25 @@ function save() {
     subtitle="Mark a work read — or with a finer verdict, anything from Favorite to Abandoned — from its right-click menu. Pressing AO3's own “Mark as Read” marks it here too, so the list fills itself in as you browse."
   >
     <div flex="~ col gap-3" mt-2>
-      <p text="sm muted-fg">
+      <p text="[12.5px] muted-fg" leading="[18px]">
         A work carries one mark at a time: the finer verdicts all mean "read", so choosing one replaces whatever the
         work had. They take it off your Marked for Later list and — where "hide in listings" is on — take it out of
         results the way the two settings below say.
       </p>
 
-      <p text="sm muted-fg">
+      <p text="[12.5px] muted-fg" leading="[18px]">
         "Ongoing" is the exception: it means you're waiting on more chapters, not that you're done. It keeps the work on
         Marked for Later and records the last chapter you finished, plus an optional date to wait until. With "hide
         until ready" on, the work is collapsed only while there's nothing new to read.
       </p>
 
-      <p text="sm muted-fg">
+      <p text="[12.5px] muted-fg" leading="[18px]">
         The arrows set the order marks appear in, here and in a work's menu. "Ongoing" stays last — it isn't one of the
         verdicts. Click a mark's icon, or the pencil beside its name, to rename it, recolour it or give it a different
         icon; hovering its name shows the key it is stored under, which never changes.
       </p>
 
-      <p text="sm muted-fg">
+      <p text="[12.5px] muted-fg" leading="[18px]">
         "In menus" is how a mark you have finished with gets out of the way: turn it off and it stops being offered
         when you mark a work, while every work already carrying it keeps it. Marks aren't deleted — the works filed
         under one would have nowhere to go.
@@ -336,8 +336,8 @@ function save() {
 
       <div flex="~ col gap-4 sm:row" border-t pt-3>
         <label flex="~ col gap-1" grow>
-          <span text="sm muted-fg">When a mark hides a work</span>
-          <Select v-model="mode" h-10 w-full>
+          <span text="[12.5px] muted-fg" leading="[18px]">When a mark hides a work</span>
+          <Select v-model="mode" size="row" w-full>
             <SelectItem value="collapse">
               Collapse it to a line saying which mark hid it
             </SelectItem>
@@ -345,26 +345,26 @@ function save() {
               Take it out of the listing completely
             </SelectItem>
           </Select>
-          <p v-if="mode === 'collapse'" text="xs muted-fg" pl-1>
+          <p v-if="mode === 'collapse'" text="[11.5px] muted-fg" leading="[16px]">
             The work keeps its place, squeezed down to its mark and a button to show it — and keeps its slot in a
             custom search view's results.
           </p>
-          <p v-else text="xs muted-fg" pl-1>
+          <p v-else text="[11.5px] muted-fg" leading="[16px]">
             The work is gone. In a custom search view it is dropped from the results altogether, so a page still fills
             with the number of works you asked for.
           </p>
         </label>
 
         <label flex="~ col gap-1" w="full sm:40">
-          <span text="sm muted-fg">Priority</span>
+          <span text="[12.5px] muted-fg" leading="[18px]">Priority</span>
           <Input
             v-model.number="priority"
             type="number"
             :min="MIN_PRIORITY"
             :max="MAX_PRIORITY"
-            text="base" h-10 w-full py-2 pl-2
+            class="h-[26px] w-full rounded-[7px] px-2 text-[12.5px] tabular-nums"
           />
-          <p text="xs muted-fg" pl-1>
+          <p text="[11.5px] muted-fg" leading="[16px]">
             {{ MIN_PRIORITY }}–{{ MAX_PRIORITY }}, vs. rule priorities
           </p>
         </label>
@@ -484,14 +484,14 @@ function save() {
       </ListFrame>
       <span :id="orderOffId" hidden>{{ MARK_ORDER_OFF }}</span>
 
-      <p v-if="external.length" text="xs muted-fg">
+      <p v-if="external.length" text="[11.5px] muted-fg" leading="[16px]">
         <template v-for="id in external" :key="id">
           <Icon :class="markIconClass(marks[id]?.icon)" />
           {{ label(id) }}<span v-if="id === SAVED_MARK"> lives on AO3, not here — this entry only says how it is drawn on results.</span>
         </template>
       </p>
 
-      <p text="xs muted-fg">
+      <p text="[11.5px] muted-fg" leading="[16px]">
         Marks are stored with your settings, so they're included in backups and sync.
         <template v-if="showSize">
           They currently take about {{ packedKb.toFixed(1) }}&nbsp;KB (compressed further before syncing, which has a

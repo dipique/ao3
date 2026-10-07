@@ -1,53 +1,41 @@
 <script setup lang="ts">
-import type { SavedList, TrackedList } from '#common'
+import { getArchiveLink, isoDay, utcToday } from '#common'
 
-import { cache, defaultTitle, describeFilters, formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, planRemoveList, planRetitle, planStopTracking, planTrack, refineLink, savedListsOf, sourceLabel, storedListRefs, toast, toEpochDays, TRACKED_TYPE_LABELS, trackedMeta, utcToday } from '#common'
-
-import { useSavedLists } from '../../composables/useSavedLists.ts'
-import { KIND_LABELS, titlePlaceholder } from '../../model/savedListRows.ts'
+import { sentence, withReason } from '../../model/phrases.ts'
+import { latestReviewable, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, WORKS_PER_REVIEW } from '../../model/review.ts'
 
 /**
- * Tracked lists: every saved list on this browser, each tracked or not, plus
- * the two numbers that shape a review — how many works a range aims for, and how
- * far the reader has already been. A tracked list's new and updated works are
- * gathered into one review stream, and only a tracked list syncs.
+ * Tracked lists, and what shapes the review they are gathered into: how far
+ * the reader has been, how many works a range aims for, and This review, the
+ * range being reviewed now, which is stored like a list so that it can be
+ * cached and downloaded. The lists themselves are under Saved lists.
  *
- * Lists aren't created here. A list comes from the page it is (the floating
- * toolbar's "Track this search") or from a stored list further down the
- * options, because both of those know the address the review has to fetch;
- * this row is where one is retitled, tracked or not, and removed — and where
- * refining a tracked one starts: its row links to the list's own page, marked
- * as being refined ({@link refineLink}), and the floating toolbar there offers
- * to update it. Every change is a plan from `savedLists.ts`, applied to both
- * halves as they stand.
+ * The cells show whether the switch is on or off: the review's window keeps
+ * its offline copy either way, so caching and downloading it stay on, while
+ * what only the review uses is off and says why.
  */
-const { enabled, target, reviewedThrough } = useOption('trackedLists')
-const { entries, records, current, apply } = useSavedLists()
-const { deleteCopies } = useSiteExport()
+const { enabled, target, reviewedThrough, lists } = useOption('trackedLists')
+const { review, userId, view: job, cacheWorks, downloadSite, stop, resume, discard } = useSiteExport()
+const now = useNow({ interval: 60_000 })
 
-// ---------------------------------------------------------------------------
-// Works per review
-// ---------------------------------------------------------------------------
+const block = computed(() => reviewBlock({
+  enabled: enabled.value,
+  tracking: lists.value.some(list => list.tracked),
+  window: review.value && {
+    key: review.value.key,
+    count: review.value.count,
+    cached: review.value.cached,
+    scrapedAt: review.value.scrapedAt,
+    listUrl: review.value.listUrl,
+  },
+  userId: userId.value,
+  job: job.value,
+  now: now.value.getTime(),
+}))
 
-const TARGET_MIN = 10
-const TARGET_MAX = 500
-
-/**
- * Edited through a draft so a half-typed number is never the stored one: typing
- * "120" passes through "1", which clamped on the spot would become 10 and leave
- * the reader fighting the field. Clamped and written on blur or Enter instead.
- */
-const targetDraft = ref(target.value)
-
-watch(target, () => targetDraft.value = target.value)
-
-function commitTarget() {
-  const typed = Math.round(Number(targetDraft.value))
-  const clamped = Number.isFinite(typed) ? Math.min(Math.max(typed, TARGET_MIN), TARGET_MAX) : TARGET_MIN
-  targetDraft.value = clamped
-  if (clamped !== target.value)
-    target.value = clamped
-}
+const settingsOffId = useId()
+const offlineOffId = useId()
+const startOffId = useId()
 
 // ---------------------------------------------------------------------------
 // Reviewed through
@@ -61,428 +49,317 @@ function commitTarget() {
  */
 const changingDate = ref(false)
 const dateDraft = ref('')
+const dateInput = useTemplateRef<HTMLInputElement>('dateInput')
+const changeButton = useTemplateRef<HTMLButtonElement>('changeButton')
 
-/**
- * The latest day a reader may claim to have reviewed. A review range never
- * reaches today — the day isn't over, and marking it reviewed would bury every
- * work posted later today — so the picker doesn't offer it either.
- */
-const latestReviewable = isoDay(utcToday() - 1)
-
-const reviewedLabel = computed(() =>
-  reviewedThrough.value > 0 ? formatDay(reviewedThrough.value) : 'Nothing reviewed yet',
-)
-
-function startChange() {
+async function startChange(): Promise<void> {
   dateDraft.value = reviewedThrough.value > 0 ? isoDay(reviewedThrough.value) : ''
   changingDate.value = true
+  await nextTick()
+  dateInput.value?.focus()
 }
 
-/** An emptied field means "nothing reviewed yet", which is how a reader starts over. */
-function commitDate() {
-  const text = dateDraft.value.trim()
-  if (!text) {
-    reviewedThrough.value = 0
-    changingDate.value = false
-    return
-  }
-  const day = toEpochDays(text)
-  // Half-entered dates arrive here from a picker being typed into; leave the
-  // field open rather than writing a day nobody asked for.
+async function endChange(): Promise<void> {
+  changingDate.value = false
+  await nextTick()
+  changeButton.value?.focus()
+}
+
+/** A date half typed into the picker writes nothing, and leaves the field open. */
+function commitDate(): void {
+  const day = reviewedThroughFrom(dateDraft.value, utcToday())
   if (day === null)
     return
-  reviewedThrough.value = Math.min(day, utcToday() - 1)
-  changingDate.value = false
+  reviewedThrough.value = day
+  void endChange()
 }
 
-// ---------------------------------------------------------------------------
-// The lists
-// ---------------------------------------------------------------------------
-
-/** A title as titles are compared: trimmed, in any case. */
-function titleKey(title: string): string {
-  return typeof title === 'string' ? title.trim().toLowerCase() : ''
-}
-
-/** A list as the title and label helpers read one: its title as an alias. */
-function aliased(list: SavedList): Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'> {
-  return { id: list.id, alias: list.title, url: list.url, type: list.type, entity: list.entity }
-}
-
-/** A list by its title, and by what it is when the title doesn't say: “Mine” (Search: tea). */
-function describe(list: Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>): string {
-  const meta = trackedMeta(list)
-  const title = sourceLabel(list)
-  const what = meta && titleKey(defaultTitle(meta)) !== titleKey(title) ? ` (${defaultTitle(meta)})` : ''
-  return `“${title}”${what}`
-}
-
-/**
- * What is typed in a title field, by list id, while it differs from what is
- * stored: a title still being typed, untrimmed, or one another list has, which
- * the field goes on showing, with the refusal under it, and which is saved
- * once it is free.
- */
-const drafts = ref<Record<string, string>>({})
-
-/**
- * The order the rows were in when a title field took focus. Rows sort by title,
- * so re-sorting as the reader types would move the field out from under them;
- * they hold still until focus leaves the titles altogether.
- */
-const heldOrder = ref<string[] | null>(null)
-
-const rows = computed(() => {
-  const state = { tracked: { enabled: enabled.value, target: target.value, reviewedThrough: reviewedThrough.value, lists: entries.value }, saved: { lists: records.value } }
-  const known = savedListsOf(state)
-  const all = known.map(({ list }) => aliased(list))
-  // Sync can bring two lists with one title together (made on two browsers
-  // before they met). Marked, so the reader knows to rename one.
-  const titleCounts = new Map<string, number>()
-  for (const { list } of known) {
-    const key = titleKey(list.title)
-    if (key)
-      titleCounts.set(key, (titleCounts.get(key) ?? 0) + 1)
-  }
-
-  const built = known.map(({ list, entry }) => {
-    /**
-     * Null for a list whose address no longer reads as a page on the archive —
-     * one that arrived through sync or an import from a build that knew a shape
-     * this one doesn't, or that names another host entirely. Such a row is
-     * flagged rather than linked, and the link is built from *this* rather than
-     * from the stored text: a review carries the reader's session, so a link out
-     * of the archive is the one thing this row must never offer.
-     */
-    const normalized = normalizeTrackedUrl(list.url)
-    /**
-     * The list's own page, marked as being refined: a tracked list's, since an
-     * update from that page is an update to its entry. Null where the address
-     * and the kind disagree.
-     */
-    const link = entry ? refineLink(list) : null
-    const meta = trackedMeta(list)
-    const draft = drafts.value[list.id]
-    const plan = draft === undefined ? null : planRetitle(state, list.id, draft)
-    return {
-      id: list.id,
-      /**
-       * What the review's "List source" facet will call it, for labels and prompts
-       * — disambiguated against every other list, so a name two lists share reads
-       * here exactly as it will there, ` (2)` and all.
-       */
-      label: sourceLabel(aliased(list), all),
-      titled: !!titleKey(list.title),
-      /** What an emptied field shows: the default title it commits to. */
-      placeholder: titlePlaceholder(list),
-      /** What's in the field: the stored title, or what is being typed over it. */
-      title: draft ?? list.title,
-      refusal: plan && !plan.ok
-        ? `Another list is already called ${describe(aliased(plan.takenBy))}, so this title isn't saved. Choose a different one.`
-        : null,
-      shared: (titleCounts.get(titleKey(list.title)) ?? 0) > 1,
-      /** The type badge, so a list retitled to anything still says what it is. */
-      type: meta ? TRACKED_TYPE_LABELS[meta.type] : null,
-      /** The whole of what it is, for the badge's tooltip: "Character: Draco Malfoy". */
-      what: meta ? defaultTitle(meta) : '',
-      kind: KIND_LABELS[list.kind] ?? list.kind,
-      /**
-       * What it filters by, in a line: the archive's filters counted, since the
-       * link opens them on screen, and the view's by name. Worded as the floating
-       * toolbar words an update's changes, so the two read alike.
-       */
-      filters: describeFilters(list),
-      broken: normalized === null,
-      href: normalized && link ? getArchiveLink(link) : undefined,
-      tracked: !!entry,
-      state: entry ? `Tracking since ${formatDay(entry.since)}` : 'Saved',
-    }
-  })
-
-  const held = heldOrder.value
-  if (held) {
-    // A list that arrived while the reader was typing goes at the end.
-    const at = (id: string): number => {
-      const index = held.indexOf(id)
-      return index === -1 ? held.length : index
-    }
-    return built.sort((a, b) => at(a.id) - at(b.id))
-  }
-  // By title, which with the default "Type: …" titles also groups them by type.
-  // Lists with no title of their own go last, under what the facet calls them.
-  return built.sort((a, b) =>
-    Number(!a.titled) - Number(!b.titled)
-    || a.label.localeCompare(b.label, undefined, { sensitivity: 'base', numeric: true }))
+watch(enabled, (on) => {
+  if (!on)
+    changingDate.value = false
 })
 
-/**
- * A title typed into a row, written straight through, trimmed: on the record,
- * and on the entry too while the list is tracked. A title another list has is
- * refused: it stays in the field, unsaved, with a line saying which list has it.
- */
-function retitle(id: string, value: string) {
-  drafts.value = { ...drafts.value, [id]: value }
-  const before = current()
-  const plan = planRetitle(before, id, value)
-  if (plan.ok)
-    apply(before, plan.state)
+// ---------------------------------------------------------------------------
+// This review
+// ---------------------------------------------------------------------------
+
+const cacheLabel = computed(() => (review.value?.cached ? 'Update the cached works' : 'Cache this list\'s works'))
+const downloadLabel = 'Cache this list\'s works, then save it as one HTML file'
+
+function cache(): void {
+  if (review.value)
+    void cacheWorks(review.value)
 }
 
-function holdOrder() {
-  heldOrder.value ??= rows.value.map(row => row.id)
-}
-
-/**
- * Focus leaving a title: the rows may sort again, unless it went straight to
- * another title. The field shows the title as saved, trimmed — unless it was
- * refused and still is. A refused title that has since become free (the other
- * list was renamed meanwhile) is saved on the way out.
- */
-function releaseOrder(id: string, event: FocusEvent) {
-  const draft = drafts.value[id]
-  if (draft !== undefined) {
-    const before = current()
-    const plan = planRetitle(before, id, draft)
-    if (plan.ok) {
-      apply(before, plan.state)
-      const rest = { ...drafts.value }
-      delete rest[id]
-      drafts.value = rest
-    }
-  }
-  const next = event.relatedTarget
-  if (!(next instanceof HTMLElement && next.dataset.trackedTitle !== undefined))
-    heldOrder.value = null
-}
-
-/**
- * Tracking starts the clock afresh, from today: a stretch spent untracked is
- * the reader saying "not these for now", so tracking again shouldn't pour back
- * everything they chose to skip. Stopping keeps the list, title and all, as a
- * saved list on this browser.
- */
-function setTracked(id: string, on: boolean) {
-  const before = current()
-  if (!on) {
-    apply(before, planStopTracking(before, id))
-    return
-  }
-  const plan = planTrack(before, id, utcToday())
-  if (plan.ok)
-    apply(before, plan.state)
-  else
-    toast(`This search is already tracked as ${describe(plan.twin)}.`, { type: 'error' })
-}
-
-/** Removing a list loses its title, its tracking and its stored copies, so it asks first. */
-const pendingDelete = ref<string | null>(null)
-const pending = computed(() => rows.value.find(row => row.id === pendingDelete.value) ?? null)
-
-/**
- * Remove the list: its record, its entry, and every copy stored at its address
- * unless another list there still claims them. The copies go first, so that no
- * moment has copies at an address with no record, which the background would
- * make an untitled list of.
- */
-async function remove() {
-  const id = pendingDelete.value
-  pendingDelete.value = null
-  if (id === null)
-    return
-  const { dropCopies } = planRemoveList(current(), id, storedListRefs(await cache.get('searchLists')))
-  await deleteCopies(dropCopies)
-  const before = current()
-  apply(before, planRemoveList(before, id, []).state)
+function download(): void {
+  if (review.value)
+    void downloadSite(review.value)
 }
 </script>
 
 <template>
-  <OptionRowCollapsable
-    v-model:open="enabled"
+  <OptionRow
     title="Tracked lists"
     subtitle="Mark a search, an uncommon tag's works or a series as tracked, and everything new or updated across all of them is gathered into one review stream on your readings page. You look through a range of days, mark what deserves marking, then mark the range reviewed."
   >
-    <div flex="~ col gap-3" mt-2>
-      <p text="sm muted-fg">
-        Nothing is ever marked reviewed one work at a time: a review is a range of days, and the only thing recorded is
-        how far you have been. Works you have already marked read, or that are on your Marked for Later list, never
-        appear — you have dealt with them already.
-      </p>
+    <template #default="{ id }">
+      <Switch :id="id" v-model="enabled" />
+    </template>
 
-      <div flex="~ col gap-3" border-t pt-3>
-        <label flex="~ gap-3 items-center wrap">
-          <span text="sm" min-w-40>Works per review</span>
-          <NumberInput
-            v-model="targetDraft"
-            :min="TARGET_MIN"
-            :max="TARGET_MAX"
-            unit="works"
-            aria-label="Works per review"
-            @blur="commitTarget"
-            @keydown.enter="commitTarget"
-          />
-          <span text="sm muted-fg">
-            A range takes whole days until one more day would push it past this, so it is a target rather than a
-            limit. {{ TARGET_MIN }}–{{ TARGET_MAX }}.
-          </span>
-        </label>
+    <template #extra>
+      <OptionRowInset>
+        <div class="review">
+          <div class="review__grid">
+            <ReviewCell cell="reviewed-through" head="Reviewed through" :dim="!!block.settingsOff">
+              <div v-if="!changingDate" class="review__line">
+                <span class="review__value">{{ reviewedThroughLabel(reviewedThrough) }}</span>
+                <button
+                  ref="changeButton"
+                  type="button"
+                  class="outline-btn small-btn"
+                  :title="withReason('Change the last day reviewed', block.settingsOff)"
+                  :disabled="!!block.settingsOff"
+                  :aria-describedby="block.settingsOff ? settingsOffId : undefined"
+                  @click="startChange"
+                >
+                  Change…
+                </button>
+              </div>
+              <div v-else class="review__line review__line--edit">
+                <input
+                  ref="dateInput"
+                  v-model="dateDraft"
+                  type="date"
+                  :max="latestReviewable(utcToday())"
+                  aria-label="Last day marked reviewed"
+                  class="review__date input-ring"
+                  @change="commitDate"
+                >
+                <button type="button" class="outline-btn" @click="commitDate">
+                  Save
+                </button>
+                <button type="button" class="ghost-btn" @click="endChange">
+                  Cancel
+                </button>
+              </div>
+              <template #help>
+                The next review starts the day after. Move it back to review a range again, or forward to write off a
+                backlog you are never going to read. Clearing it starts from the day your earliest list was tracked.
+              </template>
+            </ReviewCell>
 
-        <div flex="~ gap-3 items-center wrap">
-          <span text="sm" min-w-40>Reviewed through</span>
-          <template v-if="changingDate">
-            <Input
-              v-model="dateDraft"
-              type="date"
-              :max="latestReviewable"
-              aria-label="Last day marked reviewed"
-              text="base" h-9 py-2 pl-2
-              @change="commitDate"
-            />
-            <Button variant="outline" size="sm" @click="commitDate">
-              Save
-            </Button>
-            <Button variant="ghost" size="sm" @click="changingDate = false">
-              Cancel
-            </Button>
-          </template>
-          <template v-else>
-            <span text="sm">{{ reviewedLabel }}</span>
-            <Button variant="outline" size="sm" @click="startChange">
-              Change…
-            </Button>
-          </template>
-        </div>
-        <p text="xs muted-fg">
-          The next review starts the day after this. Move it back to review a range again, or forward to write off a
-          backlog you are never going to read. Clearing the date starts from the day your earliest list was tracked.
-        </p>
-      </div>
+            <ReviewCell cell="works-per-review" head="Works per review" :dim="!!block.settingsOff">
+              <div class="review__line">
+                <Stepper
+                  v-model="target"
+                  :min="WORKS_PER_REVIEW.min"
+                  :max="WORKS_PER_REVIEW.max"
+                  size="row"
+                  label="Works per review"
+                  decrement-label="Fewer works per review"
+                  increment-label="More works per review"
+                  :off="block.settingsOff"
+                />
+                <span class="review__unit">works</span>
+              </div>
+              <template #help>
+                A range takes whole days until one more day would push it past this, so it is a target rather than a
+                limit. {{ WORKS_PER_REVIEW.min }}–{{ WORKS_PER_REVIEW.max }}.
+              </template>
+            </ReviewCell>
 
-      <div data-list="tracked-lists" flex="~ col gap-2" text="sm" border-t pt-3>
-        <p v-if="!rows.length" text="sm muted-fg">
-          No lists yet. Use <strong>Track this search</strong> in the floating toolbar on a search, a tag's works, or a
-          series — or the <strong>Track</strong> button on a stored list under Advanced → Site export.
-        </p>
+            <ReviewCell cell="this-review" head="This review" :job="block.actions === 'stop'">
+              <div v-if="block.figure" class="review__line">
+                <span class="review__value">{{ block.figure.count }}</span>
+                <span class="review__detail">{{ block.figure.detail }}</span>
+              </div>
+              <p v-else class="review__empty">
+                {{ block.empty }}
+              </p>
 
-        <div
-          v-else
-          grid="~ cols-[1fr_min-content_min-content]"
-          items-start gap-x-4 gap-y-3
-        >
-          <span text="xs muted-fg uppercase tracking-wide">List</span>
-          <span text="xs muted-fg uppercase tracking-wide" ws-nowrap>Tracked</span>
-          <span />
+              <!-- Said where the reader is looking, beside the buttons it turns off. -->
+              <p v-if="block.offlineOff" class="review__note">
+                <SeverityGlyph severity="neutral" shrink-0 />
+                <span :id="offlineOffId">{{ sentence(block.offlineOff) }}.</span>
+              </p>
 
-          <div v-for="row in rows" :key="row.id" :data-list-row="row.id" contents>
-            <span flex="~ col gap-1" min-w-0>
-              <Input
-                :model-value="row.title"
-                type="text"
-                :placeholder="row.placeholder"
-                :aria-label="`Title for ${row.label}`"
-                :aria-invalid="row.refusal ? 'true' : undefined"
-                data-tracked-title
-                text="base" h-9 w-full py-2 pl-2
-                @update:model-value="retitle(row.id, String($event))"
-                @focus="holdOrder"
-                @blur="releaseOrder(row.id, $event)"
-              />
-              <span v-if="row.refusal" text="xs destructive" role="alert">{{ row.refusal }}</span>
-              <span v-else-if="row.shared" text="xs destructive">
-                Another list has this title too. Rename one of them so they can be told apart.
-              </span>
-              <span flex="~ gap-1 items-center wrap" text="xs muted-fg">
-                <span
-                  v-if="row.type"
-                  :title="row.what"
-                  border rounded px-1.5 font-medium text="default-fg"
-                >{{ row.type }}</span>
-                <span>{{ row.kind }}</span>
-                <span aria-hidden="true">·</span>
-                <span>{{ row.state }}</span>
-                <template v-if="row.href">
-                  <span aria-hidden="true">·</span>
-                  <ArchiveLink
-                    :href="row.href"
-                    title="Open this list's search to refine it"
-                    :aria-label="`Open the search for ${row.label} on AO3, to refine it`"
+              <SiteExportProgress v-if="block.job" />
+
+              <div v-if="block.actions" class="review__buttons">
+                <template v-if="block.actions === 'offline'">
+                  <button
+                    type="button"
+                    class="outline-btn small-btn"
+                    :title="withReason(cacheLabel, block.offlineOff)"
+                    :disabled="!!block.offlineOff"
+                    :aria-describedby="block.offlineOff ? offlineOffId : undefined"
+                    @click="cache"
                   >
-                    Refine on AO3
-                  </ArchiveLink>
+                    <span class="i-tabler-cloud-download" aria-hidden="true" />
+                    Cache works
+                  </button>
+                  <button
+                    type="button"
+                    class="outline-btn small-btn"
+                    :title="withReason(downloadLabel, block.offlineOff)"
+                    :disabled="!!block.offlineOff"
+                    :aria-describedby="block.offlineOff ? offlineOffId : undefined"
+                    @click="download"
+                  >
+                    <span class="i-tabler-download" aria-hidden="true" />
+                    Download Offline Copy
+                  </button>
                 </template>
-              </span>
-              <!--
-                One line, however narrow the page: what the summary had to leave
-                out, or the page's width cuts off, is in the tooltip. A screen
-                reader gets the whole of it in place of the shortened line.
-              -->
-              <span
-                v-if="row.filters.text"
-                :title="row.filters.full"
-                data-tracked-filters
-                truncate text="xs muted-fg"
+                <button v-else-if="block.actions === 'stop'" type="button" class="outline-btn small-btn" @click="stop()">
+                  <span class="i-tabler-player-stop" aria-hidden="true" />
+                  Stop
+                </button>
+                <template v-else>
+                  <button type="button" class="primary-btn small-btn" @click="resume()">
+                    <span class="i-tabler-player-play" aria-hidden="true" />
+                    Continue
+                  </button>
+                  <button type="button" class="ghost-btn small-btn" @click="discard()">
+                    Discard
+                  </button>
+                </template>
+              </div>
+
+              <a
+                v-if="block.start.href"
+                :href="getArchiveLink(block.start.href)"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="review__start touch-target input-ring"
+                :aria-label="block.start.label"
               >
-                <template v-if="row.filters.more">
-                  <span aria-hidden="true">{{ row.filters.text }}</span>
-                  <span class="sr-only">{{ row.filters.full }}</span>
-                </template>
-                <template v-else>{{ row.filters.text }}</template>
-              </span>
-              <span v-if="row.broken" text="xs destructive">
-                This address isn't a page on AO3, so it can't be reviewed. Remove it and track the list again from the
-                page itself.
-              </span>
-            </span>
-            <Switch
-              :model-value="row.tracked"
-              title="Track this list"
-              :aria-label="`Track ${row.label}`"
-              @update:model-value="setTracked(row.id, $event)"
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              @click.prevent="pendingDelete = row.id"
-            >
-              <Icon i-mdi-trash-can-outline :label="`Remove ${row.label}`" />
-            </Button>
+                Start Review
+                <span class="i-tabler-arrow-right" aria-hidden="true" />
+              </a>
+              <button
+                v-else
+                type="button"
+                class="review__start touch-target input-ring"
+                :title="withReason(block.start.label, block.start.off)"
+                disabled
+                :aria-describedby="startOffId"
+              >
+                Start Review
+                <span class="i-tabler-arrow-right" aria-hidden="true" />
+              </button>
+              <span v-if="block.start.off" :id="startOffId" hidden>{{ sentence(block.start.off) }}.</span>
+            </ReviewCell>
           </div>
+          <span v-if="block.settingsOff" :id="settingsOffId" hidden>{{ sentence(block.settingsOff) }}.</span>
         </div>
-
-        <p text="xs muted-fg">
-          The title is yours to set — it is what the review's "List source" filter calls the list, so no two lists can
-          share one. A new list starts out named for what it searches, such as "Character: Draco Malfoy". Switching
-          tracking off keeps the list, and its title, as a saved list on this browser: it stops being reviewed, and
-          stops syncing to your other browsers. Switching it back on tracks it again from today, so the gap isn't
-          filled in.
-        </p>
-        <p text="xs muted-fg">
-          To change what a tracked list searches, use <strong>Refine on AO3</strong>: it opens the list's search, and
-          once you have changed it — the Sort &amp; Filter sidebar, the search form — the floating toolbar there offers
-          to update the list, which keeps its place in your review.
-        </p>
-      </div>
-    </div>
-
-    <Dialog :open="!!pending" @update:open="(open) => { if (!open) pendingDelete = null }">
-      <DialogContent>
-        <DialogTitle>
-          Remove this list?
-        </DialogTitle>
-        <DialogDescription pt-2>
-          <strong>{{ pending?.label }}</strong> is removed from this browser: its title, its tracking, and its stored
-          copies, unless another list searches the same thing. Cached work text stays. To keep the list without
-          reviewing it, switch tracking off instead.
-        </DialogDescription>
-        <div flex="~ row justify-end gap-2" pt-4>
-          <Button variant="outline" @click.prevent="pendingDelete = null">
-            Cancel
-          </Button>
-          <Button variant="destructive" @click.prevent="remove">
-            Remove list
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  </OptionRowCollapsable>
+      </OptionRowInset>
+    </template>
+  </OptionRow>
 </template>
+
+<style scoped>
+/*
+  Three cells side by side where the panel has the room, each over the others
+  where it doesn't: a container query, so the cells stack on a narrow window
+  and beside the rail on a middling one alike.
+*/
+.review {
+  container-type: inline-size;
+}
+.review__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgb(var(--color-hair));
+  border-radius: 9px;
+  background-color: rgb(var(--color-default));
+}
+.review__grid > * + * {
+  border-top: 1px solid rgb(var(--color-hair));
+}
+@container (min-width: 600px) {
+  .review__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .review__grid > * + * {
+    border-top: none;
+    border-left: 1px solid rgb(var(--color-hair));
+  }
+}
+
+.review__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.review__line--edit {
+  gap: 6px;
+}
+.review__value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.review__detail,
+.review__unit {
+  color: rgb(var(--color-muted-fg));
+  font-size: 12px;
+}
+.review__empty {
+  margin: 0;
+  font-size: 12px;
+  line-height: 17px;
+}
+.review__date {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--color-input));
+  border-radius: 7px;
+  background-color: rgb(var(--color-default));
+  color: rgb(var(--color-default-fg));
+  font: inherit;
+  font-size: 12.5px;
+}
+.review__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: rgb(var(--color-muted-fg));
+  font-size: 11.5px;
+  line-height: 15px;
+}
+.review__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.review__start {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  margin-top: 6px;
+  border: 1px solid rgb(var(--color-primary));
+  border-radius: 7px;
+  background-color: rgb(var(--color-primary));
+  color: rgb(var(--color-primary-fg));
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.review__start:hover:not(:disabled) {
+  background-color: rgb(var(--color-primary) / 0.9);
+  color: rgb(var(--color-primary-fg));
+}
+.review__start:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+</style>

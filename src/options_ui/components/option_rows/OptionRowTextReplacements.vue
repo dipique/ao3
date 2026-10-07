@@ -52,8 +52,8 @@ function remove(index: number) {
         cursor-pointer py-1
       >
         <div flex="~ col" mr-4>
-          <span font="leading-none 400" text="base">Editing tools on the work page</span>
-          <span text="sm muted-fg">
+          <span text="[13.5px]" leading="[18px]">Editing tools on the work page</span>
+          <span text="[12px] muted-fg" leading="[17px]">
             Underline the text your rules replaced — click one to edit, disable or delete its rule — and offer a
             button beside any text you select to make a new rule out of it. Also on the floating toolbar.
           </span>
@@ -136,7 +136,7 @@ function remove(index: number) {
       </ListFrame>
       <span :id="casingOffId" hidden>{{ MATCH_CASING_OFF }}</span>
 
-      <p text="xs muted-fg" pl-1>
+      <p text="[11.5px] muted-fg" leading="[16px]">
         "Match casing" matches any casing and capitalises the replacement when the match was capitalised, so one rule
         covers both forms. "Across formatting" matches through italics, links and the like, where the words are split
         across markup; the replacement takes the formatting of wherever the match started. "Disabled" keeps a rule

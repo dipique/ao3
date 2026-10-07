@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { storedLists } from './helpers.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 const SEARCH = 'Search settings by name or description'
 
-const CATEGORIES = ['site-features-appearance', 'search', 'reading', 'sync-backups', 'advanced']
+/** A stored works search, for the saved lists to have a row. */
+const TEA_KEY = 'text-search:work_search%5Bquery%5D=tea'
+const TEA_COPY = storedLists({
+  [TEA_KEY]: {
+    scrapedAt: Date.now(),
+    blurbsHtml: ['<li class="work blurb group" id="work_101" role="article"><h4 class="heading"><a href="/works/101">Work 101</a></h4></li>'],
+    descriptor: { sourceId: 'text-search', label: 'Works search — tea', listUrl: 'https://archiveofourown.org/works/search?work_search%5Bquery%5D=tea' },
+  },
+})
+
+const CATEGORIES = ['site-features-appearance', 'search', 'lists', 'reading', 'sync-backups', 'advanced']
 
 /**
  * Getting around the options page: the pane shows one category at a time, the
@@ -41,19 +51,8 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
     return { top, onScreen: top >= 0 && top < window.innerHeight, clear: top >= below - 1 }
   }, id)
 
-  /**
-   * Follow a hash the way the address bar would. Setting the same hash twice
-   * fires no `hashchange`, so it is cleared first — the tests below revisit the
-   * same target more than once.
-   */
-  const goTo = async (hash) => {
-    await page.evaluate((h) => {
-      if (location.hash === h)
-        location.hash = ''
-      location.hash = h
-    }, hash)
-    await sleep(1600)
-  }
+  /** Follow a hash the way the address bar would, and wait for the page to land there. */
+  const goTo = hash => options.goTo(hash)
 
   const railLink = async (id) => {
     const link = await (await options.rail()).$(`[data-rail-item][href="#${id}"]`)
@@ -64,6 +63,12 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
   const categoriesOnRail = async () => (await options.railItems()).filter(item => item.kind === 'category')
   const subsectionsOnRail = async () => (await options.railItems()).filter(item => item.kind === 'subsection')
 
+  /** "n of m settings match", as the pane says it while a query runs. */
+  const matchLine = async () => {
+    const found = /(\d+) of (\d+) settings match/.exec(await page.evaluate(() => document.querySelector('main').textContent))
+    return found ? { hits: Number(found[1]), total: Number(found[2]) } : null
+  }
+
   const searchBox = () => options.control(page, 'textbox', SEARCH)
   const searchText = async () => (await searchBox()).evaluate(el => el.value)
   const search = async (text) => {
@@ -71,13 +76,7 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
     await box.click({ count: 3 })
     await page.keyboard.press('Backspace')
     await box.type(text)
-    await sleep(400)
-  }
-
-  /** "n of m settings match", as the pane says it while a query runs. */
-  const matchLine = async () => {
-    const found = /(\d+) of (\d+) settings match/.exec(await page.evaluate(() => document.querySelector('main').textContent))
-    return found ? { hits: Number(found[1]), total: Number(found[2]) } : null
+    await until('the query to filter the page', async () => (await matchLine()) !== null)
   }
 
   test('the hash the page opened with shows its category alone, scrolled to the setting', async () => {
@@ -96,7 +95,7 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
   test('the rail lists every category by its short name, and opens the current one onto its sub-sections', async () => {
     const categories = await categoriesOnRail()
     assert.deepEqual(categories.map(c => c.id), CATEGORIES)
-    assert.deepEqual(categories.map(c => c.name), ['Site features', 'Search', 'Reading', 'Sync & backups', 'Advanced'])
+    assert.deepEqual(categories.map(c => c.name), ['Site features', 'Search', 'Lists', 'Reading', 'Sync & backups', 'Advanced'])
     assert.deepEqual(categories.filter(c => c.current).map(c => c.id), ['reading'])
     assert.ok(categories.every(c => c.count === null), 'no query, so no count beside a category')
 
@@ -107,25 +106,48 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
   })
 
   test('a rail click opens that category and makes it current', async () => {
-    await options.press(await railLink('search'))
-    await sleep(1600)
+    const link = await railLink('search')
+    await options.land(() => options.press(link))
     assert.equal(await page.evaluate(() => location.hash), '#search')
     assert.deepEqual(await options.shownCategories(), ['search'])
     assert.deepEqual((await categoriesOnRail()).filter(c => c.current).map(c => c.id), ['search'])
     assert.deepEqual((await subsectionsOnRail()).map(s => [s.id, s.name]), [
       ['filter-defaults', 'Filter defaults'],
-      ['customize-search-results', 'Customize Search Results'],
+      ['customize-search-results', 'Customize search results'],
       ['instant-search-views', 'Instant search views'],
     ])
   })
 
   test('a sub-section link jumps to it, inside the category', async () => {
-    await options.press(await railLink('customize-search-results'))
-    await sleep(1600)
+    const link = await railLink('customize-search-results')
+    await options.land(() => options.press(link))
     assert.equal(await page.evaluate(() => location.hash), '#customize-search-results')
     assert.deepEqual(await options.shownCategories(), ['search'])
     const subsection = await positionOf('customize-search-results')
     assert.ok(subsection?.onScreen && subsection.clear, `the sub-section was at ${subsection?.top}px`)
+  })
+
+  test('Lists, between Search and Reading, opens onto its review, its saved lists, the reader\'s profile lists and offline reading', async () => {
+    const lists = await session.open({ seed: TEA_COPY, hash: '#lists', viewport: { width: 1280, height: 800 } })
+    try {
+      assert.deepEqual(await lists.shownCategories(), ['lists'])
+      const subsections = (await lists.railItems()).filter(item => item.kind === 'subsection')
+      assert.deepEqual(subsections.map(s => [s.id, s.name]), [
+        ['review', 'Review'],
+        ['saved-lists', 'Saved lists'],
+        ['user-profile-lists', 'User profile lists'],
+        ['offline-reading', 'Offline reading'],
+      ])
+      assert.equal(subsections.find(s => s.id === 'user-profile-lists').count, 2, 'Marked for Later and Read works')
+      assert.equal(subsections.find(s => s.id === 'saved-lists').count, 1, 'one per saved list')
+      for (const id of ['review-tracked-lists', 'user-profile-lists-marked-for-later', 'user-profile-lists-read-works', 'offline-reading-changes-made-in-an-export', 'offline-reading-cached-work-text', 'offline-reading-discard-unneeded-blurbs-automatically'])
+        assert.equal(await (await lists.row(id)).evaluate(el => el.checkVisibility()), true, id)
+      const stored = await lists.savedList(`copy:${TEA_KEY}`)
+      assert.equal(await stored.evaluate(el => el.id), 'saved-lists-search-tea', 'a saved list\'s row is anchored under Saved lists, by its name')
+    }
+    finally {
+      await lists.close()
+    }
   })
 
   test('a hash naming another category\'s setting opens that category', async () => {
@@ -175,7 +197,7 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
   test('Escape clears the query and returns to the category the search started from', async () => {
     await (await searchBox()).focus()
     await page.keyboard.press('Escape')
-    await sleep(400)
+    await until('the query to clear', async () => (await matchLine()) === null)
     assert.equal(await searchText(), '')
     assert.equal(await matchLine(), null)
     assert.deepEqual(await options.shownCategories(), ['reading'])
@@ -202,12 +224,11 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
     const fresh = await session.open({ viewport: { width: 1280, height: 800 } })
     try {
       assert.deepEqual(await fresh.shownCategories(), ['site-features-appearance'])
-      await fresh.press(await (await fresh.rail()).$('[data-rail-item][href="#reading"]'))
-      await sleep(1600)
+      const reading = await (await fresh.rail()).$('[data-rail-item][href="#reading"]')
+      await fresh.land(() => fresh.press(reading))
       assert.deepEqual(await fresh.shownCategories(), ['reading'])
 
-      await fresh.page.goBack()
-      await sleep(1600)
+      await fresh.land(() => fresh.page.goBack())
       assert.equal(await fresh.page.evaluate(() => location.hash), '')
       assert.deepEqual(await fresh.shownCategories(), ['site-features-appearance'])
       assert.deepEqual((await fresh.railItems()).filter(item => item.current).map(item => item.id), ['site-features-appearance'])

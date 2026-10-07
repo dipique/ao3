@@ -2,7 +2,7 @@ import { clamp } from '@antfu/utils'
 
 import type { SyncMeta, SyncPause, SyncUsage } from '#common'
 
-import { api, SYNC_SCHEMA_VERSION, syncMeta, syncRefusalMessage, toast } from '#common'
+import { api, BUILD_CHECK_TIMEOUT_MS, SYNC_SCHEMA_VERSION, syncMeta, syncRefusalMessage, toast } from '#common'
 
 import { syncStatusView } from '../model/syncStatus.ts'
 
@@ -39,9 +39,6 @@ const state = reactive({
 void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause', 'staleBuild']).then((m) => {
   Object.assign(state, m, { loaded: true })
 })
-
-/** How long the background gets to say which build it is before it's presumed outdated. */
-const BUILD_CHECK_TIMEOUT_MS = 5000
 
 /**
  * Ask the background which build it's running. This page is always served

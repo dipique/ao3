@@ -3,6 +3,7 @@ import type { SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
 
 import { getArchiveLink, parseUser, readWorkIds, toast } from '#common'
+import { linkedTo } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, noteMarkedForLater, saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
 import { hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
@@ -25,7 +26,8 @@ const SOURCE_ID = 'marked-for-later'
  * filterable/sortable view of every page of the list. It opens by itself and
  * there is no native list to go back to: two versions of the same list on one
  * page was one too many, and a reload landing on AO3's paged version instead of
- * the one being used was the worst of both.
+ * the one being used was the worst of both. Its open URL opens it whatever the
+ * switch says ({@link file://./../lists/openLink.ts}).
  *
  * A stored snapshot renders instantly, and the list is only reloaded behind it
  * once that snapshot is older than the reader's refresh interval — which, now
@@ -36,7 +38,7 @@ const SOURCE_ID = 'marked-for-later'
  */
 export class SearchMarkedForLater extends Unit {
   static override get name() { return 'SearchMarkedForLater' }
-  override get enabled() { return this.options.searchMarkedForLater }
+  override get enabled() { return this.options.searchMarkedForLater || linkedTo('marked-for-later') }
 
   static override async clean(): Promise<void> {
     // A global re-run (options change, navigation) tears the view down. If it was

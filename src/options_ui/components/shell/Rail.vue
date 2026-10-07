@@ -1,7 +1,13 @@
 <script setup lang="ts">
+import { railJob } from '../../model/jobView.ts'
+
 const { rail } = useCurrentCategory()
 const { categories } = useNav()
 const { searching } = useOptionSearch()
+const { view } = useSiteExport()
+
+/** A running job, shown on the category holding the lists it runs on, so it is in sight from any category. */
+const job = computed(() => railJob(view.value))
 
 /** Below 768 px the rail is a row of chips, which name the categories more briefly. */
 const wide = useMediaQuery('(min-width: 768px)')
@@ -14,6 +20,7 @@ const items = computed(() => rail.value
       ...category,
       label: (wide.value ? nav?.railLabel : nav?.chipLabel) ?? category.name,
       icon: nav?.icon ?? '',
+      jobs: !!nav?.jobs,
       // While a query runs, only the sub-sections it has hits in.
       subsections: category.current ? category.subsections.filter(subsection => subsection.hits > 0) : [],
     }
@@ -56,13 +63,23 @@ watch([currentId, wide, nav], () => {
           data-rail-item="category"
           :href="`#${item.id}`"
           :aria-current="item.current ? 'true' : undefined"
-          class="h-[30px] flex items-center gap-1.5 whitespace-nowrap border-1 rounded-full px-3 text-[13px] decoration-none input-ring md:h-8 md:gap-2.5 md:border-transparent md:rounded-[7px] md:px-2.5"
+          class="touch-target h-[30px] flex items-center gap-1.5 whitespace-nowrap border-1 rounded-full px-3 text-[13px] decoration-none input-ring md:h-8 md:gap-2.5 md:border-transparent md:rounded-[7px] md:px-2.5"
           :class="item.current
             ? 'border-brand-fg/32 bg-brand-fg/10 text-brand-fg font-600'
             : 'border-border bg-default text-muted-fg md:bg-transparent md:text-default-fg md:hover:bg-default-fg/3'"
         >
           <span class="hidden md:inline-flex" aria-hidden="true"><span :class="item.icon" text-base /></span>
           <span data-rail-label>{{ item.label }}</span>
+          <span
+            v-if="item.jobs && job"
+            data-rail-job
+            :title="job.title"
+            class="inline-flex items-center gap-1 text-[10.5px] text-brand-fg font-600 tabular-nums md:ml-auto"
+          >
+            <span class="i-tabler-loader-2 motion-safe:animate-spin" aria-hidden="true" />
+            <span class="sr-only">{{ job.title }}</span>
+            <span aria-hidden="true">{{ job.text }}</span>
+          </span>
           <span v-if="searching" data-rail-count ml-auto text="[10.5px]" font-400 tabular-nums>{{ item.hits }}</span>
         </a>
         <ul

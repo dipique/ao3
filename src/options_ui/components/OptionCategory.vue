@@ -8,12 +8,14 @@ const props = defineProps<{
   railLabel?: string
   /** Its name on the chip row of a narrow window, where the rail's name is too long. */
   chipLabel?: string
+  /** It holds the lists the job runs on: the rail shows a running job on it, from any category. */
+  jobs?: boolean
 }>()
 
 OptionCategoryName.provide(props.title)
 
 const railLabel = props.railLabel ?? props.title
-const { id } = useAddNav({ title: props.title, icon: props.icon, railLabel, chipLabel: props.chipLabel ?? railLabel })
+const { id } = useAddNav({ title: props.title, icon: props.icon, railLabel, chipLabel: props.chipLabel ?? railLabel, jobs: props.jobs })
 
 // Also findable by a `#hash`, by that id or by the category's own name.
 registerAnchor({ id, kind: 'category', name: props.title, category: props.title, subsection: null })

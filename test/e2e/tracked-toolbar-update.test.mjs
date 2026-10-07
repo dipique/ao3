@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
-import { ensureBuilt, findChrome, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
 import {
   ARCHIVE,
   boxButtons,
@@ -14,8 +15,10 @@ import {
   navigateBy,
   openBox,
   openTab,
+  openToolbar,
   pillText,
   refiningMark,
+  rerun,
   searchPage,
   storedOption,
   TITLE_INPUT,
@@ -107,14 +110,12 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
 
   test('choosing another list says what updating that one would change', async () => {
     await tab.select(`${TRACK_BOX} select`, 'nodraco')
-    await sleep(200)
     assert.deepEqual(await diffLines(tab), ['Excludes: Ron Weasley'])
     assert.ok((await boxButtons(tab)).includes('Update “Harry Potter, no Draco”'))
   })
 
   test('Update rewrites that list in place, keeping its tracking start', async () => {
-    await clickBoxButton(tab, 'Update “Harry Potter, no Draco”')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Update “Harry Potter, no Draco”'))
     const updated = await list('nodraco')
     assert.equal(updated.url, normalizeTrackedUrl(BOTH_OUT).url)
     assert.equal(updated.tracked, true)
@@ -129,8 +130,7 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     assert.equal(await refiningMark(tab), null, 'nothing was being refined, and nothing is now')
 
     // The page is that list now.
-    await tab.click('.AO3E--filter-toolbar--fab')
-    await sleep(300)
+    await openToolbar(tab)
     assert.equal(await pillText(tab), 'Tracked as “Harry Potter, no Draco”')
   })
 
@@ -169,23 +169,22 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
 
     const before = await storedOption(tab)
     await clickBoxButton(tab, 'Update “Harry Potter, complete”')
-    await sleep(1000)
+    const refusal = async () => (await toasts(tab)).find(text => text.startsWith('This search is already tracked as'))
+    await until('the refusal', refusal)
     assert.deepEqual(await storedOption(tab), before, 'nothing is written')
-    const said = (await toasts(tab)).find(text => text.startsWith('This search is already tracked as'))
+    const said = await refusal()
     assert.match(said, /“Harry Potter, no Draco” \(Fandom: Harry Potter - J\. K\. Rowling\), so “Harry Potter, complete” was left as it was\./)
     assert.deepEqual(await refiningMark(tab), { id: 'hpdone', restore: true }, 'and the tab is still refining')
   })
 
   test('Track makes a new list, titled for what it searches', async () => {
     await clickBoxButton(tab, 'Stop refining')
-    await sleep(300)
     await visit(tab, `${ARCHIVE}/works?work_search%5Bcomplete%5D=F&${HP_QUERY}`)
     await openBox(tab)
     assert.equal(await pillText(tab), 'Track or update…')
     // The category comes from the blurbs, which file the fandom in their heading.
     assert.equal(await tab.$eval(`${TRACK_BOX} input[aria-label="Title for this list"]`, el => el.value), 'Fandom: Harry Potter - J. K. Rowling')
-    await clickBoxButton(tab, 'Track')
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, 'Track'))
     const lists = (await storedOption(tab)).lists
     assert.equal(lists.length, 4)
     const added = lists.at(-1)
@@ -254,16 +253,14 @@ describe('tracked lists: updating a works search without words from an edited se
   })
 
   test('Update rewrites it in place, as the search it now is', async () => {
-    await clickBoxButton(tab, `Update ${label}`)
-    await sleep(1500)
+    await rerun(tab, () => clickBoxButton(tab, `Update ${label}`))
     const lists = (await storedOption(tab)).lists
     assert.equal(lists.length, 1)
     assert.deepEqual(lists[0], {
       ...HP_SEARCH,
       url: '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[character_names]=Ron+Weasley',
     })
-    await tab.click('.AO3E--filter-toolbar--fab')
-    await sleep(300)
+    await openToolbar(tab)
     assert.equal(await pillText(tab), `Tracked as ${label}`)
   })
 

@@ -15,13 +15,19 @@ export interface NavCategory {
   chipLabel: string
   /** Its icon on the rail, as an icon class. */
   icon: string
+  /** Its lists are what the job runs on, so the rail shows a running job on it. */
+  jobs?: boolean
 }
 
 const categories = ref<NavCategory[]>([])
 
+/** The sub-sections' titles, in the order they render, which is the rail's order for them. */
+const subsections = ref<string[]>([])
+
 export function useNav() {
   return {
     categories,
+    subsections,
   }
 }
 
@@ -39,4 +45,14 @@ export function useAddNav(category: Omit<NavCategory, 'id'>): { id: string } {
   })
 
   return { id }
+}
+
+/** Put a sub-section on the rail, in the order the sub-sections render. */
+export function useAddSubsection(title: string): void {
+  if (!subsections.value.includes(title))
+    subsections.value = [...subsections.value, title]
+
+  onUnmounted(() => {
+    subsections.value = subsections.value.filter(one => one !== title)
+  })
 }

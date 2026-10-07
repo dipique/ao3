@@ -8,8 +8,8 @@ const { enabled } = useOption('searchLanguage')
     title="Default language"
     subtitle="Pre-selects a language in the Sort &amp; Filter sidebar on works and bookmark listings, and on the advanced search page."
   >
-    <label py-1 flex="~ row items-center gap-1">
-      <span font="leading-none" text="sm muted-fg">Default the language filter to</span>
+    <label py-1 flex="~ row wrap items-center gap-2.5" text="[12.5px] muted-fg" leading="[18px]">
+      <span>Default the language filter to</span>
       <OptionSearchLanguage />
     </label>
   </OptionRowCollapsable>

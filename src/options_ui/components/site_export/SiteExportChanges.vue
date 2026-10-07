@@ -66,32 +66,31 @@ const showProblems = ref(false)
     subtitle="Load an ao3e-changes-….json file saved from an exported site to replay the marks you made while reading it. Importing the same file twice changes nothing."
   >
     <div flex="~ row items-center">
-      <Button
-        variant="outline"
-        class="disabled:cursor-default !rounded-r-none disabled:op-50"
+      <button
+        type="button"
+        class="outline-btn rounded-r-none!"
         :disabled="importingChanges"
         @click.prevent="start(true)"
       >
-        {{ importingChanges ? 'Importing…' : 'Import changes' }}
-      </Button>
+        <Icon i-tabler-upload text="[13px]" />{{ importingChanges ? 'Importing…' : 'Import changes' }}
+      </button>
       <DropdownMenu :modal="false">
-        <DropdownMenuTrigger>
-          <Button
-            variant="outline"
-            class="-ml-px disabled:cursor-default !rounded-l-none disabled:op-50"
-            size="icon"
+        <DropdownMenuTrigger as-child>
+          <button
+            type="button"
+            class="outline-btn -ml-px rounded-l-none! px-1.5!"
             :disabled="importingChanges"
           >
-            <Icon i-mdi-chevron-down label="More import options" />
-          </Button>
+            <Icon i-mdi-chevron-down text="[13px]" label="More import options" />
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
           <DropdownMenuItem
-            flex="~ col items-start gap-1" px-4 py-3
+            flex="~ col items-start gap-[3px]" max-w-78 px-[11px] py-[9px]
             @click="start(false)"
           >
-            <span text-sm font-medium leading-none>Import without telling AO3</span>
-            <span line-clamp-2 text-sm text-muted-fg leading-snug>
+            <span text="[12.5px]" leading="[18px]" font-600>Import without telling AO3</span>
+            <span text="[11.5px] muted-fg" leading="[16px]">
               Apply the marks here only. Nothing is asked of the Archive, so the works you
               finished stay on your Marked for Later list &mdash; import the same file again
               to send them.
@@ -103,7 +102,7 @@ const showProblems = ref(false)
 
     <template #extra>
       <div v-if="changeReport" flex="~ col gap-1" pt-1>
-        <p text="sm muted-fg">
+        <p text="[12.5px] muted-fg" leading="[18px]">
           {{ summary }}
         </p>
         <div v-if="problems.length" flex="~ col gap-1">
@@ -111,12 +110,12 @@ const showProblems = ref(false)
             {{ problems.length.toLocaleString() }} {{ problems.length === 1 ? 'work needs' : 'works need' }} a look
             <Icon :class="showProblems ? 'i-mdi-chevron-up' : 'i-mdi-chevron-down'" ml-1 />
           </Button>
-          <ul v-if="showProblems" flex="~ col gap-1" max-h-64 overflow-y-auto text-sm>
+          <ul v-if="showProblems" flex="~ col gap-1" max-h-64 overflow-y-auto text="[12px]" leading="[16px]">
             <li v-for="problem in problems" :key="`${problem.workId}-${problem.reason}`" flex="~ col">
               <ArchiveLink :path="`/works/${problem.workId}`">
                 Work {{ problem.workId }}
               </ArchiveLink>
-              <span text="xs muted-fg">
+              <span text="[11.5px] muted-fg" leading="[16px]">
                 {{ problem.archive ? `AO3 would not take it — ${problem.reason}` : problem.reason }}
               </span>
             </li>

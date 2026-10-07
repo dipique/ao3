@@ -12,9 +12,9 @@ const forwarded = useForwardPropsEmits(props, emits)
   <RekaDropdownMenuPortal>
     <RekaDropdownMenuContent
       v-bind="{ ...forwarded, ...$attrs }"
-      class="animate-popover popover"
+      class="animate-popover popover shadow-[var(--pop-shadow)]"
       border="1"
-      z-99 min-w-32 rounded-md shadow-lg
+      z-99 min-w-32 rounded-[10px] p-[5px]
     >
       <slot />
     </RekaDropdownMenuContent>

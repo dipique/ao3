@@ -15,12 +15,12 @@ import { useOptionSearch } from './useOptionSearch.ts'
 
 const chosen = ref<string | null>(null)
 
-const { categories } = useNav()
+const { categories, subsections } = useNav()
 const { query, entries } = useOptionSearch()
 
 const current = computed(() => chosen.value ?? categories.value[0]?.id ?? '')
 
-const rail = computed(() => buildRail(entries.value, categories.value.map(c => c.title), query.value, current.value))
+const rail = computed(() => buildRail(entries.value, categories.value.map(c => c.title), query.value, current.value, subsections.value))
 
 export function useCurrentCategory() {
   return {

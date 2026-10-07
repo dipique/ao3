@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { cachedTextOff, jobView, offReason, railJob, removeOff } from '../../src/options_ui/model/jobView.ts'
+import { busyNotice, cachedTextOff, jobView, listJob, offReason, railJob, removeOff } from '../../src/options_ui/model/jobView.ts'
 
 const NOW = 1_800_000_000_000
 const MINE = 'marked-for-later:tester'
@@ -161,6 +161,35 @@ describe('offReason', () => {
   })
 })
 
+describe('listJob', () => {
+  test('with no job, a list\'s offline actions are there and on, and no line is its', () => {
+    assert.deepEqual(listJob(view({ job: null, running: false }), MINE), { actions: 'offline', off: null, here: false })
+  })
+
+  test('another list\'s job turns them off, naming that list', () => {
+    assert.deepEqual(listJob(view(), OTHER), { actions: 'offline', off: 'off for now: one job at a time, and Marked for Later is caching', here: false })
+    assert.deepEqual(listJob(view({ waitingUntil: NOW + 5_000, waitReason: 'refused' }), OTHER).off, 'off for now: one job at a time, and Marked for Later is caching')
+  })
+
+  test('its own job, running or sitting out a pause: Stop, and the line is its', () => {
+    assert.deepEqual(listJob(view(), MINE), { actions: 'stop', off: null, here: true })
+    assert.deepEqual(listJob(view({ waitingUntil: NOW + 5_000, waitReason: 'pacing' }), MINE), { actions: 'stop', off: null, here: true })
+  })
+
+  test('its own job, stopped: Continue or Discard', () => {
+    assert.deepEqual(listJob(view({ running: false }), MINE), { actions: 'resume', off: null, here: true })
+  })
+
+  test('its own job, finished: the line stays, and the actions are back', () => {
+    assert.deepEqual(listJob(view({ job: job({ steps: [] }), running: false }), MINE), { actions: 'offline', off: null, here: true })
+  })
+
+  test('another list\'s stopped or finished job turns nothing off', () => {
+    assert.deepEqual(listJob(view({ running: false }), OTHER), { actions: 'offline', off: null, here: false })
+    assert.deepEqual(listJob(view({ job: job({ steps: [] }), running: false }), OTHER), { actions: 'offline', off: null, here: false })
+  })
+})
+
 describe('removeOff', () => {
   test('a list\'s offline copy can\'t be removed while its own job runs', () => {
     assert.equal(removeOff(view(), MINE), 'off while this list is caching')
@@ -197,5 +226,19 @@ describe('railJob', () => {
   test('a job that isn\'t running isn\'t on the rail', () => {
     assert.equal(railJob(view({ running: false })), null)
     assert.equal(railJob(view({ job: null, running: false })), null)
+  })
+})
+
+describe('busyNotice', () => {
+  test('while a job runs, the saved lists\' header names the list it is on and what it is doing', () => {
+    assert.equal(busyNotice(view()), 'One job at a time — Marked for Later is caching')
+    assert.equal(busyNotice(view({ waitingUntil: NOW + 5_000, waitReason: 'refused' })), 'One job at a time — Marked for Later is caching')
+    assert.equal(busyNotice(view({ job: job({ steps: ['refreshing', 'caching'] }) })), 'One job at a time — Marked for Later is refreshing')
+  })
+
+  test('a job that isn\'t running says nothing there', () => {
+    assert.equal(busyNotice(view({ running: false })), null)
+    assert.equal(busyNotice(view({ running: false, job: job({ steps: [] }) })), null)
+    assert.equal(busyNotice(view({ job: null, running: false })), null)
   })
 })

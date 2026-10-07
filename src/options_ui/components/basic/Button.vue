@@ -18,7 +18,7 @@ const variants = {
   outline: 'border-1 border-input bg-default text-default-fg hover:bg-input',
   secondary: 'bg-secondary text-secondary-fg hover:bg-secondary/80',
   ghost: 'hover:bg-accent hover:text-accent-fg',
-  link: 'text-primary underline-offset-4 hover:underline',
+  link: 'text-brand-fg underline-offset-4 hover:underline',
 } as const
 
 const sizes = {
@@ -34,7 +34,7 @@ const sizes = {
     :as="as"
     :as-child="asChild"
     :class="[variants[props.variant], (props.variant !== 'link' ? sizes[props.size] : [])]"
-    class="btn"
+    class="touch-target btn"
     ws-nowrap text-sm
   >
     <slot />

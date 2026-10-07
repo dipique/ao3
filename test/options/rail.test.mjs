@@ -38,6 +38,22 @@ describe('buildRail', () => {
     ])
   })
 
+  test('puts sub-sections in the order given, whatever order their rows come in', () => {
+    const rows = [
+      { category: 'Lists', subsection: 'Review', title: 'Tracked lists', subtitle: '' },
+      { category: 'Lists', subsection: 'Offline reading', title: 'Cached work text', subtitle: '' },
+      // A saved list's row, drawn once the stored lists have been read.
+      { category: 'Lists', subsection: 'Saved lists', title: 'Search: tea', subtitle: '' },
+    ]
+    const lists = byId(buildRail(rows, ['Lists'], '', 'lists', ['Review', 'Saved lists', 'Offline reading'])).lists
+    assert.deepEqual(lists.subsections.map(s => [s.id, s.count]), [['review', 1], ['saved-lists', 1], ['offline-reading', 1]])
+  })
+
+  test('a sub-section the order leaves out comes after the others, in the order its rows come', () => {
+    const reading = byId(buildRail(ROWS, ORDER, '', 'reading', ['Work text'])).reading
+    assert.deepEqual(reading.subsections.map(s => s.id), ['work-text', 'marks-status'])
+  })
+
   test('names each sub-section by its title', () => {
     const reading = byId(buildRail(ROWS, ORDER, '', 'reading')).reading
     assert.deepEqual(reading.subsections.map(s => s.name), ['Marks & status', 'Work text'])

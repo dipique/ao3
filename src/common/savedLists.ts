@@ -79,12 +79,15 @@ export interface StoredListRef {
 /** The `v` a migrated {@link SavedListsOption} carries. */
 export const SAVED_LISTS_VERSION = 1
 
+/** The search view of a filtered listing, and the source its copy is stored under: the listing's own kind. */
+export const FILTERED_LISTING_SOURCE_ID = 'works-filter'
+
 /**
  * The search views whose stored lists are saved lists. Marked for Later and the
  * read list aren't: their works are the reader's own choices, not a search's.
  * Nor is the review's window, which is gathered from every tracked list at once.
  */
-export const SAVED_LIST_SOURCE_IDS: readonly string[] = ['text-search', 'tag-works', 'series-works']
+export const SAVED_LIST_SOURCE_IDS: readonly string[] = ['text-search', 'tag-works', 'series-works', FILTERED_LISTING_SOURCE_ID]
 
 /**
  * A list's address: its normalized key without the view filter. Copies join
@@ -94,6 +97,33 @@ export const SAVED_LIST_SOURCE_IDS: readonly string[] = ['text-search', 'tag-wor
  */
 export function addressOf(url: string | undefined): string | null {
   return typeof url === 'string' ? normalizeTrackedUrl(url)?.key ?? null : null
+}
+
+/** A filtered listing as its search view stores it ({@link filteredListing}). */
+export interface FilteredListing {
+  /** Where its copy is stored: its address, which starts with its source, as every stored list's key does. */
+  key: string
+  /** The listing as a saved list holds one, sort and all: a path, for the caller to make absolute. */
+  url: string
+  /** What it is a listing of, as a list made from it is titled. */
+  label: string
+}
+
+/**
+ * The page at `href` as a filtered listing's search view stores it, or null
+ * for any other page: a tag's, an author's, a pseud's or a collection's works.
+ *
+ * The copy is keyed by the listing's address, so there is one copy of a
+ * listing however its address is spelt — the path a link reaches, or the
+ * query its Sort & Filter sidebar submits — and whatever it is sorted by or
+ * whichever page it is on. A sort changes the order of the works, not which
+ * they are. It is also the address its saved list joins it by.
+ */
+export function filteredListing(href: string): FilteredListing | null {
+  const normalized = normalizeTrackedUrl(href)
+  if (normalized?.kind !== FILTERED_LISTING_SOURCE_ID)
+    return null
+  return { key: normalized.key, url: normalized.url, label: defaultTitle(trackedMeta({ url: normalized.url })!) }
 }
 
 /**
@@ -524,23 +554,6 @@ export function planTrackCopy(state: ListState, copy: StoredListRef, today: Day)
 }
 
 /**
- * Put `entry` in place of its list's entry: an edit made on this browser to
- * the entry itself, such as the floating toolbar's update and its undo. The
- * record takes the entry's query and title with it, as the planner would copy
- * them, and is this browser's own from then on, so the list stays saved here if
- * its tracking stops on another browser. A list with no entry is left as it is.
- */
-export function planEntryEdit(state: ListState, entry: TrackedList): ListState {
-  const entries = entriesOf(state)
-  if (!isEntry(entry) || !entries.some(one => isEntry(one) && one.id === entry.id))
-    return state
-  return {
-    tracked: { ...state.tracked, lists: entries.map(one => (isEntry(one) && one.id === entry.id ? entry : one)) },
-    saved: withRecord(state, recordFrom(entry, own(recordsOf(state), entry.id), false)),
-  }
-}
-
-/**
  * Stop tracking list `id`: its entry goes, so it no longer syncs, and its record
  * stays on this browser as a saved list. An entry with no record yet gets one
  * first, so nothing of it is lost.
@@ -560,7 +573,7 @@ export function planStopTracking(state: ListState, id: string): ListState {
 /**
  * Remove list `id` altogether: its record and its entry. `dropCopies` are the
  * keys of every stored list at its address, newest first, for the caller to
- * delete, unless another record at that address still claims them. One search
+ * delete, unless another list is still at that address, filed or not. One search
  * stored in several sort orders is several copies at one address, and a copy
  * left behind would come back as a list of its own.
  */
@@ -574,15 +587,25 @@ export function planRemoveList(state: ListState, id: string, stored: readonly St
 
   const rest = { ...records }
   delete rest[id]
-  const address = addressOf((record ?? entry)!.url)
-  const shared = address !== null && listed(rest).some(other => addressOf(other.url) === address)
-  return {
-    state: {
-      tracked: entry ? { ...state.tracked, lists: entries.filter(one => !(isEntry(one) && one.id === id)) } : state.tracked,
-      saved: record ? { ...state.saved, lists: rest } : state.saved,
-    },
-    dropCopies: shared ? [] : copiesAt(address, addressed(stored)).map(copy => copy.key),
+  const next: ListState = {
+    tracked: entry ? { ...state.tracked, lists: entries.filter(one => !(isEntry(one) && one.id === id)) } : state.tracked,
+    saved: record ? { ...state.saved, lists: rest } : state.saved,
   }
+  const address = addressOf((record ?? entry)!.url)
+  const shared = address !== null && allLists(next).some(other => addressOf(other.url) === address)
+  return { state: next, dropCopies: shared ? [] : copiesAt(address, addressed(stored)).map(copy => copy.key) }
+}
+
+/**
+ * Every copy stored at saved list `id`'s address, newest first: the offline
+ * copy its row shows, and any older sort order of its search, which no row
+ * shows. Removing the list's offline copy takes them all, or the next newest
+ * would stand in for the one removed. A list at no address on the archive, or
+ * gone, has none.
+ */
+export function listCopies(state: ListState, id: string, stored: readonly StoredListRef[]): string[] {
+  const list = allLists(state).find(one => one.id === id)
+  return copiesAt(addressOf(list?.url), addressed(stored)).map(copy => copy.key)
 }
 
 /** The search a refined page is, for {@link planSaveBack}. */
@@ -610,7 +633,7 @@ export type SaveBackPlan
  * Save a refined search back to list `id`: the same list, searching what the
  * page does. Its record is rewritten in place under the same id, and its entry
  * too while it is tracked, keeping its tracking start. Nothing syncs for a list
- * that isn't tracked.
+ * that isn't tracked. An entry with no record yet gets one.
  *
  * - **The title** stays, unless it was the default for a root the search has
  *   left ({@link titleAfterUpdate}), or the caller passes one.
@@ -631,7 +654,9 @@ export type SaveBackPlan
  */
 export function planSaveBack(state: ListState, id: string, page: SaveBackPage, stored: readonly StoredListRef[]): SaveBackPlan {
   const records = recordsOf(state)
-  const filed = own(records, id)
+  const entries = entriesOf(state)
+  const entry = entryWithId(entries, id)
+  const filed = own(records, id) ?? (entry ? recordFrom(entry, undefined, false) : undefined)
   if (!filed)
     return { ok: false, reason: 'missing' }
   const before = withDefaultTitle(filed)
@@ -639,8 +664,6 @@ export function planSaveBack(state: ListState, id: string, page: SaveBackPage, s
   if (!query || query.kind !== page.kind)
     return { ok: false, reason: 'invalid' }
 
-  const entries = entriesOf(state)
-  const entry = entries.find(one => isEntry(one) && one.id === id)
   if (entry) {
     const key = trackedKey(query)
     const twin = entries.find(one => isEntry(one) && one.id !== id && trackedKey(one) === key)
@@ -658,7 +681,7 @@ export function planSaveBack(state: ListState, id: string, page: SaveBackPage, s
       && !other.filter
       && !entries.some(one => isEntry(one) && one.id === other.id)) ?? null
 
-  const others = titled(listed(records).filter(other => other !== absorbed))
+  const others = titled(allLists(state).filter(other => other.id !== absorbed?.id))
   const title = typeof page.title === 'string'
     ? page.title.trim() || uniqueTitle(defaultTitle(page.meta), others, id)
     : titleAfterUpdate({ ...before, alias: before.title }, query.url, page.meta, others)
@@ -671,26 +694,101 @@ export function planSaveBack(state: ListState, id: string, page: SaveBackPage, s
   const lists = { ...records, [id]: withoutMirror(withQueryOf({ ...before, title }, query)) }
   if (absorbed)
     delete lists[absorbed.id]
-  const stillThere = listed(lists).some(other => addressOf(other.url) === oldAddress)
+  const next: ListState = {
+    tracked: entry
+      ? { ...state.tracked, lists: entries.map(one => (one === entry ? { ...withQueryOf(entry, query), alias: title } : one)) }
+      : state.tracked,
+    saved: { ...state.saved, lists },
+  }
+  const stillThere = allLists(next).some(other => addressOf(other.url) === oldAddress)
   const dropCopies = oldAddress !== newAddress && !stillThere
     ? copiesAt(oldAddress, addressed(stored)).map(copy => copy.key)
     : []
+  return { ok: true, state: next, dropCopies, absorbed }
+}
+
+/** What a save-back of list `id` changed: the lists as it found and left them, and the record it absorbed. */
+export interface SaveBackDone {
+  id: string
+  before: ListState
+  after: ListState
+  absorbed: SavedList | null
+}
+
+/** A save-back that can be taken back, or why it can't, naming the list responsible. */
+export type SaveBackUndoPlan
+  = | { ok: true, state: ListState }
+    | { ok: false, reason: 'missing' | 'changed' }
+    | { ok: false, reason: 'duplicate', other: TrackedList }
+    | { ok: false, reason: 'title', other: SavedList }
+
+/**
+ * Take back the save-back `done` describes: the list's record as it was, its
+ * entry as it was while it is tracked, and the record the save-back absorbed,
+ * unless its id has been taken since. The record is this browser's own either
+ * way, as the save-back left it. The copies it dropped are the caller's to put
+ * back, after this is written, so that no moment has them at an address with
+ * no record.
+ *
+ * Only while the list is exactly as the save-back left it: `changed` once it
+ * has been retitled, saved back again, tracked or stopped since (here, in
+ * another tab, or by a sync), and `missing` once it is gone. Refused, naming
+ * the list responsible, when a tracked list would be another tracked list's
+ * twin again (`duplicate`), or would take back a title another list has taken
+ * since (`title`).
+ */
+export function planUndoSaveBack(state: ListState, done: SaveBackDone): SaveBackUndoPlan {
+  const { id } = done
+  const records = recordsOf(state)
+  const record = own(records, id)
+  if (!record)
+    return { ok: false, reason: 'missing' }
+  const entries = entriesOf(state)
+  const entry = entryWithId(entries, id)
+  const left = own(recordsOf(done.after), id)
+  const leftEntry = entryWithId(entriesOf(done.after), id)
+  if (!left || signature(record) !== signature(left) || signature(entry ?? null) !== signature(leftEntry ?? null))
+    return { ok: false, reason: 'changed' }
+
+  const priorEntry = entryWithId(entriesOf(done.before), id)
+  const filed = own(recordsOf(done.before), id) ?? (priorEntry ? recordFrom(priorEntry, undefined, false) : undefined)
+  if (!filed)
+    return { ok: false, reason: 'missing' }
+  const prior = withoutMirror(filed)
+
+  if (entry && priorEntry) {
+    const key = trackedKey(priorEntry)
+    const twin = key === null ? undefined : entries.find(one => isEntry(one) && one.id !== id && trackedKey(one) === key)
+    if (twin)
+      return { ok: false, reason: 'duplicate', other: twin }
+  }
+  if (!sameTitle(prior.title, record.title)) {
+    const taken = titleTakenBy(prior.title, titled(allLists(state)), id)
+    if (taken)
+      return { ok: false, reason: 'title', other: taken.list }
+  }
+
+  const lists = { ...records, [id]: prior }
+  if (done.absorbed && !Object.hasOwn(records, done.absorbed.id))
+    lists[done.absorbed.id] = done.absorbed
   return {
     ok: true,
     state: {
-      tracked: entry
-        ? { ...state.tracked, lists: entries.map(one => (one === entry ? { ...withQueryOf(entry, query), alias: title } : one)) }
+      tracked: entry && priorEntry
+        ? { ...state.tracked, lists: entries.map(one => (one === entry ? priorEntry : one)) }
         : state.tracked,
       saved: { ...state.saved, lists },
     },
-    dropCopies,
-    absorbed,
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function entryWithId(entries: readonly TrackedList[], id: string): TrackedList | undefined {
+  return entries.find(one => isEntry(one) && one.id === id)
+}
 
 function recordsOf(state: ListState): { [id: string]: SavedList } {
   const lists = state.saved?.lists

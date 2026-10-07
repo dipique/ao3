@@ -30,9 +30,12 @@ export interface RailCategory extends RailSubsection {
 /**
  * `order` is the category titles in rail order; a category with rows that it
  * leaves out comes after them, so no setting is left unreachable. `current` is
- * the current category's id.
+ * the current category's id. `subsections` is the sub-section titles in the
+ * order the page draws them, which a sub-section whose rows are all drawn late
+ * (a list's, once it has been read) would otherwise lose; one it leaves out
+ * comes after the rest of its category's, in the order its rows come.
  */
-export function buildRail(rows: readonly SettingsRow[], order: readonly string[], query: string, current: string): RailCategory[] {
+export function buildRail(rows: readonly SettingsRow[], order: readonly string[], query: string, current: string, subsections: readonly string[] = []): RailCategory[] {
   const terms = searchTerms(query)
   const titles = new Set(order)
   for (const row of rows) {
@@ -43,8 +46,10 @@ export function buildRail(rows: readonly SettingsRow[], order: readonly string[]
   return [...titles].map((title) => {
     const own = rows.filter(row => row.category === title)
     const hits = own.filter(row => entryMatches(row, terms)).length
-    const subsections = [...new Set(own.map(row => row.subsection))]
-      .filter(subsection => subsection !== null)
+    const drawn = [...new Set(own.map(row => row.subsection))].filter(subsection => subsection !== null)
+    const placed = drawn.filter(subsection => subsections.includes(subsection))
+      .sort((a, b) => subsections.indexOf(a) - subsections.indexOf(b))
+    const ownSubsections = [...placed, ...drawn.filter(subsection => !subsections.includes(subsection))]
       .map((subsection) => {
         const inside = own.filter(row => row.subsection === subsection)
         return {
@@ -63,7 +68,7 @@ export function buildRail(rows: readonly SettingsRow[], order: readonly string[]
       visible: !terms.length || hits > 0,
       current: id === current,
       inPane: terms.length ? hits > 0 : id === current,
-      subsections,
+      subsections: ownSubsections,
     }
   })
 }

@@ -22,17 +22,16 @@ const forward = computed(() => {
   <RekaDialogPortal>
     <RekaDialogOverlay
       pos="fixed inset-0 z-50"
-      bg="op30 black"
-      class="animate-overlay"
+      class="animate-overlay bg-[var(--scrim)]"
     />
     <RekaDialogContent
       v-bind="{ ...forward, ...$attrs }"
       pos="fixed left-1/2 top-1/2 z-50"
       translate="x--1/2 y--1/2"
       flex="~ col"
-      rounded="sm:lg"
+      rounded="sm:[12px]"
       w-full border
-      class="animate-dialog card"
+      class="animate-dialog popover shadow-[var(--dlg-shadow)]"
       :class="sections ? 'max-w-[600px] max-h-[calc(100dvh-2rem)] [container-type:inline-size]' : 'max-w-lg p-6'"
     >
       <slot />

@@ -691,7 +691,7 @@ function decodeLoosely(url: string): string {
 }
 
 /** A full archive URL or a rooted path, as a URL — or null if it isn't the archive's. */
-function parseArchiveUrl(href: string): URL | null {
+export function parseArchiveUrl(href: string): URL | null {
   if (typeof href !== 'string')
     return null
   const text = href.trim()
@@ -1141,22 +1141,58 @@ export function isListId(value: unknown): value is string {
 }
 
 /**
- * The link that opens a list's page to refine it: the list's own page — its
- * stored URL, which for a filtered listing or a works search already carries
- * every filter of the archive's; the tag's page; the series — with
+ * A list's own page on the archive — its stored URL, which for a filtered
+ * listing or a works search already carries every filter of the archive's;
+ * the tag's page; the series — as a path, like {@link pageUrl}'s: the caller
+ * makes it absolute against the archive. Null for a list whose URL isn't an
+ * archive page of its kind.
+ */
+export function listPage(list: Pick<TrackedList, 'kind' | 'url'>): string | null {
+  const normalized = normalizeTrackedUrl(list.url)
+  return normalized && normalized.kind === list.kind ? normalized.url : null
+}
+
+/**
+ * Whether `href` is the list's own page ({@link listPage}): the same query,
+ * whatever its page number, its sort or the spelling of its address.
+ */
+export function onListPage(list: Pick<TrackedList, 'kind' | 'url'>, href: string): boolean {
+  const page = normalizeTrackedUrl(href)
+  const own = normalizeTrackedUrl(list.url)
+  return !!page && !!own && page.kind === list.kind && page.key === own.key
+}
+
+/**
+ * The link that opens a list's page ({@link listPage}) to refine it, with
  * `#ao3e-list=<id>` on the end. The page it opens reads the id back
  * ({@link refiningId}) and remembers for the tab which list is being refined.
  * The fragment never reaches the archive.
  *
- * A path, like {@link pageUrl}'s: the caller makes it absolute against the
- * archive. Null for an entry whose URL isn't an archive page of its kind, or
- * whose id couldn't be read back off the link.
+ * Null for an entry with no page, or whose id couldn't be read back off the
+ * link.
  */
 export function refineLink(entry: Pick<TrackedList, 'id' | 'kind' | 'url'>): string | null {
-  const normalized = normalizeTrackedUrl(entry.url)
-  if (!normalized || normalized.kind !== entry.kind || typeof entry.id !== 'string' || !LINK_ID_RE.test(entry.id))
+  const page = listPage(entry)
+  if (!page || !isListId(entry.id))
     return null
-  return `${normalized.url}#${REFINE_FRAGMENT}=${entry.id}`
+  return `${page}#${REFINE_FRAGMENT}=${entry.id}`
+}
+
+/** A page's fragment (`location.hash`) without its `#`, if it has one; null for anything but a string. */
+export function fragmentText(hash: unknown): string | null {
+  if (typeof hash !== 'string')
+    return null
+  return hash.startsWith('#') ? hash.slice(1) : hash
+}
+
+/**
+ * The value of parameter `name` on a fragment that is exactly `name=<value>`
+ * ({@link fragmentText}), or null for any other fragment.
+ */
+export function fragmentParam(hash: unknown, name: string): string | null {
+  const text = fragmentText(hash)
+  const prefix = `${name}=`
+  return text?.startsWith(prefix) ? text.slice(prefix.length) : null
 }
 
 /**
@@ -1166,14 +1202,8 @@ export function refineLink(entry: Pick<TrackedList, 'id' | 'kind' | 'url'>): str
  * is for the caller to check.
  */
 export function refiningId(hash: string): string | null {
-  if (typeof hash !== 'string')
-    return null
-  const text = hash.startsWith('#') ? hash.slice(1) : hash
-  const prefix = `${REFINE_FRAGMENT}=`
-  if (!text.startsWith(prefix))
-    return null
-  const id = text.slice(prefix.length)
-  return LINK_ID_RE.test(id) ? id : null
+  const id = fragmentParam(hash, REFINE_FRAGMENT)
+  return isListId(id) ? id : null
 }
 
 /**
@@ -1659,17 +1689,15 @@ function queryFilterCount(parsed: ParsedTracked): number {
 }
 
 // ---------------------------------------------------------------------------
-// Updating a list, and taking an update back
+// Updating a list
 // ---------------------------------------------------------------------------
 
-/** What an update gives a list ({@link planUpdate}). */
+/** The page a list is to search instead ({@link requery}). */
 export interface TrackedListChange {
   /** The page's address, as the reader has it; normalized on the way in. */
   url: string
   /** The page's view filter, or none. Stored canonical, and dropped when it filters nothing. */
   filter?: unknown
-  /** The new title, trimmed on the way in. Left as it was when absent. */
-  alias?: string
   /**
    * What the page says the list now is — a tag's category, a series' title —
    * where it knows. Whatever it doesn't know is kept from the list while that
@@ -1720,7 +1748,7 @@ export function withQueryOf<T extends object>(list: T, query: TrackedQuery): Omi
  * it); what the page knows fills the rest. `scan` stays unless the caller has
  * checked the new tag.
  */
-export function requery(before: Pick<TrackedList, 'url' | 'type' | 'entity' | 'scan'>, change: Omit<TrackedListChange, 'alias'>): TrackedQuery | null {
+export function requery(before: Pick<TrackedList, 'url' | 'type' | 'entity' | 'scan'>, change: TrackedListChange): TrackedQuery | null {
   const normalized = normalizeTrackedUrl(change.url)
   if (!normalized)
     return null
@@ -1763,82 +1791,6 @@ export function titleAfterUpdate(
 /** Whether two titles are one, the way titles are compared: trimmed, in any case. */
 export function sameTitle(a: unknown, b: unknown): boolean {
   return titleKey(a) === titleKey(b)
-}
-
-/** An update that can be made — the lists it leaves, and the entry before and after — or why it can't. */
-export type TrackedUpdatePlan
-  = | { ok: true, lists: TrackedList[], before: TrackedList, after: TrackedList }
-    | { ok: false, reason: 'missing' | 'invalid' }
-    | { ok: false, reason: 'duplicate' | 'title', other: TrackedList }
-
-/**
- * Replace list `id`'s query with the page's, in place.
- *
- * An update is the same list searching differently, so what makes it *that*
- * list stays: its id (what the review files its works and sources under) and its
- * tracking start. Its query, view filter and title are replaced, and its type
- * and entity with them ({@link requery}).
- *
- * Refused, with the list responsible, when the result would be the same query as
- * another list (`duplicate`), or would take a title another list has (`title`).
- * A title the list already had is never refused, even where sync has since
- * brought in a namesake: that's for the reader to sort out, and no reason to stop
- * an update that doesn't touch it. `missing` when the list is gone; `invalid`
- * when the page isn't trackable at all.
- */
-export function planUpdate(lists: readonly TrackedList[], id: string, change: TrackedListChange): TrackedUpdatePlan {
-  const before = lists.find(list => list.id === id)
-  if (!before)
-    return { ok: false, reason: 'missing' }
-  const query = requery(before, change)
-  if (!query)
-    return { ok: false, reason: 'invalid' }
-
-  const key = trackedKey(query)
-  const duplicate = lists.find(list => list.id !== id && trackedKey(list) === key)
-  if (duplicate)
-    return { ok: false, reason: 'duplicate', other: duplicate }
-
-  const alias = typeof change.alias === 'string' ? change.alias.trim() : before.alias
-  if (!sameTitle(alias, before.alias)) {
-    const taken = titleTakenBy(alias, lists, id)
-    if (taken)
-      return { ok: false, reason: 'title', other: taken }
-  }
-
-  const after: TrackedList = { ...withQueryOf(before, query), alias }
-  return { ok: true, lists: lists.map(list => (list.id === id ? after : list)), before, after }
-}
-
-/** Whether an update can be taken back — and the lists that does it — or why not. */
-export type TrackedUndoPlan
-  = | { ok: true, lists: TrackedList[] }
-    | { ok: false, reason: 'missing' | 'changed' }
-    | { ok: false, reason: 'duplicate' | 'title', other: TrackedList }
-
-/**
- * Take back an update {@link planUpdate} made, putting `before` back in place of
- * `after`: only while the list is still exactly what the update left (`changed`
- * once it has been retitled or updated again — here, in another tab, or by a
- * sync) and is still tracked at all (`missing`), and only if that wouldn't now
- * duplicate a query or a title another list has taken in the meantime.
- */
-export function planUndo(lists: readonly TrackedList[], before: TrackedList, after: TrackedList): TrackedUndoPlan {
-  const current = lists.find(list => list.id === after.id)
-  if (!current)
-    return { ok: false, reason: 'missing' }
-  if (entrySignature(current) !== entrySignature(after))
-    return { ok: false, reason: 'changed' }
-  const key = trackedKey(before)
-  const duplicate = key === null ? undefined : lists.find(list => list.id !== before.id && trackedKey(list) === key)
-  if (duplicate)
-    return { ok: false, reason: 'duplicate', other: duplicate }
-  if (titleKey(before.alias) !== titleKey(after.alias)) {
-    const taken = titleTakenBy(before.alias, lists, before.id)
-    if (taken)
-      return { ok: false, reason: 'title', other: taken }
-  }
-  return { ok: true, lists: lists.map(list => (list.id === before.id ? before : list)) }
 }
 
 /**

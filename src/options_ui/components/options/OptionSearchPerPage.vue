@@ -8,7 +8,7 @@ const choices = [25, 50, 100, 250, 1000]
   <Select
     :id="id"
     v-model="optionValue"
-    h-8 w-40
+    size="row"
   >
     <SelectItem
       v-for="n in choices"

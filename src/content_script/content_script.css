@@ -1307,6 +1307,17 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   display: none;
 }
 
+/* Sits at the end of a filtered listing's own actions row, after Works and
+   Bookmarks, so the offer reads as one more thing to do with these works. */
+.AO3E--search-filtered-listing--button {
+  cursor: pointer;
+}
+
+/* Hide the button while the search view is open — it doesn't do anything there. */
+#main:has(.AO3E--search-host) li:has(.AO3E--search-filtered-listing--button) {
+  display: none;
+}
+
 /* Shown in place of the progress panel when the listing is bigger than the
    reader's result ceiling, asking whether to load the first N anyway. */
 .AO3E--search-host--gate {

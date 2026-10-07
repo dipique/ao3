@@ -1,11 +1,11 @@
 import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
-import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
+import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
+import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { TAG_BLURB_SELECTOR as BLURB_SELECTOR, tagPageName, uncommonTagPage } from '#content_script/tagPage.ts'
-import { restoreListFilter } from '#content_script/tracked/restore.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -23,7 +23,9 @@ const SOURCE_ID = 'tag-works'
  * plain paged list of works and no sort/filter sidebar at all. This unit adds a
  * "Search these works" link to the sentence that says so, which loads every page
  * of that list into the same in-memory filterable view the Marked for Later page
- * uses — the one thing AO3 won't do for these tags.
+ * uses — the one thing AO3 won't do for these tags. A saved list's own links
+ * open its view whatever the switch for the link says
+ * ({@link file://./../lists/openLink.ts}).
  *
  * All the machinery (cached snapshot, background refresh, back to list) is the
  * shared search-view host ({@link file://./../searchView/host.tsx}); this unit
@@ -31,7 +33,7 @@ const SOURCE_ID = 'tag-works'
  */
 export class SearchTagWorks extends Unit {
   static override get name() { return 'SearchTagWorks' }
-  override get enabled() { return this.options.searchTagWorks }
+  override get enabled() { return this.options.searchTagWorks || linkedTo('tag-works') }
 
   static override async clean(): Promise<void> {
     suspendSearchView()
@@ -59,36 +61,36 @@ export class SearchTagWorks extends Unit {
       listbox.before(notice)
     }
 
-    const link = (
-      <button type="button" class={`${ADDON_CLASS}  ${LINK_CLASS}`}>Search these works</button>
-    ) as HTMLElement as HTMLButtonElement
-    link.addEventListener('click', () => {
-      void this.openView(notice, listbox, link)
-    })
-    notice.append(' ', link)
-    this.logger.debug('Search tag works link added.')
+    let link: HTMLButtonElement | null = null
+    if (this.options.searchTagWorks) {
+      const offer = (
+        <button type="button" class={`${ADDON_CLASS}  ${LINK_CLASS}`}>Search these works</button>
+      ) as HTMLElement as HTMLButtonElement
+      offer.addEventListener('click', () => {
+        void this.openView(notice, listbox, offer)
+      })
+      notice.append(' ', offer)
+      link = offer
+      this.logger.debug('Search tag works link added.')
+    }
 
     // If a global re-run (say a "Hide tag" from a context menu) closed an open
     // view, put it back from cache where the reader left off. Failing that, a
-    // tab that came here to refine a tracked list opens on the list's filter.
-    const pending = takeReopen(snapshotKey())
-    if (pending)
-      void this.openView(notice, listbox, link, { initialState: pending, refresh: false })
-    else
-      void restoreListFilter(this.options, snapshotKey(), opts => this.openView(notice, listbox, link, opts))
+    // saved list's open URL or refining link opens on the list's filter.
+    resumeView(this.options, 'tag-works', snapshotKey(), opts => this.openView(notice, listbox, link, opts))
   }
 
   async openView(
     notice: HTMLElement,
     listbox: HTMLElement,
-    link: HTMLElement,
+    link: HTMLElement | null,
     opts: OpenOptions = {},
   ): Promise<void> {
     await openSearchView(this.source(notice, listbox, link), this.options, opts)
   }
 
   /** Everything the shared host needs to know about a tag's works listing. */
-  source(notice: HTMLElement, listbox: HTMLElement, link: HTMLElement): SearchSource {
+  source(notice: HTMLElement, listbox: HTMLElement, link: HTMLElement | null): SearchSource {
     return {
       id: SOURCE_ID,
       cacheKey: snapshotKey(),
@@ -108,7 +110,7 @@ export class SearchTagWorks extends Unit {
       // The native list, and the link that opened the view — the view has its own
       // "Back to list" button, and both come back when it does. The sentence
       // itself stays: it's still the reason the reader is looking at our view.
-      nativeElements: () => [listbox, link],
+      nativeElements: () => (link ? [listbox, link] : [listbox]),
       mount: container => notice.after(container),
       // Marks and progress apply to any work, so the Status facet is worth
       // having here too — just not switched on by default (see `defaultStatus`).

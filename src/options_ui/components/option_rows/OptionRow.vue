@@ -12,24 +12,6 @@ export interface OptionRowProps {
    * rather than being gated, and its title carries the weight.
    */
   master?: boolean
-  /**
-   * Give the title a line of its own, with the description and the controls
-   * side by side beneath it.
-   *
-   * For rows whose title is data rather than a label — a stored list's name,
-   * which can be as long as a tag — and whose controls are wide enough that
-   * sharing a line would wrap the title after two words. Laid out this way the
-   * title only breaks when it is longer than the whole row.
-   */
-  stacked?: boolean
-  /**
-   * Width of the control column, as a CSS length. Only meaningful with
-   * {@link stacked}, and only worth setting on a list of sibling rows: `auto`
-   * sizes each row's controls to its own contents, so rows with different
-   * buttons end up with their descriptions starting at different places and the
-   * widest row's buttons pushed off the edge. A fixed column lines them up.
-   */
-  controlWidth?: string
 }
 
 const props = defineProps<OptionRowProps>()
@@ -59,36 +41,13 @@ OptionRowOff.provide({ reason, id: reasonId })
     v-show="visible"
     :id="id"
     class="option-row"
-    :class="{ 'option-row--grid': !stacked, 'option-row--master': master, 'option-row--inert': inert }"
+    :class="{ 'option-row--master': master, 'option-row--inert': inert }"
     style="scroll-margin-top: var(--shell-top);"
   >
-    <label
-      v-if="stacked"
-      :for="controlId"
-      flex="~ col gap-1"
-    >
-      <span data-row-part="title" class="option-row__title">
-        <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <span v-html="titleHtml" />{{ ' ' }}<!--
-          Inline rather than a flex child, so a title long enough to wrap takes
-          this with it instead of stranding it on a line of its own.
-        --><slot name="title-suffix" />
-      </span>
-      <div
-        :style="{ gridTemplateColumns: `minmax(0, 1fr) ${controlWidth ?? 'auto'}` }"
-        grid="~ items-center gap-4"
-      >
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <span data-row-part="description" class="option-row__description" v-html="subtitleHtml" />
-        <div data-row-part="control" flex="~ row items-center justify-end" w-full>
-          <slot :id="controlId" />
-        </div>
-      </div>
-    </label>
-    <label v-else :for="controlId" class="option-row__main">
+    <label :for="controlId" class="option-row__main">
       <span class="option-row__text">
         <span data-row-part="title" class="option-row__title">
+          <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
           <!-- eslint-disable-next-line vue/no-v-html -->
           <span v-html="titleHtml" />
           <template v-for="badge in badges" :key="badge">
@@ -132,6 +91,14 @@ OptionRowOff.provide({ reason, id: reasonId })
 }
 .option-row--master {
   border-top-width: 0;
+}
+/* A master switch is drawn a size up from the switches it gates. */
+@media (min-width: 768px) {
+  .option-row--master :deep(.switch) {
+    --switch-width: 40px;
+    --switch-height: 22px;
+    --thumb: 16px;
+  }
 }
 
 .option-row__main {
@@ -193,34 +160,41 @@ OptionRowOff.provide({ reason, id: reasonId })
 /* `--row-title` narrows the title column inside an indented group, so the
    group's descriptions and controls line up with the rows outside it. The
    description keeps at least 10rem: a control wider than what is left wraps
-   its buttons rather than squeezing the description to a word a line. */
+   its buttons rather than squeezing the description to a word a line. Below
+   1280 px the control column is only as wide as its control, since a 180 px
+   one would leave a switch row's description a few words a line. */
 @media (min-width: 1024px) {
-  .option-row--grid {
+  .option-row {
     display: grid;
-    grid-template-columns: var(--row-title, 264px) minmax(10rem, 1fr) minmax(180px, auto);
+    grid-template-columns: var(--row-title, 264px) minmax(10rem, 1fr) auto;
     grid-template-areas:
       'title description control'
       'extra extra extra';
     align-items: start;
     column-gap: 24px;
   }
-  .option-row--grid .option-row__main,
-  .option-row--grid .option-row__text {
+  .option-row .option-row__main,
+  .option-row .option-row__text {
     display: contents;
   }
-  .option-row--grid .option-row__title {
+  .option-row .option-row__title {
     grid-area: title;
   }
-  .option-row--grid .option-row__description {
+  .option-row .option-row__description {
     grid-area: description;
   }
-  .option-row--grid .option-row__control {
+  .option-row .option-row__control {
     grid-area: control;
     align-self: center;
     margin-left: 0;
   }
-  .option-row--grid .option-row__extra {
+  .option-row .option-row__extra {
     grid-area: extra;
+  }
+}
+@media (min-width: 1280px) {
+  .option-row {
+    grid-template-columns: var(--row-title, 264px) minmax(10rem, 1fr) minmax(180px, auto);
   }
 }
 

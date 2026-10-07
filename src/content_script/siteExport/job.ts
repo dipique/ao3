@@ -542,7 +542,7 @@ async function runExport(job: ExportJob, signal: AbortSignal): Promise<void> {
   if (missing > 0) {
     warn(
       `${missing.toLocaleString()} of ${counts.total.toLocaleString()} works have no saved text, so the site links those to AO3 instead of opening them. `
-      + 'Run "Update cache" to fetch them.',
+      + 'Run “Cache works” to fetch them.',
     )
   }
 

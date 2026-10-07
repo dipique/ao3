@@ -4,12 +4,15 @@ import { anchorSlug } from '../model/anchors.ts'
 const props = defineProps<{
   title: string
   subtitle?: string
+  /** Phrases of the subtitle to draw bold, each found after the last. */
+  strong?: readonly string[]
 }>()
 
 OptionSubsectionName.provide(props.title)
+useAddSubsection(props.title)
 
 const category = OptionCategoryName.inject(null)
-const { subsectionMatches, highlight } = useOptionSearch()
+const { subsectionMatches, highlight, highlightStrong } = useOptionSearch()
 
 const visible = computed(() => subsectionMatches(category, props.title))
 
@@ -41,8 +44,9 @@ registerAnchor({ id, kind: 'subsection', name: props.title, category, subsection
     <!-- eslint-disable-next-line vue/no-v-html -->
     <p
       v-if="props.subtitle"
-      text="[12px] muted-fg" max-w="[88ch]" mb-0.5 mt-1.5 leading-normal
-      v-html="highlight(props.subtitle)"
+      class="[&_strong]:text-default-fg [&_strong]:font-600"
+      text="[12px] muted-fg" max-w="[100ch]" mb-0.5 mt-1.5 leading-normal
+      v-html="props.strong ? highlightStrong(props.subtitle, props.strong) : highlight(props.subtitle)"
     />
     <slot />
   </section>

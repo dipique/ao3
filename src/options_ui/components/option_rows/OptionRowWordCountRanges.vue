@@ -102,7 +102,7 @@ function remove(index: number) {
     subtitle="Click a work’s word count in a listing for a menu of lengths to filter by. Edit the ranges it offers below; they may overlap."
   >
     <div flex="~ col gap-3">
-      <p text="sm muted-fg">
+      <p text="[12.5px] muted-fg" leading="[18px]">
         The menu offers these ranges plus a row clearing the one currently applied. On a normal listing your pick
         fills AO3's own Word Count filter and re-runs the search; inside an instant search view it filters the loaded
         list instead.
@@ -167,7 +167,7 @@ function remove(index: number) {
         </ListRow>
       </ListFrame>
 
-      <p text="xs muted-fg" pl-1>
+      <p text="[11.5px] muted-fg" leading="[16px]">
         Leave a box empty for an open-ended range — “5000” to nothing offers “5,000+”. Ranges may overlap; only
         exact duplicates are rejected.
       </p>

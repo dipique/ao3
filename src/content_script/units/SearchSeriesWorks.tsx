@@ -1,10 +1,10 @@
 import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
-import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
+import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
+import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
-import { restoreListFilter } from '#content_script/tracked/restore.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -56,6 +56,8 @@ function seriesName(): string {
  * filter for it, whatever the series' size. This unit adds a "Search these
  * works" button to the page's own row of actions, which loads every page of the
  * list into the same in-memory filterable view the Marked for Later page uses.
+ * A saved list's own links open its view whatever the switch for the button
+ * says ({@link file://./../lists/openLink.ts}).
  *
  * All the machinery (cached snapshot, background refresh, back to list) is the
  * shared search-view host ({@link file://./../searchView/host.tsx}); this unit
@@ -63,7 +65,7 @@ function seriesName(): string {
  */
 export class SearchSeriesWorks extends Unit {
   static override get name() { return 'SearchSeriesWorks' }
-  override get enabled() { return this.options.searchSeriesWorks }
+  override get enabled() { return this.options.searchSeriesWorks || linkedTo('series-works') }
 
   static override async clean(): Promise<void> {
     suspendSearchView()
@@ -78,29 +80,28 @@ export class SearchSeriesWorks extends Unit {
     if (!list || !list.querySelector('li.blurb'))
       return
 
-    // The row that already holds "Subscribe" and "Bookmark Series": this page's
-    // one set of actions, and where an action on the same series belongs.
-    const subnav = document.querySelector('#main ul.navigation.actions')
-    if (!subnav || subnav.querySelector(`.${BUTTON_CLASS}`))
-      return
+    if (this.options.searchSeriesWorks) {
+      // The row that already holds "Subscribe" and "Bookmark Series": this
+      // page's one set of actions, and where an action on the same series
+      // belongs.
+      const subnav = document.querySelector('#main ul.navigation.actions')
+      if (!subnav || subnav.querySelector(`.${BUTTON_CLASS}`))
+        return
 
-    const button = (
-      <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search these works</button>
-    ) as HTMLElement as HTMLButtonElement
-    button.addEventListener('click', () => {
-      void this.openView(id, list)
-    })
-    subnav.append(<li class={ADDON_CLASS}>{button}</li>)
-    this.logger.debug('Search series works button added.')
+      const button = (
+        <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search these works</button>
+      ) as HTMLElement as HTMLButtonElement
+      button.addEventListener('click', () => {
+        void this.openView(id, list)
+      })
+      subnav.append(<li class={ADDON_CLASS}>{button}</li>)
+      this.logger.debug('Search series works button added.')
+    }
 
     // If a global re-run (say a "Hide tag" from a context menu) closed an open
     // view, put it back from cache where the reader left off. Failing that, a
-    // tab that came here to refine a tracked list opens on the list's filter.
-    const pending = takeReopen(snapshotKey(id))
-    if (pending)
-      void this.openView(id, list, { initialState: pending, refresh: false })
-    else
-      void restoreListFilter(this.options, snapshotKey(id), opts => this.openView(id, list, opts))
+    // saved list's open URL or refining link opens on the list's filter.
+    resumeView(this.options, 'series-works', snapshotKey(id), opts => this.openView(id, list, opts))
   }
 
   async openView(id: string, list: HTMLElement, opts: OpenOptions = {}): Promise<void> {

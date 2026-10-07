@@ -92,7 +92,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
         >
         <button
           v-if="query"
-          class="hidden input-ring md:grid"
+          class="touch-target hidden input-ring md:grid"
           text="muted-fg hover:default-fg" h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-md
           aria-label="Clear the settings search"
           @click="clearSearch"
@@ -102,7 +102,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
         <kbd v-else class="hidden md:inline" border="1" rounded px-1.5 text="[10.5px]">/</kbd>
         <button
           v-if="expanded"
-          class="grid input-ring md:hidden"
+          class="touch-target grid input-ring md:hidden"
           text="muted-fg hover:default-fg" h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-md
           aria-label="Close the settings search"
           @click="closeSearch"
@@ -116,7 +116,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
       <button
         v-if="!expanded"
         ref="opener"
-        class="grid input-ring md:hidden"
+        class="touch-target grid input-ring md:hidden"
         h-9 w-9 cursor-pointer place-items-center rounded-lg text="muted-fg lg hover:default-fg"
         aria-label="Search settings"
         @click="openSearch"
@@ -124,7 +124,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
         <Icon i-mdi-magnify />
       </button>
       <button
-        class="h-9 w-9 input-ring md:h-8 md:w-8"
+        class="touch-target h-9 w-9 input-ring md:h-8 md:w-8"
         grid cursor-pointer place-items-center rounded-lg text="muted-fg lg hover:default-fg"
         :aria-label="`Switch to ${switchTo} theme`"
         :title="`Switch to ${switchTo} theme`"

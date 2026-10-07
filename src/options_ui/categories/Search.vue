@@ -25,7 +25,7 @@
     </OptionSubsection>
 
     <OptionSubsection
-      title="Customize Search Results"
+      title="Customize search results"
       subtitle="Choose what shows up in your listings and how it looks — hide or collapse works, make others stand out, or remove individual tags from work blurbs. Applies anywhere works are listed."
     >
       <OptionRowRules />
@@ -92,6 +92,12 @@
         <OptionSwitch option-id="searchTextResults" />
       </OptionRow>
       <OptionRow
+        title="Search a filtered listing's works"
+        subtitle="AO3 already sorts and filters a tag's, an author's or a collection's works with its Sort & Filter sidebar. Adds a “Search these works” button to those listings too, which loads them into the same view, to narrow by things the sidebar can't, such as your marks."
+      >
+        <OptionSwitch option-id="searchFilteredListing" />
+      </OptionRow>
+      <OptionRow
         title="Maximum works to load"
         subtitle="A ceiling on how many works the views above will load. Works come twenty to a page from AO3's donated servers, and a text search for a common word can match hundreds of thousands — so a bigger list loads only up to this ceiling, in the Archive's own order, and only after you confirm."
       >
@@ -103,7 +109,6 @@
       >
         <OptionSearchPerPage />
       </OptionRow>
-      <OptionRowTrackedLists />
     </OptionSubsection>
   </OptionCategory>
 </template>

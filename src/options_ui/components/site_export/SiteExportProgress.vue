@@ -10,7 +10,8 @@
  * is AO3 complaining (the warning colour, its own glyph, a striped bar).
  *
  * Rendered only by the row that owns the job; it reads the one job directly
- * rather than taking it as a prop.
+ * rather than taking it as a prop. `foot` holds what the owner offers for the
+ * job (Stop, Continue, Discard), on the line with the failures.
  */
 const { view } = useSiteExport()
 
@@ -47,10 +48,11 @@ const showErrors = ref(false)
     :data-job-wait="view.wait"
     flex="~ col gap-2" pb-2 pt-1
   >
-    <div flex="~ row items-center gap-2" min-w-0 text-sm>
+    <div flex="~ row items-center gap-2" min-w-0 text="[12.5px]" leading="[18px]">
       <Icon
         v-if="!view.severity"
-        i-tabler-loader-2 shrink-0 text-brand-fg motion-safe:animate-spin
+        i-tabler-loader-2 shrink-0 text-brand-fg
+        class="motion-safe:animate-spin"
       />
       <SeverityGlyph v-else :severity="view.severity" :glyph="glyph" shrink-0 />
       <span min-w-0 flex-1 truncate :class="view.wait === 'pacing' ? 'text-muted-fg' : ''">
@@ -58,7 +60,7 @@ const showErrors = ref(false)
         <template v-else>{{ view.line }}</template>
         <template v-if="view.countdown"> — trying again in {{ view.countdown }}</template>
       </span>
-      <span v-if="view.total" ws-nowrap text="xs muted-fg" tabular-nums>
+      <span v-if="view.total" ws-nowrap text="[12px] muted-fg" leading="[16px]" tabular-nums>
         {{ view.done.toLocaleString() }} / {{ view.total.toLocaleString() }}
       </span>
     </div>
@@ -82,20 +84,30 @@ const showErrors = ref(false)
       <p>{{ warning }}</p>
     </Callout>
 
-    <div v-if="view.failures.shown.length" flex="~ col gap-1">
-      <Button variant="link" self-start p-0 :aria-expanded="showErrors" @click.prevent="showErrors = !showErrors">
-        {{ (view.failures.shown.length + view.failures.more).toLocaleString() }}
-        {{ view.failures.shown.length + view.failures.more === 1 ? 'work' : 'works' }} could not be fetched
-        <Icon :class="showErrors ? 'i-mdi-chevron-up' : 'i-mdi-chevron-down'" ml-1 />
-      </Button>
-      <ul v-if="showErrors" flex="~ col gap-1" max-h-64 overflow-y-auto text-sm>
+    <div v-if="$slots.foot || view.failures.shown.length" flex="~ col gap-1">
+      <div flex="~ row wrap items-center gap-x-3 gap-y-1">
+        <slot name="foot" />
+        <button
+          v-if="view.failures.shown.length"
+          type="button"
+          class="failures touch-target input-ring"
+          :aria-expanded="showErrors"
+          @click.prevent="showErrors = !showErrors"
+        >
+          <Icon i-tabler-circle-x text="[13px] destructive" />
+          {{ (view.failures.shown.length + view.failures.more).toLocaleString() }}
+          {{ view.failures.shown.length + view.failures.more === 1 ? 'work' : 'works' }} could not be fetched
+          <Icon :class="showErrors ? 'i-mdi-chevron-up' : 'i-mdi-chevron-down'" text="[13px]" />
+        </button>
+      </div>
+      <ul v-if="showErrors" flex="~ col gap-1" max-h-64 overflow-y-auto text="[12px]" leading="[16px]">
         <li v-for="failure in view.failures.shown" :key="failure.workId" flex="~ col">
           <ArchiveLink :path="`/works/${failure.workId}`">
             {{ failure.title || `Work ${failure.workId}` }}
           </ArchiveLink>
-          <span text="xs muted-fg">{{ failure.reason }}</span>
+          <span text="[11.5px] muted-fg" leading="[16px]">{{ failure.reason }}</span>
         </li>
-        <li v-if="view.failures.more" text="xs muted-fg">
+        <li v-if="view.failures.more" text="[11.5px] muted-fg" leading="[16px]">
           …and {{ view.failures.more.toLocaleString() }} more.
         </li>
       </ul>
@@ -104,6 +116,24 @@ const showErrors = ref(false)
 </template>
 
 <style scoped>
+/* The per-work failures, behind their count: a quiet button with the destructive glyph. */
+.failures {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -4px;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: rgb(var(--color-default-fg));
+  font-size: 12px;
+  cursor: pointer;
+}
+.failures:hover {
+  background-color: var(--row-hover);
+}
+
 .job-bar-refused {
   background: repeating-linear-gradient(
     -45deg,

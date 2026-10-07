@@ -10,7 +10,7 @@ const props = defineProps<SelectItemProps>()
     flex="~ items-center"
     bg="focus:input"
     text="sm"
-    relative w-full cursor-default select-none py-1.5 pl-8 pr-2 outline-none
+    relative w-full cursor-default select-none rounded-[7px] py-1.5 pl-8 pr-2 outline-none
     class="data-[disabled]:pointer-events-none data-[disabled]:op-50"
   >
     <RekaSelectItemText>

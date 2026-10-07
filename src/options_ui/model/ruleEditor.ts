@@ -348,63 +348,88 @@ export function parseAutocomplete(json: unknown): string[] {
   return [...new Set(names)]
 }
 
-const quoted = (text: string) => (text.trim() ? `“${text}”` : '…')
+/** A piece of a rule's sentence: its action, drawn bold; the value it matches, drawn as a quote; or the words between. */
+export interface SummaryPart { text: string, kind?: 'verb' | 'value' }
+
+const words = (text: string): SummaryPart => ({ text })
+const quoted = (text: string): SummaryPart => (text.trim() ? { text: `“${text}”`, kind: 'value' } : words('…'))
 
 /** The works a rule matches, as the end of a sentence: "every work tagged “Fluff” in Additional Tags". */
-function matchedWorks(rule: Rule): string {
+function matchedWorks(rule: Rule): SummaryPart[] {
   const value = quoted(rule.value)
   const how = rule.matcher === 'regex' ? 'matches' : 'contains'
   if (matchesId(rule.target, rule.value))
-    return rule.target === 'work' ? `the work with id ${rule.value.trim()}` : `every work in the series with id ${rule.value.trim()}`
+    return [words(rule.target === 'work' ? `the work with id ${rule.value.trim()}` : `every work in the series with id ${rule.value.trim()}`)]
   switch (rule.target) {
     case 'author': {
-      const by = rule.matcher === 'exact' ? value : `an author whose username ${how} ${value}`
-      return `every work by ${by}${rule.pseud ? ` writing as “${rule.pseud}”` : ''}`
+      const by = rule.matcher === 'exact' ? [value] : [words(`an author whose username ${how} `), value]
+      return [words('every work by '), ...by, ...(rule.pseud ? [words(` writing as “${rule.pseud}”`)] : [])]
     }
     case 'work':
-      return rule.matcher === 'exact' ? `the work ${value}` : `every work whose title ${how} ${value}`
+      return rule.matcher === 'exact' ? [words('the work '), value] : [words(`every work whose title ${how} `), value]
     case 'series':
-      return rule.matcher === 'exact' ? `every work in the series ${value}` : `every work in a series whose title ${how} ${value}`
+      return rule.matcher === 'exact' ? [words('every work in the series '), value] : [words(`every work in a series whose title ${how} `), value]
     default: {
-      const where = rule.target === 'tag' ? '' : ` in ${ruleTargetLabel(rule.target)}`
+      const where = rule.target === 'tag' ? [] : [words(` in ${ruleTargetLabel(rule.target)}`)]
       if (rule.matcher === 'exact')
-        return `every work tagged ${value}${where}`
-      return `every work with a tag ${rule.matcher === 'regex' ? 'matching' : 'containing'} ${value}${where}`
+        return [words('every work tagged '), value, ...where]
+      return [words(`every work with a tag ${rule.matcher === 'regex' ? 'matching' : 'containing'} `), value, ...where]
     }
   }
 }
 
 /** The tags a Hide Tag rule takes out: "the tag “Fluff” in Additional Tags". */
-function matchedTags(rule: Rule): string {
+function matchedTags(rule: Rule): SummaryPart[] {
   const value = quoted(rule.value)
-  const where = rule.target === 'tag' ? '' : ` in ${ruleTargetLabel(rule.target)}`
-  const tags = rule.matcher === 'exact' ? `the tag ${value}` : `every tag ${rule.matcher === 'regex' ? 'matching' : 'containing'} ${value}`
-  return `${tags}${where}`
+  const where = rule.target === 'tag' ? [] : [words(` in ${ruleTargetLabel(rule.target)}`)]
+  const tags = rule.matcher === 'exact' ? [words('the tag '), value] : [words(`every tag ${rule.matcher === 'regex' ? 'matching' : 'containing'} `), value]
+  return [...tags, ...where]
 }
 
 const VERBS: Record<'hide' | 'collapse' | 'invert', string> = { hide: 'Hide', collapse: 'Collapse', invert: 'Always show' }
 
-/** A sentence's full stop, unless it already ends on the ellipsis standing for a value not typed yet. */
-const stop = (sentence: string) => (sentence.endsWith('…') ? sentence : `${sentence}.`)
+/**
+ * A sentence of parts, its words run together where two meet, and its full
+ * stop, unless it already ends on the ellipsis standing for a value not typed
+ * yet.
+ */
+function sentenceOf(verb: string, ...rest: SummaryPart[]): SummaryPart[] {
+  const parts: SummaryPart[] = [{ text: verb, kind: 'verb' }]
+  for (const part of [...rest, words('.')]) {
+    const last = parts.at(-1)!
+    if (part.text === '.' && last.text.endsWith('…'))
+      break
+    if (!part.kind && !last.kind)
+      parts[parts.length - 1] = words(last.text + part.text)
+    else
+      parts.push(part)
+  }
+  return parts
+}
 
 /**
- * What the rule does, in one sentence, for the reader to check before saving:
- * the action, the works or tags it acts on, and a priority where it isn't the
- * action's own.
+ * What the rule does, in one sentence, for the reader to check before saving,
+ * in parts: the action, the works or tags it acts on, and a priority where it
+ * isn't the action's own.
  */
-export function describeRule(rule: Rule): string {
+export function ruleSummary(rule: Rule): SummaryPart[] {
   const behavior = rule.behavior ?? 'hide'
   switch (behavior) {
     case 'none':
-      return stop(`Off: does nothing to ${matchedWorks(rule)}`)
+      return sentenceOf('Off', words(': does nothing to '), ...matchedWorks(rule))
     case 'highlight':
-      return stop(`Highlight the match on ${matchedWorks(rule)}`)
+      return sentenceOf('Highlight', words(' the match on '), ...matchedWorks(rule))
     case 'hideFilter':
-      return `Hide ${matchedTags(rule)} from tag lists and the filter sidebar; the works stay.`
+      return sentenceOf('Hide', words(' '), ...matchedTags(rule), words(' from tag lists and the filter sidebar; the works stay'))
     default: {
       const priority = rulePriority(rule)
-      const tail = priority === DEFAULT_BEHAVIOR_PRIORITY[behavior] ? '' : `, at priority ${priority}`
-      return stop(`${VERBS[behavior]} ${matchedWorks(rule)}${tail}`)
+      const tail = priority === DEFAULT_BEHAVIOR_PRIORITY[behavior] ? [] : [words(`, at priority ${priority}`)]
+      return sentenceOf(VERBS[behavior], words(' '), ...matchedWorks(rule), ...tail)
     }
   }
+}
+
+/** {@link ruleSummary}'s sentence as one string. */
+export function describeRule(rule: Rule): string {
+  return ruleSummary(rule).map(part => part.text).join('')
 }

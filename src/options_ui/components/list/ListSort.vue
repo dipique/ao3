@@ -35,7 +35,7 @@ function pick(value: AcceptableValue) {
           v-for="choice in choices"
           :key="choice.value"
           :value="choice.value"
-          class="relative flex cursor-pointer select-none items-center rounded-sm py-1.5 pl-7 pr-3 text-[12.5px] input-ring focus:bg-muted"
+          class="relative flex cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-3 text-[12.5px] input-ring data-[highlighted]:bg-[var(--row-hover)]"
         >
           <RekaDropdownMenuItemIndicator class="absolute left-2 grid place-items-center">
             <span class="i-tabler-check" text="[13px]" aria-hidden="true" />

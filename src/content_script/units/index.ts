@@ -21,6 +21,7 @@ import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { ReaderMode } from './ReaderMode.ts'
 import { RequiredTagsToolbar } from './RequiredTagsToolbar.tsx'
 import { ReviewTrackedLists } from './ReviewTrackedLists.tsx'
+import { SearchFilteredListing } from './SearchFilteredListing.tsx'
 import { SearchMarkedForLater } from './SearchMarkedForLater.tsx'
 import { SearchReadWorks } from './SearchReadWorks.tsx'
 import { SearchSeriesWorks } from './SearchSeriesWorks.tsx'
@@ -82,6 +83,7 @@ export const UNITS = [
   SearchSeriesWorks,
   SearchTagWorks,
   SearchTextResults,
+  SearchFilteredListing,
   Tools,
   Stats,
   OptionsUpdater,

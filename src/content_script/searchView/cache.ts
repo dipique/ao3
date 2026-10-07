@@ -310,6 +310,72 @@ export async function deleteSnapshot(key: string): Promise<void> {
     await pruneIfWanted(key, unpackOrderedIds(previous.ids), [], lists)
 }
 
+/** A stored list taken out of storage whole ({@link detachSnapshot}), so it can be put back as it was. */
+export interface DetachedSnapshot {
+  key: string
+  /** The list exactly as it was stored. */
+  list: StoredList
+  /** What it failed to find, as `searchMisses` stored it, when it had anything there. */
+  misses?: string
+}
+
+/**
+ * Take a stored list out of storage, with what it failed to find, and hand both
+ * back exactly as they were stored: for a change that can still be undone,
+ * which {@link restoreSnapshot} puts back.
+ *
+ * Unlike {@link deleteSnapshot} it prunes nothing, since the list may yet come
+ * back and its blurbs must be there for it. {@link pruneDetached} is what lets
+ * them go once it won't. Null when nothing is stored under `key`.
+ */
+export async function detachSnapshot(key: string): Promise<DetachedSnapshot | null> {
+  const lists = { ...await cache.get('searchLists') }
+  const list = lists[key]
+  if (!list)
+    return null
+  delete lists[key]
+  await cache.set({ searchLists: lists })
+  const misses = { ...await cache.get('searchMisses') }
+  const missed = misses[key]
+  if (missed !== undefined) {
+    delete misses[key]
+    await cache.set({ searchMisses: misses })
+  }
+  return missed === undefined ? { key, list } : { key, list, misses: missed }
+}
+
+/**
+ * Put a list {@link detachSnapshot} took out back as it was, misses and all.
+ * A list stored under its key since then is newer, and is left as it is: false
+ * then, and nothing is put back.
+ */
+export async function restoreSnapshot(detached: DetachedSnapshot): Promise<boolean> {
+  const lists = { ...await cache.get('searchLists') }
+  if (detached.key in lists)
+    return false
+  lists[detached.key] = detached.list
+  await cache.set({ searchLists: lists })
+  if (detached.misses !== undefined) {
+    const misses = { ...await cache.get('searchMisses') }
+    misses[detached.key] = detached.misses
+    await cache.set({ searchMisses: misses })
+  }
+  return true
+}
+
+/**
+ * Let detached lists go for good: their blurbs that nothing else holds now are
+ * pruned as {@link deleteSnapshot} prunes a list it deletes, if the reader has
+ * asked for that.
+ */
+export async function pruneDetached(detached: readonly DetachedSnapshot[]): Promise<void> {
+  const lists = await cache.get('searchLists')
+  for (const { key, list } of detached) {
+    if (typeof list.ids === 'string')
+      await pruneIfWanted(key, unpackOrderedIds(list.ids), [], lists)
+  }
+}
+
 /** Discard the blurbs a list write stranded, if the reader has asked for that. */
 async function pruneIfWanted(key: string, before: string[], after: string[], lists: { [key: string]: StoredList }): Promise<void> {
   if (!await options.get('pruneOrphanedBlurbs'))

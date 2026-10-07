@@ -1,10 +1,10 @@
 import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
-import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
+import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
+import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectFoundCount, detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
-import { restoreListFilter } from '#content_script/tracked/restore.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -41,7 +41,8 @@ function foundCount(): number | null {
  * no facets, no way to see which fandoms or tags the matches cluster in. This
  * unit adds a "Search these results" button to the results page that loads them
  * into the same in-memory filterable view the Marked for Later page and the
- * uncommon-tag pages use.
+ * uncommon-tag pages use. A saved list's own links open its view whatever the
+ * switch for the button says ({@link file://./../lists/openLink.ts}).
  *
  * A text search is the one source that routinely runs to hundreds of thousands
  * of works, so the shared host's result ceiling
@@ -53,7 +54,7 @@ function foundCount(): number | null {
  */
 export class SearchTextResults extends Unit {
   static override get name() { return 'SearchTextResults' }
-  override get enabled() { return this.options.searchTextResults }
+  override get enabled() { return this.options.searchTextResults || linkedTo('text-search') }
 
   static override async clean(): Promise<void> {
     suspendSearchView()
@@ -65,29 +66,27 @@ export class SearchTextResults extends Unit {
     if (!list || !list.querySelector('li.blurb'))
       return
 
-    // The "Edit Your Search" subnav — the page's one row of actions, and the
-    // natural neighbour for an action that reworks the same results.
-    const subnav = document.querySelector('#main.works-search ul.navigation.actions')
-    if (!subnav || subnav.querySelector(`.${BUTTON_CLASS}`))
-      return
+    if (this.options.searchTextResults) {
+      // The "Edit Your Search" subnav — the page's one row of actions, and the
+      // natural neighbour for an action that reworks the same results.
+      const subnav = document.querySelector('#main.works-search ul.navigation.actions')
+      if (!subnav || subnav.querySelector(`.${BUTTON_CLASS}`))
+        return
 
-    const button = (
-      <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search these results</button>
-    ) as HTMLElement as HTMLButtonElement
-    button.addEventListener('click', () => {
-      void this.openView(list)
-    })
-    subnav.append(<li class={ADDON_CLASS}>{button}</li>)
-    this.logger.debug('Search text results button added.')
+      const button = (
+        <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search these results</button>
+      ) as HTMLElement as HTMLButtonElement
+      button.addEventListener('click', () => {
+        void this.openView(list)
+      })
+      subnav.append(<li class={ADDON_CLASS}>{button}</li>)
+      this.logger.debug('Search text results button added.')
+    }
 
     // If a global re-run (say a "Hide tag" from a context menu) closed an open
     // view, put it back from cache where the reader left off. Failing that, a
-    // tab that came here to refine a tracked list opens on the list's filter.
-    const pending = takeReopen(snapshotKey())
-    if (pending)
-      void this.openView(list, { initialState: pending, refresh: false })
-    else
-      void restoreListFilter(this.options, snapshotKey(), opts => this.openView(list, opts))
+    // saved list's open URL or refining link opens on the list's filter.
+    resumeView(this.options, 'text-search', snapshotKey(), opts => this.openView(list, opts))
   }
 
   async openView(list: HTMLOListElement, opts: OpenOptions = {}): Promise<void> {

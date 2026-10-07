@@ -52,31 +52,32 @@ watch([from, to], ([nextFrom, nextTo]) => {
     subtitle="Pre-fills AO3’s Word Count filter with a range. Leave either end blank for a one-sided range, such as “at least 50,000 words”."
   >
     <div flex="~ col gap-2" pt-2>
-      <div flex="~ gap-2 items-center wrap" py-1>
-        <span shrink-0 font="leading-none" text="sm muted-fg">Default the word count filter to</span>
+      <div flex="~ gap-2.5 items-center wrap" py-1 text="[12.5px] muted-fg" leading="[18px]">
+        <span shrink-0>Default the word count filter to</span>
         <Input
           v-model="fromText"
           type="text"
           inputmode="numeric"
-          placeholder="No minimum"
+          placeholder="No min"
           aria-label="Lowest word count"
-          text="base" h-9 w-32 py-2 pl-2
+          class="h-[26px] w-[92px] rounded-[7px] px-2 text-[12.5px] tabular-nums"
         />
-        <span shrink-0 text="sm muted-fg">to</span>
+        <span shrink-0>to</span>
         <Input
           v-model="toText"
           type="text"
           inputmode="numeric"
-          placeholder="No maximum"
+          placeholder="No max"
           aria-label="Highest word count"
-          text="base" h-9 w-32 py-2 pl-2
+          class="h-[26px] w-[92px] rounded-[7px] px-2 text-[12.5px] tabular-nums"
         />
-        <span shrink-0 text="sm muted-fg">words</span>
+        <span shrink-0>words</span>
       </div>
-      <p v-if="error" text="sm destructive" pl-1>
-        {{ error }}
+      <p v-if="error" flex="~ items-start gap-1.5" text="[11.5px] default-fg" leading="[16px]">
+        <SeverityGlyph severity="destructive" class="mt-px shrink-0 text-[13px]" />
+        <span>{{ error }}</span>
       </p>
-      <p v-else text="xs muted-fg" pl-1>
+      <p v-else text="[11.5px] muted-fg" leading="[16px]">
         Filters to {{ formatWordCountRange(parsed!) }} words. Applied only when no word count is set yet, so a range
         already chosen — or one carried in the page URL — is left alone.
       </p>

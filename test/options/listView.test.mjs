@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { capFor, cycleSort, filterRows, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, shownRules, sortHint, sortMarks, sortRows, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
+import { capFor, cycleSort, filterRows, filterSavedLists, focusSuccessor, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, SAVED_LIST_SORTS, savedListsHead, shownRules, shownSavedLists, sortHint, sortMarks, sortRows, sortSavedLists, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
 
 const MARKS = [
   { id: 'read', label: 'Read', icon: 'Check' },
@@ -362,5 +362,141 @@ describe('rulePriorityCell', () => {
       title: 'Priority 4, kept while the rule is disabled',
       custom: true,
     })
+  })
+})
+
+/** A saved list's row, as `savedListRows` makes one: only what the frame reads. */
+const savedRow = (id, title, fields = {}) => ({ id, title, placeholder: title, kind: 'Works search', status: 'saved', pending: null, caching: { kind: 'none' }, ...fields })
+const copyAt = scrapedAt => ({ kind: 'copy', key: `k${scrapedAt}`, scrapedAt, unstored: 0, buckets: { total: 1, cached: 0, failed: 0, unfetched: 1, bytes: 0, staleFailures: 0 } })
+
+const DRACO = savedRow('dr4c0', 'Mostly Draco', { type: 'Character', typeTip: 'Character: Draco Malfoy', kind: 'Filtered listing', status: 'tracked', caching: copyAt(3_000) })
+const TEA = savedRow('t3a', 'Search: tea', { type: 'Search', typeTip: 'Search: tea', caching: copyAt(5_000) })
+const CAFE = savedRow('c4fe', 'café AUs', { type: 'Tag', typeTip: 'Tag: Coffee Shop AU', kind: 'Uncommon tag', status: 'tracked' })
+const SERIES = savedRow('s3r', 'the Long Haul', { type: 'Series', typeTip: 'Series: The Long Haul', kind: 'Series', caching: copyAt(1_000) })
+/** A stored list no visit has described: a row by its raw key, with no record to track. */
+const OLD = savedRow('copy:tag-works:Old%20Tag', 'tag-works:Old%20Tag', { placeholder: '', kind: undefined, pending: 'needs-visit', caching: copyAt(500) })
+/** Tracked, at an address that isn't the archive's, with no title of its own: its URL's tail stands in. */
+const BROKEN = savedRow('br0', '', { placeholder: 'https://example.com/tags/x', kind: 'Uncommon tag', status: 'tracked', pending: 'not-archive' })
+const SAVED_ROWS = [DRACO, TEA, CAFE, SERIES, OLD, BROKEN]
+
+describe('filterSavedLists', () => {
+  test('a blank query keeps every list, in order', () => {
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, ' ')), ids(SAVED_ROWS))
+  })
+
+  test('finds a list by its title, what it is of, what kind of search it is, or the tag or name it searches', () => {
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'mostly')), ['dr4c0'])
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'character')), ['dr4c0'])
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'uncommon')), ['c4fe', 'br0'])
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'malfoy')), ['dr4c0'])
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'coffee shop')), ['c4fe'])
+  })
+
+  test('nothing else about a list is matched: not whether it is tracked', () => {
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'tracked')), [])
+  })
+
+  test('every term must appear, ignoring case and accents, as the settings search reads them', () => {
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'draco listing')), ['dr4c0'])
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'draco series')), [])
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'CAFE')), ['c4fe'])
+  })
+
+  test('a raw key is a list\'s name, and so is what stands in for a missing title', () => {
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'old%20tag')), ['copy:tag-works:Old%20Tag'])
+    assert.deepEqual(ids(filterSavedLists(SAVED_ROWS, 'example')), ['br0'])
+  })
+})
+
+describe('sortSavedLists', () => {
+  test('offers Name, Status and Last refreshed, Name first, as the default', () => {
+    assert.deepEqual(SAVED_LIST_SORTS, [
+      { value: 'name', label: 'Name' },
+      { value: 'status', label: 'Status' },
+      { value: 'refreshed', label: 'Last refreshed' },
+    ])
+  })
+
+  test('Name: A to Z by what each is called, ignoring case and accents', () => {
+    assert.deepEqual(ids(sortSavedLists(SAVED_ROWS, 'name')), ['c4fe', 'br0', 'dr4c0', 't3a', 'copy:tag-works:Old%20Tag', 's3r'])
+  })
+
+  test('Status: tracked, then saved, then every list waiting on the reader, by name within each', () => {
+    assert.deepEqual(ids(sortSavedLists(SAVED_ROWS, 'status')), ['c4fe', 'dr4c0', 't3a', 's3r', 'br0', 'copy:tag-works:Old%20Tag'])
+  })
+
+  test('Last refreshed: the newest offline copy first, and the lists with none last, by name', () => {
+    assert.deepEqual(ids(sortSavedLists(SAVED_ROWS, 'refreshed')), ['t3a', 'dr4c0', 's3r', 'copy:tag-works:Old%20Tag', 'c4fe', 'br0'])
+  })
+
+  test('leaves the rows it was given alone', () => {
+    const rows = [...SAVED_ROWS]
+    sortSavedLists(rows, 'status')
+    assert.deepEqual(rows, SAVED_ROWS)
+  })
+})
+
+describe('shownSavedLists', () => {
+  test('the lists the filter keeps, in the order the sort puts them', () => {
+    assert.deepEqual(ids(shownSavedLists(SAVED_ROWS, { query: 'tag', sort: 'refreshed', hold: null })), ['copy:tag-works:Old%20Tag', 'c4fe', 'br0'])
+    assert.deepEqual(ids(shownSavedLists(SAVED_ROWS, { query: '', sort: 'status', hold: null })), ids(sortSavedLists(SAVED_ROWS, 'status')))
+  })
+
+  test('while a title has focus, the rows hold the order they had, whatever the sort', () => {
+    const hold = { order: ['s3r', 't3a', 'dr4c0', 'c4fe', 'br0', 'copy:tag-works:Old%20Tag'], focused: 't3a' }
+    assert.deepEqual(ids(shownSavedLists(SAVED_ROWS, { query: '', sort: 'name', hold })), hold.order)
+    assert.deepEqual(ids(shownSavedLists(SAVED_ROWS, { query: '', sort: 'status', hold })), hold.order)
+  })
+
+  test('a list that arrives while the order is held goes at the end, in the sort\'s order', () => {
+    const hold = { order: ['t3a', 'dr4c0'], focused: 't3a' }
+    assert.deepEqual(ids(shownSavedLists(SAVED_ROWS, { query: '', sort: 'name', hold })), ['t3a', 'dr4c0', 'c4fe', 'br0', 'copy:tag-works:Old%20Tag', 's3r'])
+  })
+
+  test('the filter never hides the list whose title has focus', () => {
+    const hold = { order: ids(SAVED_ROWS), focused: 't3a' }
+    assert.deepEqual(ids(shownSavedLists(SAVED_ROWS, { query: 'draco', sort: 'name', hold })), ['dr4c0', 't3a'])
+  })
+})
+
+describe('savedListsHead', () => {
+  test('with no lists: none yet', () => {
+    assert.deepEqual(savedListsHead([], [], ''), { count: 'none yet', shortCount: 'none yet', placeholder: 'Filter lists' })
+  })
+
+  test('how many lists, how many of them are tracked, and how many have an offline copy', () => {
+    assert.deepEqual(savedListsHead(SAVED_ROWS, SAVED_ROWS, ''), { count: '6 lists · 3 tracked · 4 cached', shortCount: '6', placeholder: 'Filter 6 lists' })
+    assert.deepEqual(savedListsHead([TEA], [TEA], ''), { count: '1 list · 0 tracked · 1 cached', shortCount: '1', placeholder: 'Filter 1 list' })
+  })
+
+  test('while the filter holds a query, how many lists it shows', () => {
+    const shown = filterSavedLists(SAVED_ROWS, 'tag')
+    assert.deepEqual(savedListsHead(SAVED_ROWS, shown, 'tag'), { count: '3 of 6', shortCount: '3 of 6', placeholder: 'Filter 6 lists' })
+    assert.deepEqual(savedListsHead(SAVED_ROWS, [], 'nothing'), { count: '0 of 6', shortCount: '0 of 6', placeholder: 'Filter 6 lists' })
+    assert.deepEqual(savedListsHead(SAVED_ROWS, SAVED_ROWS, '  '), savedListsHead(SAVED_ROWS, SAVED_ROWS, ''), 'spaces are no query')
+  })
+})
+
+describe('focusSuccessor', () => {
+  test('a row that goes hands focus to the one that takes its place: the next', () => {
+    assert.equal(focusSuccessor(['a', 'b', 'c'], ['a', 'c'], 'b'), 'c')
+    assert.equal(focusSuccessor(['a', 'b', 'c'], ['b', 'c'], 'a'), 'b')
+  })
+
+  test('the last row hands it back to the row before', () => {
+    assert.equal(focusSuccessor(['a', 'b', 'c'], ['a', 'b'], 'c'), 'b')
+  })
+
+  test('a row replaced where it stood hands it to its replacement', () => {
+    assert.equal(focusSuccessor(['a', 'copy:k', 'c'], ['a', 'n3w', 'c'], 'copy:k'), 'n3w')
+  })
+
+  test('with no rows left, to none', () => {
+    assert.equal(focusSuccessor(['a'], [], 'a'), null)
+  })
+
+  test('a row the old order never had hands it to the first', () => {
+    assert.equal(focusSuccessor(['a', 'b'], ['a', 'b'], 'x'), 'a')
+    assert.equal(focusSuccessor(undefined, ['a', 'b'], 'x'), 'a')
   })
 })

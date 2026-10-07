@@ -2,12 +2,13 @@ import type { SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
 
 import { ADDON_CLASS, getArchiveLink, parseUser, readWorkIds, toast } from '#common'
+import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
 import { readMisses } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
-import { limitFor, openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
+import { limitFor, openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -70,13 +71,16 @@ function onHistoryPage(): boolean {
  * {@link SearchSource.pageCount}'s promise and {@link SearchSource.firstPageDoc}
  * are for.
  *
+ * Its open URL opens it whatever the switch for the button says
+ * ({@link file://./../lists/openLink.ts}).
+ *
  * Everything generic (cached snapshot, background refresh, back to list) is the
  * shared search-view host ({@link file://./../searchView/host.tsx}).
  */
 export class SearchReadWorks extends Unit {
   static override get name() { return 'SearchReadWorks' }
   // Marks are the list; with them off there is nothing this could show.
-  override get enabled() { return this.options.searchReadWorks && this.options.workMarks.enabled }
+  override get enabled() { return (this.options.searchReadWorks || linkedTo('read-works')) && this.options.workMarks.enabled }
 
   static override async clean(): Promise<void> {
     // A global re-run (options change, navigation) tears the view down. If it was
@@ -99,24 +103,24 @@ export class SearchReadWorks extends Unit {
     if (!onHistoryPage())
       hideClearHistory()
 
-    const host = anchorItem()
-    if (!host || host.parentElement?.querySelector(`.${BUTTON_CLASS}`))
-      return
+    if (this.options.searchReadWorks) {
+      const host = anchorItem()
+      if (!host || host.parentElement?.querySelector(`.${BUTTON_CLASS}`))
+        return
 
-    const button = (
-      <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search read items</button>
-    ) as HTMLElement as HTMLButtonElement
-    button.addEventListener('click', () => {
-      void this.openView(pageUser)
-    })
-    host.after(<li class={ADDON_CLASS}>{button}</li>)
-    this.logger.debug('Search read items button added.')
+      const button = (
+        <button type="button" class={`${ADDON_CLASS}  ${BUTTON_CLASS}`}>Search read items</button>
+      ) as HTMLElement as HTMLButtonElement
+      button.addEventListener('click', () => {
+        void this.openView(pageUser)
+      })
+      host.after(<li class={ADDON_CLASS}>{button}</li>)
+      this.logger.debug('Search read items button added.')
+    }
 
     // If a global re-run closed an open view, reopen it (from cache, no
-    // re-scrape) where the user left off.
-    const pending = takeReopen(snapshotKey(pageUser))
-    if (pending)
-      void this.openView(pageUser, { initialState: pending, refresh: false })
+    // re-scrape) where the user left off. Failing that, its open URL opens it.
+    resumeView(this.options, 'read-works', snapshotKey(pageUser), opts => this.openView(pageUser, opts))
   }
 
   async openView(userId: string, opts: { initialState?: ViewState, refresh?: boolean } = {}): Promise<void> {
@@ -276,8 +280,9 @@ function listChrome(): Element[] {
 /**
  * Stand in for {@link listChrome} while the view is up, the way AO3 draws its
  * own lists: a heading naming the list, the list's subnav item as the current
- * one — in place of our button, which has nothing left to do — and the item
- * that *was* current turned back into a link, so the reader can go to it.
+ * one — in place of our button, which has nothing left to do, or where it
+ * would be — and the item that *was* current turned back into a link, so the
+ * reader can go to it.
  *
  * Everything added carries {@link CHROME_CLASS}, which is what `unmount` removes;
  * the originals come back with the rest of the native page.
@@ -297,7 +302,8 @@ function showReadChrome(userId: string): void {
       <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><a href={href}>{current.textContent?.trim() ?? ''}</a></li>,
     )
   }
-  nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li')?.after(
+  const place = nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li') ?? anchorItem()
+  place?.after(
     <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><span class="current">{LIST_NAME}</span></li>,
   )
 }

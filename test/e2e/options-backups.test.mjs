@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { scriptBackground, skip, startOptions } from './optionsPage.mjs'
+import { scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
 
 const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 390, height: 844 }
@@ -118,10 +117,9 @@ describe('options UI — backups', { skip }, () => {
 
       const asked = (await options.sent('listBackups')).length
       await options.press(await restoreButton(options, second.key))
-      await sleep(300)
+      await until('the restore to be said', async () => (await options.toasts()).includes('Backup restored'))
       assert.deepEqual(await options.sent('restoreBackup'), [[second.key]])
-      assert.ok((await options.toasts()).includes('Backup restored'))
-      assert.ok((await options.sent('listBackups')).length > asked, 'the list is read again, with the backup the restore took')
+      await until('the list to be read again, with the backup the restore took', async () => (await options.sent('listBackups')).length > asked)
       assert.equal(await options.text(await restoreButton(options, second.key)), 'Restore')
     }
     finally {
@@ -136,8 +134,7 @@ describe('options UI — backups', { skip }, () => {
       const button = await restoreButton(options, backups[0].key)
       await options.press(button)
       await options.press(button)
-      await sleep(200)
-      assert.equal(await options.text(button), 'Restoring…')
+      await until('the button to say the restore is running', async () => await options.text(button) === 'Restoring…')
       assert.equal(await button.evaluate(el => el.disabled), true)
     }
     finally {
@@ -152,8 +149,7 @@ describe('options UI — backups', { skip }, () => {
       const button = await restoreButton(options, backups[0].key)
       await options.press(button)
       await options.press(button)
-      await sleep(300)
-      assert.ok((await options.toasts()).includes('Failed to restore backup; see console for details'))
+      await until('the failure to be said', async () => (await options.toasts()).includes('Failed to restore backup; see console for details'))
       assert.equal(await options.text(button), 'Restore')
     }
     finally {
@@ -171,7 +167,7 @@ describe('options UI — backups', { skip }, () => {
         window.__replies.listBackups = backups
         await window.browser.storage.local.set({ 'sync.backups': backups })
       }, taken)
-      await sleep(300)
+      await until('the new backup to join the list', async () => (await options.listRowIds('backups')).length === taken.length)
       assert.deepEqual(await options.listRowIds('backups'), taken.map(b => b.key))
     }
     finally {
@@ -186,13 +182,44 @@ describe('options UI — backups', { skip }, () => {
       assert.ok(await options.page.$(count), 'shown while on')
 
       await options.press(await options.control(await options.row('backups-keep-daily-backups'), 'switch'))
-      await sleep(300)
-      assert.equal(await options.stored('sync.backupsEnabled'), false)
+      await until('daily backups to be turned off', async () => await options.stored('sync.backupsEnabled') === false)
       assert.equal(await options.page.$(count), null, 'gone while off')
       assert.match(await options.text(await options.list('backups')), /No backups yet\s*Daily backups are off\.$/)
     }
     finally {
       await options.close()
+    }
+  })
+
+  test('the count to keep is a stepper, and each press writes it', async () => {
+    const options = await open({ listBackups: [] })
+    try {
+      const row = await options.row('backups-number-of-daily-backups-to-keep')
+      assert.equal(await (await options.control(row, 'spinbutton')).evaluate(el => el.value), '7')
+      // The stepper steps as the pointer goes down, so it is pressed with the pointer.
+      await (await options.control(row, 'button', 'Keep more daily backups')).click()
+      await until('the count to be written', async () => await options.stored('sync.backupCount') === 8)
+      await (await options.control(row, 'button', 'Keep fewer daily backups')).click()
+      await until('the count to be written again', async () => await options.stored('sync.backupCount') === 7)
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('the snapshots sit in an inset that pads them by 10 px, and on a phone in none', async () => {
+    for (const viewport of [WIDE, NARROW]) {
+      const options = await open({ listBackups: everyKind() }, {}, viewport)
+      try {
+        const inset = await (await options.list('backups')).evaluate((frame) => {
+          const panel = frame.closest('[data-row-inset]')
+          return panel && getComputedStyle(panel).padding
+        })
+        assert.equal(inset, viewport === WIDE ? '10px' : null, `at ${viewport.width} px`)
+      }
+      finally {
+        await options.close()
+      }
     }
   })
 

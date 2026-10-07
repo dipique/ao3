@@ -1,12 +1,14 @@
 import type { RefiningMark, TrackedList } from '#common'
 
-import { getArchiveLink, normalizeTrackedUrl, parseRefiningMark, refineLink, REFINING_STORAGE_KEY, refiningId } from '#common'
+import { getArchiveLink, onListPage, parseRefiningMark, refineLink, REFINING_STORAGE_KEY, refiningId } from '#common'
 
 /**
- * Which list this tab is refining — the tab-side half of refining a list.
+ * Which saved list this tab is refining — the tab-side half of refining a list.
  *
- * The options page links each list to its own page with the list's id in the
- * fragment ({@link refineLink}). Arriving by that link marks the tab as
+ * The options page links each saved list, tracked or not, to its own page with
+ * the list's id in the fragment ({@link refineLink}). The id is the list's
+ * record's, which a tracked list's entry shares, so a link or a mark carrying
+ * an entry's id names its saved list. Arriving by that link marks the tab as
  * refining that list, and the mark is kept in the tab's `sessionStorage`
  * ({@link REFINING_STORAGE_KEY}) rather than in the address, because refining
  * is made of moving between addresses: submitting a listing's Sort & Filter
@@ -76,11 +78,21 @@ export function pendingRestore<T extends Pick<TrackedList, 'id' | 'kind' | 'url'
   if (!mark?.restore)
     return null
   const list = lists.find(one => one.id === mark.id)
-  if (!list)
-    return null
-  const page = normalizeTrackedUrl(href)
-  const own = normalizeTrackedUrl(list.url)
-  return page && own && page.kind === list.kind && page.key === own.key ? list : null
+  return list && onListPage(list, href) ? list : null
+}
+
+/**
+ * The list this page has come to refine, with its view filter still to go
+ * back: one named by a refining link the page hasn't yet taken off its address
+ * ({@link takeRefiningLink}), or else the tab's mark ({@link pendingRestore}).
+ * Either way, only on the list's own page. For a page still loading, which has
+ * yet to take the link.
+ */
+export function arrivingList<T extends Pick<TrackedList, 'id' | 'kind' | 'url'>>(lists: readonly T[]): T | null {
+  const linked = lists.find(one => one.id === refiningId(location.hash))
+  if (linked)
+    return onListPage(linked, location.href) ? linked : null
+  return pendingRestore(lists)
 }
 
 /**

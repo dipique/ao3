@@ -134,12 +134,21 @@ async function followHash(hash: string): Promise<void> {
  * Follow the address bar: the hash the page was opened with, and every one it is
  * given afterwards (the rail sets them, and so can the reader, or Back).
  *
- * Once the page has opened on what its address names, the body carries
- * `data-landed`: until then the page may still scroll under whatever is
- * pointing at it, which is what anything driving the page waits out.
+ * Once the page has opened on what its address names, the body's `data-landed`
+ * names the hash it landed on. Each later jump takes it away until that jump
+ * has landed in turn, or leaves it to a jump that overtook it: until then the
+ * page may still scroll under whatever is pointing at it, which is what
+ * anything driving the page waits out.
  */
 export function useHashNav(ready: Ref<boolean>): void {
-  useEventListener(window, 'hashchange', () => void followHash(location.hash))
+  async function land(hash: string): Promise<void> {
+    delete document.body.dataset.landed
+    await followHash(hash)
+    if (ready.value && location.hash === hash)
+      document.body.dataset.landed = hash
+  }
+
+  useEventListener(window, 'hashchange', () => void land(location.hash))
 
   watch(ready, async (isReady) => {
     if (!isReady)
@@ -147,7 +156,6 @@ export function useHashNav(ready: Ref<boolean>): void {
     // The categories only render once the options have loaded, and they are what
     // register the categories and anchors this reads.
     await nextTick()
-    await followHash(location.hash)
-    document.body.dataset.landed = ''
+    await land(location.hash)
   }, { immediate: true })
 }

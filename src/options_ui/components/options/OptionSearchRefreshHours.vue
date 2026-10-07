@@ -16,7 +16,7 @@ const choices: { hours: number, label: string }[] = [
   <Select
     :id="id"
     v-model="optionValue"
-    h-8 w-40
+    size="row"
   >
     <SelectItem
       v-for="choice in choices"

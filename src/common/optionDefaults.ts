@@ -54,6 +54,7 @@ export const OPTION_DEFAULTS: Options = {
   searchTagWorks: true,
   searchSeriesWorks: true,
   searchTextResults: true,
+  searchFilteredListing: false,
   searchPerPage: 50,
   searchMaxResults: 1000,
   searchLanguage: { enabled: false, language: null },

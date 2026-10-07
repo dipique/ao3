@@ -25,7 +25,7 @@ const size = computed(() => SIZES[props.size ?? 'default'])
   <RekaSelectRoot v-bind="forward">
     <RekaSelectTrigger
       :id="props.id"
-      class="whitespace-nowrap default input-ring disabled:cursor-not-allowed placeholder:text-muted-fg disabled:op50"
+      class="touch-target whitespace-nowrap default input-ring disabled:cursor-not-allowed placeholder:text-muted-fg disabled:op50"
       :class="size.trigger"
       flex="~ items-center justify-between"
       border="1 input"
@@ -42,7 +42,7 @@ const size = computed(() => SIZES[props.size ?? 'default'])
     </RekaSelectTrigger>
 
     <RekaSelectPortal>
-      <RekaSelectContent position="popper" relative z-50 max-h-96 min-w-32 overflow-hidden border rounded-md shadow-md class="popover">
+      <RekaSelectContent position="popper" relative z-50 max-h-96 min-w-32 overflow-hidden border rounded="[10px]" p="[5px]" class="popover shadow-[var(--pop-shadow)]">
         <RekaSelectScrollUpButton>
           <Icon i-mdi-chevron-up />
         </RekaSelectScrollUpButton>

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { DIST, installMock, sleep } from './helpers.mjs'
+import { DIST, installMock } from './helpers.mjs'
 
 export { launch } from './helpers.mjs'
 
@@ -68,7 +68,26 @@ export function persistentMock(seed) {
 
 /** A stored option, as the tab's store now holds it. */
 export function storedOption(tab, name = 'trackedLists') {
-  return tab.evaluate((key, option) => JSON.parse(localStorage.getItem(key) || 'null')?.store?.[`option.${option}`] ?? null, STORE_KEY, name)
+  return stored(tab, `option.${name}`)
+}
+
+/**
+ * Anything the tab's store holds, by its whole key (`cache.searchLists`), as it
+ * is kept across loads. Only what is set is kept ({@link persistentMock}), so a
+ * key the page has removed still reads as it was: ask the page's own
+ * `browser.storage` for those.
+ */
+export function stored(tab, key) {
+  return tab.evaluate((store, name) => JSON.parse(localStorage.getItem(store) || 'null')?.store?.[name] ?? null, STORE_KEY, key)
+}
+
+/**
+ * Everything the tab's store holds, as it is kept across loads: to seed another
+ * page, such as the options page, with what the tab wrote. Read as
+ * {@link stored} reads one key, so a key the page has removed is still there.
+ */
+export function keptStore(tab) {
+  return tab.evaluate(store => JSON.parse(localStorage.getItem(store) || 'null')?.store ?? {}, STORE_KEY)
 }
 
 /** The tab's refining mark, as it stored it, or null. */
@@ -87,33 +106,52 @@ async function contentScript() {
   return bundle
 }
 
-/** Put the content script into the page on screen, and give it time to run. */
+/** Put the content script into the page on screen, and wait for the page to settle ({@link settled}). */
 export async function inject(tab) {
   const { css, js } = await contentScript()
   await tab.addStyleTag({ content: css })
   await tab.addScriptTag({ content: js })
-  await sleep(1200)
+  await settled(tab)
+}
+
+/** How many runs the page's content script has finished, each with every unit it ran ready. */
+export function runs(tab) {
+  return tab.evaluate(() => Number(document.documentElement.dataset.ao3eRuns ?? 0))
+}
+
+/**
+ * Wait for the page to settle: its content script has finished a run after its
+ * `after`th, and none is under way or asked for by an options change — the
+ * marks it keeps on `<html>`. Work a unit leaves going once it is ready, such
+ * as a search view opening, isn't part of a run: wait for what it does instead.
+ */
+export function settled(tab, after = 0) {
+  return tab.waitForFunction((done) => {
+    const { dataset } = document.documentElement
+    return !('ao3eBusy' in dataset) && Number(dataset.ao3eRuns ?? 0) > done
+  }, {}, after)
 }
 
 /**
  * A new tab on the stand-in archive: every request answered by `route(url)`
- * (which returns a page's HTML, or null for a 404), the extension's storage
- * seeded with `seed` and kept across loads. `requests` collects every URL the
- * tab asked for.
+ * (which returns a page's HTML, or null for a 404, or a promise of either, to
+ * hold the answer back until it settles), the extension's storage seeded with
+ * `seed` and kept across loads. `requests` collects every URL the tab asked for.
  */
 export async function openTab(browser, { seed, route, requests = [] }) {
   const tab = await browser.newPage()
   await tab.setViewport({ width: 1280, height: 900 })
   await tab.setRequestInterception(true)
-  tab.on('request', (req) => {
+  tab.on('request', async (req) => {
     const url = req.url()
     if (!url.startsWith(`${ARCHIVE}/`))
       return void req.abort()
     requests.push(url)
-    const body = route(new URL(url))
+    const body = await route(new URL(url))
+    // A request held back may have been dropped meanwhile, by a navigation.
     if (body === null)
-      return void req.respond({ status: 404, contentType: 'text/html; charset=utf-8', body: '<!doctype html><title>404</title>' })
-    void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body })
+      return void req.respond({ status: 404, contentType: 'text/html; charset=utf-8', body: '<!doctype html><title>404</title>' }).catch(() => {})
+    void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body }).catch(() => {})
   })
   await tab.evaluateOnNewDocument(persistentMock(seed))
   return tab
@@ -140,12 +178,36 @@ export const TRACK_TEXT = '.AO3E--filter-toolbar--track--text'
 export const TRACK_BOX = '.AO3E--filter-toolbar--track--box'
 export const TITLE_INPUT = `${TRACK_BOX} input[aria-label="Title for this list"]`
 
-/** Open the collapsed toolbar, and the pill's box under it. Every re-run rebuilds both shut. */
+/** Open the toolbar, unless it is open, and wait for its pills to be in place. */
+export async function openToolbar(tab) {
+  if (!await tab.$eval('.AO3E--filter-toolbar', bar => bar.classList.contains('AO3E--filter-toolbar--open')))
+    await tab.click('.AO3E--filter-toolbar--fab')
+  // The panel fades and slides in, and a click aimed while it moves can miss.
+  await tab.waitForFunction(() => getComputedStyle(document.querySelector('.AO3E--filter-toolbar--panel')).opacity === '1')
+}
+
+/**
+ * Open the toolbar, and the pill's box under it, whichever of them is shut:
+ * every re-run rebuilds both shut, and a pill rebuilt in place is shut in a
+ * toolbar left open. A pill with no box (one click tracks a saved list) is
+ * left unpressed.
+ */
 export async function openBox(tab) {
-  await tab.click('.AO3E--filter-toolbar--fab')
-  await sleep(300)
-  await tab.click(TRACK_PILL)
-  await sleep(300)
+  await openToolbar(tab)
+  if (await tab.$eval(TRACK_BOX, box => box.hidden).catch(() => false)) {
+    await tab.click(TRACK_PILL)
+    await tab.waitForFunction(selector => document.querySelector(selector)?.hidden === false, {}, TRACK_BOX)
+  }
+}
+
+/**
+ * Do `action`, which writes an option the page's units re-run on, and wait for
+ * the re-run to finish, every unit built again from what was written.
+ */
+export async function rerun(tab, action) {
+  const before = await runs(tab)
+  await action()
+  await settled(tab, before)
 }
 
 export function pillText(tab) {
@@ -257,8 +319,14 @@ export const SIDEBAR_CHARACTERS = [
  * last. What's ticked follows the address, as it does on the archive.
  *
  * `tagId` is the name as `tag_id` spells it, the archive's own escapes included.
+ *
+ * `subnav` draws the row of actions the archive puts above a listing (Works,
+ * Bookmarks, and the Filters link a narrow screen opens the sidebar by), which
+ * is where the search view's button goes. `pages` draws its
+ * pagination, above and below the works, on the page the address names, and
+ * `total` is how many works the heading says the listing holds.
  */
-export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)] }) {
+export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)], subnav = false, pages = 1, total = blurbs.length }) {
   const values = name => url.searchParams.getAll(name)
   const excluded = values('exclude_work_search[character_ids][]')
   const complete = url.searchParams.get('work_search[complete]') ?? ''
@@ -270,13 +338,34 @@ export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)] }) {
   const radio = (value, label) => `
     <li><label><input type="radio" name="work_search[complete]" value="${value}"${complete === value ? ' checked' : ''} /> <span>${label}</span></label></li>`
   const name = tagId.replace(/\*s\*/g, '/').replace(/\*a\*/g, '&').replace(/\*d\*/g, '.').replace(/\*q\*/g, '?').replace(/\*h\*/g, '#')
+  const page = Number(url.searchParams.get('page') ?? 1)
+  const first = (page - 1) * blurbs.length + 1
+  const pagination = pages > 1
+    ? `<h4 class="landmark heading">Navigation</h4>
+    <ol class="pagination actions pagy" role="navigation">${Array.from({ length: pages }, (_, i) => i + 1)
+      .map(n => (n === page ? `<li><a aria-current="page" class="current">${n}</a></li>` : `<li><a href="?page=${n}">${n}</a></li>`))
+      .join('')}</ol>`
+    : ''
+  const actions = subnav
+    ? `<div class="navigation actions module">
+      <h3 class="landmark heading">Navigation and Actions</h3>
+      <ul class="user navigation actions" role="navigation">
+        <li><span class="current">Works</span></li>
+        <li><a href="/tags/${encodeURIComponent(tagId)}/bookmarks">Bookmarks</a></li>
+        <li class="narrow-shown hidden"><a href="#work-filters" id="go_to_filters">Filters</a></li>
+      </ul>
+    </div>`
+    : ''
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Works in ${escape(name)}</title></head>
 <body>
   ${HEADER}
   <div id="main" class="works-index region">
-    <h2 class="heading">1 - ${blurbs.length} of ${blurbs.length} Works in <a class="tag" href="/tags/${encodeURIComponent(tagId)}">${escape(name)}</a></h2>
+    <h2 class="heading">${first} - ${first + blurbs.length - 1} of ${total} Works in <a class="tag" href="/tags/${encodeURIComponent(tagId)}">${escape(name)}</a></h2>
+    ${actions}
+    ${pagination}
     <ol class="work index group">${blurbs.join('')}</ol>
+    ${pagination}
     <form class="narrow-hidden filters" id="work-filters" action="/works" accept-charset="UTF-8" method="get">
       <input name="utf8" type="hidden" value="✓" />
       <select name="work_search[sort_column]" id="work_search_sort_column"><option value="revised_at" selected>Date Updated</option></select>
@@ -297,8 +386,12 @@ export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)] }) {
 </body></html>`
 }
 
-/** Works search results for whatever the address asked for. */
-export function searchPage(url, blurbs = [blurb(201), blurb(202)]) {
+/**
+ * Works search results for whatever the address asked for. `subnav` draws the
+ * "Edit Your Search" row the archive puts above them, which is where the
+ * search view's button goes: without it no view is offered.
+ */
+export function searchPage(url, blurbs = [blurb(201), blurb(202)], { subnav = false } = {}) {
   const query = url.searchParams.get('work_search[query]') ?? ''
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Search Works</title></head>
@@ -307,6 +400,7 @@ export function searchPage(url, blurbs = [blurb(201), blurb(202)]) {
   <div id="main" class="works-search region">
     <h2 class="heading">Search Works</h2>
     <h4 class="heading">You searched for: ${escape(query)}</h4>
+    ${subnav ? '<ul class="navigation actions"><li><a href="?edit_search=true">Edit Your Search</a></li></ul>' : ''}
     <h3 class="heading">${blurbs.length} Found</h3>
     <ol class="work index group">${blurbs.join('')}</ol>
   </div>

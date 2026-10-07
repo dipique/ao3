@@ -161,6 +161,15 @@ export interface Options {
    * of works, and AO3 pages them twenty at a time.
    */
   searchTextResults: boolean
+  /**
+   * On a filtered listing — a tag's, an author's or a collection's works, the
+   * pages AO3's own Sort & Filter sidebar sorts and filters — add a button that
+   * loads the listing into the same filterable view. Off unless the reader
+   * switches it on, since AO3 already sorts and filters these. Bounded by
+   * {@link Options.searchMaxResults}, as a busy tag's listing runs to tens of
+   * thousands of works.
+   */
+  searchFilteredListing: boolean
   /** How many works to render per page in the search views (paging keeps large lists fast). */
   searchPerPage: number
   /**

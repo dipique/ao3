@@ -18,7 +18,7 @@ OptionRowRulesContext.provide({
       <OptionRowRuleColors />
       <Dialog>
         <DialogTrigger as-child>
-          <Button variant="link">
+          <Button variant="link" text="[12px]!">
             How rules work
           </Button>
         </DialogTrigger>

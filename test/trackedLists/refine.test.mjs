@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { fillMeta, parseRefiningMark, planUndo, planUpdate, tagTypeFromProfile, trackedKey } from '../../src/common/trackedLists.ts'
+import { fillMeta, parseRefiningMark, requery, tagTypeFromProfile } from '../../src/common/trackedLists.ts'
 
 const HP = '/tags/Harry%20Potter%20-%20J*d*%20K*d*%20Rowling/works'
 
@@ -75,132 +75,55 @@ describe('fillMeta', () => {
   })
 })
 
-describe('planUpdate', () => {
-  const since = 20_000
-  const hp = { id: 'hp', kind: 'works-filter', url: HP, alias: 'Fandom: Harry Potter - J. K. Rowling', type: 'fandom', entity: 'Harry Potter - J. K. Rowling', tracked: true, since }
-  const tea = { id: 'tea', kind: 'text-search', url: '/works/search?work_search[query]=tea', alias: 'Tea', tracked: false, since: since - 3 }
-  const lists = [hp, tea]
+describe('requery', () => {
+  const hp = { url: HP, type: 'fandom', entity: 'Harry Potter - J. K. Rowling' }
   const refined = '/works?exclude_work_search[character_ids][]=1234&work_search[complete]=T&commit=Sort+and+Filter&tag_id=Harry+Potter+-+J*d*+K*d*+Rowling'
 
-  test('replaces the query and keeps what makes it the same list', () => {
-    const plan = planUpdate(lists, 'hp', { url: `https://archiveofourown.org${refined}` })
-    assert.equal(plan.ok, true)
-    assert.deepEqual(plan.after, {
-      ...hp,
+  test('the page\'s query, its address normalized', () => {
+    assert.deepEqual(requery(hp, { url: `https://archiveofourown.org${refined}` }), {
+      kind: 'works-filter',
       url: '/works?exclude_work_search[character_ids][]=1234&work_search[complete]=T&tag_id=Harry+Potter+-+J*d*+K*d*+Rowling',
+      type: 'fandom',
+      entity: 'Harry Potter - J. K. Rowling',
     })
-    assert.equal(plan.before, hp)
-    assert.deepEqual(plan.lists, [plan.after, tea], 'in place, the others untouched')
   })
 
-  test('a paused list stays paused, and a scanned tag stays scanned unless told', () => {
-    const plan = planUpdate(lists, 'tea', { url: '/works/search?work_search[query]=tea&work_search[complete]=T' })
-    assert.equal(plan.after.tracked, false)
-    assert.equal(plan.after.since, since - 3)
-
-    const tag = { id: 't', kind: 'tag-works', url: '/tags/marriage%20problems', alias: 'x', tracked: true, since, scan: true }
-    assert.equal(planUpdate([tag], 't', { url: '/tags/marriage%20woes' }).after.scan, true)
-    assert.equal('scan' in planUpdate([tag], 't', { url: '/tags/marriage%20woes', scan: false }).after, false)
-  })
-
-  test('writes the title it\'s given, trimmed, and keeps the old one when given none', () => {
-    assert.equal(planUpdate(lists, 'hp', { url: refined, alias: '  HP, no Draco ' }).after.alias, 'HP, no Draco')
-    assert.equal(planUpdate(lists, 'hp', { url: refined }).after.alias, hp.alias)
-  })
-
-  test('refuses a title another list has, and says which', () => {
-    const plan = planUpdate(lists, 'hp', { url: refined, alias: ' TEA ' })
-    assert.equal(plan.ok, false)
-    assert.equal(plan.reason, 'title')
-    assert.equal(plan.other.id, 'tea')
-  })
-
-  test('a title the list already had is never refused, even one sync has doubled up', () => {
-    const twin = { ...tea, id: 'twin', alias: hp.alias.toUpperCase(), url: '/works/search?work_search[query]=twin' }
-    assert.equal(planUpdate([hp, twin], 'hp', { url: refined }).ok, true)
-    assert.equal(planUpdate([hp, twin], 'hp', { url: refined, alias: hp.alias }).ok, true)
-  })
-
-  test('refuses to make a list identical to another, and says which', () => {
-    const plan = planUpdate(lists, 'hp', { url: '/works/search?work_search[query]=tea&work_search[sort_column]=title' })
-    assert.equal(plan.ok, false)
-    assert.equal(plan.reason, 'duplicate')
-    assert.equal(plan.other.id, 'tea')
+  test('a scanned tag stays scanned unless the page has checked it afresh', () => {
+    const tag = { url: '/tags/marriage%20problems', scan: true }
+    assert.equal(requery(tag, { url: '/tags/marriage%20woes' }).scan, true)
+    assert.equal('scan' in requery(tag, { url: '/tags/marriage%20woes', scan: false }), false)
+    assert.equal(requery({ url: tag.url }, { url: '/tags/marriage%20woes', scan: true }).scan, true)
+    assert.equal('scan' in requery({ url: tag.url }, { url: '/tags/marriage%20woes' }), false)
   })
 
   test('the view filter is stored canonical, and dropped when there is none', () => {
-    const tag = { id: 't', kind: 'tag-works', url: '/tags/marriage%20problems', alias: 'x', tracked: true, since, filter: { text: 'old' } }
-    const plan = planUpdate([tag], 't', { url: tag.url, filter: { facets: { characters: { ex: ['b', 'a', 'b'] } } } })
-    assert.deepEqual(plan.after.filter, { facets: { characters: { ex: ['a', 'b'] } } })
-    assert.equal('filter' in planUpdate([tag], 't', { url: tag.url }).after, false)
-    assert.equal('filter' in planUpdate([tag], 't', { url: tag.url, filter: { facets: {} } }).after, false)
-  })
-
-  test('a filtered list can\'t be matched to the unfiltered page as a duplicate of itself', () => {
-    const tag = { id: 't', kind: 'tag-works', url: '/tags/marriage%20problems', alias: 'x', tracked: true, since, filter: { text: 'old' } }
-    const other = { id: 'o', kind: 'tag-works', url: '/tags/marriage%20problems', alias: 'y', tracked: true, since }
-    const plan = planUpdate([tag, other], 't', { url: tag.url })
-    assert.equal(plan.reason, 'duplicate')
-    assert.equal(plan.other.id, 'o')
+    const tag = { url: '/tags/marriage%20problems' }
+    assert.deepEqual(requery(tag, { url: tag.url, filter: { facets: { characters: { ex: ['b', 'a', 'b'] } } } }).filter, { facets: { characters: { ex: ['a', 'b'] } } })
+    assert.equal('filter' in requery(tag, { url: tag.url }), false)
+    assert.equal('filter' in requery(tag, { url: tag.url, filter: { facets: {} } }), false)
   })
 
   test('type and entity follow the query: what the page knows, else what still fits', () => {
     // The root stays and the page names no category: the stored one still fits.
-    assert.deepEqual(pick(planUpdate(lists, 'hp', { url: refined }).after), { type: 'fandom', entity: 'Harry Potter - J. K. Rowling' })
+    assert.deepEqual(pick(requery(hp, { url: refined })), { type: 'fandom', entity: 'Harry Potter - J. K. Rowling' })
     // Another tag, whose category the page names.
     assert.deepEqual(
-      pick(planUpdate(lists, 'hp', { url: '/tags/Draco%20Malfoy/works', meta: { type: 'character', entity: 'Draco Malfoy' } }).after),
+      pick(requery(hp, { url: '/tags/Draco%20Malfoy/works', meta: { type: 'character', entity: 'Draco Malfoy' } })),
       { type: 'character', entity: 'Draco Malfoy' },
     )
     // Another tag, whose category nothing has named yet: the old one doesn't carry over.
-    assert.deepEqual(pick(planUpdate(lists, 'hp', { url: '/tags/Draco%20Malfoy/works' }).after), { type: 'tag', entity: 'Draco Malfoy' })
-    // A series' title can't be checked against its id, so moving series drops it.
-    const series = { id: 's', kind: 'series-works', url: '/series/1', alias: 'One', type: 'series', entity: 'Series One', tracked: true, since }
-    assert.deepEqual(pick(planUpdate([series], 's', { url: '/series/2' }).after), { type: 'series', entity: '2' })
-    assert.deepEqual(pick(planUpdate([series], 's', { url: '/series/2', meta: { type: 'series', entity: 'Series Two' } }).after), { type: 'series', entity: 'Series Two' })
+    assert.deepEqual(pick(requery(hp, { url: '/tags/Draco%20Malfoy/works' })), { type: 'tag', entity: 'Draco Malfoy' })
   })
 
-  test('nothing to update, or nothing to update it to', () => {
-    assert.deepEqual(planUpdate(lists, 'gone', { url: refined }), { ok: false, reason: 'missing' })
-    assert.deepEqual(planUpdate(lists, 'hp', { url: 'https://example.com/tags/x/works' }), { ok: false, reason: 'invalid' })
-  })
-})
-
-describe('planUndo', () => {
-  const since = 20_000
-  const before = { id: 'hp', kind: 'works-filter', url: HP, alias: 'HP', type: 'fandom', entity: 'Harry Potter - J. K. Rowling', tracked: true, since }
-  const other = { id: 'o', kind: 'text-search', url: '/works/search?work_search[query]=tea', alias: 'Tea', tracked: true, since }
-  const { after, lists } = planUpdate([before, other], 'hp', { url: '/works?work_search[complete]=T&tag_id=Harry+Potter+-+J*d*+K*d*+Rowling', alias: 'HP, complete' })
-
-  test('puts the list back as it was', () => {
-    const plan = planUndo(lists, before, after)
-    assert.equal(plan.ok, true)
-    assert.deepEqual(plan.lists, [before, other])
+  test('a series\' title can\'t be checked against another series\' id, so moving series drops it', () => {
+    const series = { url: '/series/1', type: 'series', entity: 'Series One' }
+    assert.deepEqual(pick(requery(series, { url: '/series/1' })), { type: 'series', entity: 'Series One' })
+    assert.deepEqual(pick(requery(series, { url: '/series/2' })), { type: 'series', entity: '2' })
+    assert.deepEqual(pick(requery(series, { url: '/series/2', meta: { type: 'series', entity: 'Series Two' } })), { type: 'series', entity: 'Series Two' })
   })
 
-  test('the entry as storage hands it back — keys in another order — is still the same', () => {
-    const stored = JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(after).reverse())))
-    assert.equal(planUndo([stored, other], before, after).ok, true)
-  })
-
-  test('not once the list has changed again since', () => {
-    for (const changed of [{ ...after, tracked: false }, { ...after, alias: 'Renamed' }, { ...after, url: HP }])
-      assert.deepEqual(planUndo([changed, other], before, after), { ok: false, reason: 'changed' })
-  })
-
-  test('not once it\'s gone', () => {
-    assert.deepEqual(planUndo([other], before, after), { ok: false, reason: 'missing' })
-  })
-
-  test('not if another list has taken its old query, or its old title', () => {
-    const copy = { ...other, id: 'copy', url: HP, alias: 'Copy' }
-    const plan = planUndo([...lists, copy], before, after)
-    assert.equal(plan.reason, 'duplicate')
-    assert.equal(plan.other.id, 'copy')
-    assert.equal(trackedKey(copy), trackedKey(before))
-
-    const namesake = { ...other, id: 'n', url: '/works/search?work_search[query]=n', alias: 'hp' }
-    assert.equal(planUndo([...lists, namesake], before, after).reason, 'title')
+  test('nothing for a page that isn\'t trackable', () => {
+    assert.equal(requery(hp, { url: 'https://example.com/tags/x/works' }), null)
   })
 })
 

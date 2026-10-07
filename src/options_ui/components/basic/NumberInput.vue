@@ -29,8 +29,9 @@ const modelWidth = computed(() => `${Math.max(2, String(modelValue.value).length
 const rightPadding = computed(() => `${Math.max(unitWidth.value, 8)}px`)
 </script>
 
+<!-- At the height of a settings row's other controls: 28 px, with their 12.5 px text. -->
 <template>
-  <div relative text-sm>
+  <div relative text="[12.5px]">
     <Input
       v-bind="$attrs"
       v-model="modelValue"
@@ -39,7 +40,8 @@ const rightPadding = computed(() => `${Math.max(unitWidth.value, 8)}px`)
         '--unit-width': rightPadding,
         '--model-width': modelWidth,
       }"
-      box-content h-8 pl-2 text-right
+      class="rounded-[7px]"
+      box-content h-[26px] pl-2 text-right tabular-nums
       pr="[var(--unit-width)]"
       w="[var(--model-width)]"
     >
@@ -50,11 +52,9 @@ const rightPadding = computed(() => `${Math.max(unitWidth.value, 8)}px`)
           flex="inline items-center"
           pointer-events-none pr-2
         >
-          <div h-1lh>
-            <span text="0.6rem" op50>
-              {{ unit }}
-            </span>
-          </div>
+          <span text="[11px] muted-fg">
+            {{ unit }}
+          </span>
         </div>
       </template>
     </Input>

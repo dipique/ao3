@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { after, before, beforeEach, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { REOPEN_GUARD_MS } from '../../src/common/constants.ts'
+import { ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { inject } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -67,8 +68,6 @@ describe('Shift bypass', { skip }, () => {
 
   before(async () => {
     ensureBuilt()
-    const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
-    const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
     browser = await puppeteer.launch({
       executablePath: chromePath,
@@ -111,9 +110,7 @@ describe('Shift bypass', { skip }, () => {
     // decorated DOM with it, and beforeEach puts it back.
     mount = async () => {
       await page.goto(LISTING_URL, { waitUntil: 'domcontentloaded' })
-      await page.addStyleTag({ content: css })
-      await page.addScriptTag({ content: js })
-      await sleep(1200)
+      await inject(page)
       // Registered after the content script, on the same node and phase, so it
       // runs after the extension's handler and sees whatever it decided — and
       // survives the stopPropagation() the extension calls when it takes over.
@@ -135,16 +132,40 @@ describe('Shift bypass', { skip }, () => {
     // Put the fixture back if the previous gesture navigated off it.
     if (page.url() !== LISTING_URL || !(await page.$('#blurb')))
       await mount()
-    navigations = []
-    newTabs = []
     await page.evaluate(() => {
       window.__events = []
       document.querySelectorAll('.AO3E--menu').forEach(el => el.remove())
     })
   })
 
-  /** Click `selector` for real while holding `keys`, and report what followed. */
-  async function gesture(selector, { button = 'left', keys = [] } = {}) {
+  /**
+   * What a gesture is waited out for: our menu opening; the page's own
+   * listener hearing the event, after the extension's has had its say; or the
+   * link being opened, in this tab or another, whether the browser opened it or
+   * we did.
+   */
+  const OUTCOMES = {
+    menu: async () => (await page.$('.AO3E--menu')) !== null,
+    event: () => page.evaluate(() => window.__events.length > 0),
+    open: () => navigations.length + newTabs.length > 0,
+  }
+
+  /** When a menu of ours was last seen open: the content script opens no other until its guard has passed. */
+  let menuSeenAt = 0
+
+  /**
+   * Click `selector` for real while holding `keys`, wait for its `outcome`
+   * ({@link OUTCOMES}), and report what followed. Waiting for what the gesture
+   * brings about, rather than for a while, is what keeps a tab the browser is
+   * slow to open counted against its own gesture, and not the next one. A
+   * gesture that opens a menu first sits out what is left of the guard after
+   * the last one ({@link REOPEN_GUARD_MS}), which would otherwise swallow it.
+   */
+  async function gesture(selector, { button = 'left', keys = [], outcome }) {
+    if (outcome === 'menu')
+      await sleep(Math.max(0, menuSeenAt + REOPEN_GUARD_MS - Date.now()))
+    navigations = []
+    newTabs = []
     for (const key of keys)
       await page.keyboard.down(key)
     try {
@@ -154,7 +175,9 @@ describe('Shift bypass', { skip }, () => {
       for (const key of [...keys].reverse())
         await page.keyboard.up(key)
     }
-    await sleep(400)
+    await until(`the ${outcome} to follow`, OUTCOMES[outcome])
+    if (outcome === 'menu')
+      menuSeenAt = Date.now()
     // A modified click can open a *foreground* tab, which backgrounds ours
     // — and puppeteer can't drive input on a backgrounded tab. Close whatever
     // opened and take the focus back before the next gesture.
@@ -176,6 +199,35 @@ describe('Shift bypass', { skip }, () => {
   const SHIFT = ['Shift']
   const CTRL_SHIFT = ['Control', 'Shift']
 
+  /**
+   * A browser under load can open a modified click's tab well after the click
+   * itself has been handled. A link here stands in for that: its click is
+   * handled at once, and the tab it opens follows `LATE_MS` later.
+   */
+  const LATE_URL = 'https://archiveofourown.org/tags/Late/works'
+  const LATE_MS = 2000
+
+  test('a tab the browser is slow to open is its own gesture\'s, and not the next one\'s', async () => {
+    await page.evaluate((url, ms) => {
+      const link = document.createElement('a')
+      link.id = 'late'
+      link.href = url
+      link.textContent = 'Opens late'
+      link.addEventListener('click', (event) => {
+        event.preventDefault()
+        setTimeout(() => window.open(url, '_blank'), ms)
+      })
+      document.getElementById('main').append(link)
+    }, LATE_URL, LATE_MS)
+
+    const late = await gesture('#late', { outcome: 'open' })
+    assert.deepEqual(late.opened, [LATE_URL])
+
+    const next = await gesture('#tag-fluff', { button: 'right', outcome: 'menu' })
+    assert.equal(next.menu, true)
+    assert.deepEqual(next.opened, [], 'the slow tab was counted where it belonged')
+  })
+
   test('the highlighted tag got an indicator to aim at', async () => {
     assert.equal(await page.$(INDICATOR) !== null, true)
   })
@@ -183,25 +235,25 @@ describe('Shift bypass', { skip }, () => {
   // --- Right-click ---------------------------------------------------------
 
   test('a plain right-click on a link opens our menu', async () => {
-    const r = await gesture('#tag-fluff', { button: 'right' })
+    const r = await gesture('#tag-fluff', { button: 'right', outcome: 'menu' })
     assert.equal(r.menu, true)
     assert.deepEqual(r.events, [{ type: 'contextmenu', prevented: true }])
   })
 
   test('Shift+right-click on a link leaves the native menu alone', async () => {
-    const r = await gesture('#tag-fluff', { button: 'right', keys: SHIFT })
+    const r = await gesture('#tag-fluff', { button: 'right', keys: SHIFT, outcome: 'event' })
     assert.equal(r.menu, false)
     assert.deepEqual(r.events, [{ type: 'contextmenu', prevented: false }])
   })
 
   test('Shift+right-click on an indicator leaves the native menu alone', async () => {
-    const r = await gesture(INDICATOR, { button: 'right', keys: SHIFT })
+    const r = await gesture(INDICATOR, { button: 'right', keys: SHIFT, outcome: 'event' })
     assert.equal(r.menu, false)
     assert.deepEqual(r.events, [{ type: 'contextmenu', prevented: false }])
   })
 
   test('a plain right-click on an indicator still opens our menu', async () => {
-    const r = await gesture(INDICATOR, { button: 'right' })
+    const r = await gesture(INDICATOR, { button: 'right', outcome: 'menu' })
     assert.equal(r.menu, true)
     assert.deepEqual(r.events, [{ type: 'contextmenu', prevented: true }])
   })
@@ -209,13 +261,13 @@ describe('Shift bypass', { skip }, () => {
   // --- Left-click, no navigation -------------------------------------------
 
   test('with openMenuOnClick, a plain click on a link opens the menu instead of navigating', async () => {
-    const r = await gesture('#tag-fluff')
+    const r = await gesture('#tag-fluff', { outcome: 'menu' })
     assert.equal(r.menu, true)
     assert.deepEqual(r.opened, [], 'the link must not have been followed')
   })
 
   test('a plain click on an indicator still opens its menu', async () => {
-    const r = await gesture(INDICATOR)
+    const r = await gesture(INDICATOR, { outcome: 'menu' })
     assert.equal(r.menu, true)
     assert.deepEqual(r.opened, [])
   })
@@ -223,7 +275,7 @@ describe('Shift bypass', { skip }, () => {
   // --- Left-click that follows the link ------------------------------------
 
   test('Shift+click on a link is left to the browser', async () => {
-    const r = await gesture('#tag-fluff', { keys: SHIFT })
+    const r = await gesture('#tag-fluff', { keys: SHIFT, outcome: 'open' })
     assert.equal(r.menu, false, 'our menu must not open')
     assert.ok(r.events.every(e => !e.prevented), 'the browser must still be free to handle it')
     assert.deepEqual(r.opened, [FLUFF_URL])
@@ -233,7 +285,7 @@ describe('Shift bypass', { skip }, () => {
     // The whole point of Shift (not Ctrl+Shift) being the chord: Ctrl is left for
     // the browser to read, so the habit of Ctrl+Shift+click for a new foreground
     // tab keeps working on a link we have otherwise hijacked.
-    const r = await gesture('#tag-fluff', { keys: CTRL_SHIFT })
+    const r = await gesture('#tag-fluff', { keys: CTRL_SHIFT, outcome: 'open' })
     assert.equal(r.menu, false, 'our menu must not open')
     assert.ok(r.events.every(e => !e.prevented), 'the browser must still be free to handle it')
     assert.deepEqual(r.opened, [FLUFF_URL])
@@ -241,7 +293,7 @@ describe('Shift bypass', { skip }, () => {
   })
 
   test('Shift+click on an indicator opens the link it belongs to, here', async () => {
-    const r = await gesture(INDICATOR, { keys: SHIFT })
+    const r = await gesture(INDICATOR, { keys: SHIFT, outcome: 'open' })
     assert.equal(r.menu, false, 'our menu must not open')
     // An indicator is a span beside the link, so nothing would happen at all
     // unless we stand in for the menu's "Open" row.
@@ -252,7 +304,7 @@ describe('Shift bypass', { skip }, () => {
   test('Ctrl+Shift+click on an indicator opens it in a new tab', async () => {
     // Standing in for the menu's "Open in new tab" row — the modifier the browser
     // would have read on a real link is read here instead.
-    const r = await gesture(INDICATOR, { keys: CTRL_SHIFT })
+    const r = await gesture(INDICATOR, { keys: CTRL_SHIFT, outcome: 'open' })
     assert.equal(r.menu, false, 'our menu must not open')
     assert.deepEqual(r.opened, [FLUFF_URL])
     assert.equal(newTabs.length, 1)
