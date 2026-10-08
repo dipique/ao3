@@ -109,6 +109,8 @@ function hideModel(id: MarkId) {
   })
 }
 
+const OFFER_TIP = 'In menus: off, it isn’t offered when you mark a work. Works keep it: a mark is never deleted.'
+
 /**
  * Whether this mark is still offered when marking a work. Switching it off is as
  * close to deleting a mark as the list gets: the works keep it, and it goes on
@@ -144,7 +146,9 @@ const rows = computed(() => local.value.map((id) => {
     offer: offerModel(id),
     // A progress mark's hiding is a per-work decision (is there anything new to
     // read yet?), so the switch means something different enough to say so.
-    hideLabel: markTracksProgress(marks.value, id) ? 'Hide until ready' : 'Hide in listings',
+    hideLabel: markTracksProgress(marks.value, id)
+      ? 'Hide until ready: collapsed while nothing past the chapter you finished is out, or before any date you set'
+      : 'Hide in listings',
     hideAria: `Hide works marked ${label(id)} ${markTracksProgress(marks.value, id) ? 'until ready' : 'in listings'}`,
     offerAria: `Offer ${label(id)} when marking a work`,
     tracksProgress: markTracksProgress(marks.value, id),
@@ -310,29 +314,9 @@ function save() {
     subtitle="Mark a work read — or with a finer verdict, anything from Favorite to Abandoned — from its right-click menu. Pressing AO3's own “Mark as Read” marks it here too, so the list fills itself in as you browse."
   >
     <div flex="~ col gap-3" mt-2>
-      <p text="[12.5px] muted-fg" leading="[18px]">
-        A work carries one mark at a time: the finer verdicts all mean "read", so choosing one replaces whatever the
-        work had. They take it off your Marked for Later list and — where "hide in listings" is on — take it out of
-        results the way the two settings below say.
-      </p>
-
-      <p text="[12.5px] muted-fg" leading="[18px]">
-        "Ongoing" is the exception: it means you're waiting on more chapters, not that you're done. It keeps the work on
-        Marked for Later and records the last chapter you finished, plus an optional date to wait until. With "hide
-        until ready" on, the work is collapsed only while there's nothing new to read.
-      </p>
-
-      <p text="[12.5px] muted-fg" leading="[18px]">
-        The arrows set the order marks appear in, here and in a work's menu. "Ongoing" stays last — it isn't one of the
-        verdicts. Click a mark's icon, or the pencil beside its name, to rename it, recolour it or give it a different
-        icon; hovering its name shows the key it is stored under, which never changes.
-      </p>
-
-      <p text="[12.5px] muted-fg" leading="[18px]">
-        "In menus" is how a mark you have finished with gets out of the way: turn it off and it stops being offered
-        when you mark a work, while every work already carrying it keeps it. Marks aren't deleted — the works filed
-        under one would have nowhere to go.
-      </p>
+      <ListNote>
+        A work carries one mark at a time: the finer verdicts all count as Read, and take the work off Marked for Later.
+      </ListNote>
 
       <div flex="~ col gap-4 sm:row" border-t pt-3>
         <label flex="~ col gap-1" grow>
@@ -387,6 +371,7 @@ function save() {
           :row-id="row.id"
           :template="ROW"
           :narrow-template="NARROW_ROW"
+          identity-controls
         >
           <template #order>
             <template v-if="row.movable">
@@ -394,7 +379,7 @@ function save() {
                 type="button"
                 class="icon-btn"
                 :aria-label="`Move ${row.label} up`"
-                :title="orderOff ?? `Move ${row.label} up`"
+                :title="orderOff ?? `Move ${row.label} up, here and in a work’s menu`"
                 :aria-describedby="orderOff ? orderOffId : undefined"
                 :disabled="!!orderOff || !row.canMoveUp"
                 @click="move(row.id, -1)"
@@ -405,7 +390,7 @@ function save() {
                 type="button"
                 class="icon-btn"
                 :aria-label="`Move ${row.label} down`"
-                :title="orderOff ?? `Move ${row.label} down`"
+                :title="orderOff ?? `Move ${row.label} down, here and in a work’s menu`"
                 :aria-describedby="orderOff ? orderOffId : undefined"
                 :disabled="!!orderOff || !row.canMoveDown"
                 @click="move(row.id, 1)"
@@ -416,7 +401,7 @@ function save() {
             <span
               v-else
               class="grid size-6 place-items-center"
-              :title="`${row.label} always comes last — it isn't one of the read verdicts`"
+              :title="`${row.label} always comes last: it isn’t a verdict, but says you’re waiting on more chapters`"
             >
               <Icon i-tabler-pin text="[13px]" :label="`${row.label} is always last`" />
             </span>
@@ -426,7 +411,7 @@ function save() {
               v-if="dialog"
               class="icon-btn"
               :dialog="dialog"
-              :title="`Change the ${row.label} icon`"
+              :title="`Change the ${row.label} icon or colour`"
               @click="edit(row.id)"
             >
               <Icon
@@ -439,15 +424,20 @@ function save() {
           </template>
           <span class="min-w-0 flex items-center gap-1">
             <span class="truncate" :title="`id: ${row.id}`">{{ row.label }}</span>
-            <DialogDetachedTrigger
-              v-if="dialog"
-              class="icon-btn"
-              :dialog="dialog"
-              :title="`Rename ${row.label}`"
-              @click="edit(row.id)"
-            >
-              <Icon i-tabler-pencil text="[13px]" :label="`Rename ${row.label}`" />
-            </DialogDetachedTrigger>
+            <!-- Below 768 px, a control's parent is drawn over what comes before
+                 it, holding the control's hit area: the pencil has a parent of its
+                 own, so the name isn't drawn over the icon's hit area. -->
+            <span class="flex">
+              <DialogDetachedTrigger
+                v-if="dialog"
+                class="icon-btn"
+                :dialog="dialog"
+                :title="`Rename ${row.label}`"
+                @click="edit(row.id)"
+              >
+                <Icon i-tabler-pencil text="[13px]" :label="`Rename ${row.label}`" />
+              </DialogDetachedTrigger>
+            </span>
           </span>
           <template #meta>
             {{ row.count.toLocaleString() }} {{ row.count === 1 ? 'work' : 'works' }}<template v-if="row.tracksProgress">
@@ -459,12 +449,12 @@ function save() {
           <template #actions>
             <div class="flex items-center gap-[2px]">
               <IconToggle v-model="row.hide.value" :label="row.hideAria" :tip="row.hideLabel" icon="i-tabler-eye-off" />
-              <IconToggle v-model="row.offer.value" :label="row.offerAria" tip="In menus" icon="i-tabler-menu-2" />
+              <IconToggle v-model="row.offer.value" :label="row.offerAria" :tip="OFFER_TIP" icon="i-tabler-menu-2" />
               <!-- One button, armed or not, so a press from the keyboard keeps its focus. -->
               <button
                 type="button"
                 :class="confirm.armed(clearId(row.id))
-                  ? 'destructive input-ring ml-[2px] h-6 cursor-pointer whitespace-nowrap rounded-md px-2 text-[11.5px] font-600'
+                  ? 'armed touch-target input-ring ml-[2px] h-6 cursor-pointer whitespace-nowrap rounded-md px-2 text-[11.5px] font-600'
                   : 'icon-btn'"
                 :aria-label="confirm.armed(clearId(row.id)) ? undefined : `Clear ${row.label} marks`"
                 :title="confirm.armed(clearId(row.id))
@@ -481,23 +471,21 @@ function save() {
             </div>
           </template>
         </ListRow>
+
+        <template #foot>
+          Kept with your settings, in backups and sync<template v-if="showSize">
+            · ~{{ packedKb.toFixed(1) }}&nbsp;KB before compression, of the 100&nbsp;KB sync budget all settings share
+          </template>
+        </template>
       </ListFrame>
       <span :id="orderOffId" hidden>{{ MARK_ORDER_OFF }}</span>
 
-      <p v-if="external.length" text="[11.5px] muted-fg" leading="[16px]">
+      <ListNote v-if="external.length">
         <template v-for="id in external" :key="id">
           <Icon :class="markIconClass(marks[id]?.icon)" />
           {{ label(id) }}<span v-if="id === SAVED_MARK"> lives on AO3, not here — this entry only says how it is drawn on results.</span>
         </template>
-      </p>
-
-      <p text="[11.5px] muted-fg" leading="[16px]">
-        Marks are stored with your settings, so they're included in backups and sync.
-        <template v-if="showSize">
-          They currently take about {{ packedKb.toFixed(1) }}&nbsp;KB (compressed further before syncing, which has a
-          100&nbsp;KB budget for all settings combined).
-        </template>
-      </p>
+      </ListNote>
     </div>
 
     <Dialog :ref="setDialogRef" v-model:open="open" detached-trigger>
@@ -518,8 +506,9 @@ function save() {
               :aria-invalid="!!draftError"
               text="base" h-10 w-full py-2 pl-2
             />
-            <p v-if="draftError" role="alert" text="xs destructive" pl-1>
-              {{ draftError }}
+            <p v-if="draftError" role="alert" flex="~ items-start gap-1.5" text="xs default-fg" pl-1>
+              <SeverityGlyph severity="destructive" class="mt-px shrink-0 text-[13px]" />
+              <span>{{ draftError }}</span>
             </p>
             <p v-else-if="creating" text="xs muted-fg" pl-1>
               Stored under the key <code>{{ draftId }}</code>, worked out from the name. That key never changes —

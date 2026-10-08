@@ -7,7 +7,7 @@ import { HIGHLIGHT_PRESETS, isTagTarget, MAX_PRIORITY, MIN_PRIORITY, RULE_TARGET
 
 import type { RuleAction, Swatch } from '../../model/ruleEditor.ts'
 
-import { canSave, draftRule, HIDE_TAG_OFF, openDraft, regexTester, RULE_ACTIONS, RULE_OFF_HELP, ruleSummary, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../model/ruleEditor.ts'
+import { canSave, draftRule, HIDE_TAG_OFF, openDraft, RULE_ACTIONS, RULE_OFF_HELP, ruleSummary, saveButton, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../model/ruleEditor.ts'
 
 const context = OptionRowRulesContext.inject()
 const { filters, colors } = useOption('rules')
@@ -19,7 +19,9 @@ const draft = ref(openDraft(undefined, {}))
 /** What the regex tester tests the pattern against. It is no part of the rule. */
 const testSubject = ref('')
 const suggest = useTagSuggestions(draft, open)
-const canonical = useCanonicalTags(draft, open)
+const known = useKnownTags(() => draft.value.target, open)
+const check = useRegexCheck(draft, testSubject, known, open)
+const canonical = useCanonicalTags(draft, open, known, check)
 
 /*
   What the editor says of its own accord is said in live regions that are
@@ -43,6 +45,7 @@ const pseudId = useId()
 const priorityId = useId()
 const enabledId = useId()
 const hideTagOffId = useId()
+const saveOffId = useId()
 
 const MATCHERS = [
   { value: 'exact', label: 'Exact', tip: 'The whole name, exactly', icon: 'i-codicon-symbol-string' },
@@ -60,7 +63,8 @@ const ACTION_ICONS: Record<RuleAction, string> = {
 }
 
 const field = computed(() => valueField(draft.value.target, draft.value.matcher, draft.value.value))
-const tester = computed(() => regexTester(draft.value, testSubject.value))
+const tester = toRef(check, 'tester')
+const save = computed(() => saveButton(draft.value, check.run))
 const hideTagOff = computed(() => !isTagTarget(draft.value.target))
 const targetDefault = computed(() => ruleTargetColor(draft.value.target, colors.value))
 const actionHelp = computed(() => draft.value.enabled
@@ -84,8 +88,12 @@ function setDialogRef(ref: unknown) {
   context.editDialog.value = ref as ComponentInstance<GlobalComponents['Dialog']>
 }
 
-function save() {
-  if (!canSave(draft.value))
+/** Store the draft, once a check of its Regex pattern still under way has passed. */
+async function commit() {
+  if (save.value.off)
+    return
+  await check.settled()
+  if (!open.value || !canSave(draft.value, check.run))
     return
   const rule = draftRule(draft.value, colors.value)
   const at = editing.value ? filters.value.indexOf(editing.value) : -1
@@ -189,7 +197,7 @@ function save() {
             </p>
           </template>
           <template #help>
-            {{ field.help }}
+            {{ save.reason ?? field.help }}
           </template>
         </DialogField>
 
@@ -212,7 +220,7 @@ function save() {
                 :class="`verdict--${tester.verdict.kind}`"
                 :data-regex-verdict="tester.verdict.kind"
               >
-                <SeverityGlyph v-if="tester.verdict.kind === 'invalid'" severity="destructive" />
+                <SeverityGlyph v-if="tester.verdict.kind === 'invalid' || tester.verdict.kind === 'slow'" severity="destructive" />
                 <span v-else-if="tester.verdict.kind === 'match'" class="i-tabler-check text-success" aria-hidden="true" />
                 {{ tester.label }}
               </span>
@@ -381,9 +389,17 @@ function save() {
         <RekaDialogClose class="cancel-button input-ring" aria-keyshortcuts="Escape">
           <kbd aria-hidden="true">Esc</kbd> Cancel
         </RekaDialogClose>
-        <button type="button" class="save-button input-ring" :disabled="!canSave(draft)" @click="save">
+        <button
+          type="button"
+          class="save-button input-ring"
+          :disabled="save.off"
+          :title="save.reason ?? undefined"
+          :aria-describedby="save.reason ? saveOffId : undefined"
+          @click="commit"
+        >
           {{ editing ? 'Save' : 'Add rule' }}
         </button>
+        <span v-if="save.reason" :id="saveOffId" hidden>{{ save.reason }}</span>
       </div>
     </DialogContent>
   </Dialog>
@@ -538,7 +554,8 @@ function save() {
   background-color: rgb(var(--color-success) / 0.1);
   color: rgb(var(--color-default-fg));
 }
-.verdict--invalid {
+.verdict--invalid,
+.verdict--slow {
   border-color: rgb(var(--color-destructive) / 0.45);
   background-color: rgb(var(--color-destructive) / 0.1);
   color: rgb(var(--color-default-fg));

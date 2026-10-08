@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { menuClosed, openMenu, rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -119,7 +120,7 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
     }, PAGE)
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -129,11 +130,10 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
   /** Right-click the link with this text and pick the row whose label starts with `label`. */
   const pick = async (linkText, label) => {
     await page.keyboard.press('Escape')
-    await sleep(100)
+    await menuClosed(page)
     const link = await page.evaluateHandle(text =>
       [...document.querySelectorAll('#work_1 a.tag')].find(a => a.textContent.trim() === text), linkText)
-    await link.click({ button: 'right' })
-    await sleep(200)
+    await openMenu(page, () => link.click({ button: 'right' }))
     const picked = await page.evaluate((l) => {
       const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .find(el => el.querySelector('.AO3E--menu--label').textContent.startsWith(l))
@@ -141,11 +141,8 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
       return !!row
     }, label)
     assert.ok(picked, `no "${label}" row on ${linkText}`)
-    await sleep(200)
+    await menuClosed(page)
   }
-
-  /** Long enough for the options listener's debounce and the re-run behind it. */
-  const waitForRerun = () => sleep(1500)
 
   const form = () => page.evaluate(() => ({
     language: document.getElementById('work_search_language_id').value,
@@ -179,8 +176,7 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
       document.getElementById('ex_r_13').checked = false
     })
 
-    await pick('Fluff', 'Highlight')
-    await waitForRerun()
+    await rerun(page, () => pick('Fluff', 'Highlight'))
     assert.ok(
       await page.$('#work_1 .AO3E--indicator--highlight'),
       'the highlight should be drawn, i.e. the re-run happened',
@@ -206,10 +202,9 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
   })
 
   test('changing the default itself still reaches the open page', async () => {
-    await page.evaluate(() => browser.storage.local.set({
+    await rerun(page, () => page.evaluate(() => browser.storage.local.set({
       'option.searchLanguage': { enabled: true, language: { value: 'fr', label: 'Français' } },
-    }))
-    await waitForRerun()
+    })))
     assert.equal((await form()).language, 'fr')
   })
 })

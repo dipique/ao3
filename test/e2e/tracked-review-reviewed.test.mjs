@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { rerun, settled } from './trackedPages.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -94,7 +95,8 @@ describe('tracked review: works already dealt with', { skip }, () => {
     await page.goto(REVIEW_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(3000)
+    await settled(page)
+    await reviewDrawn(page)
     return page
   }
 
@@ -125,8 +127,8 @@ describe('tracked review: works already dealt with', { skip }, () => {
   })
 
   test('a work marked during the review stays where it is', async () => {
-    await tab.evaluate(table => browser.storage.local.set({ 'option.workMarks': table }), marks([markedRead.id], [markedFavorite.id, plain.id]))
-    await sleep(2500)
+    await rerun(tab, () => tab.evaluate(table => browser.storage.local.set({ 'option.workMarks': table }), marks([markedRead.id], [markedFavorite.id, plain.id])))
+    await reviewDrawn(tab)
     const shown = await shownIds()
     assert.ok(shown.includes(plain.id), 'marking is taking notes on the box, not emptying it')
     assert.equal(shown.length, 5)
@@ -134,7 +136,7 @@ describe('tracked review: works already dealt with', { skip }, () => {
 
   test('and only drops out when the range is reloaded — which the reader asks for', async () => {
     await tab.click('.AO3E--search-view--refresh')
-    await sleep(3500)
+    await reviewDrawn(tab)
     // A review holds its page layout, so a reload that arrives on its own is
     // offered rather than swapped in. This one is the reader's own Refresh, and
     // answering the button they pressed with a second button to press isn't an
@@ -155,7 +157,6 @@ describe('tracked review: works already dealt with', { skip }, () => {
     const stored = await tab.evaluate(() => Object.assign({}, ...window.__writes))
     await tab.close()
     tab = await open({ ...SEED, ...stored, 'option.searchProfileListsRefreshHours': 0 })
-    await sleep(2500)
 
     assert.equal(await barText('--prompt'), 'Range updated.Show')
     assert.equal((await shownIds()).length, 4, 'the reader keeps the works they were looking at')
@@ -165,7 +166,7 @@ describe('tracked review: works already dealt with', { skip }, () => {
         .find(button => button.textContent.trim() === 'Show')
         .click()
     })
-    await sleep(800)
+    await tab.waitForFunction(() => !document.querySelector('.AO3E--tracked-review--bar--prompt .AO3E--tracked-review--bar--confirm'))
     assert.equal(await barText('--prompt'), '')
     assert.equal((await shownIds()).length, 4)
     await tab.close()

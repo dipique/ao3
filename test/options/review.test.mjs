@@ -116,12 +116,19 @@ describe('This review', () => {
     assert.equal(view.job, false)
   })
 
-  test('with no window yet, the cell says so, and has nothing to cache or start', () => {
+  test('with no window yet, the cell says so and has nothing to cache, and Start Review opens the review on the reader\'s readings, which gathers the first', () => {
     const view = block({ window: null })
     assert.equal(view.figure, null)
-    assert.equal(view.empty, 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.')
+    assert.equal(view.empty, 'Nothing gathered yet.')
     assert.equal(view.actions, null)
     assert.equal(view.offlineOff, null)
+    assert.deepEqual(view.start, { href: OPEN, label: 'Start the review', off: null })
+  })
+
+  test('with no window and the reader\'s account not known, there is no page to open: the cell says how the first review is gathered', () => {
+    const view = block({ window: null, userId: undefined })
+    assert.equal(view.empty, 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.')
+    assert.equal(view.actions, null)
     assert.deepEqual(view.start, { href: null, label: 'Start the review', off: START_OFF.noWindow })
     assert.equal(START_OFF.noWindow, 'off until your first review is gathered on AO3')
   })
@@ -135,14 +142,16 @@ describe('This review', () => {
   })
 
   test('Tracked lists being off comes first, before anything else that keeps Start Review off', () => {
-    assert.equal(block({ enabled: false, window: null }).start.off, TRACK_OFF.review)
+    assert.deepEqual(block({ enabled: false, window: null }).start, { href: null, label: 'Start the review', off: TRACK_OFF.review })
+    assert.equal(block({ enabled: false, window: null, userId: undefined }).start.off, TRACK_OFF.review)
     assert.equal(block({ enabled: false, tracking: false }).start.off, TRACK_OFF.review)
   })
 
   test('with no list tracked, there is nothing to review', () => {
     assert.equal(START_OFF.noneTracked, 'off while no list is tracked')
     assert.deepEqual(block({ tracking: false }).start, { href: null, label: 'Start the review: 37 works', off: START_OFF.noneTracked })
-    assert.equal(block({ tracking: false, window: null }).start.off, START_OFF.noneTracked)
+    assert.deepEqual(block({ tracking: false, window: null }).start, { href: null, label: 'Start the review', off: START_OFF.noneTracked })
+    assert.equal(block({ tracking: false, window: null, userId: undefined }).start.off, START_OFF.noneTracked)
   })
 
   test('another list\'s job turns its offline actions off, naming the list; Start Review is untouched', () => {

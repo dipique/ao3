@@ -34,6 +34,7 @@ declare module 'vue' {
     ListFilter: typeof import('./../options_ui/components/list/ListFilter.vue')['default']
     ListFrame: typeof import('./../options_ui/components/list/ListFrame.vue')['default']
     ListKeySort: typeof import('./../options_ui/components/list/ListKeySort.vue')['default']
+    ListNote: typeof import('./../options_ui/components/list/ListNote.vue')['default']
     ListRow: typeof import('./../options_ui/components/list/ListRow.vue')['default']
     ListSort: typeof import('./../options_ui/components/list/ListSort.vue')['default']
     NumberInput: typeof import('./../options_ui/components/basic/NumberInput.vue')['default']

@@ -7,6 +7,10 @@
  * greyed; the controls inside are greyed once, with the cell, rather than
  * again by their own disabled look. `job` tints the cell the job is running
  * on.
+ *
+ * The cell's quieter words, what it holds included, are `--quiet-fg`: muted,
+ * but the text colour at 57% on the job's tint, where muted is under AA in
+ * light.
  */
 defineProps<{
   /** Its `data-review-cell`. */
@@ -31,6 +35,7 @@ defineProps<{
 
 <style scoped>
 .review-cell {
+  --quiet-fg: rgb(var(--color-muted-fg));
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -38,6 +43,7 @@ defineProps<{
   padding: 12px 14px 13px;
 }
 .review-cell--job {
+  --quiet-fg: rgb(var(--color-default-fg) / 0.57);
   background-color: rgb(var(--color-brand-fg) / 0.04);
 }
 .review-cell--dim {
@@ -49,7 +55,7 @@ defineProps<{
 }
 
 .review-cell__head {
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.07em;
@@ -58,7 +64,7 @@ defineProps<{
 }
 .review-cell__help {
   margin: 0;
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
   font-size: 11.5px;
   line-height: 16px;
 }

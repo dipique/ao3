@@ -150,6 +150,29 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
     }
   })
 
+  test('with no lists saved, Saved lists is on the rail at 0, and its link lands on the empty state', async () => {
+    const lists = await session.open({ hash: '#lists', viewport: { width: 1280, height: 800 } })
+    try {
+      // With no rows, the frame is its header and its empty state.
+      const frame = () => lists.list('saved-lists')
+      await until('the saved lists to be read', async () => /No saved lists yet/.test(await lists.text(await frame())))
+      const subsections = (await lists.railItems()).filter(item => item.kind === 'subsection')
+      assert.deepEqual(subsections.map(s => s.id), ['review', 'saved-lists', 'user-profile-lists', 'offline-reading'])
+      assert.equal(subsections.find(s => s.id === 'saved-lists').count, 0)
+
+      const link = await (await lists.rail()).$('[data-rail-item="subsection"][href="#saved-lists"]')
+      await lists.land(() => lists.press(link))
+      const where = await (await frame()).evaluate((el) => {
+        const { top, bottom } = el.getBoundingClientRect()
+        return { top, bottom, below: document.querySelector('[data-rail]').getBoundingClientRect().top, height: window.innerHeight }
+      })
+      assert.ok(where.top >= where.below - 1 && where.bottom <= where.height, `the frame holding the empty state was at ${where.top}–${where.bottom}px`)
+    }
+    finally {
+      await lists.close()
+    }
+  })
+
   test('a hash naming another category\'s setting opens that category', async () => {
     await goTo('#chapter-statistics')
     assert.deepEqual(await options.shownCategories(), ['reading'])
@@ -235,6 +258,177 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
     }
     finally {
       await fresh.close()
+    }
+  })
+})
+
+/**
+ * As the page scrolls, the rail marks the current category's sub-section
+ * being read: the one whose section holds the reading line, just under the
+ * top bar, or at the foot of the page the last, however short. A jump marks
+ * where it goes at once, and keeps it marked where it lands until the reader
+ * scrolls on. A narrow window's chip row lists no sub-sections, so marks none.
+ */
+describe('options UI — the rail marks the sub-section being read', { skip }, () => {
+  const VIEWPORT = { width: 1280, height: 800 }
+  let session
+
+  before(async () => {
+    session = await startOptions()
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  /** The ids of the sub-sections the rail marks: the one, or none. */
+  const marked = async options => (await options.railItems()).filter(item => item.inView).map(item => item.id)
+  const markedIs = async (options, ...ids) => JSON.stringify(await marked(options)) === JSON.stringify(ids)
+
+  /** Scroll the window, as the reader would. */
+  const scrollTo = (options, top) => options.page.evaluate(y => window.scrollTo({ top: y, behavior: 'instant' }), top)
+
+  /**
+   * How far the page scrolls to bring the sub-section's top to the reading
+   * line, where a jump puts it, and how far the page can scroll.
+   */
+  const reach = (options, id) => options.page.evaluate((sectionId) => {
+    const section = document.getElementById(sectionId)
+    const line = Number.parseFloat(getComputedStyle(section).scrollMarginTop)
+    return { top: section.getBoundingClientRect().top + window.scrollY - line, max: document.documentElement.scrollHeight - window.innerHeight }
+  }, id)
+
+  /** From now on, note each sub-section the rail marks, in turn, for `marks` to read back. */
+  const noteMarks = options => options.page.evaluate(() => {
+    window.__marks = []
+    const rail = document.querySelector('[data-rail]')
+    new MutationObserver(() => {
+      const now = rail.querySelector('[data-rail-item="subsection"][aria-current="location"]')?.hash.slice(1)
+      if (now && window.__marks.at(-1) !== now)
+        window.__marks.push(now)
+    }).observe(rail, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-current'] })
+  })
+  const marks = options => options.page.evaluate(() => window.__marks)
+
+  test('scrolling a category marks each of its sub-sections in turn, from the first', async () => {
+    const options = await session.open({ hash: '#search', viewport: VIEWPORT })
+    try {
+      const ids = (await options.railItems()).filter(item => item.kind === 'subsection').map(item => item.id)
+      assert.deepEqual(ids, ['filter-defaults', 'customize-search-results', 'instant-search-views'])
+      await until('the first to be marked, above them all', () => markedIs(options, 'filter-defaults'))
+
+      for (const [i, id] of ids.entries()) {
+        const { top, max } = await reach(options, id)
+        assert.ok(top <= max, `${id} reaches the reading line at ${top} px, within the page's ${max} px`)
+        if (i > 0) {
+          await scrollTo(options, top - 20)
+          await until(`${ids[i - 1]} to be marked, ${id} still under the line`, () => markedIs(options, ids[i - 1]))
+        }
+        await scrollTo(options, top)
+        await until(`${id} to be marked`, () => markedIs(options, id))
+      }
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('at the foot of the page, a last sub-section too short to reach the reading line is marked', async () => {
+    const options = await session.open({ hash: '#site-features-appearance', viewport: VIEWPORT })
+    try {
+      const { top, max } = await reach(options, 'appearance')
+      assert.ok(top > max, `Appearance reaches the reading line at ${top} px, past the page's ${max} px`)
+      await scrollTo(options, max)
+      await until('Appearance to be marked', () => markedIs(options, 'appearance'))
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('a rail click marks its target at once, and where the page stops short of it, until the reader scrolls on', async () => {
+    const options = await session.open({ hash: '#site-features-appearance', viewport: VIEWPORT })
+    try {
+      await until('Link menus to be marked', () => markedIs(options, 'link-menus'))
+      const { top, max } = await reach(options, 'page-controls')
+      assert.ok(top > max, `Page controls reaches the reading line at ${top} px, past the page's ${max} px`)
+
+      await noteMarks(options)
+      const link = await (await options.rail()).$('[data-rail-item="subsection"][href="#page-controls"]')
+      await options.land(() => options.press(link))
+      await until('Page controls to be marked', () => markedIs(options, 'page-controls'))
+      assert.deepEqual(await marks(options), ['page-controls'], 'and nothing else on the way')
+
+      await scrollTo(options, max - 200)
+      await until('the reading line to decide again', () => markedIs(options, 'link-menus'))
+
+      // Clicked again, the link changes no hash: the browser's scroll is the whole jump.
+      await options.press(link)
+      await until('Page controls to be marked again', () => markedIs(options, 'page-controls'))
+      await scrollTo(options, max - 200)
+      await until('the reading line to decide once more', () => markedIs(options, 'link-menus'))
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('a hash that opens another category marks its target at once, and where the page stops short of it', async () => {
+    const options = await session.open({ hash: '#instant-search-views', viewport: VIEWPORT })
+    try {
+      await until('Instant search views to be marked', () => markedIs(options, 'instant-search-views'))
+      await noteMarks(options)
+      await options.goTo('#chapter-statistics')
+      const { top, max } = await reach(options, 'chapter-statistics')
+      assert.ok(top > max, `Chapter statistics reaches the reading line at ${top} px, past the page's ${max} px`)
+      await until('Chapter statistics to be marked', () => markedIs(options, 'chapter-statistics'))
+      assert.deepEqual(await marks(options), ['chapter-statistics'], 'and nothing else on the way')
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('a hash naming a setting marks the sub-section it is in', async () => {
+    const options = await session.open({ hash: '#work-text-reader-mode', viewport: VIEWPORT })
+    try {
+      await until('Work text to be marked', () => markedIs(options, 'work-text'))
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('while a query runs, the mark is on a sub-section the rail lists', async () => {
+    const options = await session.open({ hash: '#customize-search-results', viewport: VIEWPORT })
+    try {
+      await until('Customize search results to be marked', () => markedIs(options, 'customize-search-results'))
+      await (await options.control(options.page, 'textbox', SEARCH)).type('complete')
+      await until('the rail to list Filter defaults alone', async () => {
+        const listed = (await options.railItems()).filter(item => item.kind === 'subsection').map(item => item.id)
+        return JSON.stringify(listed) === JSON.stringify(['filter-defaults'])
+      })
+      await until('Filter defaults to be marked', () => markedIs(options, 'filter-defaults'))
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('below 768 px, where the chip row lists no sub-sections, none is marked', async () => {
+    const options = await session.open({ hash: '#search', viewport: VIEWPORT })
+    try {
+      const anyMarked = () => options.page.$('[aria-current="location"]')
+      await until('the first to be marked', () => markedIs(options, 'filter-defaults'))
+      await options.page.setViewport({ width: 390, height: 844 })
+      await until('the mark to go', async () => await anyMarked() === null)
+
+      await scrollTo(options, (await reach(options, 'instant-search-views')).top)
+      // The page reads where it is scrolled to once a frame, in the frame after the scroll.
+      await options.frame()
+      await options.frame()
+      assert.equal(await anyMarked(), null)
+    }
+    finally {
+      await options.close()
     }
   })
 })

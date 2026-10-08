@@ -304,9 +304,14 @@ async function drive(job: ExportJob): Promise<void> {
     }
   }
   catch (err) {
-    if (!signal.aborted)
+    // A Stop is the reader's doing, not a failure, so it is logged quietly.
+    if (signal.aborted) {
+      log.log('Site export job stopped', err)
+    }
+    else {
       error = describe(err)
-    log.error('Site export job stopped', err)
+      log.error('Site export job stopped', err)
+    }
   }
   finally {
     unwatch()

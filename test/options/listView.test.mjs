@@ -278,9 +278,25 @@ describe('shownRules: the sort', () => {
     assert.deepEqual(order('value', 'desc'), ['Zebra', 'Mango', 'banana', 'apple'])
   })
 
-  test('priority sorts by number, both ways', () => {
-    assert.deepEqual(order('priority'), ['Zebra', 'banana', 'apple', 'Mango'])
-    assert.deepEqual(order('priority', 'desc'), ['Mango', 'apple', 'banana', 'Zebra'])
+  test('priority sorts by number, both ways, with the rules that show none after', () => {
+    assert.deepEqual(order('priority'), ['Zebra', 'apple', 'Mango', 'banana'])
+    assert.deepEqual(order('priority', 'desc'), ['apple', 'Zebra', 'Mango', 'banana'])
+  })
+
+  test('the rules that show no priority keep the list\'s own order among themselves, whichever way the sort points', () => {
+    // Highlight and hide-tag rules show "–", whatever number they store. The
+    // list's own order (by target, then text) differs here from the stored
+    // order, from the text's, and from the stored numbers'.
+    const mixed = [
+      { target: 'tag', value: 'apple', matcher: 'exact', behavior: 'highlight', priority: 9 },
+      { target: 'author', value: 'cherry', matcher: 'exact', behavior: 'hideFilter', priority: 1 },
+      { target: 'tag', value: 'Banana', matcher: 'exact', behavior: 'hide', priority: 5 },
+      { target: 'author', value: 'banana', matcher: 'exact', behavior: 'highlight' },
+      { target: 'tag', value: 'date', matcher: 'exact', behavior: 'invert' },
+    ]
+    assert.deepEqual(order(null, 'asc', '', mixed).filter(value => ['apple', 'cherry', 'banana'].includes(value)), ['banana', 'cherry', 'apple'])
+    assert.deepEqual(order('priority', 'asc', '', mixed), ['date', 'Banana', 'banana', 'cherry', 'apple'])
+    assert.deepEqual(order('priority', 'desc', '', mixed), ['Banana', 'date', 'banana', 'cherry', 'apple'])
   })
 
   test('what a rule applies to sorts by the name shown, not the stored code', () => {

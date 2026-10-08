@@ -4,8 +4,10 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep, storedLists } from './helpers.mjs'
-import { advanceClock, archiveRoutes, blurbHtml, CLOCK_BASE, installClock, listing, resetWorkIds, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, storedLists } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { rerun, settled } from './trackedPages.mjs'
+import { advanceClock, archiveRoutes, blurbHtml, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -92,9 +94,10 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
     [...document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)')]
       .map(li => li.id.replace('work_', '')))
 
+  /** Mark the range reviewed, and wait for the re-run its write causes and the review it reopens. */
   const markReviewed = async () => {
-    await tab.click('.AO3E--tracked-review--bar--mark')
-    await sleep(4000)
+    await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
+    await reviewDrawn(tab)
   }
 
   test('the first window is the first day', async () => {
@@ -107,19 +110,20 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
     await tab.goto(REVIEW_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(3200)
+    await settled(tab)
+    await reviewDrawn(tab)
 
     assert.deepEqual((await shownIds()).sort(), first.map(work => work.id).sort())
   })
 
   test('the reader marks one work and saves another', async () => {
-    await tab.evaluate(id => browser.storage.local.set({
+    await rerun(tab, () => tab.evaluate(id => browser.storage.local.set({
       'option.workMarks': {
         enabled: true,
         marks: { favorite: { icon: 'favorite', label: 'Favorite', color: '#b8860b', triggerAlias: 'read', hideSearchResult: false, items: Number(id).toString(36), order: 0 } },
       },
-    }), marked.id)
-    await sleep(2500)
+    }), marked.id))
+    await reviewDrawn(tab)
 
     // Through the blurb's own menu, so the saved-work index learns about it the
     // way it does on any listing.
@@ -128,7 +132,7 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
     }, saved.id)
-    await sleep(400)
+    await tab.waitForSelector('.AO3E--menu .AO3E--menu--item')
     const clicked = await tab.evaluate(() => {
       const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .find(el => el.textContent.trim().startsWith('Mark for later'))
@@ -136,7 +140,8 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
       return !!row
     })
     assert.equal(clicked, true, 'the work menu should offer to save it')
-    await sleep(2500)
+    await until('the saved-work index to be written', async () => (await tab.evaluate(async () =>
+      (await browser.storage.local.get('cache.markedForLater'))['cache.markedForLater']?.ids)) !== '')
 
     const index = await tab.evaluate(async () =>
       (await browser.storage.local.get('cache.markedForLater'))['cache.markedForLater'])

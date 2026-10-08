@@ -49,6 +49,8 @@ declare global {
   const getCurrentInstance: typeof import('vue').getCurrentInstance
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
+  const holdForJump: typeof import('../options_ui/composables/useSubsectionInView').holdForJump
+  const holdForLink: typeof import('../options_ui/composables/useSubsectionInView').holdForLink
   const ignorableWatch: typeof import('@vueuse/core').ignorableWatch
   const inject: typeof import('vue').inject
   const injectLocal: typeof import('@vueuse/core').injectLocal
@@ -59,6 +61,7 @@ declare global {
   const isRef: typeof import('vue').isRef
   const isReviewWindow: typeof import('../options_ui/composables/useSiteExport').isReviewWindow
   const isShallow: typeof import('vue').isShallow
+  const jumpLanded: typeof import('../options_ui/composables/useSubsectionInView').jumpLanded
   const jumpToHash: typeof import('../options_ui/composables/useHashNav').jumpToHash
   const makeDestructurable: typeof import('@vueuse/core').makeDestructurable
   const markRaw: typeof import('vue').markRaw
@@ -207,6 +210,7 @@ declare global {
   const useGamepad: typeof import('@vueuse/core').useGamepad
   const useGeolocation: typeof import('@vueuse/core').useGeolocation
   const useHashNav: typeof import('../options_ui/composables/useHashNav').useHashNav
+  const useHeld: typeof import('../options_ui/composables/useHeld').useHeld
   const useId: typeof import('vue').useId
   const useIdle: typeof import('@vueuse/core').useIdle
   const useImage: typeof import('@vueuse/core').useImage
@@ -215,6 +219,7 @@ declare global {
   const useInterval: typeof import('@vueuse/core').useInterval
   const useIntervalFn: typeof import('@vueuse/core').useIntervalFn
   const useKeyModifier: typeof import('@vueuse/core').useKeyModifier
+  const useKnownTags: typeof import('../options_ui/composables/useKnownTags').useKnownTags
   const useLastChanged: typeof import('@vueuse/core').useLastChanged
   const useLocalStorage: typeof import('@vueuse/core').useLocalStorage
   const useLostFocus: typeof import('../options_ui/composables/useLostFocus').useLostFocus
@@ -257,6 +262,8 @@ declare global {
   const usePrevious: typeof import('@vueuse/core').usePrevious
   const useRafFn: typeof import('@vueuse/core').useRafFn
   const useRefHistory: typeof import('@vueuse/core').useRefHistory
+  const useRegexCheck: typeof import('../options_ui/composables/useRegexCheck').useRegexCheck
+  const useRegexRunner: typeof import('../options_ui/composables/useRegexRunner').useRegexRunner
   const useResizeObserver: typeof import('@vueuse/core').useResizeObserver
   const useSSRWidth: typeof import('@vueuse/core').useSSRWidth
   const useSavedLists: typeof import('../options_ui/composables/useSavedLists').useSavedLists
@@ -277,6 +284,7 @@ declare global {
   const useStorage: typeof import('@vueuse/core').useStorage
   const useStorageAsync: typeof import('@vueuse/core').useStorageAsync
   const useStyleTag: typeof import('@vueuse/core').useStyleTag
+  const useSubsectionInView: typeof import('../options_ui/composables/useSubsectionInView').useSubsectionInView
   const useSupported: typeof import('@vueuse/core').useSupported
   const useSwipe: typeof import('@vueuse/core').useSwipe
   const useSync: typeof import('../options_ui/composables/useSync').useSync
@@ -336,6 +344,9 @@ declare global {
   // @ts-ignore
   export type { AnchorKind, Anchor } from '../options_ui/composables/useAnchors'
   import('../options_ui/composables/useAnchors')
+  // @ts-ignore
+  export type { KnownPool } from '../options_ui/composables/useKnownTags'
+  import('../options_ui/composables/useKnownTags')
   // @ts-ignore
   export type { NavCategory } from '../options_ui/composables/useNav'
   import('../options_ui/composables/useNav')

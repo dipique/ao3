@@ -11,7 +11,7 @@ const forwardedProps = useForwardProps(props)
     as="h1"
     m="x--6 t--6"
     p="t-4 x-6 b-2"
-    text="primary"
+    text="brand-fg"
     font="serif 500"
     text-lg
   >

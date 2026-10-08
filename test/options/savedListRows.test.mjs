@@ -357,6 +357,8 @@ describe('the row\'s cells', () => {
       assert.equal(cachingCell(rowsWith(join, job).t3a, job, NOW).detail, 'caching now')
       const refreshing = jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['refreshing', 'caching'] } })
       assert.equal(cachingCell(rowsWith(join, refreshing).t3a, refreshing, NOW).detail, 'refreshing now')
+      const downloading = jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['exporting'] } })
+      assert.equal(cachingCell(rowsWith(join, downloading).t3a, downloading, NOW).detail, 'downloading now', 'a Download\'s last stage, as its button says')
       const other = jobOn(old.key)
       assert.equal(cachingCell(rowsWith(join, other).t3a, other, NOW).detail, `as of ${timeAgo(7_000, NOW)} · 1 failed`)
     })
@@ -393,6 +395,8 @@ describe('the row\'s cells', () => {
     test('Download becomes Stop while its own job runs, and leaves Continue to the job\'s line once it stops', () => {
       const running = jobOn(teaCopy.key)
       assert.deepEqual(rowAction(rowsWith(join, running).t3a, running), { kind: 'stop', verb: 'caching' })
+      const downloading = jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['exporting'] } })
+      assert.deepEqual(rowAction(rowsWith(join, downloading).t3a, downloading), { kind: 'stop', verb: 'downloading' })
       const stopped = jobOn(teaCopy.key, { running: false })
       assert.deepEqual(rowAction(rowsWith(join, stopped).t3a, stopped), { kind: 'none' })
     })

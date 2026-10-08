@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { pressFacet, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -116,11 +118,9 @@ describe('the Status facet in the search view', { skip }, () => {
     await page.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1200)
-
-    // The view opens by itself on the Marked for Later page; wait for the
-    // scrape and the first render.
-    await sleep(1800)
+    await settled(page)
+    // The view opens by itself on the Marked for Later page.
+    await viewDrawn(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -146,14 +146,11 @@ describe('the Status facet in the search view', { skip }, () => {
     }))
   })
 
-  const clickInclude = async (value) => {
-    await page.evaluate((v) => {
-      const rows = [...document.querySelectorAll('.AO3E--search-view--row')]
-      const row = rows.find(r => r.querySelector('.AO3E--search-view--row-name').textContent === v)
-      row.querySelector('.AO3E--search-view--toggle-include').click()
-    }, value)
-    await sleep(400)
-  }
+  /** The Status selection the last write of the search-view prefs stored, or null before there is one. */
+  const storedStatus = () => page.evaluate(() => {
+    const writes = window.__writes.filter(w => 'cache.searchViewPrefs' in w)
+    return writes.at(-1)?.['cache.searchViewPrefs']['marked-for-later']?.status ?? null
+  })
 
   test('the facet exists, listing every status present', async () => {
     const rows = await statusRows()
@@ -189,6 +186,7 @@ describe('the Status facet in the search view', { skip }, () => {
   })
 
   test('the selection lands in the stored search-view prefs', async () => {
+    await until('the Status selection to be stored', async () => (await storedStatus())?.join() === 'Ready')
     const status = await page.evaluate(() => {
       const writes = window.__writes.filter(w => 'cache.searchViewPrefs' in w)
       if (!writes.length)
@@ -199,13 +197,14 @@ describe('the Status facet in the search view', { skip }, () => {
   })
 
   test('picking Caught up as well brings the whole list back', async () => {
-    await clickInclude('Caught up')
+    await pressFacet(page, 'Caught up')
     assert.deepEqual((await visibleTitles()).sort(), ['All caught up', 'Never marked', 'Still going'])
     const rows = await statusRows()
     assert.deepEqual(rows.filter(r => r.included).map(r => r.value).sort(), ['Caught up', 'Ready'])
   })
 
   test('and that change is persisted too, so it is what opens next time', async () => {
+    await until('the new Status selection to be stored', async () => (await storedStatus())?.includes('Caught up'))
     const status = await page.evaluate(() => {
       const writes = window.__writes.filter(w => 'cache.searchViewPrefs' in w)
       return writes[writes.length - 1]['cache.searchViewPrefs']['marked-for-later'].status

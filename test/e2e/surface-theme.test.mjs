@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { openMenu, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -102,14 +103,13 @@ describe('the floating surface palette', { skip }, () => {
     await tab.goto(LISTING_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(tab)
 
-    await tab.evaluate(() => {
+    await openMenu(tab, () => tab.evaluate(() => {
       document.querySelector('#work_1 h4.heading a').dispatchEvent(
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
-    })
-    await sleep(250)
+    }))
 
     const result = await tab.evaluate(() => {
       const menu = document.querySelector('.AO3E--menu')
@@ -177,24 +177,22 @@ describe('the floating surface palette', { skip }, () => {
     await tab.goto(LISTING_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(tab)
 
-    await tab.evaluate(() => {
+    await openMenu(tab, () => tab.evaluate(() => {
       document.querySelector('#work_1 h4.heading a').dispatchEvent(
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
-    })
-    await sleep(250)
+    }))
     await tab.evaluate(() => {
       const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))
       row.click()
     })
-    await sleep(250)
+    await tab.waitForSelector('.AO3E--progress-editor')
 
     const read = async (selector) => {
       await tab.focus(selector)
-      await sleep(80)
       return tab.$eval(selector, (el) => {
         const style = getComputedStyle(el)
         return {

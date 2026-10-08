@@ -302,9 +302,10 @@ function download(): void {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+/* `--quiet-fg` is the cell's: muted, unless a job tints it. */
 .review__detail,
 .review__unit {
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
   font-size: 12px;
 }
 .review__empty {
@@ -327,7 +328,7 @@ function download(): void {
   align-items: flex-start;
   gap: 6px;
   margin: 0;
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
   font-size: 11.5px;
   line-height: 15px;
 }

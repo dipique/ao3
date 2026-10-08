@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
 import { skip, startOptions } from './optionsPage.mjs'
 
 /**
@@ -42,14 +41,14 @@ describe('options UI — rules filter', { skip }, () => {
 
   const filterBox = async () => options.control(await options.list(LIST), 'textbox', 'Search rules by text')
 
-  /** Type `text` into the filter (replacing whatever is there). */
+  /** Type `text` into the filter (replacing whatever is there), and wait until the filter holds it. */
   const filter = async (text) => {
     const box = await filterBox()
     await box.click({ clickCount: 3 })
     await options.page.keyboard.press('Backspace')
     if (text)
       await box.type(text)
-    await sleep(300)
+    await options.page.waitForFunction((el, value) => el.value === value, {}, box, text)
   }
 
   /** The text of every rule the list is showing. Each row is the rule at that place in the stored list. */
@@ -132,9 +131,9 @@ describe('options UI — rules filter', { skip }, () => {
   test('clearing the filter brings the whole list back, and keeps the focus in it', async () => {
     await filter('slow')
     await (await options.control(await options.list(LIST), 'button', 'Clear rule search')).click()
-    await sleep(300)
-    const listed = await rows()
     const box = await filterBox()
+    await options.page.waitForFunction(el => el.value === '', {}, box)
+    const listed = await rows()
     assert.equal(await box.evaluate(el => el.value), '')
     assert.equal(listed.length, RULES.length)
     assert.equal(await box.evaluate(el => el === document.activeElement), true, 'the clear button went, so the field has the focus')
@@ -143,7 +142,7 @@ describe('options UI — rules filter', { skip }, () => {
   test('filtering writes nothing', async () => {
     await filter('slow')
     await filter('')
-    await sleep(500)
+    await options.saved()
     assert.equal(await options.lastWrite('option.rules'), null)
   })
 

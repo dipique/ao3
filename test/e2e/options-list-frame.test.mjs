@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 /** The Word count menu's ranges: a list inside a setting, so it shows seven rows before it scrolls. */
 const RANGES = 'word-count-ranges'
@@ -62,6 +61,23 @@ describe('options UI — list frame', { skip }, () => {
 
   const open = (count, viewport = { width: 1440, height: 900 }) =>
     session.open({ seed: seed(count), hash: '#filter-defaults', viewport })
+
+  /**
+   * The list's boxes ({@link frameBoxes}) once it holds `rows` rows and holds
+   * still: the same a frame later, with whatever a row just added scrolled
+   * come to rest.
+   */
+  const stillBoxes = async (options, rows) => {
+    let last = null
+    await until(`the list to hold still with ${rows} rows`, async () => {
+      await options.frame()
+      const boxes = await options.page.evaluate(frameBoxes, RANGES)
+      const still = boxes.rows.length === rows && JSON.stringify(boxes) === JSON.stringify(last)
+      last = boxes
+      return still
+    })
+    return last
+  }
 
   test('below its cap, the body is exactly as tall as its rows, and does not scroll', async () => {
     const options = await open(2)
@@ -137,8 +153,7 @@ describe('options UI — list frame', { skip }, () => {
       assert.ok(before.body.gutter > 0, 'room is kept for a scrollbar before there is one')
 
       await options.press(await options.control(await options.list(RANGES), 'button', 'Add a range'))
-      await sleep(300)
-      const after = await options.page.evaluate(frameBoxes, RANGES)
+      const after = await stillBoxes(options, CAP + 1)
       assert.equal(after.rows.length, CAP + 1)
       assert.ok(after.body.scrollHeight > after.body.clientHeight, 'past the cap, it scrolls')
       assert.equal(after.body.gutter, before.body.gutter, 'the scrollbar fills the room kept for it')
@@ -158,8 +173,7 @@ describe('options UI — list frame', { skip }, () => {
       const options = await open(count)
       try {
         await options.press(await options.control(await options.list(RANGES), 'button', 'Add a range'))
-        await sleep(600)
-        const { body, rows } = await options.page.evaluate(frameBoxes, RANGES)
+        const { body, rows } = await stillBoxes(options, count + 1)
         const added = rows.at(-1)
         const height = await options.page.evaluate(() => window.innerHeight)
         assert.equal(rows.length, count + 1)
@@ -193,7 +207,7 @@ describe('options UI — list frame', { skip }, () => {
         const { top, bottom, left, width } = body.getBoundingClientRect()
         return { top, bottom, middle: left + body.clientWidth / 2, width }
       }, RANGES, rows)
-      await sleep(100)
+      await options.frame()
       const x = Math.round(box.middle)
       return {
         top: await options.colourAt(x, Math.ceil(box.top) + 1),

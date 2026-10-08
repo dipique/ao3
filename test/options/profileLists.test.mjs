@@ -128,10 +128,19 @@ describe('a tile with its copy', () => {
 describe('a tile with no copy', () => {
   const none = (input = {}) => tiles({ copies: { 'marked-for-later': null, 'read-works': null }, ...input })
 
-  test('says how one is kept, and has nothing to count or fetch', () => {
-    const [mfl, rw] = none()
+  test('says how one is kept: by its own View on AO3, which keeps one whatever the list\'s search switch says', () => {
+    for (const tile of none())
+      assert.equal(tile.empty, 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.', tile.id)
+  })
+
+  test('with no View on AO3, the reader\'s account not known, it names the page and the switch that keep one', () => {
+    const [mfl, rw] = none({ userId: undefined })
     assert.equal(mfl.empty, 'None yet. Open your Marked for Later page on AO3, signed in, with Search your Marked for Later list on: a copy is kept from then on, and refreshes from here.')
     assert.equal(rw.empty, 'None yet. Press Search read items on your History page on AO3, signed in, with Search the works you\'ve read on: a copy is kept from then on, and refreshes from here.')
+  })
+
+  test('has nothing to count or fetch', () => {
+    const [mfl, rw] = none()
     for (const tile of [mfl, rw]) {
       assert.equal(tile.figure, null)
       assert.equal(tile.bar, null)

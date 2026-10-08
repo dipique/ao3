@@ -5,8 +5,9 @@ import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
 import { formatDay } from '../../src/common/trackedLists.ts'
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, search, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { pressFacet, rerun, runs, settled } from './trackedPages.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, search, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -72,7 +73,8 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     await page.goto(REVIEW_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(3000)
+    await settled(page)
+    await reviewDrawn(page)
     return page
   }
 
@@ -87,15 +89,6 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
   const watermark = () => tab.evaluate(async () =>
     (await browser.storage.local.get('option.trackedLists'))['option.trackedLists'].reviewedThrough)
 
-  const includeFacet = async (value) => {
-    await tab.evaluate((want) => {
-      const row = Array.from(document.querySelectorAll('.AO3E--search-view--row'))
-        .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent?.trim() === want)
-      row.querySelector('.AO3E--search-view--toggle-include').click()
-    }, value)
-    await sleep(500)
-  }
-
   /** Whether a facet value is currently included. */
   const isIncluded = value => tab.evaluate((want) => {
     const row = Array.from(document.querySelectorAll('.AO3E--search-view--row'))
@@ -103,10 +96,10 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     return row?.querySelector('.AO3E--search-view--toggle-include')?.getAttribute('aria-pressed') === 'true'
   }, value)
 
+  /** Mark the range reviewed, and wait for the re-run its write causes and the review it reopens. */
   const markReviewed = async () => {
-    await tab.click('.AO3E--tracked-review--bar--mark')
-    // The fetch, the option write, the re-run's debounce and the reopen.
-    await sleep(4000)
+    await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
+    await reviewDrawn(tab)
   }
 
   /** Click a button in the toast shadow root by its label. */
@@ -129,7 +122,7 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
   })
 
   test('a facet selection narrows it', async () => {
-    await includeFacet('Fluff')
+    await pressFacet(tab, 'Fluff')
     assert.equal((await shownIds()).length, 2, 'one Fluff work a day')
   })
 
@@ -149,8 +142,10 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
   })
 
   test('Undo puts the watermark back', async () => {
+    const before = await runs(tab)
     assert.equal(await clickToast('Undo'), true, 'the Undo offer should still be up')
-    await sleep(4000)
+    await settled(tab, before)
+    await reviewDrawn(tab)
     assert.equal(await watermark(), since - 1)
     assert.equal(await barText('--range'), `Reviewing ${formatDay(since).slice(0, -5)} – ${formatDay(since + 1)}`)
     await tab.close()
@@ -170,18 +165,18 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     assert.deepEqual(warnings, ['“Hurt/comfort” couldn’t be loaded, so its works are missing from this range.'])
 
     await tab.click('.AO3E--tracked-review--bar--mark')
-    await sleep(600)
+    await tab.waitForSelector('.AO3E--tracked-review--bar--prompt .AO3E--tracked-review--bar--confirm')
     assert.equal(await watermark(), since - 1, 'nothing has moved yet')
     const prompt = await barText('--prompt')
     assert.match(prompt, /“Hurt\/comfort” couldn’t be loaded; its works for .* will be skipped\./)
   })
 
   test('and goes ahead once the reader says so', async () => {
-    await tab.evaluate(() => {
+    await rerun(tab, () => tab.evaluate(() => {
       const buttons = [...document.querySelectorAll('.AO3E--tracked-review--bar--confirm')]
       buttons.find(button => button.textContent.trim() === 'Mark reviewed anyway').click()
-    })
-    await sleep(4000)
+    }))
+    await reviewDrawn(tab)
     assert.equal(await watermark(), since + 1)
   })
 })

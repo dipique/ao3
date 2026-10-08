@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { menuClosed, openMenu, rerun, runs, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -105,7 +107,7 @@ describe('the ongoing mark', { skip }, () => {
     await page.goto(LISTING_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -114,12 +116,11 @@ describe('the ongoing mark', { skip }, () => {
 
   /** Right-click a work's title to open its menu, and read the rows back. */
   const openWorkMenu = async (id) => {
-    await page.evaluate((workId) => {
+    await openMenu(page, () => page.evaluate((workId) => {
       document.querySelector(`#work_${workId} h4.heading a`).dispatchEvent(
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
-    }, id)
-    await sleep(300)
+    }, id))
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
         label: el.querySelector('.AO3E--menu--label').textContent,
@@ -132,14 +133,26 @@ describe('the ongoing mark', { skip }, () => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.textContent.startsWith(p)).click()
     }, prefix)
-    await sleep(250)
+    await menuClosed(page)
   }
+
+  /** Pick "Mark as ongoing…" from the open menu, and wait for the editor it opens. */
+  const openEditor = async () => {
+    await clickRow('Mark as ongoing…')
+    await page.waitForSelector('.AO3E--progress-editor')
+  }
+
+  /** How many `option.workMarks` writes the page has made. */
+  const markWrites = () => page.evaluate(() => window.__writes.filter(w => 'option.workMarks' in w).length)
 
   /** The ongoing mark as the last `option.workMarks` write left it, or null. */
   const lastMarks = () => page.evaluate(() => {
     const writes = window.__writes.filter(w => 'option.workMarks' in w)
     return writes.length ? writes[writes.length - 1]['option.workMarks'].marks.continue : null
   })
+
+  /** The runs the page had finished when the first mark was saved. */
+  let runsBeforeSave
 
   test('an unmarked work offers one row, and it opens the editor', async () => {
     const labels = (await openWorkMenu(1)).map(i => i.label)
@@ -149,7 +162,7 @@ describe('the ongoing mark', { skip }, () => {
   })
 
   test('the editor prefills the published count, not the author\'s target', async () => {
-    await clickRow('Mark as ongoing…')
+    await openEditor()
     const value = await page.$eval('.AO3E--progress-editor--chapter', el => el.value)
     // 9 of a stated 23: the right-hand number is a guess and counts nothing.
     assert.equal(value, '9')
@@ -163,18 +176,22 @@ describe('the ongoing mark', { skip }, () => {
   test('and survives a scroll, which would dismiss an ordinary popover', async () => {
     // The one that actually breaks a form in a popover: focusing an off-screen
     // field scrolls it into view, and a mobile keyboard opening fires resize.
-    await page.evaluate(() => window.scrollBy(0, 300))
+    await page.evaluate(() => new Promise((resolve) => {
+      window.addEventListener('scroll', resolve, { capture: true, once: true })
+      window.scrollBy(0, 300)
+    }))
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
-    await sleep(250)
     assert.notEqual(await page.$('.AO3E--progress-editor'), null, 'the editor must still be open')
   })
 
   test('saving writes the mark and its progress in one option write', async () => {
+    runsBeforeSave = await runs(page)
+    const writes = await markWrites()
     await page.evaluate(() => {
       document.querySelector('.AO3E--progress-editor--chapter').value = '9'
       document.querySelector('.AO3E--progress-editor--save').click()
     })
-    await sleep(300)
+    await until('the mark to be written', async () => await markWrites() > writes)
     const mark = await lastMarks()
     assert.notEqual(mark, null, 'no option.workMarks write was made')
     // Work 1, delta-encoded from 0, chapter 9 in base 36 — and no trailing
@@ -188,8 +205,7 @@ describe('the ongoing mark', { skip }, () => {
   })
 
   test('a caught-up work collapses, naming why', async () => {
-    // The re-run is debounced 500ms after the option write.
-    await sleep(1500)
+    await settled(page, runsBeforeSave)
     const hiddenBy = await page.evaluate(() => document.getElementById('work_1')?.dataset.ao3eHiddenBy ?? null)
     assert.equal(hiddenBy, 'marks')
     const reason = await page.evaluate(() =>
@@ -215,32 +231,33 @@ describe('the ongoing mark', { skip }, () => {
     const latest = items.find(i => i.label.startsWith('Update to latest'))
     assert.equal(latest.disabled, true, 'already on chapter 9 — the row states where you are')
     await page.keyboard.press('Escape')
-    await sleep(200)
+    await menuClosed(page)
   })
 
   test('an open-ended work reads its published count, ignoring the "?"', async () => {
     const labels = (await openWorkMenu(2)).map(i => i.label)
     assert.ok(labels.includes('Mark as ongoing…'), labels.join(' | '))
-    await clickRow('Mark as ongoing…')
+    await openEditor()
     const value = await page.$eval('.AO3E--progress-editor--chapter', el => el.value)
     assert.equal(value, '4')
     await page.evaluate(() => document.querySelector('.AO3E--progress-editor--cancel').click())
-    await sleep(200)
+    await page.waitForFunction(() => !document.querySelector('.AO3E--progress-editor'))
   })
 
   test('updating to the latest chapter writes without opening a dialog', async () => {
     // A one-shot with no anchor at all in its dd.chapters — the third shape.
     await openWorkMenu(3)
-    await clickRow('Mark as ongoing…')
-    await page.evaluate(() => {
+    await openEditor()
+    await rerun(page, () => page.evaluate(() => {
       document.querySelector('.AO3E--progress-editor--chapter').value = '0'
       document.querySelector('.AO3E--progress-editor--save').click()
-    })
-    await sleep(1500)
+    }))
 
     await openWorkMenu(3)
+    const writes = await markWrites()
     await clickRow('Update to latest chapter (1)')
     assert.equal(await page.$('.AO3E--progress-editor'), null, 'no dialog for a one-click update')
+    await until('the update to be written', async () => await markWrites() > writes)
     const mark = await lastMarks()
     // Works 1 and 3 both marked: deltas 1 and 2, chapters 9 and 1.
     assert.equal(mark.items, '1,2')

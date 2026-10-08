@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep, storedListIds, storedLists } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, storedListIds, storedLists } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { pressFacet, rerun, settled, toasts, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -153,7 +155,7 @@ describe('search read items', { skip }, () => {
     await tab.goto(url, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(tab)
     return tab
   }
 
@@ -198,7 +200,7 @@ describe('search read items', { skip }, () => {
 
   test('the Marked for Later page is the search view, with nothing to go back to', async () => {
     tab = await load(TO_READ_URL)
-    await sleep(2000)
+    await viewDrawn(tab)
     const page = await tab.evaluate(() => {
       const shown = el => !!el && getComputedStyle(el).display !== 'none'
       const button = document.querySelector('.AO3E--search-read-works--button')
@@ -229,7 +231,9 @@ describe('search read items', { skip }, () => {
     // The page count can't be read off this document — it is the to-read
     // listing, not the history — so the source fetches page 1 to find out.
     await tab.click('.AO3E--search-read-works--button')
-    await sleep(2500)
+    // The Marked for Later view is drawn until the read one takes its place.
+    await tab.waitForSelector('.AO3E--search-host.AO3E--read-works')
+    await viewDrawn(tab)
     assert.deepEqual(await shownTitles(tab), ['Work number 1', 'Work number 3'])
     assert.equal(await tab.$('.AO3E--search-host.AO3E--marked-for-later'), null, 'one view at a time')
     // Opened over a page that is itself a search view, "Back to list" would
@@ -258,7 +262,7 @@ describe('search read items', { skip }, () => {
     assert.equal(await tab.$('.AO3E--search-host'), null)
     assert.deepEqual((await pageChrome(tab)).links.map(link => link.text), ['Marked for Later', 'Clear Entire History'])
     await tab.click('.AO3E--search-read-works--button')
-    await sleep(2500)
+    await viewDrawn(tab)
 
     // Twenty-four works in the history; two of them have a verdict. Work 2 is
     // marked Ongoing, which is the one mark in the read group that means you are
@@ -294,12 +298,7 @@ describe('search read items', { skip }, () => {
   })
 
   test('including one narrows the view to the works marked that way', async () => {
-    await tab.evaluate(() => {
-      const row = Array.from(document.querySelectorAll('.AO3E--search-view--row'))
-        .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent?.trim() === 'Favorite')
-      row.querySelector('.AO3E--search-view--toggle-include').click()
-    })
-    await sleep(400)
+    await pressFacet(tab, 'Favorite')
     assert.deepEqual(await shownTitles(tab), ['Work number 1'])
   })
 
@@ -325,7 +324,7 @@ describe('search read items', { skip }, () => {
 
   test('"Back to list" puts the native page back', async () => {
     await tab.click('.AO3E--search-view--back')
-    await sleep(400)
+    await tab.waitForFunction(() => !document.querySelector('.AO3E--search-host'))
     const restored = await tab.evaluate(() => ({
       view: document.querySelector('.AO3E--search-host'),
       list: getComputedStyle(document.querySelector('#main ol.reading.work.index.group')).display,
@@ -359,7 +358,7 @@ describe('search read items', { skip }, () => {
     })
     const before = fetched.length
     await empty.click('.AO3E--search-read-works--button')
-    await sleep(1200)
+    await until('the reader to be told nothing is marked', async () => (await toasts(empty)).includes('You haven’t marked any works as read yet.'))
     assert.equal(await empty.$('.AO3E--search-host'), null, 'no view opens')
     assert.equal(fetched.length, before, 'and AO3 is not asked for a single page')
     await empty.close()
@@ -488,9 +487,9 @@ describe('read list auto-reload', { skip }, () => {
     await tab.goto(HISTORY_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1000)
+    await settled(tab)
     await tab.click('.AO3E--search-read-works--button')
-    await sleep(3000)
+    await viewDrawn(tab)
     return tab
   }
 
@@ -566,17 +565,20 @@ describe('read list auto-reload', { skip }, () => {
   })
 
   test('taking the last read mark off a work takes it off the list at once', async () => {
-    const tab = await open({ stored: storedReadList(['1', '3'], 2 * HOUR) })
+    const seeded = storedReadList(['1', '3'], 2 * HOUR)
+    const tab = await open({ stored: seeded })
     assert.deepEqual((await shownTitles(tab)).sort(), ['Stored work 1', 'Stored work 3'])
-    const { scrapedAt } = storedReadList(['1', '3'], 2 * HOUR)['read-works:me']
+    const { scrapedAt } = seeded['read-works:me']
 
     // Work 3's only verdict was Read. Work 1 keeps Favorite, so it stays.
     const marks = {
       ...SEED['option.workMarks'],
       marks: { ...SEED['option.workMarks'].marks, read: { ...SEED['option.workMarks'].marks.read, items: '' } },
     }
-    await tab.evaluate(m => browser.storage.local.set({ 'option.workMarks': m }), marks)
-    await sleep(2000)
+    await rerun(tab, () => tab.evaluate(m => browser.storage.local.set({ 'option.workMarks': m }), marks))
+    await viewDrawn(tab)
+    await until('the pruned list to be written', async () =>
+      storedListIds((await lastWrite(tab, 'cache.searchLists'))?.['read-works:me']).length === 1)
 
     assert.deepEqual(await shownTitles(tab), ['Stored work 1'], 'gone without a reload')
     assert.deepEqual(listPages, [])
@@ -590,7 +592,7 @@ describe('read list auto-reload', { skip }, () => {
     const tab = await open({ stored: storedReadList(['1', '3'], 2 * HOUR) })
     assert.deepEqual(listPages, [])
     await tab.click('.AO3E--search-view--refresh')
-    await sleep(3000)
+    await viewDrawn(tab)
     assert.ok(listPages.length > 0)
     assert.deepEqual(await shownTitles(tab), ['Work number 1', 'Work number 3'], 'fresh blurbs, not the stored ones')
     await tab.close()

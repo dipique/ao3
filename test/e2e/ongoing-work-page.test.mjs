@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { openMenu, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -108,26 +109,27 @@ describe('the ongoing mark on a work page', { skip }, () => {
     await tab.goto(WORK_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(tab)
 
-    await tab.evaluate(() => {
+    await openMenu(tab, () => tab.evaluate(() => {
       document.querySelector('#workskin > .preface.group > h2.title.heading').dispatchEvent(
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
-    })
-    await sleep(250)
+    }))
     const labels = await tab.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item .AO3E--menu--label')]
         .map(el => el.textContent))
 
-    await tab.evaluate(() => {
+    const picked = await tab.evaluate(() => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       const row = rows.find(el =>
         el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))
       if (row)
         row.click()
+      return !!row
     })
-    await sleep(250)
+    if (picked)
+      await tab.waitForSelector('.AO3E--progress-editor')
     const field = await tab.$eval('.AO3E--progress-editor--chapter', el => ({
       value: el.value,
       max: el.max,

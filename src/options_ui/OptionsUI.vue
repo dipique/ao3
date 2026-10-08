@@ -108,10 +108,10 @@ h6 {
    shortcuts' classes are named here because a shortcut can't add a class of
    its own. */
 @media (max-width: 767.98px) {
-  :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn) {
+  :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn, .armed-btn) {
     position: relative;
   }
-  :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn)::after {
+  :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn, .armed-btn)::after {
     content: '';
     position: absolute;
     z-index: -1;
@@ -121,7 +121,7 @@ h6 {
     height: max(100%, 44px);
     transform: translate(-50%, -50%);
   }
-  :has(> :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn)) {
+  :has(> :is(.touch-target, .icon-btn, .label-btn, .outline-btn, .ghost-btn, .primary-btn, .armed-btn)) {
     isolation: isolate;
   }
 }

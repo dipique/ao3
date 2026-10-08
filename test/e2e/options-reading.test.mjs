@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 /** The rows with a slider beside their number, the option each edits, and the slider's far end. */
 const SLIDER_ROWS = {
@@ -106,7 +105,7 @@ describe('options UI — Reading', { skip }, () => {
           const row = await options.row(id)
           const thumb = await row.$('[role="slider"]')
           await thumb.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
-          await sleep(200)
+          await options.frame()
           const track = await thumb.evaluate((el) => {
             const { left, right, top, bottom } = el.parentElement.getBoundingClientRect()
             return { left, right, y: (top + bottom) / 2 }
@@ -116,7 +115,7 @@ describe('options UI — Reading', { skip }, () => {
           await options.page.mouse.down()
           await options.page.mouse.move(track.right + 200, track.y, { steps: 5 })
           await options.page.mouse.up()
-          await sleep(600)
+          await until(`${id} to store its end`, async () => await options.stored(key) === max)
 
           assert.equal(await options.stored(key), max, id)
           assert.equal(await (await options.control(row, 'spinbutton')).evaluate(el => Number(el.value)), max, `${id} shows it`)
@@ -142,9 +141,10 @@ describe('options UI — Reading', { skip }, () => {
 
       await select.evaluate(el => window.scrollBy({ top: el.getBoundingClientRect().top - window.innerHeight / 2, behavior: 'instant' }))
       await select.click()
-      await sleep(300)
+      await options.page.waitForSelector('[role="option"]')
+      await options.calm()
       await (await options.control(options.page, 'option', 'Justified')).click()
-      await sleep(600)
+      await options.saved()
       assert.equal(await options.lastWrite('option.forceAlignment'), 'justify')
       assert.equal(await options.text(select), 'Justified')
       assert.deepEqual(options.problems(), [])

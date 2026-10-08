@@ -5,6 +5,7 @@ import { anchorCategory, resolveAnchor } from './useAnchors.ts'
 import { useCurrentCategory } from './useCurrentCategory.ts'
 import { useNav } from './useNav.ts'
 import { useOptionSearch } from './useOptionSearch.ts'
+import { holdForJump, jumpLanded } from './useSubsectionInView.ts'
 
 /**
  * Deep links into the options page: `options_ui.html#search` opens on the Search
@@ -138,13 +139,18 @@ async function followHash(hash: string): Promise<void> {
  * names the hash it landed on. Each later jump takes it away until that jump
  * has landed in turn, or leaves it to a jump that overtook it: until then the
  * page may still scroll under whatever is pointing at it, which is what
- * anything driving the page waits out.
+ * anything driving the page waits out. The rail marks the sub-section a jump
+ * goes to from when it begins (see {@link file://./useSubsectionInView.ts}).
  */
 export function useHashNav(ready: Ref<boolean>): void {
   async function land(hash: string): Promise<void> {
     delete document.body.dataset.landed
+    holdForJump(hash)
     await followHash(hash)
-    if (ready.value && location.hash === hash)
+    if (location.hash !== hash)
+      return
+    jumpLanded()
+    if (ready.value)
       document.body.dataset.landed = hash
   }
 

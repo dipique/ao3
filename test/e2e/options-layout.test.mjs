@@ -23,6 +23,19 @@ const LONG = {
   entity: 'Marvel Cinematic Universe',
 }
 const UNDESCRIBED = 'tag-works:A%20Very%20Long%20Uncommon%20Tag%20Name%20Nobody%20Opened%20Since'
+/**
+ * Work marks, on: Read on 600 works, over a kilobyte packed, so the frame's
+ * foot gives its figure, at its longest; Good, a second row with works to
+ * clear; and Marked for later, which has a note of its own.
+ */
+const MARKS = {
+  enabled: true,
+  marks: {
+    read: { icon: 'read', label: 'Read', color: '#6b7280', items: Array.from({ length: 600 }).fill('1').join(','), order: 0 },
+    good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: 'read', items: '1,1', order: 1 },
+    saved: { icon: 'mdi/clock-check', label: 'Marked for later', color: '#2f8f4e', order: 2 },
+  },
+}
 const SEED = {
   'option.searchLanguage': { enabled: true, language: null },
   'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [{ id: LONG.id, kind: LONG.kind, url: LONG.url, alias: LONG.title, type: LONG.type, entity: LONG.entity, tracked: true, since: 20000 }] },
@@ -38,8 +51,71 @@ function savedListsOverflow() {
     .filter(el => el.checkVisibility() && el.getBoundingClientRect().right > edge + 0.5)
     .map(el => `${el.tagName.toLowerCase()}.${el.className} reaches ${Math.round(el.getBoundingClientRect().right)} px, past ${Math.round(edge)} px`)
 }
+/**
+ * A list frame's foot, if it has one, against the frame and its scrolling
+ * rows: the boxes, and the foot's text size, line spacing and any text it
+ * cuts off.
+ */
+function footBoxes(id) {
+  const frame = document.querySelector(`[data-list="${id}"]`)
+  const foot = frame.querySelector('[data-list-foot]')
+  if (!foot?.checkVisibility())
+    return null
+  const body = frame.querySelector('[data-list-body]')
+  const box = (el) => {
+    const { top, bottom, left, right } = el.getBoundingClientRect()
+    return { top, bottom, left, right }
+  }
+  const style = getComputedStyle(foot)
+  return {
+    frame: box(frame),
+    body: box(body),
+    foot: box(foot),
+    inBody: body.contains(foot),
+    cut: foot.scrollWidth > foot.clientWidth,
+    size: Number.parseFloat(style.fontSize),
+    leading: Number.parseFloat(style.lineHeight),
+  }
+}
+
 /** A row whose control is two buttons, too wide to sit beside the text in a phone's width. */
 const WIDE_CONTROL_ROW = 'your-data-import-export-your-settings'
+
+/** {@link SEED} with Work marks on. */
+const WITH_MARKS = { ...SEED, 'option.workMarks': MARKS }
+
+/**
+ * {@link WITH_MARKS} with every other list on and holding rows, so each list's
+ * controls are drawn: rules, word-count ranges, and text replacements, a
+ * disabled one among them. The backups the background lists are
+ * {@link BACKUPS}.
+ */
+const WITH_LISTS = {
+  ...WITH_MARKS,
+  'option.rules': {
+    enabled: true,
+    filters: [
+      { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'highlight', color: '#7c3aed' },
+      { target: 'tag', value: 'Dead Dove: Do Not Eat', matcher: 'exact', behavior: 'none' },
+    ],
+    colors: {},
+  },
+  'option.wordCountToolbar': { enabled: true, ranges: [{ from: 1000, to: 5000 }, { from: 50000, to: null }] },
+  'option.textReplacements': { enabled: true, tools: false, rules: [{ find: 'Y/N', replace: 'Alex' }, { find: 'E/N', replace: 'Sam', disabled: true }] },
+}
+
+/** Two snapshots, for the backups list to have rows. */
+const BACKUPS = [
+  { key: 'backup.1', createdAt: Date.now(), date: '2026-09-08', kind: 'daily', label: 'Today' },
+  { key: 'backup.2', createdAt: Date.now() - 86400_000, date: '2026-09-07', kind: 'daily', label: 'Yesterday' },
+]
+
+/** The lists in each category, by `data-list`, and how many rows each draws from {@link WITH_LISTS} and {@link BACKUPS}. */
+const LIST_ROWS = {
+  'search': { 'rules': 2, 'word-count-ranges': 2 },
+  'reading': { 'work-marks': 2, 'text-replacements': 2 },
+  'sync-backups': { backups: BACKUPS.length },
+}
 
 /** The title, description and control of a settings row, and its inset panel if it has one, as rounded boxes. */
 function rowBoxes(id) {
@@ -72,6 +148,9 @@ function token(name) {
  * under them where it is too wide to leave the text room. Rows are parted by
  * `hair` lines, and what a switch reveals sits in a `sunken` inset across the
  * whole row.
+ *
+ * And a list's foot, Work marks' at its longest: inside the frame, under the
+ * rows, wrapping rather than cut off.
  */
 describe('options UI — layout', { skip }, () => {
   let session
@@ -85,7 +164,7 @@ describe('options UI — layout', { skip }, () => {
   for (const theme of THEMES) {
     for (const width of WIDTHS) {
       test(`${width} px, ${theme}`, async () => {
-        const options = await session.open({ viewport: { width, height: 900 }, theme, seed: SEED })
+        const options = await session.open({ viewport: { width, height: 900 }, theme, seed: WITH_MARKS })
         const noSidewaysScroll = async () => {
           const { scrollWidth, innerWidth } = await options.page.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
@@ -195,6 +274,17 @@ describe('options UI — layout', { skip }, () => {
           await options.savedListDetails(`copy:${UNDESCRIBED}`)
           assert.deepEqual(await options.page.evaluate(savedListsOverflow), [])
           await noSidewaysScroll()
+
+          // Work marks' foot: inside the frame, under the rows rather than among them, whole, its lines spaced to be read.
+          await options.goTo('#marks-status')
+          const marks = await options.page.evaluate(footBoxes, 'work-marks')
+          const marksLayout = JSON.stringify(marks)
+          assert.ok(marks, 'Work marks has a foot')
+          assert.ok(!marks.inBody && marks.foot.top >= marks.body.bottom - 0.5, `under the rows: ${marksLayout}`)
+          assert.ok(marks.foot.left >= marks.frame.left && marks.foot.right <= marks.frame.right && marks.foot.bottom <= marks.frame.bottom + 0.5, `inside the frame: ${marksLayout}`)
+          assert.ok(!marks.cut, `nothing cut off: ${marksLayout}`)
+          assert.ok(marks.leading >= marks.size * 1.3, `its lines are ${marks.leading} px apart for ${marks.size} px text`)
+          await noSidewaysScroll()
         }
         finally {
           await options.close()
@@ -204,25 +294,95 @@ describe('options UI — layout', { skip }, () => {
   }
 })
 
+/**
+ * The lists the page keeps a note beside, each where it is opened, with what
+ * its notes must say: one line each, in order, and whether it is above the
+ * frame or below it.
+ */
+const NOTED_LISTS = {
+  'word-count-ranges': { hash: '#filter-defaults', notes: [{ above: true, says: [/Word Count filter/, /instant search view/, /clear/, /blank bound/, /exact repeat/] }] },
+  'text-replacements': { hash: '#work-text', notes: [{ above: false, says: [/Match casing/, /any casing/, /Across formatting/, /italics/] }] },
+  'work-marks': {
+    hash: '#marks-status',
+    notes: [
+      { above: true, says: [/one mark at a time/, /count as Read/, /off Marked for Later/] },
+      { above: false, says: [/Marked for later lives on AO3/] },
+    ],
+  },
+}
+
+/** The notes beside the list's frame, in order: their text, how many lines each is laid out in, and whether each is above the frame. */
+function listNotes(id) {
+  const frame = document.querySelector(`[data-list="${id}"]`)
+  return [...frame.parentElement.querySelectorAll('[data-list-note]')].map(note => ({
+    text: note.textContent.replace(/\s+/g, ' ').trim(),
+    lines: Math.round(note.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(note).lineHeight)),
+    above: !!(note.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING),
+  }))
+}
+
+/**
+ * Beside each list that needs one, a single short line holds what no control
+ * in it says: one line across a wide window. Work marks keeps a second, on
+ * the mark that has no row.
+ */
+describe('options UI — the notes beside a list', { skip }, () => {
+  let session
+
+  before(async () => {
+    session = await startOptions()
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  for (const [list, { hash, notes: expected }] of Object.entries(NOTED_LISTS)) {
+    test(list, async () => {
+      const options = await session.open({
+        viewport: { width: 1440, height: 900 },
+        hash,
+        seed: {
+          'option.wordCountToolbar': { enabled: true, ranges: [{ from: 1000, to: 5000 }] },
+          'option.textReplacements': { enabled: true, tools: false, rules: [{ find: 'Y/N', replace: 'Alex' }] },
+          'option.workMarks': MARKS,
+        },
+      })
+      try {
+        const notes = await options.page.evaluate(listNotes, list)
+        assert.equal(notes.length, expected.length, `${expected.length} note(s): ${JSON.stringify(notes)}`)
+        for (const [i, note] of notes.entries()) {
+          assert.equal(note.lines, 1, `note ${i + 1} is one line: "${note.text}"`)
+          assert.equal(note.above, expected[i].above, `note ${i + 1} is ${expected[i].above ? 'above' : 'below'} the frame: "${note.text}"`)
+          for (const fact of expected[i].says)
+            assert.match(note.text, fact)
+        }
+      }
+      finally {
+        await options.close()
+      }
+    })
+  }
+})
+
 const CATEGORIES = ['site-features-appearance', 'search', 'lists', 'reading', 'sync-backups', 'advanced']
 
 /** What a touch or a press acts on. */
 const CONTROLS = 'button, a[href], [role="switch"], [role="radio"], [role="checkbox"], [role="combobox"], [role="tab"], select'
 
 /**
- * The controls in view that don't answer a touch anywhere in a 44 px square
- * around them, each brought to the middle of the window first. The square's
+ * The controls in view, or only those the selector `only` picks, that don't
+ * answer a touch anywhere in a 44 px square around them, each brought to the
+ * middle of the window first. The square's
  * middle must be the control itself, and its edges the control, its label, or
  * whatever else is drawn there (another control, or words), never the bare
  * ground a hit area missing or cut off would leave. A link in running text is
  * left out, as WCAG leaves it out; so is a text field, which a touch only puts
  * the caret in, and which spans its row.
  */
-function smallTargets(controls) {
+function smallTargets(controls, only = null) {
   const found = []
   const owner = el => el?.closest(`${controls}, input, textarea`)
   const drawn = el => [...el.childNodes].some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim())
-  for (const el of document.querySelectorAll(`header ${controls.replaceAll(', ', ', header ')}, [data-rail] ${controls.replaceAll(', ', ', [data-rail] ')}, main ${controls.replaceAll(', ', ', main ')}`)) {
+  for (const el of document.querySelectorAll(only ?? `header ${controls.replaceAll(', ', ', header ')}, [data-rail] ${controls.replaceAll(', ', ', [data-rail] ')}, main ${controls.replaceAll(', ', ', main ')}`)) {
     if (!el.checkVisibility() || el.closest('[aria-hidden="true"], [inert]'))
       continue
     if (el.matches('a') && [...el.parentElement.childNodes].some(node => node !== el && node.textContent.trim()) && el.closest('p'))
@@ -246,7 +406,8 @@ function smallTargets(controls) {
 
 /**
  * Below 768 px, where the page is touched, every control answers a touch
- * anywhere in a 44 px square around it.
+ * anywhere in a 44 px square around it: every list on, with rows, so their
+ * controls are among them.
  */
 describe('options UI — touch targets below 768 px', { skip }, () => {
   let session
@@ -259,12 +420,19 @@ describe('options UI — touch targets below 768 px', { skip }, () => {
 
   for (const category of CATEGORIES) {
     test(category, async () => {
-      const options = await session.open({ viewport: { width: 390, height: 844 }, hash: `#${category}`, seed: SEED })
+      const options = await session.open({
+        viewport: { width: 390, height: 844 },
+        hash: `#${category}`,
+        seed: WITH_LISTS,
+        prepare: page => page.evaluateOnNewDocument(scriptBackground, { listBackups: BACKUPS }),
+      })
       try {
         if (category === 'lists') {
           await until('the rows to be drawn', async () => (await options.savedListIds()).length === 2)
           await options.savedListDetails(LONG.id)
         }
+        for (const [list, count] of Object.entries(LIST_ROWS[category] ?? {}))
+          await until(`${list} to draw its rows`, async () => (await options.listRows(list)).length === count)
         await options.calm()
         assert.deepEqual(await options.page.evaluate(smallTargets, CONTROLS), [])
       }
@@ -273,6 +441,23 @@ describe('options UI — touch targets below 768 px', { skip }, () => {
       }
     })
   }
+
+  // It asks for a few seconds only, so it alone is read, and it is checked to be asking still once read.
+  test('Work marks\' Clear, armed', async () => {
+    const options = await session.open({ viewport: { width: 390, height: 844 }, hash: '#marks-status', seed: WITH_MARKS })
+    try {
+      const clear = await options.control(await options.listRow('work-marks', 'good'), 'button', /^Clear /)
+      await options.press(clear)
+      await until('Clear to ask', async () => /^Clear [\d,]+\?$/.test(await options.text(clear)))
+      await options.calm()
+      await clear.evaluate(el => el.setAttribute('data-probed', ''))
+      assert.deepEqual(await options.page.evaluate(smallTargets, CONTROLS, '[data-probed]'), [])
+      assert.match(await options.text(clear), /^Clear [\d,]+\?$/, 'still asking once read')
+    }
+    finally {
+      await options.close()
+    }
+  })
 })
 
 /**

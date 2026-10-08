@@ -3,7 +3,20 @@ import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 
 import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_PRESETS, RULE_TARGETS, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, ruleValueMatches, TagType } from '../../src/common/data.ts'
-import { canSave, describeRule, draftRule, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, ruleSummary, suggestSource, swatchFor, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
+import { ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
+import { canSave, checkedNames, checkedPattern, describeRule, draftRule, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, ruleSummary, saveButton, suggestSource, swatchFor, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
+
+/** A check of `pattern` that ran to the end over `subject` and `names`. */
+const finished = (pattern, subject, names = []) => {
+  const job = { pattern, subjects: [subject, ...names] }
+  return ended(job, matchSpans(pattern, job.subjects))
+}
+
+/** A check of `pattern` stopped for running past the budget. */
+const slow = pattern => ({ kind: 'slow', job: { pattern, subjects: [] } })
+
+/** A check under way, after `last`. */
+const running = (last = null) => ({ kind: 'running', last })
 
 /** AO3's answers to its tag autocomplete, recorded signed out and trimmed to a few names each, keyed by request. */
 const RECORDED = JSON.parse(readFileSync(new URL('./ao3-autocomplete.json', import.meta.url), 'utf8'))
@@ -292,10 +305,89 @@ describe('draftRule', () => {
 })
 
 describe('canSave', () => {
+  const regex = value => ({ ...opened(undefined), matcher: 'regex', value })
+
   test('needs something to match', () => {
-    assert.equal(canSave(opened(undefined)), false)
-    assert.equal(canSave({ ...opened(undefined), value: '   ' }), false)
-    assert.equal(canSave({ ...opened(undefined), value: 'Fluff' }), true)
+    assert.equal(canSave(opened(undefined), IDLE_RUN), false)
+    assert.equal(canSave({ ...opened(undefined), value: '   ' }, IDLE_RUN), false)
+    assert.equal(canSave({ ...opened(undefined), value: 'Fluff' }, IDLE_RUN), true)
+  })
+
+  test('a Regex pattern needs its check to have run to the end in time', () => {
+    assert.equal(canSave(regex('^a+!$'), finished('^a+!$', 'aaaa!')), true)
+    assert.equal(canSave(regex('(a+)+$'), slow('(a+)+$')), false)
+    assert.equal(canSave(regex('(a+)+$'), running()), false)
+    assert.equal(canSave(regex('^a+!$'), running(finished('^a+', 'aaaa!'))), false)
+  })
+
+  test('a pattern the engine refuses runs nothing, so has nothing to wait for, as before', () => {
+    assert.equal(canSave(regex('(slow'), IDLE_RUN), true)
+  })
+
+  test('nothing is checked for Exact or Contains, or for a number matching an id', () => {
+    for (const draft of [{ ...regex('(a+)+$'), matcher: 'exact' }, { ...regex('(a+)+$'), matcher: 'contains' }, { ...regex('4232377'), target: 'work' }])
+      assert.equal(canSave(draft, IDLE_RUN), true, draft.matcher)
+  })
+})
+
+describe('saveButton', () => {
+  const regex = value => ({ ...opened(undefined), matcher: 'regex', value })
+  const TOO_SLOW = 'Too slow to test: change the pattern to save the rule.'
+
+  test('is off with no reason while there is nothing to match', () => {
+    assert.deepEqual(saveButton(opened(undefined), IDLE_RUN), { off: true, reason: null })
+  })
+
+  test('is off, saying why, for a pattern that ran past the budget', () => {
+    assert.deepEqual(saveButton(regex('(a+)+$'), slow('(a+)+$')), { off: true, reason: TOO_SLOW })
+  })
+
+  test('stays off while the next check runs, until it passes', () => {
+    assert.deepEqual(saveButton(regex('(a+)+'), running(slow('(a+)+$'))), { off: true, reason: TOO_SLOW })
+    assert.deepEqual(saveButton(regex('(a+)+'), finished('(a+)+', 'aaaa!')), { off: false, reason: null })
+  })
+
+  test('stays on while a check runs after one that passed, or the first: a press waits for it', () => {
+    assert.deepEqual(saveButton(regex('^a+!$'), running(finished('^a+', 'aaaa!'))), { off: false, reason: null })
+    assert.deepEqual(saveButton(regex('^a+!$'), running()), { off: false, reason: null })
+  })
+
+  test('a slow check is nothing to Exact or Contains', () => {
+    assert.deepEqual(saveButton({ ...regex('(a+)+$'), matcher: 'contains' }, IDLE_RUN), { off: false, reason: null })
+  })
+})
+
+describe('checkedPattern', () => {
+  const draft = (target, matcher, value) => ({ target, matcher, value })
+
+  test('is the pattern in Regex mode, as the live rule runs it: a work\'s or a series\' trimmed, any other\'s as typed', () => {
+    assert.equal(checkedPattern(draft('tag', 'regex', ' ^slow ')), ' ^slow ')
+    assert.equal(checkedPattern(draft('author', 'regex', ' ^some')), ' ^some')
+    assert.equal(checkedPattern(draft('work', 'regex', ' ^Saga ')), '^Saga')
+    assert.equal(checkedPattern(draft('series', 'regex', ' ^Saga ')), '^Saga')
+  })
+
+  test('runs nothing in Exact or Contains mode, for a number matching an id, or for a blank or refused pattern', () => {
+    assert.equal(checkedPattern(draft('tag', 'exact', 'slow')), null)
+    assert.equal(checkedPattern(draft('tag', 'contains', 'slow')), null)
+    assert.equal(checkedPattern(draft('work', 'regex', ' 4232377 ')), null)
+    assert.equal(checkedPattern(draft('tag', 'regex', '   ')), null)
+    assert.equal(checkedPattern(draft('tag', 'regex', '(slow')), null)
+  })
+})
+
+describe('checkedNames', () => {
+  const known = { target: TagType.Character, names: ['Harry Potter'] }
+
+  test('a tag\'s pattern runs over the names known for its target, once they have loaded', () => {
+    assert.equal(checkedNames(TagType.Character, known), known.names)
+    assert.equal(checkedNames(TagType.Character, null), null)
+    assert.equal(checkedNames(TagType.Fandom, known), null, 'the names known for another target are no use')
+  })
+
+  test('an author\'s, a work\'s or a series\' runs over none', () => {
+    for (const target of ['author', 'work', 'series'])
+      assert.deepEqual(checkedNames(target, null), [], target)
   })
 })
 
@@ -346,48 +438,71 @@ describe('valueField', () => {
 })
 
 describe('regexVerdict', () => {
+  /** The verdict once the check of `pattern` over `subject` has run to the end. */
+  const verdict = (pattern, subject) => regexVerdict(pattern, subject, finished(pattern, subject))
+
   test('tests the pattern ignoring case', () => {
-    assert.deepEqual(regexVerdict('^slow.*burn$', 'Slow Burn'), { kind: 'match' })
-    assert.deepEqual(regexVerdict('^SLOW', 'slow burn'), { kind: 'match' })
-    assert.deepEqual(regexVerdict('^burn', 'Slow Burn'), { kind: 'miss' })
+    assert.deepEqual(verdict('^slow.*burn$', 'Slow Burn'), { kind: 'match' })
+    assert.deepEqual(verdict('^SLOW', 'slow burn'), { kind: 'match' })
+    assert.deepEqual(verdict('^burn', 'Slow Burn'), { kind: 'miss' })
   })
 
   test('a negated class keeps its meaning under the i flag', () => {
     // Each pair is an escape and its negation, which must disagree.
     for (const [miss, match] of [['Slow\\S*Burn', 'Slow\\s*Burn'], ['Slow\\wBurn', 'Slow\\WBurn'], ['\\d{4}', '\\D{4}'], ['\\bl', '\\Bl']]) {
-      assert.deepEqual(regexVerdict(miss, 'Slow Burn'), { kind: 'miss' }, miss)
-      assert.deepEqual(regexVerdict(match, 'Slow Burn'), { kind: 'match' }, match)
+      assert.deepEqual(verdict(miss, 'Slow Burn'), { kind: 'miss' }, miss)
+      assert.deepEqual(verdict(match, 'Slow Burn'), { kind: 'match' }, match)
     }
-    assert.deepEqual(regexVerdict('omega\\S+verse', 'Omega Verse'), { kind: 'miss' })
+    assert.deepEqual(verdict('omega\\S+verse', 'Omega Verse'), { kind: 'miss' })
   })
 
   test('an unterminated group is an invalid pattern, with the engine\'s reason, and a live rule matches nothing with it', () => {
-    assert.deepEqual(regexVerdict('(slow', 'slow'), { kind: 'invalid', reason: 'Unterminated group' })
+    assert.deepEqual(regexVerdict('(slow', 'slow', IDLE_RUN), { kind: 'invalid', reason: 'Unterminated group' })
     assert.equal(ruleValueMatches({ value: '(slow', matcher: 'regex' }, 'slow'), false)
   })
 
   test('the reason leaves out the pattern the engine repeats, however the pattern reads, and starts with a capital', () => {
-    assert.deepEqual(regexVerdict('x/i: (', 'x'), { kind: 'invalid', reason: 'Unterminated group' })
-    assert.deepEqual(regexVerdict('a{2,1}', 'a'), { kind: 'invalid', reason: 'Numbers out of order in {} quantifier' })
+    assert.deepEqual(regexVerdict('x/i: (', 'x', IDLE_RUN), { kind: 'invalid', reason: 'Unterminated group' })
+    assert.deepEqual(regexVerdict('a{2,1}', 'a', IDLE_RUN), { kind: 'invalid', reason: 'Numbers out of order in {} quantifier' })
   })
 
   test('an invalid pattern says so before anything is typed to test', () => {
-    assert.deepEqual(regexVerdict('[', ''), { kind: 'invalid', reason: 'Unterminated character class' })
+    assert.deepEqual(regexVerdict('[', '', IDLE_RUN), { kind: 'invalid', reason: 'Unterminated character class' })
   })
 
   test('no verdict without a pattern, or without something to test', () => {
-    assert.deepEqual(regexVerdict('', 'Slow Burn'), { kind: 'none' })
-    assert.deepEqual(regexVerdict('   ', 'Slow Burn'), { kind: 'none' })
-    assert.deepEqual(regexVerdict('slow', ''), { kind: 'none' })
+    assert.deepEqual(regexVerdict('', 'Slow Burn', IDLE_RUN), { kind: 'none' })
+    assert.deepEqual(regexVerdict('   ', 'Slow Burn', IDLE_RUN), { kind: 'none' })
+    assert.deepEqual(verdict('slow', ''), { kind: 'none' })
+  })
+
+  test('a check that ran past the budget is too slow, in place of a verdict, with or without something to test', () => {
+    assert.deepEqual(regexVerdict('(a+)+$', 'aaaa!', slow('(a+)+$')), { kind: 'slow' })
+    assert.deepEqual(regexVerdict('(a+)+$', '', slow('(a+)+$')), { kind: 'slow' })
+  })
+
+  test('while the check runs, it is checking what is typed to test', () => {
+    assert.deepEqual(regexVerdict('(a+)+$', 'aaaa!', running()), { kind: 'checking' })
+    assert.deepEqual(regexVerdict('(a+)+$', 'aaaa!', running(finished('(a+)+', 'aaaa!'))), { kind: 'checking' })
+  })
+
+  test('with nothing typed to test, there is no verdict to wait for while the check runs', () => {
+    assert.deepEqual(regexVerdict('(a+)+$', '', running(finished('(a+)+', ''))), { kind: 'none' })
+  })
+
+  test('a pattern the engine refuses, or a blank one, needs no check', () => {
+    assert.deepEqual(regexVerdict('(slow', 'slow', running()), { kind: 'invalid', reason: 'Unterminated group' })
+    assert.deepEqual(regexVerdict('  ', 'slow', running()), { kind: 'none' })
   })
 })
 
 describe('regexTester', () => {
-  const tester = (target, value, subject) => regexTester({ target, matcher: 'regex', value }, subject)
+  /** The tester once the check of `value` over `subject` has run to the end. */
+  const tester = (target, value, subject) => regexTester({ target, matcher: 'regex', value }, subject, finished(checkedPattern({ target, matcher: 'regex', value }) ?? value, subject))
 
   test('is there in Regex mode only', () => {
-    assert.equal(regexTester({ target: 'tag', matcher: 'exact', value: 'slow' }, 'Slow Burn'), null)
-    assert.equal(regexTester({ target: 'tag', matcher: 'contains', value: 'slow' }, 'Slow Burn'), null)
+    assert.equal(regexTester({ target: 'tag', matcher: 'exact', value: 'slow' }, 'Slow Burn', IDLE_RUN), null)
+    assert.equal(regexTester({ target: 'tag', matcher: 'contains', value: 'slow' }, 'Slow Burn', IDLE_RUN), null)
     assert.notEqual(tester('tag', 'slow', 'Slow Burn'), null)
   })
 
@@ -427,6 +542,19 @@ describe('regexTester', () => {
     for (const [value, subject] of [['', ''], ['^slow', ''], ['^slow', 'Slow Burn'], ['^burn', 'Slow Burn']])
       assert.equal(tester('tag', value, subject).help, 'Checks the pattern as you type. Nothing is saved from here.', `${value} / ${subject}`)
     assert.equal(tester('tag', '(slow', '').help, 'Unterminated group')
+  })
+
+  test('says a pattern that ran past the budget is too slow, and that testing stopped', () => {
+    const shown = regexTester({ target: 'tag', matcher: 'regex', value: '(a+)+$' }, 'aaaa!', slow('(a+)+$'))
+    assert.deepEqual(shown.verdict, { kind: 'slow' })
+    assert.equal(shown.label, 'Too slow')
+    assert.equal(shown.help, 'Testing stopped: the pattern took too long.')
+  })
+
+  test('says while it checks', () => {
+    const shown = regexTester({ target: 'tag', matcher: 'regex', value: '(a+)+$' }, 'aaaa!', running())
+    assert.equal(shown.label, 'Checking…')
+    assert.equal(shown.help, 'Checks the pattern as you type. Nothing is saved from here.')
   })
 
   test('agrees with live rules on every kind of target, which trim a work\'s or a series\' pattern only', () => {

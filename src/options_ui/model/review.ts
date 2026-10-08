@@ -22,7 +22,11 @@ export const WORKS_PER_REVIEW = { min: 10, max: 500 } as const
 /** What the job and every reason that names the job's list call the review's window. */
 export const REVIEW_NAME = 'this review'
 
-/** Why Start Review is off, once Tracked lists is on. Worded to follow the control's name after a dash. */
+/**
+ * Why Start Review is off, once Tracked lists is on. Worded to follow the
+ * control's name after a dash. `noWindow` is for a review with no page to open
+ * on: none gathered yet, and the reader's account not known.
+ */
 export const START_OFF = {
   noneTracked: 'off while no list is tracked',
   noWindow: 'off until your first review is gathered on AO3',
@@ -100,20 +104,25 @@ export interface ReviewBlockView {
 
 export function reviewBlock({ enabled, tracking, window, userId, job, now }: ReviewBlockInput): ReviewBlockView {
   const settingsOff = enabled ? null : TRACK_OFF.review
-  const open = window && reviewOpen(window, userId)
+  const open = reviewOpen(window, userId)
+  const startOff = settingsOff ?? (!tracking ? START_OFF.noneTracked : !open ? START_OFF.noWindow : null)
   const start = {
+    href: startOff ? null : open,
     label: window ? `Start the review: ${works(window.count)}` : 'Start the review',
-    off: settingsOff ?? (!tracking ? START_OFF.noneTracked : !open ? START_OFF.noWindow : null),
+    off: startOff,
   }
   if (!window) {
     return {
       settingsOff,
       figure: null,
-      empty: 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.',
+      // With a page to open, Start Review gathers the first review itself.
+      empty: open
+        ? 'Nothing gathered yet.'
+        : 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.',
       actions: null,
       offlineOff: null,
       job: false,
-      start: { ...start, href: null },
+      start,
     }
   }
 
@@ -128,7 +137,7 @@ export function reviewBlock({ enabled, tracking, window, userId, job, now }: Rev
     actions,
     offlineOff: off,
     job: here,
-    start: { ...start, href: start.off ? null : open },
+    start,
   }
 }
 
@@ -136,11 +145,12 @@ const REVIEW: ListRef = { kind: 'review' }
 
 /**
  * Where Start Review opens the review: its open URL ({@link openLink}), on the
- * reader's readings ({@link hostPage}), else, with their account not known, on
- * the page its window was gathered on; null with neither.
+ * reader's readings ({@link hostPage}), which gathers a review when there is
+ * none yet; else, with their account not known, on the page its window was
+ * gathered on; null with neither.
  */
-function reviewOpen(window: ReviewWindow, userId: string | undefined): string | null {
-  const page = hostPage(REVIEW, null, userId) ?? window.listUrl
+function reviewOpen(window: ReviewWindow | null, userId: string | undefined): string | null {
+  const page = hostPage(REVIEW, null, userId) ?? window?.listUrl
   return page ? openLink(REVIEW, page) : null
 }
 

@@ -12,6 +12,9 @@
  * Rendered only by the row that owns the job; it reads the one job directly
  * rather than taking it as a prop. `foot` holds what the owner offers for the
  * job (Stop, Continue, Discard), on the line with the failures.
+ *
+ * Its quieter words are muted, or `--quiet-fg` where its owner sets one: a
+ * job's tint does, since muted reads under AA on it in light.
  */
 const { view } = useSiteExport()
 
@@ -55,12 +58,12 @@ const showErrors = ref(false)
         class="motion-safe:animate-spin"
       />
       <SeverityGlyph v-else :severity="view.severity" :glyph="glyph" shrink-0 />
-      <span min-w-0 flex-1 truncate :class="view.wait === 'pacing' ? 'text-muted-fg' : ''">
+      <span min-w-0 flex-1 truncate :class="view.wait === 'pacing' ? 'quiet' : ''">
         <b v-if="view.wait === 'refused'" font-bold>{{ view.line }}</b>
         <template v-else>{{ view.line }}</template>
         <template v-if="view.countdown"> — trying again in {{ view.countdown }}</template>
       </span>
-      <span v-if="view.total" ws-nowrap text="[12px] muted-fg" leading="[16px]" tabular-nums>
+      <span v-if="view.total" class="quiet" ws-nowrap text="[12px]" leading="[16px]" tabular-nums>
         {{ view.done.toLocaleString() }} / {{ view.total.toLocaleString() }}
       </span>
     </div>
@@ -105,9 +108,9 @@ const showErrors = ref(false)
           <ArchiveLink :path="`/works/${failure.workId}`">
             {{ failure.title || `Work ${failure.workId}` }}
           </ArchiveLink>
-          <span text="[11.5px] muted-fg" leading="[16px]">{{ failure.reason }}</span>
+          <span class="quiet" text="[11.5px]" leading="[16px]">{{ failure.reason }}</span>
         </li>
-        <li v-if="view.failures.more" text="[11.5px] muted-fg" leading="[16px]">
+        <li v-if="view.failures.more" class="quiet" text="[11.5px]" leading="[16px]">
           …and {{ view.failures.more.toLocaleString() }} more.
         </li>
       </ul>
@@ -116,6 +119,10 @@ const showErrors = ref(false)
 </template>
 
 <style scoped>
+.quiet {
+  color: var(--quiet-fg, rgb(var(--color-muted-fg)));
+}
+
 /* The per-work failures, behind their count: a quiet button with the destructive glyph. */
 .failures {
   display: inline-flex;

@@ -279,6 +279,17 @@ export function installMock(seed) {
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 /**
+ * Let `ms` go by in `page`, timed by the page's own timers: for a wait that
+ * has to outlast a delay the page keeps, `ms` being the constant it keeps it
+ * by. Timers fire in the order they were set when the later one's delay is no
+ * shorter, so a timer the page set before this with the same delay has fired,
+ * and done whatever it does at once, by the time this returns.
+ */
+export function outlast(page, ms) {
+  return page.evaluate(delay => new Promise(resolve => setTimeout(resolve, delay)), ms)
+}
+
+/**
  * Storage items for stored search-view lists, in the layout the extension keeps
  * them in: each list's work ids under `cache.searchLists`, and each work's blurb
  * once, under `blurb.<short id>`.

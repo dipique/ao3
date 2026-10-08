@@ -80,8 +80,7 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
     <div flex="~ row wrap items-center justify-end gap-2">
       <button
         type="button"
-        class="outline-btn"
-        :class="{ armed: confirm.armed(DISCARD) }"
+        :class="confirm.armed(DISCARD) ? 'armed-btn' : 'outline-btn'"
         :title="discardOff ? withReason('Discard orphans', discardOff) : undefined"
         :aria-describedby="discardOff ? jobOffId : undefined"
         :disabled="!orphanCount || !!jobOff"
@@ -91,8 +90,7 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
       </button>
       <button
         type="button"
-        class="outline-btn"
-        :class="{ armed: confirm.armed(DELETE) }"
+        :class="confirm.armed(DELETE) ? 'armed-btn' : 'outline-btn'"
         :title="deleteOff ? withReason('Delete cached text', deleteOff) : undefined"
         :aria-describedby="deleteOff ? jobOffId : undefined"
         :disabled="!usage.cached || !!jobOff"
@@ -104,13 +102,3 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
     </div>
   </OptionRow>
 </template>
-
-<style scoped>
-/* Armed: the next press deletes. */
-.armed {
-  border-color: rgb(var(--color-destructive));
-  background-color: rgb(var(--color-destructive));
-  color: rgb(var(--color-destructive-fg));
-  font-weight: 600;
-}
-</style>

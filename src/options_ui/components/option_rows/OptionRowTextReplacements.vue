@@ -91,7 +91,7 @@ function remove(index: number) {
               aria-label="Find"
               class="h-[22px] w-full px-[7px] text-[12.5px]"
             />
-            <span class="i-tabler-arrow-right justify-self-center text-[13px] text-muted-fg" aria-hidden="true" />
+            <span class="list-row__glyph i-tabler-arrow-right justify-self-center text-[13px] text-muted-fg" aria-hidden="true" />
             <Input
               v-model="rule.replace"
               type="text"
@@ -108,7 +108,7 @@ function remove(index: number) {
                   v-model="rule.matchCasing"
                   label="Match casing"
                   icon="i-codicon-preserve-case"
-                  :tip="matchCasingOff(rule) ?? undefined"
+                  :tip="matchCasingOff(rule) ?? 'Match casing: matches any casing, and capitalises the replacement where the match was capitalised'"
                   :disabled="!!matchCasingOff(rule)"
                   :aria-describedby="matchCasingOff(rule) ? casingOffId : undefined"
                 />
@@ -116,10 +116,10 @@ function remove(index: number) {
                 <IconToggle
                   v-model="rule.acrossFormatting"
                   label="Match across formatting"
-                  tip="Across formatting"
+                  tip="Across formatting: matches through italics, links and the like; the replacement takes the formatting of where the match starts"
                   icon="i-tabler-code"
                 />
-                <IconToggle v-model="rule.disabled" label="Disable this replacement" tip="Disabled" icon="i-tabler-ban" />
+                <IconToggle v-model="rule.disabled" label="Disable this replacement" tip="Disabled: kept, but not applied" icon="i-tabler-ban" />
               </div>
               <button
                 type="button"
@@ -136,12 +136,9 @@ function remove(index: number) {
       </ListFrame>
       <span :id="casingOffId" hidden>{{ MATCH_CASING_OFF }}</span>
 
-      <p text="[11.5px] muted-fg" leading="[16px]">
-        "Match casing" matches any casing and capitalises the replacement when the match was capitalised, so one rule
-        covers both forms. "Across formatting" matches through italics, links and the like, where the words are split
-        across markup; the replacement takes the formatting of wherever the match started. "Disabled" keeps a rule
-        without applying it.
-      </p>
+      <ListNote>
+        Match casing lets one rule cover a word in any casing, and Across formatting matches through italics and links.
+      </ListNote>
     </div>
   </OptionRowCollapsable>
 </template>

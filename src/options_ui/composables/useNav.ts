@@ -1,3 +1,5 @@
+import type { DrawnSubsection } from '../model/rail.ts'
+
 import { categoryId } from '../model/anchors.ts'
 
 /**
@@ -21,8 +23,8 @@ export interface NavCategory {
 
 const categories = ref<NavCategory[]>([])
 
-/** The sub-sections' titles, in the order they render, which is the rail's order for them. */
-const subsections = ref<string[]>([])
+/** The sub-sections, each under its category, in the order they render, which is the rail's order for them. */
+const subsections = ref<DrawnSubsection[]>([])
 
 export function useNav() {
   return {
@@ -47,12 +49,12 @@ export function useAddNav(category: Omit<NavCategory, 'id'>): { id: string } {
   return { id }
 }
 
-/** Put a sub-section on the rail, in the order the sub-sections render. */
-export function useAddSubsection(title: string): void {
-  if (!subsections.value.includes(title))
-    subsections.value = [...subsections.value, title]
+/** Put a sub-section on the rail, under the category it renders in, in the order the sub-sections render. */
+export function useAddSubsection(title: string, category: string | null): void {
+  if (!subsections.value.some(one => one.title === title))
+    subsections.value = [...subsections.value, { category, title }]
 
   onUnmounted(() => {
-    subsections.value = subsections.value.filter(one => one !== title)
+    subsections.value = subsections.value.filter(one => one.title !== title)
   })
 }

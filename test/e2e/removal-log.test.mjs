@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -116,14 +117,14 @@ describe('removed works are logged in debug mode', { skip }, () => {
     await page.goto(TAG_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(page)
     return { page, logs }
   }
 
-  /** Open the search view over the tag's works, and give it time to settle. */
+  /** Open the search view over the tag's works, and wait for it to be drawn. */
   async function openView(page) {
     await page.click('.AO3E--search-tag-works--link')
-    await sleep(2500)
+    await viewDrawn(page)
   }
 
   const linesAbout = (logs, id) => logs.filter(line => line.includes(`Work ${id} "`))

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, beforeEach, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { menuClosed, openMenu, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -90,25 +91,24 @@ describe('one direction at a time in the sidebar filter', { skip }, () => {
       document.body.innerHTML = html
     }, PAGE)
     await page.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(page)
   })
 
   /** Right-click the blurb tag link reading `text`; returns the menu's row labels. */
   const openMenuOn = async (text) => {
-    await page.evaluate((want) => {
+    await openMenu(page, () => page.evaluate((want) => {
       const link = [...document.querySelectorAll('.blurb ul.tags a.tag')]
         .find(a => a.textContent.trim() === want)
       if (!link)
         throw new Error(`no tag link reading "${want}"`)
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
-    }, text)
-    await sleep(250)
+    }, text))
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .map(el => el.querySelector('.AO3E--menu--label').textContent))
   }
 
-  /** Click the open menu's row starting with `prefix`. */
+  /** Click the open menu's row starting with `prefix`, and wait for the menu to close behind it. */
   const pick = async (prefix) => {
     await page.evaluate((p) => {
       const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
@@ -117,8 +117,7 @@ describe('one direction at a time in the sidebar filter', { skip }, () => {
         throw new Error(`no menu row starting "${p}"`)
       row.click()
     }, prefix)
-    // Long enough for the toggle and for the menu's reopen guard to lapse.
-    await sleep(400)
+    await menuClosed(page)
   }
 
   const checked = id => page.evaluate(sel => document.getElementById(sel).checked, id)

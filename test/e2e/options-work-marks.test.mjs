@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
 import { skip, startOptions } from './optionsPage.mjs'
 
 const LIST = 'work-marks'
@@ -53,6 +52,10 @@ Object.assign(COUNTED[KEY].marks.favorite, { items: '3,1,1' })
 Object.assign(COUNTED[KEY].marks.gross, { items: 'a' })
 Object.assign(COUNTED[KEY].marks.continue, { items: 'k,1,1,1' })
 
+/** {@link SEED} with read on 600 works: over a kilobyte packed, where the cost to store them is worth a figure. */
+const HEAVY = structuredClone(SEED)
+HEAVY[KEY].marks.read.items = Array.from({ length: 600 }).fill('1').join(',')
+
 /**
  * The work-marks row is built entirely from the stored mark table — one row per
  * mark that holds ids, its icon and colour from the table, and its "hide in
@@ -62,7 +65,8 @@ Object.assign(COUNTED[KEY].marks.continue, { items: 'k,1,1,1' })
  *
  * The list is a list frame: Add mark and a sort in its header, and each row a
  * mark's order buttons (or its pin), icon, name, count, Hide and In menus
- * toggles, and Clear, which asks again in its own place.
+ * toggles, and Clear, which asks again in its own place. A foot under the rows
+ * says where the marks are kept and what they cost to store.
  */
 describe('options UI — work marks', { skip }, () => {
   let session
@@ -101,7 +105,7 @@ describe('options UI — work marks', { skip }, () => {
    * (Safari's, Firefox's on macOS), so focus is wherever an earlier dialog left
    * it.
    */
-  const openAddDialog = () => clickNamed('Add mark')
+  const openAddDialog = async () => options.openDialog(await options.control(await options.list(LIST), 'button', 'Add mark'))
 
   /** A button inside the open dialog, by the text on it. */
   const clickDialogButton = text => page.evaluate(
@@ -124,11 +128,19 @@ describe('options UI — work marks', { skip }, () => {
     }
   })
 
-  /** Replace the dialog's name field, the way a reader would. */
+  /** Replace the dialog's name field, the way a reader would, and wait until it holds `text`. */
   const typeName = async (text) => {
     await page.click('[role="dialog"] input[name="mark-name"]', { clickCount: 3 })
     await page.keyboard.press('Backspace')
     await page.type('[role="dialog"] input[name="mark-name"]', text)
+    await page.waitForFunction(value => document.querySelector('[role="dialog"] input[name="mark-name"]')?.value === value, {}, text)
+  }
+
+  /** Press a button inside the open dialog, by the text on it, and wait until the dialog has closed and what it saved is written. */
+  const saveDialog = async (text) => {
+    await clickDialogButton(text)
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
+    await options.saved()
   }
 
   /** The last mark table written to storage. */
@@ -142,6 +154,60 @@ describe('options UI — work marks', { skip }, () => {
   test('the frame is headed by its title, the marks, and the works they are on', async () => {
     assert.equal(await options.name(await options.list(LIST)), 'Work marks')
     assert.equal(await options.listCount(LIST), '5 · 4 works', 'read and favorite hold two works each')
+  })
+
+  /** The frame's foot, and where it is drawn against the frame and its scrolling rows. */
+  const footOf = view => view.page.evaluate((id) => {
+    const frame = document.querySelector(`[data-list="${id}"]`)
+    const foot = frame.querySelector('[data-list-foot]')
+    const body = frame.querySelector('[data-list-body]')
+    if (!foot)
+      return null
+    return {
+      text: foot.textContent.replace(/\s+/g, ' ').trim(),
+      inBody: body.contains(foot),
+      underBody: foot.getBoundingClientRect().top >= body.getBoundingClientRect().bottom - 0.5,
+      inFrame: foot.getBoundingClientRect().bottom <= frame.getBoundingClientRect().bottom + 0.5,
+    }
+  }, LIST)
+
+  test('a foot inside the frame, under its rows, says the marks are kept with your settings', async () => {
+    const foot = await footOf(options)
+    assert.ok(foot, 'the frame has a foot')
+    const { text, ...where } = foot
+    assert.deepEqual(where, { inBody: false, underBody: true, inFrame: true }, 'outside the scrolling rows, under them, inside the frame')
+    assert.equal(text, 'Kept with your settings, in backups and sync', 'a few marks take too little to be worth a figure')
+  })
+
+  test('past a kilobyte the foot says what the marks take of the sync budget', async () => {
+    const heavy = await session.open({ seed: HEAVY, hash: HASH })
+    try {
+      const foot = await footOf(heavy)
+      assert.ok(foot, 'the frame has a foot')
+      assert.equal(foot.text, 'Kept with your settings, in backups and sync · ~1.2 KB before compression, of the 100 KB sync budget all settings share')
+    }
+    finally {
+      await heavy.close()
+    }
+  })
+
+  test('each control says what it does that its name doesn\'t', async () => {
+    const ongoing = await options.listRow(LIST, 'continue')
+    assert.equal(
+      await options.tooltip(await options.control(ongoing, 'button', 'Hide works marked Ongoing until ready')),
+      'Hide until ready: collapsed while nothing past the chapter you finished is out, or before any date you set',
+    )
+    assert.equal(
+      await ongoing.$eval('[title^="Ongoing "]', el => el.title),
+      'Ongoing always comes last: it isn’t a verdict, but says you’re waiting on more chapters',
+    )
+    assert.equal(
+      await options.tooltip(await options.control(await options.listRow(LIST, 'gross'), 'button', 'Offer Gross when marking a work')),
+      'In menus: off, it isn’t offered when you mark a work. Works keep it: a mark is never deleted.',
+    )
+    const read = await options.listRow(LIST, 'read')
+    assert.equal(await (await options.control(read, 'button', 'Move Read down')).evaluate(el => el.title), 'Move Read down, here and in a work’s menu')
+    assert.equal(await (await options.control(read, 'button', 'Change the Read icon')).evaluate(el => el.title), 'Change the Read icon or colour')
   })
 
   test('shows each mark\'s count, and what it counts as', async () => {
@@ -165,7 +231,7 @@ describe('options UI — work marks', { skip }, () => {
     const before = await rows()
     assert.equal(before[1].on, true)
     await options.press(await options.control(await options.listRow(LIST, 'favorite'), 'button', 'Hide works marked Favorite in listings'))
-    await sleep(1000)
+    await options.saved()
     const stored = await storedMarks()
     assert.equal(stored?.marks?.favorite?.hideSearchResult, false, 'diverging from the root is stored')
     assert.equal(stored?.marks?.read?.hideSearchResult, true, 'the root is untouched')
@@ -181,7 +247,7 @@ describe('options UI — work marks', { skip }, () => {
 
   test('moving a mark reorders the rows and stores the new order', async () => {
     await clickNamed('Move Favorite up')
-    await sleep(1000)
+    await options.saved()
 
     const got = await rows()
     assert.deepEqual(got.map(r => r.mark), ['Favorite', 'Read', 'Good', 'Gross', 'Ongoing'])
@@ -214,20 +280,19 @@ describe('options UI — work marks', { skip }, () => {
     const pressed = async () => (await offer()).evaluate(el => el.getAttribute('aria-pressed') === 'true')
     assert.equal(await pressed(), true, 'offered until it says otherwise')
     await options.press(await offer())
-    await sleep(1000)
+    await options.saved()
     assert.equal((await storedMarks())?.marks?.gross?.disabled, true)
     assert.equal((await storedMarks())?.marks?.gross?.items, '', 'the mark itself is untouched')
     assert.equal(await pressed(), false)
 
     await options.press(await offer())
-    await sleep(1000)
+    await options.saved()
     assert.ok(!('disabled' in (await storedMarks()).marks.gross), 'back to the shape it shipped as')
     assert.equal(await pressed(), true)
   })
 
   test('the pencil renames a mark without moving the key its works are filed under', async () => {
-    await clickNamed('Rename Good')
-    await sleep(300)
+    await options.openDialog(await options.control(await options.list(LIST), 'button', 'Rename Good'))
     assert.deepEqual(await dialogState(), {
       title: 'Edit mark',
       name: 'Good',
@@ -237,8 +302,7 @@ describe('options UI — work marks', { skip }, () => {
     })
 
     await typeName('Great')
-    await clickDialogButton('Save')
-    await sleep(1000)
+    await saveDialog('Save')
 
     const stored = await storedMarks()
     assert.equal(stored.marks.good.label, 'Great', 'the display name moved')
@@ -247,29 +311,30 @@ describe('options UI — work marks', { skip }, () => {
   })
 
   test('the row icon opens the same dialog, where the palette sets the icon', async () => {
-    await clickNamed('Change the Great icon')
-    await sleep(300)
+    await options.openDialog(await options.control(await options.list(LIST), 'button', 'Change the Great icon'))
     assert.equal((await dialogState()).title, 'Edit mark')
 
     await page.evaluate(() => {
       [...document.querySelectorAll('[role="dialog"] button')].find(b => b.title === 'mdi/star')?.click()
     })
-    await clickDialogButton('Save')
-    await sleep(1000)
+    await saveDialog('Save')
 
     assert.equal((await storedMarks()).marks.good.icon, 'mdi/star')
   })
 
   test('a name whose key is taken is refused rather than merged', async () => {
     await openAddDialog()
-    await sleep(300)
     assert.equal((await dialogState()).title, 'Add mark')
 
     await typeName('read')
-    await sleep(100)
     const state = await dialogState()
     assert.match(state.error, /already taken/)
     assert.equal(state.saveDisabled, true, 'and there is no way to save it anyway')
+    const error = await page.$('[role="dialog"] [role="alert"]')
+    assert.deepEqual(await options.colour(error), await options.token('default-fg'), 'the error\'s words are in the text colour')
+    const glyph = await error.$('[data-glyph]')
+    assert.ok(glyph, 'a glyph marks the error')
+    assert.deepEqual(await options.colour(glyph), await options.token('destructive'), 'and carries the red')
 
     await clickDialogButton('Cancel')
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
@@ -282,14 +347,11 @@ describe('options UI — work marks', { skip }, () => {
 
   test('adding a mark files it under a key worked out from the name', async () => {
     await openAddDialog()
-    await sleep(300)
 
     await typeName('Did Not Finish')
-    await sleep(100)
     assert.equal((await dialogState()).key, 'did-not-finish', 'shown before it is committed to')
 
-    await clickDialogButton('Save')
-    await sleep(1000)
+    await saveDialog('Save')
 
     const added = (await storedMarks()).marks['did-not-finish']
     assert.equal(added.label, 'Did Not Finish')
@@ -331,7 +393,7 @@ describe('options UI — work marks', { skip }, () => {
     })
     await page.keyboard.press('Backspace')
     await page.keyboard.type('3')
-    await sleep(1000)
+    await options.saved()
 
     const stored = await storedMarks()
     assert.equal(stored?.hidePriority, 3)
@@ -355,7 +417,7 @@ describe('options UI — work marks', { skip }, () => {
     await view.page.evaluate(text => [...document.querySelectorAll('[role="menuitemradio"]')]
       .find(item => item.textContent.trim() === text)
       .click(), choice)
-    await sleep(300)
+    await view.page.waitForFunction(() => !document.querySelector('[role="menuitemradio"]'))
   }
 
   /** Whether the move button so named is inert, and what it is described by. */
@@ -388,12 +450,11 @@ describe('options UI — work marks', { skip }, () => {
       assert.deepEqual(await moveState(counted, 'Move Favorite up'), { disabled: false, why: '' })
       assert.deepEqual(await moveState(counted, 'Move Read up'), { disabled: true, why: '' }, 'the first mark still has nowhere to go')
 
-      await sleep(500)
+      await counted.saved()
       assert.equal(await counted.lastWrite(KEY), null, 'no sort and no inert press writes a thing')
 
       await sortBy(counted, 'Works')
-      await counted.page.reload({ waitUntil: 'networkidle2' })
-      await sleep(1500)
+      await counted.reload()
       assert.equal(await counted.name(await sortButton(counted)), 'Sort: Your order', 'a visit starts in your order')
       assert.deepEqual(await counted.listRowIds(LIST), yourOrder)
       assert.deepEqual(counted.problems(), [])
@@ -411,17 +472,16 @@ describe('options UI — work marks', { skip }, () => {
       assert.equal(await (await clear('good')).evaluate(el => el.disabled), true, 'a mark on no works has nothing to clear')
 
       await counted.press(await clear('favorite'))
-      await sleep(300)
+      await counted.saved()
       assert.equal(await counted.text(await clear('favorite')), 'Clear 3?', 'armed, saying how many it would clear')
       assert.equal(await counted.lastWrite(KEY), null, 'nothing cleared on the first press')
 
       await counted.press(await clear('read'))
-      await sleep(300)
       assert.equal(await counted.text(await clear('read')), 'Clear 2?')
       assert.equal(await counted.name(await clear('favorite')), 'Clear Favorite marks', 'arming one disarms the other')
 
       await counted.press(await clear('read'))
-      await sleep(1000)
+      await counted.saved()
       const stored = await counted.lastWrite(KEY)
       assert.equal(stored.marks.read.items, '', 'cleared on the second press')
       assert.equal(stored.marks.favorite.items, '3,1,1', 'and nothing else')

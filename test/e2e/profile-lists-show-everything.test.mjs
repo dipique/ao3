@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -163,7 +164,7 @@ describe('the lists the reader built themselves', { skip }, () => {
     await tab.goto(url, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(tab)
     return tab
   }
 
@@ -200,8 +201,8 @@ describe('the lists the reader built themselves', { skip }, () => {
 
   test('the Marked for Later view shows every work on the list', async () => {
     const tab = await load(TO_READ_URL)
-    // The view opens by itself here; give the scrape and the first render time.
-    await sleep(2000)
+    // The view opens by itself here.
+    await viewDrawn(tab)
     const view = await viewState(tab)
     assert.deepEqual(view.titles, TITLES)
     assert.deepEqual(view.hidden, [], 'nothing is dropped from the results')
@@ -218,7 +219,7 @@ describe('the lists the reader built themselves', { skip }, () => {
     const tab = await load(HISTORY_URL)
     // History is not replaced, so the read list is opened from its button.
     await tab.click('.AO3E--search-read-works--button')
-    await sleep(2500)
+    await viewDrawn(tab)
     const view = await viewState(tab)
     // Every one of these carries the `read` mark, which is set to hide its own
     // works: on a list that *is* those marks, honouring that would leave nothing.

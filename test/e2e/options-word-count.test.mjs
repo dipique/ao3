@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 const SEED = {
   'option.wordCountToolbar': { enabled: true, ranges: [{ from: 1000, to: 3000 }] },
@@ -57,7 +56,7 @@ describe('options UI — word count ranges', { skip }, () => {
     await options.page.keyboard.press('Backspace')
     if (value)
       await input.type(value)
-    await sleep(400)
+    await options.saved()
   }
 
   test('loads the saved ranges into the editor, a frame headed by its title and count', async () => {
@@ -71,7 +70,7 @@ describe('options UI — word count ranges', { skip }, () => {
 
   test('adding a range from the header writes it once both bounds are set', async () => {
     await options.press(await options.control(await options.list(RANGES), 'button', 'Add a range'))
-    await sleep(300)
+    await until('the range to be added', async () => (await options.listRows(RANGES)).length === 2)
     assert.equal(await options.listCount(RANGES), '2')
     const inputs = await rangeInputs()
     assert.equal(inputs.length, 4)
@@ -126,7 +125,7 @@ describe('options UI — word count ranges', { skip }, () => {
   test('removing a range writes the shortened list', async () => {
     const last = (await options.listRows(RANGES)).at(-1)
     await options.press(await options.control(last, 'button', 'Remove range'))
-    await sleep(400)
+    await options.saved()
     assert.deepEqual(await options.lastWrite('option.wordCountToolbar'), {
       enabled: true,
       ranges: [{ from: 1000, to: 3000 }],
@@ -137,14 +136,14 @@ describe('options UI — word count ranges', { skip }, () => {
   test('with every range removed, the frame says so in place, and its header still adds one', async () => {
     const [row] = await options.listRows(RANGES)
     await options.press(await options.control(row, 'button', 'Remove range'))
-    await sleep(400)
+    await options.saved()
     assert.deepEqual(await options.lastWrite('option.wordCountToolbar'), { enabled: true, ranges: [] })
     assert.deepEqual(await options.listRows(RANGES), [])
     assert.equal(await options.listCount(RANGES), 'none yet')
     assert.ok((await options.text(await options.list(RANGES))).includes('No ranges yet'), 'the empty state shows')
 
     await options.press(await options.control(await options.list(RANGES), 'button', 'Add a range'))
-    await sleep(300)
+    await until('the range to be added', async () => (await options.listRows(RANGES)).length > 0)
     assert.equal((await options.listRows(RANGES)).length, 1)
     assert.equal((await rangeInputs()).length, 2)
     assert.ok(!(await options.text(await options.list(RANGES))).includes('No ranges yet'), 'the empty state goes')

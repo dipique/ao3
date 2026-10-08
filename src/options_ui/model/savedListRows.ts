@@ -8,7 +8,7 @@ import { hostPage, openLink } from '../../common/listLinks.ts'
 import { aliasOf, defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
 import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, TRACKED_TYPE_LABELS, trackedMeta } from '../../common/trackedLists.ts'
 import { bucketBar, formatBytes } from './buckets.ts'
-import { isRunning, listJob, removeOff } from './jobView.ts'
+import { isRunning, jobVerb, listJob, removeOff } from './jobView.ts'
 import { timeAgo } from './moments.ts'
 import { sentence, withReason } from './phrases.ts'
 
@@ -335,9 +335,9 @@ function counted(n: number, one: string, many: string): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`
 }
 
-/** The phase a job on this row's copy is in while it runs, or null. */
+/** What a job on this row's copy is doing while it runs, in the word that names it ({@link jobVerb}), or null. */
 function runningHere(row: SavedListRow, view: JobView): string | null {
-  return row.caching.kind === 'copy' && view.key === row.caching.key && isRunning(view) ? view.phase ?? 'working' : null
+  return row.caching.kind === 'copy' && view.key === row.caching.key && isRunning(view) ? jobVerb(view) : null
 }
 
 /**

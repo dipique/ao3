@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -120,9 +122,9 @@ describe('the search view layout', { skip }, () => {
     await tab.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(tab)
     // The view opens by itself on the Marked for Later page.
-    await sleep(1800)
+    await viewDrawn(tab)
     return tab
   }
 
@@ -140,7 +142,7 @@ describe('the search view layout', { skip }, () => {
     await tab.mouse.down()
     await tab.mouse.move(box.x + dx, box.y, { steps: 8 })
     await tab.mouse.up()
-    await sleep(250)
+    await tab.waitForFunction(() => !document.body.classList.contains('AO3E--resizing'))
   }
 
   /** The sidebarWidth the view last wrote to its stored prefs. */
@@ -171,14 +173,13 @@ describe('the search view layout', { skip }, () => {
     await tab.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(tab)
     // The view opens by itself on the Marked for Later page.
-    await sleep(1800)
+    await viewDrawn(tab)
 
     // Scroll well past the sidebar. A sticky element sits exactly where it was
     // laid out until you scroll, so measuring at the top would find nothing.
     await tab.evaluate(() => window.scrollTo(0, 2000))
-    await sleep(300)
 
     const result = await tab.evaluate(() => {
       const root = document.querySelector('.AO3E--search-view')
@@ -292,6 +293,8 @@ describe('the search view layout', { skip }, () => {
     const tab = await openView(1400, '')
     await dragBy(tab, 120)
     const shown = await sidebarWidth(tab)
+    // Opening the view writes its prefs too, with the width it opened at.
+    await until('the dragged width to be written', async () => await storedWidth(tab) === shown)
     const stored = await storedWidth(tab)
     await tab.close()
     assert.ok(stored, 'a width was written to prefs')
@@ -326,7 +329,6 @@ describe('the search view layout', { skip }, () => {
     await tab.focus('.AO3E--search-view--resizer')
     for (let i = 0; i < 4; i++)
       await tab.keyboard.press('ArrowRight')
-    await sleep(200)
     const after = await sidebarWidth(tab)
     await tab.close()
     assert.ok(after > before, `expected wider, went ${before} -> ${after}`)

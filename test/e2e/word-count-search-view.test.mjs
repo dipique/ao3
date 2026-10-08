@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { menuClosed, openMenu, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -84,11 +85,9 @@ describe('word-count range menu in the search view', { skip }, () => {
     await page.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1200)
-
-    // The view opens by itself on the Marked for Later page; wait for the
-    // scrape and the first render.
-    await sleep(1500)
+    await settled(page)
+    // The view opens by itself on the Marked for Later page.
+    await viewDrawn(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -107,10 +106,9 @@ describe('word-count range menu in the search view', { skip }, () => {
   })
 
   const openMenuOnFirstWordCount = async () => {
-    await page.evaluate(() => {
+    await openMenu(page, () => page.evaluate(() => {
       document.querySelector('.AO3E--search-view--results dd.words').click()
-    })
-    await sleep(200)
+    }))
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .map(el => el.querySelector('.AO3E--menu--label').textContent))
@@ -134,7 +132,7 @@ describe('word-count range menu in the search view', { skip }, () => {
         .find(el => el.querySelector('.AO3E--menu--label').textContent === l)
       row.click()
     }, section, label)
-    await sleep(400)
+    await menuClosed(page)
   }
 
   const pick = async (prefix) => {
@@ -142,7 +140,7 @@ describe('word-count range menu in the search view', { skip }, () => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.textContent.startsWith(p)).click()
     }, prefix)
-    await sleep(400)
+    await menuClosed(page)
   }
 
   test('the view opened with every work', async () => {

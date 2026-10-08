@@ -326,9 +326,10 @@ describe('options UI — the Review block', { skip }, () => {
 })
 
 /**
- * Start Review opens a review that is there to open: one that has been
- * gathered, from lists that are tracked. Before then the cell says how one
- * comes about, and the button why it is off.
+ * Start Review opens the review from lists that are tracked, on the reader's
+ * readings, which gathers the first one; with no account known, only a
+ * review already gathered has a page to open it on. Before then the cell says
+ * how one comes about, and the button why it is off.
  */
 describe('options UI — This review with nothing to start', { skip }, () => {
   let session
@@ -349,7 +350,21 @@ describe('options UI — This review with nothing to start', { skip }, () => {
     return review
   }
 
-  test('before the first review is gathered, the cell says how one is, and has nothing to cache', async () => {
+  test('before the first review is gathered, Start Review opens it on the reader\'s readings, which gathers it; there is nothing to cache', async () => {
+    const options = await session.open({ seed: { 'option.user': { userId: 'reader' }, ...listsSeed() }, hash: '#review' })
+    const review = await options.page.$('[data-review-cell="this-review"]')
+    const start = await options.control(review, 'link', 'Start the review')
+    assert.equal(await start.evaluate(a => a.getAttribute('href')), REVIEW_OPEN)
+    assert.equal(await options.text(start), 'Start Review')
+    assert.match(await options.text(review), /Nothing gathered yet\./)
+    assert.doesNotMatch(await options.text(review), /your first review is gathered/, 'Start Review gathers it, so the cell doesn\'t send the reader to AO3 for it')
+    assert.deepEqual(await options.controls(review, 'button', 'Cache works'), [])
+    assert.deepEqual(await options.controls(review, 'button', 'Download Offline Copy'), [])
+    assert.deepEqual(options.problems(), [])
+    await options.close()
+  })
+
+  test('before the first review, with the reader\'s account not known, there is no page to open: the cell says how one is gathered', async () => {
     const options = await session.open({ seed: listsSeed(), hash: '#review' })
     const review = await startIsOff(options, 'Start the review', START_OFF.noWindow)
     assert.match(await options.text(review), /Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3\./)

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { holdForLink } from '../../composables/useSubsectionInView.ts'
 import { railJob } from '../../model/jobView.ts'
 
 const { rail } = useCurrentCategory()
@@ -21,13 +22,19 @@ const items = computed(() => rail.value
       label: (wide.value ? nav?.railLabel : nav?.chipLabel) ?? category.name,
       icon: nav?.icon ?? '',
       jobs: !!nav?.jobs,
-      // While a query runs, only the sub-sections it has hits in.
-      subsections: category.current ? category.subsections.filter(subsection => subsection.hits > 0) : [],
+      subsections: category.current ? category.subsections.filter(subsection => subsection.visible) : [],
     }
   }))
 
 const nav = ref<HTMLElement | null>(null)
-const currentId = computed(() => items.value.find(item => item.current)?.id)
+const current = computed(() => items.value.find(item => item.current))
+const currentId = computed(() => current.value?.id)
+
+/**
+ * The current category's sub-section being read, marked as the page scrolls.
+ * The chip row lists no sub-sections, so nothing is marked on a narrow window.
+ */
+const inView = useSubsectionInView(computed(() => current.value?.subsections.map(subsection => subsection.id) ?? []), wide)
 
 /**
  * The chip row scrolls sideways when its chips outgrow the window, so it brings
@@ -37,7 +44,7 @@ const currentId = computed(() => items.value.find(item => item.current)?.id)
  */
 watch([currentId, wide, nav], () => {
   const row = nav.value
-  const chip = row?.querySelector<HTMLElement>('[data-rail-item][aria-current]')
+  const chip = row?.querySelector<HTMLElement>('[data-rail-item="category"][aria-current]')
   if (wide.value || !row || !chip)
     return
   const inset = Number.parseFloat(getComputedStyle(row).paddingLeft) || 0
@@ -67,6 +74,7 @@ watch([currentId, wide, nav], () => {
           :class="item.current
             ? 'border-brand-fg/32 bg-brand-fg/10 text-brand-fg font-600'
             : 'border-border bg-default text-muted-fg md:bg-transparent md:text-default-fg md:hover:bg-default-fg/3'"
+          @click="holdForLink($event, `#${item.id}`)"
         >
           <span class="hidden md:inline-flex" aria-hidden="true"><span :class="item.icon" text-base /></span>
           <span data-rail-label>{{ item.label }}</span>
@@ -91,7 +99,10 @@ watch([currentId, wide, nav], () => {
             <a
               data-rail-item="subsection"
               :href="`#${subsection.id}`"
-              class="h-[26px] flex items-center justify-between gap-2 rounded-md px-2 text-xs text-muted-fg decoration-none input-ring hover:bg-default-fg/3 hover:text-default-fg"
+              :aria-current="subsection.id === inView ? 'location' : undefined"
+              class="h-[26px] flex items-center justify-between gap-2 rounded-md px-2 text-xs decoration-none input-ring hover:bg-default-fg/3 hover:text-default-fg"
+              :class="subsection.id === inView ? 'bg-default-fg/3 text-default-fg' : 'text-muted-fg'"
+              @click="holdForLink($event, `#${subsection.id}`)"
             >
               <span data-rail-label truncate>{{ subsection.name }}</span>
               <span data-rail-count text="[10.5px]" tabular-nums>{{ subsection.hits }}</span>

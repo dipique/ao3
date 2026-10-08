@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 const WIDE = { width: 1280, height: 800 }
 const SEARCH = 'Search settings by name or description'
@@ -94,7 +93,7 @@ describe('options UI — the settings row', { skip }, () => {
       const options = await session.open({ hash: '#link-menus', viewport: WIDE, seed: SEEDED })
       try {
         await options.press(await switchOf(options, MASTER))
-        await sleep(600)
+        await options.saved()
         assert.equal(await options.stored(MASTER_KEY), false)
 
         assert.deepEqual(await dependents(options), expected({ inert: true, description: false }))
@@ -104,12 +103,12 @@ describe('options UI — the settings row', { skip }, () => {
 
         // An inert switch takes no press.
         await options.press(await switchOf(options, 'link-menus-menu-on-tags'))
-        await sleep(600)
+        await options.saved()
         assert.equal(await checked(options, 'link-menus-menu-on-tags'), true)
         await noDependentWrites(options)
 
         await options.press(await switchOf(options, MASTER))
-        await sleep(600)
+        await options.saved()
         assert.equal(await options.stored(MASTER_KEY), true)
         assert.deepEqual(await dependents(options), expected({ inert: false, description: true }))
         await noDependentWrites(options)
@@ -135,8 +134,8 @@ describe('options UI — the settings row', { skip }, () => {
       try {
         const box = await options.control(options.page, 'textbox', SEARCH)
         await box.type('byline')
-        await sleep(400)
         const row = await options.row('link-menus-hide-or-highlight-an-author')
+        await until('the search to mark its hit', () => row.$('[data-row-part="description"] mark'))
         assert.equal(await row.evaluate(el => el.checkVisibility()), true)
         assert.equal(await descriptionShown(options, 'link-menus-hide-or-highlight-an-author'), true)
         assert.equal(await row.$eval('[data-row-part="description"] mark', el => el.textContent), 'byline')

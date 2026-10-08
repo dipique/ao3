@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep, storedListIds } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, storedListIds } from './helpers.mjs'
+import { settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -129,7 +130,7 @@ describe('search a series\' works', { skip }, () => {
     await tab.goto(url, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(tab)
     return tab
   }
 
@@ -161,7 +162,7 @@ describe('search a series\' works', { skip }, () => {
 
   test('clicking it loads every page into one view', async () => {
     await tab.click('.AO3E--search-series-works--button')
-    await sleep(2500)
+    await viewDrawn(tab)
     const titles = await shownTitles(tab)
     assert.equal(titles.length, PAGES * PER_PAGE, 'every page of works should be in the view')
     assert.deepEqual(
@@ -228,7 +229,7 @@ describe('search a series\' works', { skip }, () => {
 
   test('"Back to list" puts the native page back', async () => {
     await tab.click('.AO3E--search-view--back')
-    await sleep(400)
+    await tab.waitForFunction(() => !document.querySelector('.AO3E--search-host'))
     const restored = await tab.evaluate(() => ({
       view: document.querySelector('.AO3E--search-host'),
       list: getComputedStyle(document.querySelector('#main ul.series.work.index.group')).display,

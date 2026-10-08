@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { after, afterEach, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { ARCHIVE, skip, startOptions, stubArchive } from './optionsPage.mjs'
+import { ARCHIVE, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 
 /** AO3's answers to its tag autocomplete, recorded signed out and trimmed to a few names each, keyed by request. */
 const RECORDED = JSON.parse(readFileSync(new URL('../options/ao3-autocomplete.json', import.meta.url), 'utf8'))
@@ -46,9 +45,6 @@ const usualReply = (url) => {
 /** The request for `term` from AO3's autocomplete for `kind`, as the stand-in sees it. */
 const asking = (kind, term) => `${ARCHIVE}/autocomplete/${kind}?term=${encodeURIComponent(term)}`
 
-/** Longer than the pause in typing the suggestions wait for, with room for an answer. */
-const SETTLE_MS = 700
-
 const SHOW = 'Show matching canonical tags'
 const HIDE = 'Hide matching canonical tags'
 
@@ -82,22 +78,15 @@ describe('options UI — matching canonical tags', { skip }, () => {
 
   // --- helpers bound to the live page ---
   const dialog = async () => {
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 })
+    await page.waitForSelector('[role="dialog"]')
     return page.$('[role="dialog"]')
   }
-  const openAddRule = async () => {
-    await options.press(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-    await dialog()
-    await sleep(400)
-  }
-  const closeDialog = async () => {
-    await page.keyboard.press('Escape')
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-  }
-  /** One of a radio group's choices, the group by its name, such as “What the rule matches”. */
+  const openAddRule = async () => options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
+  /** One of a radio group's choices, the group by its name, such as “What the rule matches”, once it is the one chosen. */
   const pick = async (group, name) => {
-    await options.press(await options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name))
-    await sleep(200)
+    const choice = await options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name)
+    await options.press(choice)
+    await page.waitForFunction(el => el.getAttribute('aria-checked') === 'true', {}, choice)
   }
   /** The pattern: in Regex mode the value field is the first text field, above the tester's. */
   const setPattern = async (text) => {
@@ -117,32 +106,35 @@ describe('options UI — matching canonical tags', { skip }, () => {
     await options.press(await options.control(await dialog(), 'button', name))
   }
   /** One part of the preview, once it shows. */
-  const part = name => page.waitForSelector(`[role="dialog"] [data-canonical] [data-canonical-part="${name}"]`, { timeout: 5000 })
+  const part = name => page.waitForSelector(`[role="dialog"] [data-canonical] [data-canonical-part="${name}"]`)
   const partText = async name => options.text(await part(name))
   /** The names the preview shows, and the text marked in each. */
   const tags = () => page.$$eval('[role="dialog"] [data-canonical] [data-canonical-part="tag"]', els => els.map(el => el.textContent))
   const marked = () => page.$$eval('[role="dialog"] [data-canonical] [data-canonical-part="tag"]', els => els.map(el => [...el.querySelectorAll('mark')].map(mark => mark.textContent).join('|')))
   const writes = () => page.evaluate(() => window.__writes.length)
-  /** Wait until `check` holds, or fail after `ms`. */
-  const until = async (check, ms = 5000) => {
-    const end = Date.now() + ms
-    while (!(await check())) {
-      assert.ok(Date.now() < end, 'timed out')
-      await sleep(50)
-    }
-  }
+  /**
+   * Wait until the press has heard back from AO3 about every run it asked: the
+   * preview shows AO3's answers, and its note, which says so while it asks,
+   * doesn't, once the frames that draw the note have run.
+   */
+  const pressAnswered = () => until('the press to hear back from AO3', () => page.evaluate(async () => {
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    const note = document.querySelector('[role="dialog"] [data-canonical] [data-canonical-part="note"]')
+    return !!document.querySelector('[role="dialog"] [data-canonical-part="sources"]') && note?.textContent.trim() !== 'Asking AO3…'
+  }))
 
   test('a press asks AO3 about the pattern\'s three longest runs, edits filter again without asking, and nothing is written', async () => {
     await openPage()
     await regexRule('Character', '^Original (Female|Male) Character\\(s\\)')
     const before = await writes()
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked, [], 'nothing is asked before the press')
 
     const toggle = await options.control(await dialog(), 'button', SHOW)
     assert.equal(await toggle.evaluate(el => el.getAttribute('aria-expanded')), 'false')
     await press(SHOW)
-    await until(async () => (await page.$('[role="dialog"] [data-canonical-part="sources"]')) !== null)
+    await pressAnswered()
 
     assert.deepEqual(archive.asked, [asking('character', 'character(s)'), asking('character', 'original'), asking('character', 'female')], 'three runs, longest first')
     assert.equal(await partText('head'), '2 of 6 known canonical Characters')
@@ -156,21 +148,22 @@ describe('options UI — matching canonical tags', { skip }, () => {
     assert.ok(await options.contrast(await page.$('[role="dialog"] [data-canonical] mark')) >= 4.5, 'a match reads at AA')
 
     await setPattern('^Original (Female|Child)')
-    await until(async () => (await tags()).includes('Original Child Character(s)'))
+    await until('the preview to filter by the new pattern', async () => (await tags()).includes('Original Child Character(s)'))
     assert.deepEqual(await tags(), ['Original Child Character(s)', 'Original Female Character(s)'], 'AO3\'s answers are filtered again')
     assert.deepEqual(await marked(), ['Original Child', 'Original Female'])
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.equal(archive.asked.length, 3, 'an edit asks nothing')
 
     await press(HIDE)
     assert.equal(await page.$('[role="dialog"] [data-canonical]'), null)
     await press(SHOW)
-    await until(() => archive.asked.length === 4)
-    await sleep(SETTLE_MS)
+    await pressAnswered()
+    await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked.slice(3), [asking('character', 'child')], 'the next press asks only what it hasn\'t had answered')
     assert.equal(await partText('sources'), 'plus AO3’s suggestions for “Original”, “Female”, “Child”')
 
-    await closeDialog()
+    await options.closeDialog()
+    await options.saved()
     assert.equal(await writes(), before, 'nothing is written')
     assert.deepEqual(options.problems(), [])
   })
@@ -179,7 +172,7 @@ describe('options UI — matching canonical tags', { skip }, () => {
     await openPage()
     await regexRule('Fandom', '^harry potter')
     await press(SHOW)
-    await until(async () => (await page.$('[role="dialog"] [data-canonical-part="sources"]')) !== null)
+    await pressAnswered()
 
     assert.deepEqual(archive.asked, [asking('fandom', 'harry potter')])
     const pool = new Set([...BUNDLED, ...LEARNED_FANDOMS, ...POTTER_FANDOMS].map(name => name.toLowerCase()))
@@ -206,7 +199,7 @@ describe('options UI — matching canonical tags', { skip }, () => {
     assert.deepEqual(await tags(), ['Original Female Character(s)', 'Original Male Character(s)'])
     assert.equal(await partText('head'), '2 of 3 known canonical Characters')
     assert.equal(await page.$('[role="dialog"] [data-canonical-part="sources"]'), null)
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked, [asking('character', 'character(s)')], 'the refusal stops the press')
     for (const handle of [note, await part('head'), await page.$('[role="dialog"] [data-canonical] mark')])
       assert.ok(await options.contrast(handle) >= 4.5, `${await options.text(handle)} reads at AA in dark`)
@@ -214,7 +207,7 @@ describe('options UI — matching canonical tags', { skip }, () => {
     await press(HIDE)
     await press(SHOW)
     await part('note')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.equal(archive.asked.length, 1, 'a press under the refusal asks nothing')
   })
 

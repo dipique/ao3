@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { captureDownloads, skip, startOptions } from './optionsPage.mjs'
+import { captureDownloads, skip, startOptions, until } from './optionsPage.mjs'
 
 const WIDE = { width: 1280, height: 800 }
 const IMPORT_EXPORT = 'your-data-import-export-your-settings'
@@ -103,8 +102,9 @@ describe('options UI — Advanced', { skip }, () => {
         assert.deepEqual(await Promise.all(items.map(handle => options.description(handle))), VARIANTS.map(variant => variant.note))
         assert.equal(await options.description(menu), NEVER_IN_AN_EXPORT)
 
+        const before = await options.page.evaluate(() => window.__downloads.length)
         await (await options.control(menu, 'menuitem', item)).click()
-        await sleep(600)
+        await until(`${item} to hand over its file`, () => options.page.evaluate(n => window.__downloads.length > n, before))
         const saved = await options.lastDownload()
         assert.ok(saved, `${item}: nothing was saved`)
         assert.match(saved.name, file)
@@ -121,8 +121,9 @@ describe('options UI — Advanced', { skip }, () => {
     const options = await open()
     try {
       const row = await options.row(FANDOM_IDS)
+      await until('the learned ids to be counted', () => options.control(row, 'button', 'Export ids').then(button => button.evaluate(el => !el.disabled)))
       await options.press(await options.control(row, 'button', 'Export ids'))
-      await sleep(400)
+      await until('the ids to be handed over', () => options.page.evaluate(() => window.__downloads.length > 0))
       const saved = await options.lastDownload()
       assert.match(saved.name, /^AO3-Enhancements_fandom-ids_\d{4}-\d{2}-\d{2}_[\d-]{8}\.json$/)
       assert.deepEqual(JSON.parse(saved.text), {
@@ -132,7 +133,7 @@ describe('options UI — Advanced', { skip }, () => {
       })
 
       await options.press(await options.control(row, 'button', 'Clear'))
-      await sleep(400)
+      await until('the clear to be said', async () => (await options.toasts()).includes('Cleared learned fandom ids'))
       assert.deepEqual(await options.stored('fandomCache.fandoms'), {})
       assert.deepEqual(await options.stored('fandomCache.characters'), {})
       assert.equal(await (await options.control(row, 'button', 'Export ids')).evaluate(el => el.disabled), true)
@@ -152,7 +153,7 @@ describe('options UI — Advanced', { skip }, () => {
       assert.deepEqual(rows, ['under-the-hood-compress-filter-urls', 'under-the-hood-debug-mode'])
       for (const [id, key] of [['under-the-hood-compress-filter-urls', 'option.compressSearchUrls'], ['under-the-hood-debug-mode', 'option.verbose']]) {
         await options.press(await options.control(await options.row(id), 'switch'))
-        await sleep(500)
+        await until(`${key} to be written`, async () => await options.lastWrite(key) !== null)
         assert.equal(await options.stored(key), true, id)
       }
     }

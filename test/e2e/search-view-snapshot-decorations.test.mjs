@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep, storedLists } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, storedLists } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { rerun, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -93,7 +95,8 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
     await tab.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(2700)
+    await settled(tab)
+    await viewDrawn(tab)
     return tab
   }
 
@@ -158,7 +161,7 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
         .find(el => el.querySelector('h4.heading a').textContent === 'Angsty one')
       li.querySelector('.AO3E--search-view--blurb-action').click()
     })
-    await sleep(1000)
+    await until('the stored list to be rewritten', async () => (await storedBlurbs()).length !== 4)
     const stored = await storedBlurbs()
     assert.equal(stored.length, 3, 'Mark as Read should have taken the work off the stored list')
     for (const html of stored) {
@@ -176,8 +179,8 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
     })
     // Any options change re-runs the units, which reopens the view from the works
     // it was already showing — the same blurbs, decorated once already.
-    await page.evaluate(() => browser.storage.local.set({ 'option.searchPerPage': 49 }))
-    await sleep(2500)
+    await rerun(page, () => page.evaluate(() => browser.storage.local.set({ 'option.searchPerPage': 49 })))
+    await viewDrawn(page)
     assert.ok(
       await page.evaluate(() => document.querySelector('.AO3E--search-view--results')?.dataset.stale === undefined),
       'the view should have reopened',

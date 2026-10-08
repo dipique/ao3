@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -85,7 +86,7 @@ describe('replacements across a change of formatting', { skip }, () => {
     await tab.evaluateOnNewDocument(js)
     await tab.goto(WORK_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
-    await sleep(1500)
+    await settled(tab)
   }, { timeout: 300000 })
 
   after(async () => {

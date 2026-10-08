@@ -17,7 +17,8 @@ import { capFor } from '../../model/listView.ts'
  *
  * The rows are the default slot's direct children, since the cap measures
  * them. `bands` goes between the header and the rows: notes about the whole
- * list, and column heads.
+ * list, and column heads. `foot` goes under the rows, outside the cap and its
+ * shadows: a line about the list as a whole, such as what it takes to store.
  */
 const props = withDefaults(defineProps<{
   /** The list's `data-list`. */
@@ -108,6 +109,9 @@ defineExpose({ reveal })
       <div ref="rows" role="list">
         <slot />
       </div>
+    </div>
+    <div v-if="$slots.foot" data-list-foot class="list-frame__foot">
+      <slot name="foot" />
     </div>
   </div>
 </template>
@@ -203,5 +207,13 @@ defineExpose({ reveal })
 }
 .list-frame__body:hover {
   scrollbar-color: var(--scroll-thumb-hover) transparent;
+}
+
+.list-frame__foot {
+  padding: 6px 8px;
+  border-top: 1px solid rgb(var(--color-hair));
+  color: rgb(var(--color-muted-fg));
+  font-size: 11.5px;
+  line-height: 16px;
 }
 </style>

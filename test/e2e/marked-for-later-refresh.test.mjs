@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep, storedListIds, storedLists } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, storedListIds, storedLists } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { rerun, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -92,7 +94,8 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
 
   /**
    * Open the to-read page with a stored copy `ageMs` old — which opens the view
-   * — and report which pages of the list AO3 was then asked for.
+   * — and report which pages of the list AO3 was then asked for, and when the
+   * stored copy says it was last reloaded.
    */
   const open = async ({ ageMs, hours, marks }) => {
     const tab = await browser.newPage()
@@ -110,9 +113,10 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
         listRequests.push(page)
       void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: toReadPage(page) })
     })
+    const snapshot = storedSnapshot(ageMs)
     const seed = {
       'option.searchMarkedForLater': true,
-      ...storedLists(storedSnapshot(ageMs)),
+      ...storedLists(snapshot),
     }
     if (hours !== undefined)
       seed['option.searchProfileListsRefreshHours'] = hours
@@ -125,8 +129,9 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
     armed = true
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(3500)
-    return { tab, listRequests }
+    await settled(tab)
+    await viewDrawn(tab)
+    return { tab, listRequests, scrapedAt: snapshot['marked-for-later:me'].scrapedAt }
   }
 
   /** A mark table whose read mark holds `readIds` (packed). */
@@ -181,15 +186,18 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
   })
 
   test('a work marked read leaves the list at once, and the stored copy with it', async () => {
-    const { tab, listRequests } = await open({ ageMs: 2 * HOUR, marks: workMarks('') })
+    const { tab, listRequests, scrapedAt } = await open({ ageMs: 2 * HOUR, marks: workMarks('') })
     assert.deepEqual(await shownTitles(tab), ['Stored work 1', 'Stored work 2'])
-    const { scrapedAt } = storedSnapshot(2 * HOUR)['marked-for-later:me']
+    // Reading the stored blurbs the first time writes them back parsed, behind
+    // the view, ending with the blurb index: the open's writes, not the mark's.
+    await until('the stored blurbs to be written back parsed', () => tab.evaluate(() => window.__writes.some(w => 'blurbIndex' in w)))
 
     // What the work menu's "Mark as read" writes. Every options change re-runs
     // the page, which reopens the view and prunes its stored copy.
     const writesBefore = await tab.evaluate(() => window.__writes.length)
-    await tab.evaluate(marks => browser.storage.local.set({ 'option.workMarks': marks }), workMarks('1'))
-    await sleep(2000)
+    await rerun(tab, () => tab.evaluate(marks => browser.storage.local.set({ 'option.workMarks': marks }), workMarks('1')))
+    await viewDrawn(tab)
+    await until('the pruned list to be written', () => tab.evaluate(n => window.__writes.slice(n).some(w => 'cache.searchLists' in w), writesBefore))
     const written = await tab.evaluate(n => window.__writes.slice(n).flatMap(Object.keys), writesBefore)
     assert.ok(written.includes('cache.searchLists'), 'the list is rewritten')
     assert.deepEqual(written.filter(key => key.startsWith('blurb')), [], 'and not one blurb with it')
@@ -208,7 +216,7 @@ describe('Marked for Later auto-refresh interval', { skip }, () => {
     assert.deepEqual(listRequests, [])
 
     await tab.click('.AO3E--search-view--refresh')
-    await sleep(2500)
+    await viewDrawn(tab)
     assert.ok(listRequests.length >= PAGES, 'pressing it reloads the list')
     assert.deepEqual(await shownTitles(tab), ['Live work 1', 'Live work 2', 'Live work 3', 'Live work 4'])
 

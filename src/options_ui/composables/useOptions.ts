@@ -3,7 +3,7 @@ import type { Ref, ToRefs } from 'vue'
 
 import type { Options } from '#common'
 
-import { createLogger, deepToRaw, options, toast } from '#common'
+import { createLogger, deepToRaw, options, OPTIONS_SAVE_DELAY_MS, toast } from '#common'
 
 const logger = createLogger('useOptions')
 
@@ -25,7 +25,7 @@ const changedOptions: Set<options.Id> = new Set()
  */
 const applying: Set<options.Id> = new Set()
 
-const save = debounce(200, () => {
+const save = debounce(OPTIONS_SAVE_DELAY_MS, () => {
   if (loading)
     return false
 

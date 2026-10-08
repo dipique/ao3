@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { menuClosed, menuGuardOver, openMenu, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -90,7 +91,7 @@ describe('word-count range menu', { skip }, () => {
     }, PAGE)
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -98,13 +99,12 @@ describe('word-count range menu', { skip }, () => {
   })
 
   /** Open the menu on the word count and read back its rows. */
-  const openMenu = async () => {
+  const openWordCountMenu = async () => {
     // The menu is drawn at the click point, so it can cover the word count that
     // opened it — dismiss whatever is up before aiming at it again.
     await page.keyboard.press('Escape')
-    await sleep(100)
-    await page.click('#words')
-    await sleep(150)
+    await menuClosed(page)
+    await openMenu(page, () => page.click('#words'))
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
         label: el.querySelector('.AO3E--menu--label').textContent,
@@ -122,7 +122,7 @@ describe('word-count range menu', { skip }, () => {
         .find(el => el.querySelector('.AO3E--menu--label').textContent === l)
       row.click()
     }, section, label)
-    await sleep(200)
+    await menuClosed(page)
   }
 
   const bounds = () => page.evaluate(() => ({
@@ -140,7 +140,7 @@ describe('word-count range menu', { skip }, () => {
   })
 
   test('offers every configured range, and no clear row while none is set', async () => {
-    const items = await openMenu()
+    const items = await openWordCountMenu()
     const labels = items.filter(i => i.section === 'Search').map(i => i.label)
     assert.equal(labels.length, 3, labels.join(' | '))
     assert.ok(labels[0].startsWith('1,000'), labels[0])
@@ -155,12 +155,12 @@ describe('word-count range menu', { skip }, () => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.textContent.includes('5,000')).click()
     })
-    await sleep(200)
+    await menuClosed(page)
     assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 0 })
   })
 
   test('the applied range is shown as current, and a clear row appears', async () => {
-    const items = await openMenu()
+    const items = await openWordCountMenu()
     const clear = items.find(i => i.label.startsWith('Clear'))
     assert.ok(clear, items.map(i => i.label).join(' | '))
     assert.ok(clear.label.includes('5,000'), clear.label)
@@ -173,13 +173,14 @@ describe('word-count range menu', { skip }, () => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.textContent.startsWith('Clear')).click()
     })
-    await sleep(200)
+    await menuClosed(page)
     assert.deepEqual(await bounds(), { from: '', to: '', submits: 0 })
   })
 
   test('Ctrl+Shift+right-click hands the gesture back to the browser', async () => {
     // No preventDefault means the browser's own menu opens instead of ours — all
     // we can observe here is that ours stayed shut and the event was left alone.
+    await menuGuardOver(page)
     const defaultPrevented = await page.evaluate(() => new Promise((resolve) => {
       const target = document.getElementById('words')
       document.addEventListener('contextmenu', e => resolve(e.defaultPrevented), { once: true })
@@ -190,36 +191,34 @@ describe('word-count range menu', { skip }, () => {
         shiftKey: true,
       }))
     }))
-    await sleep(150)
     assert.equal(defaultPrevented, false, 'the native menu must not be suppressed')
     assert.equal(await page.$('.AO3E--menu'), null, 'our menu must stay shut')
   })
 
   test('a plain right-click still opens our menu', async () => {
-    const defaultPrevented = await page.evaluate(() => new Promise((resolve) => {
+    const defaultPrevented = await openMenu(page, () => page.evaluate(() => new Promise((resolve) => {
       const target = document.getElementById('words')
       document.addEventListener('contextmenu', e => resolve(e.defaultPrevented), { once: true })
       target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-    }))
-    await sleep(200)
+    })))
     assert.equal(defaultPrevented, true)
     assert.notEqual(await page.$('.AO3E--menu'), null)
     await page.keyboard.press('Escape')
-    await sleep(150)
+    await menuClosed(page)
   })
 
   test('an open-ended range leaves the other bound empty', async () => {
-    await openMenu()
+    await openWordCountMenu()
     await page.evaluate(() => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.textContent.startsWith('50,000+')).click()
     })
-    await sleep(200)
+    await menuClosed(page)
     assert.deepEqual(await bounds(), { from: '50000', to: '', submits: 0 })
   })
 
   test('lists each distinct bound of the configured ranges in its own section', async () => {
-    const items = await openMenu()
+    const items = await openWordCountMenu()
     const inSection = name => items.filter(i => i.section === name).map(i => i.label)
     // Ascending, de-duplicated, and an unbounded side (50,000+) contributes no
     // upper bound of its own.
@@ -233,19 +232,19 @@ describe('word-count range menu', { skip }, () => {
   })
 
   test('picking an upper bound leaves the lower one alone', async () => {
-    await openMenu()
+    await openWordCountMenu()
     await pickInSection('Set upper bound', '100,000')
     assert.deepEqual(await bounds(), { from: '50000', to: '100000', submits: 0 })
   })
 
   test('picking a lower bound leaves the upper one alone', async () => {
-    await openMenu()
+    await openWordCountMenu()
     await pickInSection('Set lower bound', '5,000')
     assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 0 })
   })
 
   test('a bound that would invert the range drops the other one', async () => {
-    const items = await openMenu()
+    const items = await openWordCountMenu()
     // 3,000 is below the standing lower bound of 5,000; keeping it would filter
     // to nothing, so the range goes open-ended downwards instead — and the row
     // is labelled with that whole range rather than the bare bound.
@@ -293,7 +292,7 @@ describe('default word count range', { skip }, () => {
           document.getElementById('work_search_words_to').value = values.to
       }, PAGE, prefill)
       await page.addScriptTag({ content: js })
-      await sleep(1200)
+      await settled(page)
       return await page.evaluate(() => ({
         from: document.getElementById('work_search_words_from').value,
         to: document.getElementById('work_search_words_to').value,

@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { skip, startOptions } from './optionsPage.mjs'
+import { skip, startOptions, until } from './optionsPage.mjs'
 
 /** One rule of each action, an author with a pseud, a priority of a rule's own, and each matcher. */
 const RULES = [
@@ -44,10 +43,10 @@ describe('options UI — rules list', { skip }, () => {
     return dialog?.querySelector('[i-codicon-regex]') ? dialog.querySelector('input[type="text"]').value : null
   })
 
+  /** Close the editor, and wait for the focus to land back on the page. */
   const closeEditor = async () => {
-    await page.keyboard.press('Escape')
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-    await sleep(200)
+    await options.closeDialog()
+    await page.waitForFunction(() => document.activeElement !== document.body)
   }
 
   const focused = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? null)
@@ -70,14 +69,48 @@ describe('options UI — rules list', { skip }, () => {
     assert.deepEqual(await options.colour(star), [124, 58, 237])
   })
 
-  test('a disabled rule\'s row drops to 48%', async () => {
-    assert.equal(await (await row(3)).evaluate(el => getComputedStyle(el).opacity), '0.48')
-    assert.equal(await (await row(0)).evaluate(el => getComputedStyle(el).opacity), '1')
+  test('a disabled rule\'s row fades its glyphs and controls to 48%, and draws its words in the text colour at 57%', async () => {
+    /** How much of the element its own and its ancestors' opacity leave drawn. */
+    const opacity = handle => handle.evaluate((el) => {
+      let left = 1
+      for (let at = el; at; at = at.parentElement)
+        left *= Number(getComputedStyle(at).opacity)
+      return Math.round(left * 100) / 100
+    })
+    /** Each piece of text the row draws, as `{ text, opacity, colour }`. */
+    const words = handle => handle.evaluate((row) => {
+      const drawn = []
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const el = node.parentElement
+        if (!node.textContent.trim() || el.closest('.sr-only'))
+          continue
+        let left = 1
+        for (let at = el; at; at = at.parentElement)
+          left *= Number(getComputedStyle(at).opacity)
+        drawn.push({ text: node.textContent.trim(), opacity: Math.round(left * 100) / 100, colour: getComputedStyle(el).color })
+      }
+      return drawn
+    })
+    const [r, g, b] = await options.token('default-fg')
+
+    const off = await row(3)
+    for (const glyph of ['[i-mdi-cancel]', '[i-codicon-symbol-string]'])
+      assert.equal(await opacity(await off.$(glyph)), 0.48, `the ${glyph} glyph fades`)
+    for (const name of ['Edit rule “Dead Dove: Do Not Eat”', 'Remove rule “Dead Dove: Do Not Eat”'])
+      assert.equal(await opacity(await options.control(off, 'button', name)), 0.48, `${name} fades`)
+    const quiet = { opacity: 1, colour: `rgba(${r}, ${g}, ${b}, 0.57)` }
+    assert.deepEqual(await words(off), ['0', 'Dead Dove: Do Not Eat', 'Any tag'].map(text => ({ text, ...quiet })))
+
+    const on = await row(0)
+    assert.equal(await opacity(await on.$('[i-mdi-arrow-collapse-vertical]')), 1)
+    assert.equal(await opacity(await options.control(on, 'button', 'Edit rule “someone”')), 1)
+    assert.ok((await words(on)).every(word => word.opacity === 1 && word.colour !== quiet.colour), 'a rule that acts is drawn whole')
   })
 
   test('Edit opens the editor on that rule, and the focus comes back to it', async () => {
     await (await options.control(await row(2), 'button', 'Edit rule “Fluff”')).click()
-    await sleep(400)
+    await page.waitForSelector('[role="dialog"]')
     assert.equal(await editor(), 'Fluff')
     await closeEditor()
     assert.equal(await focused(), 'Edit rule “Fluff”')
@@ -86,8 +119,7 @@ describe('options UI — rules list', { skip }, () => {
   test('Add opens a blank editor, and the focus comes back to Add however it was clicked', async () => {
     // Pressed the way a click that doesn't focus its button presses it
     // (Safari's, Firefox's on macOS), after another row's Edit had the focus.
-    await options.press(await options.control(await options.list(LIST), 'button', 'Add a rule'))
-    await sleep(400)
+    await options.openDialog(await options.control(await options.list(LIST), 'button', 'Add a rule'))
     assert.equal(await editor(), '')
     await closeEditor()
     assert.equal(await focused(), 'Add a rule')
@@ -95,7 +127,7 @@ describe('options UI — rules list', { skip }, () => {
 
   test('Remove takes the rule out of storage', async () => {
     await options.press(await options.control(await row(3), 'button', 'Remove rule “Dead Dove: Do Not Eat”'))
-    await sleep(1000)
+    await until('the rules to be written', async () => await options.lastWrite('option.rules') !== null)
     const stored = await options.lastWrite('option.rules')
     assert.deepEqual(stored.filters.map(rule => rule.value), RULES.filter((_, at) => at !== 3).map(rule => rule.value))
     assert.equal((await options.listRowIds(LIST)).length, RULES.length - 1)

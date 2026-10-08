@@ -72,7 +72,7 @@ function press(key: string) {
         <button
           type="button"
           class="backup-row__restore"
-          :class="confirm.armed(restoreId(row.key)) ? 'label-btn destructive border-destructive font-600' : 'outline-btn'"
+          :class="confirm.armed(restoreId(row.key)) ? 'armed-btn' : 'outline-btn'"
           :aria-label="confirm.armed(restoreId(row.key)) ? `${row.restore}?` : row.restore"
           :disabled="restoring === row.key"
           @click="press(row.key)"

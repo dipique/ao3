@@ -11,6 +11,10 @@
  * - `meta`: a line about it, or `error` in its place;
  * - `actions`.
  *
+ * A glyph among the words in `numbers`, `identity` or `meta` takes the class
+ * `list-row__glyph`, so it fades with the row's other glyphs while the row is
+ * off.
+ *
  * `template` lays them out, as a CSS `grid-template` over those names, and
  * `narrowTemplate` while the frame is 440 px wide or less, where `meta` may
  * take a line of its own and wraps.
@@ -22,8 +26,18 @@ defineProps<{
   narrowTemplate?: string
   /** Why the row can't be saved, shown in place of `meta`. */
   error?: string | null
-  /** A row that is switched off, such as a disabled rule, drops to 48%. */
+  /**
+   * A row that is switched off, such as a disabled rule: its glyphs and
+   * controls drop to 48%, and its words to the text colour at 57%.
+   */
   off?: boolean
+  /**
+   * `identity` holds a control beside words that ellipse themselves, such as
+   * a name and its Rename: the cell leaves the control's hit area whole
+   * rather than clipping for an ellipsis, and the list's first row keeps room
+   * above that line for it where the narrow layout puts the line at the top.
+   */
+  identityControls?: boolean
 }>()
 </script>
 
@@ -32,7 +46,12 @@ defineProps<{
     role="listitem"
     :data-list-row="rowId"
     class="list-row"
-    :class="{ 'list-row--off': off, 'list-row--narrowable': !!narrowTemplate }"
+    :class="{
+      'list-row--off': off,
+      'list-row--narrowable': !!narrowTemplate,
+      'list-row--ordered': !!$slots.order,
+      'list-row--identity-controls': identityControls,
+    }"
     :style="{ '--row-template': template, '--row-template-narrow': narrowTemplate }"
   >
     <div v-if="$slots.order" class="list-row__order">
@@ -48,7 +67,7 @@ defineProps<{
       <slot />
     </div>
     <div v-if="error" data-list-error class="list-row__meta list-row__meta--error">
-      <SeverityGlyph severity="destructive" class="mt-px shrink-0 text-[13px]" />
+      <SeverityGlyph severity="destructive" class="list-row__glyph mt-px shrink-0 text-[13px]" />
       <span>{{ error }}</span>
     </div>
     <div v-else-if="$slots.meta" class="list-row__meta">
@@ -78,8 +97,18 @@ defineProps<{
 .list-row:hover {
   background-color: var(--row-hover);
 }
-.list-row--off {
+/* Switched off, the row stands back from the rows that act: its glyphs and
+   controls fade to 48%, and its words, still there to be read, are the text
+   colour at 57%, which reads at AA where 48% would not. */
+.list-row--off :is(.list-row__order, .list-row__icon, .list-row__actions),
+.list-row--off :is(.list-row__numbers, .list-row__identity, .list-row__meta) :deep(.list-row__glyph) {
   opacity: 0.48;
+}
+.list-row--off :is(.list-row__numbers, .list-row__identity, .list-row__meta),
+.list-row--off
+  :is(.list-row__numbers, .list-row__identity, .list-row__meta)
+  :deep(:not(.list-row__glyph, .list-row__glyph *)) {
+  color: rgb(var(--color-default-fg) / 0.57);
 }
 
 .list-row__order {
@@ -112,6 +141,9 @@ defineProps<{
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.list-row--identity-controls .list-row__identity {
+  overflow: visible;
+}
 .list-row__meta {
   grid-area: meta;
   min-width: 0;
@@ -138,11 +170,16 @@ defineProps<{
   gap: 1px;
 }
 
-/* Below 768 px, where it is touched, as tall as Canvas 1's phone rows, so a
-   button's hit area stays inside its row. */
+/* Below 768 px, where it is touched, 48 px tall, so a button's hit area stays
+   inside its row. The frame's body scrolls, so it cuts off whatever reaches
+   past its edges: a row starting with its order buttons keeps room before the
+   first for its hit area. */
 @media (max-width: 767.98px) {
   .list-row {
     min-height: 48px;
+  }
+  .list-row--ordered {
+    padding-left: 10px;
   }
 }
 
@@ -154,6 +191,17 @@ defineProps<{
   }
   .list-row--narrowable .list-row__meta {
     white-space: normal;
+  }
+}
+
+/* Narrow and touched, the controls beside a row's identity sit on its first
+   line rather than across the whole row, so the first row keeps room above
+   them for their hit areas inside the body. */
+@media (max-width: 767.98px) {
+  @container (max-width: 440px) {
+    .list-row--narrowable.list-row--identity-controls:first-child {
+      padding-top: 10px;
+    }
   }
 }
 </style>

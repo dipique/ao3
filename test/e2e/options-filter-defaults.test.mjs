@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
 import { skip, startOptions } from './optionsPage.mjs'
 
 const COMPLETION = 'filter-defaults-default-completion-status'
@@ -25,7 +24,7 @@ describe('options UI — completion and crossover defaults', { skip }, () => {
 
   const switchOn = async (row) => {
     await (await options.control(await options.row(row), 'switch')).click()
-    await sleep(500)
+    await options.saved()
   }
 
   /**
@@ -37,9 +36,10 @@ describe('options UI — completion and crossover defaults', { skip }, () => {
     const combobox = await options.control(await options.row(row), 'combobox')
     await combobox.evaluate(el => window.scrollBy({ top: el.getBoundingClientRect().top - window.innerHeight / 2, behavior: 'instant' }))
     await combobox.click()
-    await sleep(300)
+    await options.page.waitForSelector('[role="option"]')
+    await options.calm()
     await (await options.control(options.page, 'option', label)).click()
-    await sleep(500)
+    await options.saved()
   }
 
   const shown = async row => options.text(await options.control(await options.row(row), 'combobox'))

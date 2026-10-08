@@ -19,3 +19,16 @@ export const REOPEN_GUARD_MS = 250
  * before the question was asked never answers.
  */
 export const BUILD_CHECK_TIMEOUT_MS = 5000
+
+/**
+ * How long the options page waits after an edit before saving, in
+ * milliseconds: every option changed within it is saved together.
+ */
+export const OPTIONS_SAVE_DELAY_MS = 200
+
+/**
+ * How long the rule editor lets a regex pattern run over the names it tests
+ * before stopping it, in milliseconds. A pattern stopped for running longer
+ * can't be saved: on AO3's pages nothing stops it.
+ */
+export const REGEX_TIME_BUDGET_MS = 1000

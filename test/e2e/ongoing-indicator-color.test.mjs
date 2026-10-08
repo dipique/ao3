@@ -6,7 +6,8 @@ import puppeteer from 'puppeteer-core'
 
 import { packIds, packProgress } from '../../src/common/workMarks.ts'
 import { READINESS_COLORS, todayEpochDays } from '../../src/common/workProgress.ts'
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -107,7 +108,7 @@ describe('the ongoing indicator colour', { skip }, () => {
     await page.goto(LISTING_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
 
     colors = await page.evaluate(() => Object.fromEntries([1, 2, 3].map((id) => {
       const el = document.querySelector(`#work_${id} .AO3E--indicator--mark-continue`)

@@ -124,7 +124,7 @@ function add(event: MouseEvent) {
       <span class="min-w-0 flex items-center gap-[7px]">
         <span class="overflow-hidden text-ellipsis whitespace-pre" :title="rule.value">{{ rule.value }}<span v-if="rule.pseud" class="text-muted-fg"> ({{ rule.pseud }})</span></span>
         <Tooltip>
-          <span class="grid shrink-0 place-items-center text-[13px] text-muted-fg">
+          <span class="list-row__glyph grid shrink-0 place-items-center text-[13px] text-muted-fg">
             <Icon v-if="matchesId(rule)" i-codicon-symbol-numeric label="Id" />
             <Icon v-else-if="rule.matcher === 'contains'" i-codicon-whole-word label="Contains" />
             <Icon v-else-if="rule.matcher === 'regex'" i-codicon-regex label="Regex" />

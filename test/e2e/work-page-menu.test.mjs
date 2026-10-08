@@ -6,7 +6,9 @@ import puppeteer from 'puppeteer-core'
 
 import { createDefaultMarks, moveMark, packIds, packProgress } from '../../src/common/workMarks.ts'
 import { fromEpochDays, todayEpochDays } from '../../src/common/workProgress.ts'
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { openMenu, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -119,7 +121,7 @@ describe('the work menu on a work page', { skip }, () => {
     await tab.goto(url, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(tab)
     return tab
   }
 
@@ -127,10 +129,12 @@ describe('the work menu on a work page', { skip }, () => {
     [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item .AO3E--menu--label')]
       .map(el => el.textContent))
 
+  /** Click the work's title, which opens its menu, and wait for the menu. */
+  const openTitleMenu = tab => openMenu(tab, () => tab.click('#workskin > .preface.group > h2.title.heading'))
+
   test('a plain left click on the title opens the menu', async () => {
     const tab = await open(WORK_URL)
-    await tab.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(tab)
     const labels = await menuLabels(tab)
     await tab.close()
     assert.ok(labels.length > 0, 'the menu opened on a left click')
@@ -142,8 +146,7 @@ describe('the work menu on a work page', { skip }, () => {
     // page. Before that, the title was silently skipped while the author menu
     // and the reader handles carried on working.
     const tab = await open(CHAPTER_PERMALINK)
-    await tab.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(tab)
     const labels = await menuLabels(tab)
     await tab.close()
     assert.ok(labels.length > 0, 'the menu opened on a chapter permalink')
@@ -152,13 +155,12 @@ describe('the work menu on a work page', { skip }, () => {
 
   test('the wait-until field starts at today when no date is set', async () => {
     const tab = await open(WORK_URL)
-    await tab.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(tab)
     await tab.evaluate(() => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
     })
-    await sleep(250)
+    await tab.waitForSelector('.AO3E--progress-editor')
     const value = await tab.$eval('.AO3E--progress-editor--date', el => el.value)
     await tab.close()
     assert.equal(value, fromEpochDays(todayEpochDays()), 'the presets need a visible base to move from')
@@ -166,13 +168,12 @@ describe('the work menu on a work page', { skip }, () => {
 
   test('Clear still empties the field, so no date is genuinely unset', async () => {
     const tab = await open(WORK_URL)
-    await tab.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(tab)
     await tab.evaluate(() => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
     })
-    await sleep(250)
+    await tab.waitForSelector('.AO3E--progress-editor')
     await tab.evaluate(() => {
       const buttons = [...document.querySelectorAll('.AO3E--progress-editor--preset')]
       buttons.find(b => b.textContent === 'Clear')?.click()
@@ -187,15 +188,15 @@ describe('the work menu on a work page', { skip }, () => {
     // field can default to today for the presets' sake without every mark then
     // carrying a date. A real future date is still stored.
     const tab = await open(WORK_URL)
-    await tab.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(tab)
     await tab.evaluate(() => {
       const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
       rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
     })
-    await sleep(250)
+    await tab.waitForSelector('.AO3E--progress-editor')
     await tab.evaluate(() => document.querySelector('.AO3E--progress-editor--save').click())
-    await sleep(400)
+    await until('the ongoing mark to be written', () => tab.evaluate(() =>
+      (window.__writes ?? []).some(w => w['option.workMarks']?.marks?.continue?.items)))
     const written = await tab.evaluate(() => {
       const writes = window.__writes ?? []
       for (let i = writes.length - 1; i >= 0; i--) {
@@ -217,8 +218,7 @@ describe('the work menu on a work page', { skip }, () => {
       'option.workMarks': { enabled: true, marks: createDefaultMarks() },
       'option.markForLaterToolbar': true,
     })
-    await tab.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(tab)
     const rows = await tab.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
         label: el.querySelector('.AO3E--menu--label').textContent,
@@ -244,8 +244,7 @@ describe('the work menu on a work page', { skip }, () => {
     // moved from the end of the verdicts to the front of them.
     const marks = moveMark(createDefaultMarks(), 'favorite', -10)
     const tab = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
-    await tab.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(tab)
     const labels = await tab.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
     await tab.close()
@@ -264,8 +263,7 @@ describe('the work menu on a work page', { skip }, () => {
     marks.bad.disabled = true
 
     const clean = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
-    await clean.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(clean)
     const offered = await clean.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
     await clean.close()
@@ -277,8 +275,7 @@ describe('the work menu on a work page', { skip }, () => {
     carried.boring.disabled = true
     carried.boring.items = packIds([WORK_ID])
     const marked = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks: carried } })
-    await marked.click('#workskin > .preface.group > h2.title.heading')
-    await sleep(250)
+    await openTitleMenu(marked)
     const withMark = await marked.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
     await marked.close()

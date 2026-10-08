@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -60,7 +61,9 @@ describe('the dark skin', { skip }, () => {
   /**
    * Load the listing with `seed` in storage. `remembered` pre-fills the page's
    * own localStorage the way a previous page would have; `stalled` makes the
-   * extension's storage never answer, leaving only what was remembered.
+   * extension's storage never answer, leaving only what was remembered — so the
+   * content script never finishes a run, and what the page holds once it has
+   * loaded is all it will.
    */
   const load = async (seed, { remembered = null, stalled = false } = {}) => {
     const tab = await browser.newPage()
@@ -99,7 +102,8 @@ describe('the dark skin', { skip }, () => {
       watch.observe(document, { childList: true, subtree: true })
     })
     await tab.goto(LISTING_URL, { waitUntil: 'load' })
-    await sleep(1500)
+    if (!stalled)
+      await settled(tab)
     return tab
   }
 
@@ -119,7 +123,7 @@ describe('the dark skin', { skip }, () => {
     }
   })
 
-  const setOption = (tab, value) => tab.evaluate(v => window.chrome.storage.local.set({ 'option.darkSkin': v }), value)
+  const setOption = (tab, value) => rerun(tab, () => tab.evaluate(v => window.chrome.storage.local.set({ 'option.darkSkin': v }), value))
 
   test('is off unless asked for', async () => {
     const tab = await load({})
@@ -174,7 +178,6 @@ describe('the dark skin', { skip }, () => {
     const tab = await load(ON)
     const on = await state(tab)
     await setOption(tab, false)
-    await sleep(1500)
     const off = await state(tab)
     await tab.close()
     assert.equal(on.remembered, '1')
@@ -184,7 +187,6 @@ describe('the dark skin', { skip }, () => {
   test('switching it off takes it away without a reload', async () => {
     const tab = await load(ON)
     await setOption(tab, false)
-    await sleep(1500)
     const s = await state(tab)
     await tab.close()
     assert.equal(s.skin, false, 'the skin is gone')
@@ -195,7 +197,6 @@ describe('the dark skin', { skip }, () => {
   test('switching it on applies it without a reload', async () => {
     const tab = await load({})
     await setOption(tab, true)
-    await sleep(1500)
     const s = await state(tab)
     await tab.close()
     assert.ok(s.afterAo3, 'the skin comes after AO3\'s own stylesheet')

@@ -47,8 +47,17 @@ export interface JobView {
   failures: { shown: ExportJobError[], more: number }
 }
 
-/** What a phase is called when it names a job that is doing it, for a phase not yet known. */
-const NO_PHASE = 'working'
+/**
+ * What each phase is called when it names a job that is doing it. A
+ * Download's last stage is said as downloading, as the button that started it
+ * says.
+ */
+const PHASE_WORDS: Readonly<Record<ExportJobPhase, string>> = { refreshing: 'refreshing', caching: 'caching', exporting: 'downloading' }
+
+/** What the job is doing, in the word that names it: its phase, or "working" for a phase not yet known. */
+export function jobVerb(view: Pick<JobView, 'phase'>): string {
+  return view.phase ? PHASE_WORDS[view.phase] : 'working'
+}
 
 /** The job, from the runner's status. `names` gives a stored list's name by its key, or `''`; `now` drives the countdown. */
 export function jobView(status: JobStatus, names: (key: string) => string, now: number): JobView {
@@ -58,12 +67,11 @@ export function jobView(status: JobStatus, names: (key: string) => string, now: 
 
   const name = names(job.cacheKey) || job.descriptor?.label || job.cacheKey
   const phase = job.steps[0] ?? null
-  const verb = phase ?? NO_PHASE
   const view: JobView = {
     key: job.cacheKey,
     name,
     phase,
-    label: sentence(`${verb} ${name}`),
+    label: sentence(`${jobVerb({ phase })} ${name}`),
     state: 'running',
     done: job.done,
     total: job.total,
@@ -113,7 +121,7 @@ export function isRunning(view: JobView): boolean {
 export function offReason(view: JobView, key: string): string | null {
   if (!isRunning(view))
     return null
-  const verb = view.phase ?? NO_PHASE
+  const verb = jobVerb(view)
   return key === view.key
     ? `off while this list is ${verb}`
     : `off for now: one job at a time, and ${view.name} is ${verb}`
@@ -140,7 +148,7 @@ export function removeOff(view: JobView, key: string): string | null {
 
 /** Why deleting cached work text is off, or null: a running job is writing it. */
 export function cachedTextOff(view: JobView): string | null {
-  return isRunning(view) ? `off while ${view.name} is ${view.phase ?? NO_PHASE}` : null
+  return isRunning(view) ? `off while ${view.name} is ${jobVerb(view)}` : null
 }
 
 /**
@@ -149,7 +157,7 @@ export function cachedTextOff(view: JobView): string | null {
  * none runs.
  */
 export function busyNotice(view: JobView): string | null {
-  return isRunning(view) ? `One job at a time — ${view.name} is ${view.phase ?? NO_PHASE}` : null
+  return isRunning(view) ? `One job at a time — ${view.name} is ${jobVerb(view)}` : null
 }
 
 /** The running job, for the rail: how far it has got, and what it is. Null while none runs. */
@@ -158,6 +166,6 @@ export function railJob(view: JobView): { text: string, title: string } | null {
     return null
   return {
     text: view.total ? `${view.done.toLocaleString()}/${view.total.toLocaleString()}` : '',
-    title: `A job is running: ${view.phase ?? NO_PHASE} ${view.name}`,
+    title: `A job is running: ${jobVerb(view)} ${view.name}`,
   }
 }

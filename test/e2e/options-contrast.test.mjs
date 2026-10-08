@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { storedLists } from './helpers.mjs'
-import { scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
+import { ARCHIVE, scriptBackground, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 
-const ARCHIVE = 'https://archiveofourown.org'
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.now()
 const TODAY = Math.floor(NOW / DAY)
@@ -23,8 +22,9 @@ const BROKEN = { id: 'br0ken', kind: 'tag-works', url: 'https://example.invalid/
 /**
  * An install with something in every place the page draws text: lists with
  * rows, a disabled rule and replacement, saved lists of every status, a job
- * stopped with works it couldn't fetch, the profile lists' tiles, sync on and
- * backups to restore.
+ * stopped with works it couldn't fetch, the profile lists' tiles, a cached
+ * work no list holds, sync on and backups to restore. So every destructive
+ * control has something to delete, and can be armed.
  */
 const SEED = {
   'option.user': { userId: 'reader' },
@@ -37,7 +37,15 @@ const SEED = {
       { target: 'tag', value: 'Dead Dove: Do Not Eat', matcher: 'exact', behavior: 'none' },
     ],
   },
-  'option.workMarks': { enabled: true, marks: { read: { icon: 'read', label: 'Read', color: '#6b7280', items: '1000,7', order: 0 }, good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: 'read', items: '1000', order: 1 } } },
+  'option.workMarks': {
+    enabled: true,
+    marks: {
+      read: { icon: 'read', label: 'Read', color: '#6b7280', items: '1000,7', order: 0 },
+      good: { icon: 'good', label: 'Good', color: '#2f8f4e', triggerAlias: 'read', items: '1000', order: 1 },
+      // Over a kilobyte packed, so the frame's foot gives its figure.
+      favorite: { icon: 'favorite', label: 'Favorite', color: '#c2185b', triggerAlias: 'read', items: Array.from({ length: 600 }).fill('1').join(','), order: 2 },
+    },
+  },
   'option.textReplacements': { enabled: true, tools: true, rules: [{ find: 'Y/N', replace: 'Alex', wholeWord: true }, { find: 'orbs', replace: 'eyes', disabled: true }] },
   'option.wordCountToolbar': { enabled: true, ranges: [{ from: null, to: 1000 }, { from: 1000, to: null }] },
   'option.searchWordCount': { enabled: true, from: 5000, to: null },
@@ -64,6 +72,7 @@ const SEED = {
     errorCount: 2,
     errors: [{ workId: '501', title: 'Work 501', reason: 'Restricted to registered users' }, { workId: '502', title: 'Work 502', reason: 'HTTP 404' }],
   },
+  'workTextIndex': { 99: { size: 120, updatedAt: 0, chapters: 1, words: 100, fetchedAt: NOW - 3 * 3600_000, v: 1 } },
   'sync.enabled': true,
   'sync.backupsEnabled': true,
   'sync.backupCount': 7,
@@ -78,40 +87,68 @@ const REPLIES = {
   ],
 }
 
-/**
- * Drawn under AA on purpose: a row switched off, such as a disabled rule, fades
- * so it stands back from the rows that act; and a saved list whose job runs
- * wears the brand's tint, which takes its quieter words a shade under.
- */
-const DRAWN_SO = '.list-row--off, .saved-list--job'
+const THEMES = ['light', 'dark']
+const VIEWPORT = { width: 1440, height: 900 }
+
+/** The install with nothing running: so a job can be started, one at a time. */
+const IDLE = Object.fromEntries(Object.entries(SEED).filter(([key]) => key !== 'siteExportJob'))
+
+/** How much of the element its own and its ancestors' opacity leave drawn. */
+function opacityOf(handle) {
+  return handle.evaluate((el) => {
+    let opacity = 1
+    for (let at = el; at; at = at.parentElement)
+      opacity *= Number(getComputedStyle(at).opacity)
+    return opacity
+  })
+}
 
 /**
  * Every word the page draws reads at WCAG's AA against what is behind it, in
  * both themes, placeholders included — but for a control that is switched
- * off, which AA leaves out.
+ * off, which AA leaves out. That holds in a row switched off, such as a
+ * disabled rule, whose glyphs and controls fade; under a job's tint, with the
+ * pointer on its row or not; while a destructive control asks whether it
+ * should; and in the work-mark dialog while it says why a name can't be saved.
  */
 describe('options UI — text contrast', { skip }, () => {
   let session
+  let release
+  /** Every work page a job asks for waits on this, so the job runs for as long as a test reads it. */
+  const held = new Promise((resolve) => {
+    release = resolve
+  })
 
   before(async () => {
     session = await startOptions()
   }, { timeout: 180000 })
 
-  after(() => session?.close())
+  after(() => {
+    release()
+    return session?.close()
+  })
 
-  for (const theme of ['light', 'dark']) {
+  /** The options page in `theme`, opened at `hash`, with the background's replies scripted. */
+  const open = (theme, hash, { seed = SEED, prepare } = {}) => session.open({
+    seed,
+    theme,
+    hash,
+    viewport: VIEWPORT,
+    prepare: async (page) => {
+      await page.evaluateOnNewDocument(scriptBackground, REPLIES)
+      await prepare?.(page)
+    },
+  })
+
+  const jobDrawn = options => until('the saved lists and the job to be drawn', () => options.page.evaluate(() => !!document.querySelector('[data-saved-list] [data-job-state="stopped"]')))
+
+  for (const theme of THEMES) {
     for (const category of CATEGORIES) {
       test(`${category}, ${theme}`, async () => {
-        const options = await session.open({
-          seed: SEED,
-          theme,
-          hash: `#${category}`,
-          viewport: { width: 1440, height: 900 },
-          prepare: page => page.evaluateOnNewDocument(scriptBackground, REPLIES),
-        })
+        const options = await open(theme, `#${category}`)
         try {
           if (category === 'lists') {
-            await until('the saved lists and the job to be drawn', () => options.page.evaluate(() => !!document.querySelector('[data-saved-list] [data-job-state="stopped"]')))
+            await jobDrawn(options)
             await options.savedListDetails(TAG.id)
           }
           if (category === 'search') {
@@ -124,10 +161,27 @@ describe('options UI — text contrast', { skip }, () => {
           if (category === 'sync-backups')
             await until('the backups to be listed', async () => (await options.listRows('backups')).length === REPLIES.listBackups.length)
           await options.calm()
-          assert.deepEqual(await options.illegibleText('body', DRAWN_SO), [])
+          assert.deepEqual(await options.illegibleText(), [])
+
+          if (category === 'reading') {
+            const foot = await (await options.list('work-marks')).$('[data-list-foot]')
+            assert.ok(foot, 'Work marks’ foot was there to be read')
+            assert.match(await options.text(foot), /100 KB sync budget/, 'with its figure')
+
+            // A field's words are its value, which is no text node, so the sweep reads past them.
+            const off = await options.listRow('text-replacements', 1)
+            for (const field of await options.controls(off, 'textbox')) {
+              const name = await options.name(field)
+              assert.equal(await opacityOf(field), 1, `the switched-off replacement's ${name} field is drawn unfaded`)
+              assert.ok(await options.contrast(field) >= 4.5, `the switched-off replacement's ${name} field reads at AA`)
+            }
+          }
           if (category === 'lists') {
-            const failures = await options.control(await options.savedList(TAG.id), 'button', /works could not be fetched/)
-            assert.ok(await options.contrast(failures) >= 4.5, 'the job line’s failures read at AA')
+            const job = await options.savedList(TAG.id)
+            await (await job.$('[data-saved-list-part="caching"]')).hover()
+            assert.ok(await job.evaluate(el => el.matches(':hover')), 'the pointer is on the job’s row')
+            await options.calm()
+            assert.deepEqual(await options.illegibleText(), [], 'with the pointer on the job’s row')
           }
         }
         finally {
@@ -135,5 +189,91 @@ describe('options UI — text contrast', { skip }, () => {
         }
       })
     }
+
+    test(`This review while its job runs, ${theme}`, async () => {
+      const options = await open(theme, '#review', {
+        seed: IDLE,
+        prepare: page => stubArchive(page, async () => {
+          await held
+          return { status: 404 }
+        }),
+      })
+      try {
+        const cell = await options.page.$('[data-review-cell="this-review"]')
+        await options.press(await options.control(cell, 'button', 'Cache works'))
+        await until('the review’s job to run', () => cell.evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState === 'running'))
+        await options.calm()
+        assert.deepEqual(await options.illegibleText(), [])
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test(`the work-mark dialog saying why a name can't be saved, ${theme}`, async () => {
+      const options = await open(theme, '#marks-status')
+      try {
+        const dialog = await options.openDialog(await options.control(await options.list('work-marks'), 'button', 'Add mark'))
+        await (await dialog.$('input[name="mark-name"]')).type('read')
+        await until('the dialog to say why', async () => !!(await dialog.$('[role="alert"]')))
+        await options.calm()
+        assert.deepEqual(await options.illegibleText('[role="dialog"]'), [])
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test(`each destructive control, armed, ${theme}`, async () => {
+      const options = await open(theme, '#saved-lists')
+      try {
+        /** What reads under AA while each control asks, by the control. */
+        const unread = {}
+        /**
+         * Arm `control` with a press of the pointer, which stays on it as a
+         * reader's does, and read the page while it asks `asks`. It asks for
+         * a few seconds only, so it is checked to be asking still once read.
+         */
+        async function arm(what, control, asks) {
+          await control.evaluate(el => el.scrollIntoView({ block: 'center' }))
+          await control.click()
+          await until(`${what} to ask`, async () => asks.test(await options.text(control)))
+          await options.calm()
+          unread[what] = await options.illegibleText()
+          assert.match(await options.text(control), asks, `${what} still asking once read`)
+        }
+
+        await jobDrawn(options)
+        const tag = await options.savedListDetails(TAG.id)
+        await arm('Remove offline copy', await options.control(tag, 'button', /^Remove offline copy/), /^Remove it\?$/)
+        await arm('Remove list', await options.control(tag, 'button', /^Remove list/), /^Remove it\?$/)
+
+        const cache = await options.row('offline-reading-cached-work-text')
+        const discard = await options.control(cache, 'button', 'Discard orphans')
+        await until('Discard orphans to have something to discard', () => discard.evaluate(el => !el.disabled))
+        await arm('Discard orphans', discard, /^Discard [\d,]+\?$/)
+        await arm('Delete cached text', await options.control(cache, 'button', 'Delete cached text'), /^Delete it all\?$/)
+
+        const more = await options.control(await options.tile('marked-for-later'), 'button', 'More for Marked for Later')
+        await more.focus()
+        await options.page.keyboard.press('Enter')
+        await until('the tile’s menu to open', async () => (await options.controls(options.page, 'menuitem')).length > 0)
+        await arm('Remove Marked for Later’s offline copy', await options.control(options.page, 'menuitem', /^Remove offline copy/), /^Remove offline copy\?/)
+        await options.page.keyboard.press('Escape')
+        await until('the tile’s menu to close', async () => (await options.controls(options.page, 'menuitem')).length === 0)
+
+        await options.goTo('#backups')
+        await until('the backups to be listed', async () => (await options.listRows('backups')).length === REPLIES.listBackups.length)
+        await arm('Restore', await options.control(await options.listRow('backups', 'backup.1'), 'button'), /^Restore\?$/)
+
+        await options.goTo('#marks-status')
+        await arm('Clear Read marks', await options.control(await options.listRow('work-marks', 'read'), 'button', /^Clear /), /^Clear 2\?$/)
+
+        assert.deepEqual(unread, Object.fromEntries(Object.keys(unread).map(what => [what, []])))
+      }
+      finally {
+        await options.close()
+      }
+    })
   }
 })

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { DIST, installMock } from './helpers.mjs'
+import { REOPEN_GUARD_MS } from '../../src/common/constants.ts'
+import { DIST, installMock, sleep } from './helpers.mjs'
 
 export { launch } from './helpers.mjs'
 
@@ -130,6 +131,65 @@ export function settled(tab, after = 0) {
     const { dataset } = document.documentElement
     return !('ao3eBusy' in dataset) && Number(dataset.ao3eRuns ?? 0) > done
   }, {}, after)
+}
+
+/**
+ * Press one of the toggles on the search view's facet row named `value` (its
+ * `include`, `require` or `exclude`), and wait until the toggle shows the
+ * press: the view filters its works as it draws the toggle, so they are in
+ * step by then.
+ */
+export async function pressFacet(tab, value, toggle = 'include') {
+  const find = (want, kind) => [...document.querySelectorAll('.AO3E--search-view--row')]
+    .find(row => row.querySelector('.AO3E--search-view--row-name')?.textContent?.trim() === want)
+    ?.querySelector(`.AO3E--search-view--toggle-${kind}`)
+  const pressed = () => tab.evaluate(`(${find})(${JSON.stringify(value)}, ${JSON.stringify(toggle)})?.getAttribute('aria-pressed')`)
+  const was = await pressed()
+  await tab.evaluate(`(${find})(${JSON.stringify(value)}, ${JSON.stringify(toggle)}).click()`)
+  await tab.waitForFunction(`(${find})(${JSON.stringify(value)}, ${JSON.stringify(toggle)})?.getAttribute('aria-pressed') !== ${JSON.stringify(was)}`)
+}
+
+/** When each tab last showed one of the extension's menus, by the clock here. */
+const menuShown = new WeakMap()
+
+/**
+ * Wait until the content script would open a menu in the tab again: it opens
+ * none within {@link REOPEN_GUARD_MS} of the last, so this waits out what is
+ * left of that since the last menu {@link openMenu} opened there. Before a
+ * gesture that should open no menu, so that it shows none for its own reasons.
+ */
+export function menuGuardOver(tab) {
+  return sleep(Math.max(0, (menuShown.get(tab) ?? 0) + REOPEN_GUARD_MS - Date.now()))
+}
+
+/**
+ * Do `gesture`, which opens one of the extension's menus in the tab (a
+ * right-click, a click on what opens one), once the content script would open
+ * one ({@link menuGuardOver}), and wait for the menu. Returns what `gesture`
+ * does.
+ */
+export async function openMenu(tab, gesture) {
+  await menuGuardOver(tab)
+  const before = await tab.$('.AO3E--menu')
+  const done = await gesture()
+  await tab.waitForFunction(old => !!document.querySelector('.AO3E--menu') && document.querySelector('.AO3E--menu') !== old, {}, before)
+  menuShown.set(tab, Date.now())
+  return done
+}
+
+/** Wait until no menu of the extension's is open: one closes at once, on Escape or a pick. */
+export function menuClosed(tab) {
+  return tab.waitForFunction(() => !document.querySelector('.AO3E--menu'))
+}
+
+/**
+ * Wait for a search view to be on screen and done loading: its works drawn,
+ * with no progress panel up and no refresh under way. Opening a view is work a
+ * unit leaves going once it is ready, so {@link settled} doesn't wait for it.
+ */
+export function viewDrawn(tab) {
+  return tab.waitForFunction(() => !!document.querySelector('.AO3E--search-host .AO3E--search-view--results')
+    && !document.querySelector('.AO3E--search-host--progress, .AO3E--search-view--updating-on'))
 }
 
 /**

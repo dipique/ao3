@@ -5,7 +5,8 @@ import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
 import { SEARCH_PROMPT_TIMEOUT } from '../../src/common/constants.ts'
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, outlast } from './helpers.mjs'
+import { menuClosed, openMenu, runs, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -73,7 +74,16 @@ describe('the pending-search prompt', { skip }, () => {
     }, PAGE)
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
+    // Registered after the content script's own, on the same node and phase, so
+    // by the time it counts an Enter the extension has done what it does with it.
+    await page.evaluate(() => {
+      window.__enters = 0
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')
+          window.__enters++
+      })
+    })
   }, { timeout: 180000 })
 
   after(async () => {
@@ -90,16 +100,25 @@ describe('the pending-search prompt', { skip }, () => {
     }
     return null
   }
-  const prompt = () => page.evaluate(findPrompt)
+
+  /**
+   * The prompt that is up, or null. A toast that goes is hidden at once and
+   * taken out of the page a moment later; until then {@link findPrompt} would
+   * find it ahead of a new one, so this waits for it to be gone.
+   */
+  const prompt = async () => {
+    await page.waitForFunction(() => [...document.body.children]
+      .every(el => ![...el.shadowRoot?.querySelectorAll('.toast') ?? []].some(t => t.style.visibility === 'hidden')))
+    return page.evaluate(findPrompt)
+  }
 
   const submits = () => page.evaluate(() => window.__submits)
 
   /** Right-click Fluff and pick the row whose label starts with `label`. */
   const pick = async (label) => {
     await page.keyboard.press('Escape')
-    await sleep(100)
-    await page.click('#work_1 a.tag', { button: 'right' })
-    await sleep(200)
+    await menuClosed(page)
+    await openMenu(page, () => page.click('#work_1 a.tag', { button: 'right' }))
     const picked = await page.evaluate((l) => {
       const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .find(el => el.querySelector('.AO3E--menu--label').textContent.startsWith(l))
@@ -107,8 +126,16 @@ describe('the pending-search prompt', { skip }, () => {
       return !!row
     }, label)
     assert.ok(picked, `no "${label}" row on Fluff`)
-    // Past the toast's own hide transition.
-    await sleep(300)
+    await menuClosed(page)
+  }
+
+  /** Press Ctrl+Enter, and wait until the page has handled it. */
+  const ctrlEnter = async () => {
+    const seen = await page.evaluate(() => window.__enters)
+    await page.keyboard.down('Control')
+    await page.keyboard.press('Enter')
+    await page.keyboard.up('Control')
+    await page.waitForFunction(n => window.__enters > n, {}, seen)
   }
 
   test('says nothing while the form still matches the results', async () => {
@@ -127,29 +154,25 @@ describe('the pending-search prompt', { skip }, () => {
   })
 
   test('a default set from another tab says what it did', async () => {
+    const before = await runs(page)
     await page.evaluate(() => browser.storage.local.set({
       'option.searchLanguage': { enabled: true, language: { value: 'en', label: 'English' } },
     }))
     // Checked the moment it arrives: it fades on its own soon after.
     await page.waitForFunction(`(${findPrompt})()?.message === 'Language filter set to English.'`, { timeout: 5000 })
+    await settled(page, before)
   })
 
   test('Ctrl+Enter on a link outside the filter is left to the link', async () => {
     await page.focus('#elsewhere')
-    await page.keyboard.down('Control')
-    await page.keyboard.press('Enter')
-    await page.keyboard.up('Control')
-    await sleep(100)
+    await ctrlEnter()
     assert.equal(await submits(), 0)
     assert.ok(await prompt(), 'the prompt is still up')
   })
 
   test('Ctrl+Enter runs the search and takes the prompt down', async () => {
     await page.evaluate(() => document.activeElement?.blur())
-    await page.keyboard.down('Control')
-    await page.keyboard.press('Enter')
-    await page.keyboard.up('Control')
-    await sleep(300)
+    await ctrlEnter()
     assert.equal(await submits(), 1)
     assert.equal(await prompt(), null)
   })
@@ -163,17 +186,22 @@ describe('the pending-search prompt', { skip }, () => {
       for (const el of document.body.children)
         el.shadowRoot?.querySelector('.toast .action')?.click()
     })
-    await sleep(300)
     assert.equal(await submits(), 2)
     assert.equal(await prompt(), null)
   })
 
-  /** Long enough that the prompt would have faded, were it going to. */
-  const outlastPrompt = () => sleep(SEARCH_PROMPT_TIMEOUT * 1.2)
+  /**
+   * Long enough that the prompt would have faded, were it going to: past the
+   * timeout it started when it was last shown or let go of.
+   */
+  const outlastPrompt = () => outlast(page, SEARCH_PROMPT_TIMEOUT)
+
+  const FAB = '.AO3E--filter-toolbar--fab'
 
   const toggleToolbar = async () => {
-    await page.click('.AO3E--filter-toolbar--fab')
-    await sleep(100)
+    const was = await page.$eval(FAB, fab => fab.getAttribute('aria-expanded'))
+    await page.click(FAB)
+    await page.waitForFunction((fab, w) => document.querySelector(fab).getAttribute('aria-expanded') !== w, {}, FAB, was)
   }
 
   test('fades by itself after a few seconds', async () => {
@@ -204,7 +232,6 @@ describe('the pending-search prompt', { skip }, () => {
         document.getElementById(id).value = ''
       document.getElementById('work_search_language_id').dispatchEvent(new Event('change', { bubbles: true }))
     })
-    await sleep(100)
     assert.equal(await prompt(), null)
     await toggleToolbar()
     assert.equal(await prompt(), null)

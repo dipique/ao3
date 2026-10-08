@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { inflateSync } from 'node:zlib'
 
-import { ensureBuilt, findChrome, installMock, launch, serveDist, sleep } from './helpers.mjs'
+import { OPTIONS_SAVE_DELAY_MS } from '../../src/common/constants.ts'
+import { SUGGEST_DELAY_MS } from '../../src/options_ui/model/tagSuggestions.ts'
+import { ensureBuilt, findChrome, installMock, launch, outlast, serveDist, sleep } from './helpers.mjs'
 
 /**
  * The options page, opened the one way every e2e test opens it, and read
@@ -21,11 +23,15 @@ import { ensureBuilt, findChrome, installMock, launch, serveDist, sleep } from '
  *   {@link OptionsPage.savedListDetails});
  * - a profile list's tile by its `data-tile` ({@link OptionsPage.tile});
  * - a control inside either by its role and accessible name
- *   ({@link OptionsPage.control}), and what it is described by
- *   ({@link OptionsPage.description});
+ *   ({@link OptionsPage.control}), what it is described by
+ *   ({@link OptionsPage.description}), and what its tooltip says
+ *   ({@link OptionsPage.tooltip});
+ * - a dialog, opened and closed ({@link OptionsPage.openDialog},
+ *   {@link OptionsPage.closeDialog});
  * - what the page stored, read back from the storage mock rather than off the
- *   screen ({@link OptionsPage.stored}, {@link OptionsPage.lastWrite}), and
- *   the files it saved ({@link OptionsPage.lastDownload});
+ *   screen ({@link OptionsPage.stored}, {@link OptionsPage.lastWrite}) once it
+ *   has saved ({@link OptionsPage.saved}), and the files it saved
+ *   ({@link OptionsPage.lastDownload});
  * - a colour as it is drawn, for what only a screenshot shows
  *   ({@link OptionsPage.colourAt}), and colours as styles give them: an
  *   element's, a token's, and how well an element's text stands out from what
@@ -138,11 +144,27 @@ export const ARCHIVE = 'https://archiveofourown.org'
  * - `'fail'`: the network failing.
  *
  * @returns `asked`, the URLs the page asked for, in order, and `abandoned`,
- *   those it gave up on before an answer came.
+ *   those it gave up on before an answer came; `heard()`, which waits until
+ *   every request the page has made of the archive so far has reached the
+ *   stand-in, and so is in `asked`; and `answered()`, which waits until the
+ *   stand-in has answered every request it has had, or found the page gone
+ *   from it.
  */
 export async function stubArchive(page, answer) {
   const asked = []
   const abandoned = []
+  let answering = 0
+  // Counted in the page as each is made: a request takes a while to reach the
+  // stand-in, and `heard` waits for the count to get there.
+  await page.evaluateOnNewDocument((archive) => {
+    const fetch = window.fetch
+    window.__archiveAsks = 0
+    window.fetch = function (input, init) {
+      if (String(input instanceof Request ? input.url : input).startsWith(archive))
+        window.__archiveAsks++
+      return fetch.call(this, input, init)
+    }
+  }, ARCHIVE)
   await page.setRequestInterception(true)
   page.on('requestfailed', (request) => {
     if (request.url().startsWith(ARCHIVE) && request.failure()?.errorText === 'net::ERR_ABORTED')
@@ -153,30 +175,42 @@ export async function stubArchive(page, answer) {
     if (!url.startsWith(ARCHIVE))
       return void request.continue()
     asked.push(url)
-    const reply = await answer(url)
+    answering++
     try {
-      if (reply === 'fail') {
-        await request.abort('internetdisconnected')
-        return
-      }
-      const json = 'json' in reply
-      await request.respond({
-        status: reply.status ?? 200,
-        contentType: json ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
-        headers: {
-          'access-control-allow-origin': '*',
-          'access-control-expose-headers': 'Retry-After',
-          'cache-control': 'no-store',
-          ...reply.headers,
-        },
-        body: json ? JSON.stringify(reply.json) : (reply.body ?? ''),
-      })
+      await respond(request, await answer(url))
     }
-    catch {
-      // The page gave up on the request before the answer was ready.
+    finally {
+      answering--
     }
   })
-  return { asked, abandoned }
+  const heard = () => until('every request the page made of AO3 to reach the stand-in', async () => asked.length >= await page.evaluate(() => window.__archiveAsks))
+  const answered = () => until('the stand-in to answer every request it had', () => answering === 0)
+  return { asked, abandoned, heard, answered }
+}
+
+/** Answer an intercepted request to the archive with one of {@link stubArchive}'s replies. */
+async function respond(request, reply) {
+  try {
+    if (reply === 'fail') {
+      await request.abort('internetdisconnected')
+      return
+    }
+    const json = 'json' in reply
+    await request.respond({
+      status: reply.status ?? 200,
+      contentType: json ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
+      headers: {
+        'access-control-allow-origin': '*',
+        'access-control-expose-headers': 'Retry-After',
+        'cache-control': 'no-store',
+        ...reply.headers,
+      },
+      body: json ? JSON.stringify(reply.json) : (reply.body ?? ''),
+    })
+  }
+  catch {
+    // The page gave up on the request before the answer was ready.
+  }
 }
 
 /**
@@ -431,9 +465,10 @@ export class OptionsPage {
 
   /**
    * The rail's links as they are drawn, in order, each as `{ kind, id, name,
-   * count, current }`: `kind` is `'category'` or `'subsection'`, `id` is the
-   * anchor it links to, `name` is its label, `count` is the number beside it
-   * (or null), and `current` says whether it is the current category.
+   * count, current, inView }`: `kind` is `'category'` or `'subsection'`, `id`
+   * is the anchor it links to, `name` is its label, `count` is the number
+   * beside it (or null), `current` says whether it is the current category,
+   * and `inView` whether it is the sub-section marked as the one being read.
    */
   railItems() {
     return this.page.$$eval('[data-rail] [data-rail-item]', links => links.filter(a => a.checkVisibility()).map(a => ({
@@ -442,6 +477,7 @@ export class OptionsPage {
       name: a.querySelector('[data-rail-label]')?.textContent.trim() ?? '',
       count: a.querySelector('[data-rail-count]')?.checkVisibility() ? Number(a.querySelector('[data-rail-count]').textContent) : null,
       current: a.getAttribute('aria-current') === 'true',
+      inView: a.getAttribute('aria-current') === 'location',
     })))
   }
 
@@ -609,6 +645,22 @@ export class OptionsPage {
       .trim())
   }
 
+  /**
+   * What the control's tooltip says, opened as the keyboard opens it: the
+   * control is focused, read for what its open tooltip describes it by, and
+   * left again. A scroll closes a tooltip, so the control is brought into view
+   * first, and the page has moved before it is focused.
+   */
+  async tooltip(handle) {
+    await handle.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
+    await this.frame()
+    await handle.evaluate(el => el.focus({ preventScroll: true }))
+    let said = ''
+    await until('the tooltip to open', async () => (said = await this.description(handle)) !== '')
+    await handle.evaluate(el => el.blur())
+    return said
+  }
+
   /** Click the element from inside the page, where nothing drawn over it can take the click instead. */
   press(handle) {
     return handle.evaluate(el => el.click())
@@ -636,6 +688,31 @@ export class OptionsPage {
   calm() {
     return until('the page to hold still', () => this.page.evaluate(() => document.getAnimations()
       .every(animation => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity)))
+  }
+
+  /** Wait for the page's next frame: whatever has just changed is laid out, and drawn next. */
+  frame() {
+    return this.page.evaluate(() => new Promise(requestAnimationFrame))
+  }
+
+  /**
+   * Press `handle`, which opens a dialog, and return the dialog once it is
+   * open and holds still ({@link calm}): nothing moves under a test's first
+   * click in it.
+   */
+  async openDialog(handle) {
+    const open = (await this.page.$$('[role="dialog"]')).length
+    await this.press(handle)
+    await this.page.waitForFunction(n => document.querySelectorAll('[role="dialog"]').length > n, {}, open)
+    await this.calm()
+    return (await this.page.$$('[role="dialog"]')).at(-1)
+  }
+
+  /** Press Escape, which closes the dialog on top, and wait until it has gone. */
+  async closeDialog() {
+    const open = (await this.page.$$('[role="dialog"]')).length
+    await this.page.keyboard.press('Escape')
+    await this.page.waitForFunction(n => document.querySelectorAll('[role="dialog"]').length < n, {}, open)
   }
 
   /** Reload the page, and wait until it has read its options and landed on its hash again, as `openOptions` does. */
@@ -679,6 +756,29 @@ export class OptionsPage {
   /** The last value the page wrote to `key`, or null if it never wrote one. */
   lastWrite(key) {
     return this.page.evaluate(k => window.__writes.filter(w => k in w).map(w => w[k]).at(-1) ?? null, key)
+  }
+
+  /**
+   * Wait until the page has saved whatever the edits made so far changed:
+   * past the delay it saves after ({@link OPTIONS_SAVE_DELAY_MS}), timed by
+   * the page. Only for an edit the page takes in at once, such as a press or
+   * a keystroke; for one it takes in later, such as a slider's, wait for the
+   * write itself.
+   */
+  saved() {
+    return outlast(this.page, OPTIONS_SAVE_DELAY_MS)
+  }
+
+  /**
+   * Wait until the rule editor has asked AO3 whatever it was going to of what
+   * has been typed, and `archive` (a {@link stubArchive}) has heard it: past
+   * the pause in typing its suggestions wait for ({@link SUGGEST_DELAY_MS}),
+   * timed by the page, and every request made in the stand-in's hands. For
+   * showing that something was not asked.
+   */
+  async suggestionsAsked(archive) {
+    await outlast(this.page, SUGGEST_DELAY_MS)
+    await archive.heard()
   }
 
   /** The arguments of each `name` message the page sent, in order: with {@link scriptBackground} in the page. */

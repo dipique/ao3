@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
 import { skip, startOptions } from './optionsPage.mjs'
 
 /**
@@ -77,18 +76,24 @@ describe('options UI — rules sorting', { skip }, () => {
     return items
   }
 
-  /** Press the key so labelled in the sort's menu, `times` times over, then close the menu. */
+  /**
+   * Press the key so labelled in the sort's menu, `times` times over, then
+   * close the menu. Each press is waited out by the key's name, which says
+   * where the sort is, and changes with every press of a three-way cycle.
+   */
   const press = async (label, times = 1) => {
     await options.press(await sortButton())
     await page.waitForSelector('[role="menuitem"]')
+    const item = () => page.evaluateHandle(text => [...document.querySelectorAll('[role="menuitem"]')]
+      .find(el => el.textContent.trim() === text), label)
     for (let i = 0; i < times; i++) {
-      await page.evaluate(text => [...document.querySelectorAll('[role="menuitem"]')]
-        .find(item => item.textContent.trim() === text)
-        .click(), label)
-      await sleep(150)
+      const before = await (await item()).evaluate(el => el.getAttribute('aria-label'))
+      await (await item()).evaluate(el => el.click())
+      await page.waitForFunction((text, was) => [...document.querySelectorAll('[role="menuitem"]')]
+        .find(el => el.textContent.trim() === text)
+        ?.getAttribute('aria-label') !== was, {}, label, before)
     }
     await closeMenu()
-    await sleep(150)
   }
 
   test('the menu offers the four keys, Action first, none of them sorting yet', async () => {
@@ -132,11 +137,11 @@ describe('options UI — rules sorting', { skip }, () => {
     assert.equal(await sortName(), 'Sort: none')
   })
 
-  test('Priority sorts numerically, both ways', async () => {
+  test('Priority sorts numerically, both ways, with the rules that show none after, in the list\'s own order', async () => {
     await press('Priority')
-    assert.deepEqual(await order(), ['Zebra', 'banana', 'apple', 'Mango'])
+    assert.deepEqual(await order(), ['Zebra', 'apple', 'Mango', 'banana'])
     await press('Priority')
-    assert.deepEqual(await order(), ['Mango', 'apple', 'banana', 'Zebra'])
+    assert.deepEqual(await order(), ['apple', 'Zebra', 'Mango', 'banana'])
     await press('Priority')
   })
 
@@ -168,8 +173,9 @@ describe('options UI — rules sorting', { skip }, () => {
   })
 
   test('sorting and the filter compose', async () => {
-    await (await options.control(await options.list(LIST), 'textbox', 'Search rules by text')).type('an')
-    await sleep(300)
+    const search = await options.control(await options.list(LIST), 'textbox', 'Search rules by text')
+    await search.type('an')
+    await page.waitForFunction(el => el.value === 'an', {}, search)
     await press('Rule')
     const sorted = await order()
     await press('Rule')
@@ -185,10 +191,9 @@ describe('options UI — rules sorting', { skip }, () => {
 
   test('sorting writes nothing, and a reload starts unsorted', async () => {
     await press('Priority')
-    await sleep(500)
+    await options.saved()
     assert.equal(await options.lastWrite('option.rules'), null)
-    await page.reload({ waitUntil: 'networkidle2' })
-    await sleep(1500)
+    await options.reload()
     assert.equal(await sortName(), 'Sort: none')
     assert.deepEqual(await order(), DEFAULT_ORDER)
   })

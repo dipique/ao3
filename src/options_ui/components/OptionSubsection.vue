@@ -9,9 +9,9 @@ const props = defineProps<{
 }>()
 
 OptionSubsectionName.provide(props.title)
-useAddSubsection(props.title)
 
 const category = OptionCategoryName.inject(null)
+useAddSubsection(props.title, category)
 const { subsectionMatches, highlight, highlightStrong } = useOptionSearch()
 
 const visible = computed(() => subsectionMatches(category, props.title))

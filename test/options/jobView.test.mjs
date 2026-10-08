@@ -68,6 +68,12 @@ describe('jobView', () => {
     assert.equal(view({ message: '' }).line, 'Working…')
   })
 
+  test('a Download\'s last stage: the phase is exporting, said as downloading', () => {
+    const downloading = view({ job: job({ steps: ['exporting'] }) })
+    assert.equal(downloading.phase, 'exporting')
+    assert.equal(downloading.label, 'Downloading Marked for Later')
+  })
+
   test('a list the page has no name for goes by its own label', () => {
     assert.equal(jobView(status(), () => '', NOW).name, 'Marked for Later — tester')
   })
@@ -142,7 +148,11 @@ describe('offReason', () => {
   test('while a job runs, every other list says which list holds the one job, and what it is doing', () => {
     assert.equal(offReason(view(), OTHER), 'off for now: one job at a time, and Marked for Later is caching')
     assert.equal(offReason(view({ job: job({ steps: ['refreshing', 'caching'] }) }), OTHER), 'off for now: one job at a time, and Marked for Later is refreshing')
-    assert.equal(offReason(view({ job: job({ steps: ['exporting'] }) }), OTHER), 'off for now: one job at a time, and Marked for Later is exporting')
+  })
+
+  test('a Download\'s last stage is said as downloading, as its button says', () => {
+    assert.equal(offReason(view({ job: job({ steps: ['exporting'] }) }), OTHER), 'off for now: one job at a time, and Marked for Later is downloading')
+    assert.equal(offReason(view({ job: job({ steps: ['exporting'] }) }), MINE), 'off while this list is downloading')
   })
 
   test('the list the job is on says it is busy itself', () => {
@@ -207,6 +217,10 @@ describe('cachedTextOff', () => {
     assert.equal(cachedTextOff(view({ waitingUntil: NOW + 5_000, waitReason: 'refused' })), 'off while Marked for Later is caching')
   })
 
+  test('a Download\'s last stage is said as downloading', () => {
+    assert.equal(cachedTextOff(view({ job: job({ steps: ['exporting'] }) })), 'off while Marked for Later is downloading')
+  })
+
   test('and is free again once none does', () => {
     assert.equal(cachedTextOff(view({ running: false })), null)
     assert.equal(cachedTextOff(view({ job: null, running: false })), null)
@@ -217,6 +231,10 @@ describe('railJob', () => {
   test('a running job shows on the rail: how far it has got, and what it is', () => {
     assert.deepEqual(railJob(view()), { text: '148/240', title: 'A job is running: caching Marked for Later' })
     assert.deepEqual(railJob(view({ waitingUntil: NOW + 5_000, waitReason: 'pacing' })), { text: '148/240', title: 'A job is running: caching Marked for Later' })
+  })
+
+  test('a Download\'s last stage is said as downloading', () => {
+    assert.equal(railJob(view({ job: job({ steps: ['exporting'] }) })).title, 'A job is running: downloading Marked for Later')
   })
 
   test('before it has counted anything, it shows no count', () => {
@@ -234,6 +252,7 @@ describe('busyNotice', () => {
     assert.equal(busyNotice(view()), 'One job at a time — Marked for Later is caching')
     assert.equal(busyNotice(view({ waitingUntil: NOW + 5_000, waitReason: 'refused' })), 'One job at a time — Marked for Later is caching')
     assert.equal(busyNotice(view({ job: job({ steps: ['refreshing', 'caching'] }) })), 'One job at a time — Marked for Later is refreshing')
+    assert.equal(busyNotice(view({ job: job({ steps: ['exporting'] }) })), 'One job at a time — Marked for Later is downloading')
   })
 
   test('a job that isn\'t running says nothing there', () => {

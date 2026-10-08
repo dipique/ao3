@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { menuClosed, menuGuardOver, openMenu, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -24,7 +25,7 @@ const menuRows = page => page.evaluate(() =>
     disabled: el.disabled,
   })))
 
-/** Click the open menu's row whose label starts with `prefix`. */
+/** Click the open menu's row whose label starts with `prefix`, and wait for the menu to close behind it. */
 async function pick(page, prefix) {
   const picked = await page.evaluate((p) => {
     const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
@@ -33,15 +34,19 @@ async function pick(page, prefix) {
     return !!row
   }, prefix)
   assert.ok(picked, `no "${prefix}" row in the menu`)
-  await sleep(400)
+  await menuClosed(page)
+}
+
+/** Close whatever menu is up, and wait until it has gone. */
+async function closeMenu(page) {
+  await page.keyboard.press('Escape')
+  await menuClosed(page)
 }
 
 /** Close whatever menu is up, then click `selector` to open its menu. */
-async function openMenu(page, selector) {
-  await page.keyboard.press('Escape')
-  await sleep(100)
-  await page.evaluate(sel => document.querySelector(sel).click(), selector)
-  await sleep(200)
+async function openMenuOn(page, selector) {
+  await closeMenu(page)
+  await openMenu(page, () => page.evaluate(sel => document.querySelector(sel).click(), selector))
   return menuRows(page)
 }
 
@@ -115,7 +120,7 @@ describe('completion menu', { skip }, () => {
     }, PAGE)
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -154,7 +159,7 @@ describe('completion menu', { skip }, () => {
   })
 
   test('offers both choices, and no clear row while none is set', async () => {
-    const rows = await openMenu(page, '#open dd.chapters .AO3E--completion')
+    const rows = await openMenuOn(page, '#open dd.chapters .AO3E--completion')
     assert.deepEqual(rows.map(r => r.label), ['Completed works only', 'Incomplete works only'])
   })
 
@@ -165,7 +170,7 @@ describe('completion menu', { skip }, () => {
   })
 
   test('the label opens the same menu, showing the choice as current', async () => {
-    const rows = await openMenu(page, '#done dt.chapters')
+    const rows = await openMenuOn(page, '#done dt.chapters')
     assert.deepEqual(rows.map(r => r.label), [
       'Clear completion filter (completed works only)',
       'Completed works only',
@@ -180,17 +185,16 @@ describe('completion menu', { skip }, () => {
   })
 
   test('clearing goes back to all works, and the prompt comes down', async () => {
-    await openMenu(page, '#done dd.chapters .AO3E--completion')
+    await openMenuOn(page, '#done dd.chapters .AO3E--completion')
     await pick(page, 'Clear')
     assert.deepEqual(await radio(), { checked: '', submits: 0 })
     assert.equal(await prompt(), null, 'the form is back in step with the results')
   })
 
   test('the chapter link is still just a link', async () => {
-    await page.keyboard.press('Escape')
-    await sleep(100)
+    await closeMenu(page)
+    await menuGuardOver(page)
     await page.click('#done dd.chapters a')
-    await sleep(200)
     assert.equal(await page.$('.AO3E--menu'), null, 'no menu on the chapter link')
     assert.ok(page.url().endsWith('#latest'), page.url())
   })
@@ -262,7 +266,8 @@ describe('completion menu in the search view', { skip }, () => {
     await page.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(2700)
+    await settled(page)
+    await viewDrawn(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -289,7 +294,7 @@ describe('completion menu in the search view', { skip }, () => {
   })
 
   test('picking a choice filters the loaded list, not AO3', async () => {
-    const rows = await openMenu(page, TOTAL)
+    const rows = await openMenuOn(page, TOTAL)
     assert.deepEqual(rows.map(r => r.label), ['Completed works only', 'Incomplete works only'])
     await pick(page, 'Incomplete works only')
     assert.deepEqual(await visibleTitles(), ['An ongoing one'])
@@ -298,7 +303,7 @@ describe('completion menu in the search view', { skip }, () => {
   })
 
   test('the other choice replaces it rather than adding to it', async () => {
-    const rows = await openMenu(page, TOTAL)
+    const rows = await openMenuOn(page, TOTAL)
     assert.equal(rows[0].label, 'Clear completion filter (incomplete works only)')
     await pick(page, 'Completed works only')
     assert.deepEqual(await visibleTitles(), ['A finished one', 'Another finished one'])
@@ -306,7 +311,7 @@ describe('completion menu in the search view', { skip }, () => {
   })
 
   test('the facet sidebar\'s own selection reads back as the current choice', async () => {
-    const rows = await openMenu(page, '.AO3E--search-view--results dt.chapters')
+    const rows = await openMenuOn(page, '.AO3E--search-view--results dt.chapters')
     assert.equal(rows.find(r => r.label === 'Completed works only').disabled, true)
   })
 

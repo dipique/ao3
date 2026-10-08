@@ -1,6 +1,8 @@
 import type { FilterBehavior, HighlightPreset, Rule, RuleColors, RuleTarget } from '../../common/data.ts'
+import type { RegexRun } from './regexCheck.ts'
 
-import { DEFAULT_BEHAVIOR_PRIORITY, HIGHLIGHT_PRESETS, isTagTarget, ruleAffectsWorks, rulePriority, ruleTargetColor, ruleTargetLabel, ruleValueMatches, TagType } from '../../common/data.ts'
+import { DEFAULT_BEHAVIOR_PRIORITY, HIGHLIGHT_PRESETS, isTagTarget, ruleAffectsWorks, rulePriority, ruleTargetColor, ruleTargetLabel, TagType } from '../../common/data.ts'
+import { compilePattern } from './regexCheck.ts'
 
 /**
  * The rule editor's choices and what saving them writes. The editor holds a
@@ -133,8 +135,31 @@ export function withSwatch(draft: RuleDraft, swatch: Swatch): RuleDraft {
 }
 
 /** Whether the rule has something to match, without which it can't be saved. */
-export function canSave(draft: RuleDraft): boolean {
+function hasValue(draft: Pick<RuleDraft, 'value'>): boolean {
   return draft.value.trim() !== ''
+}
+
+/** What the value field and Save say of a pattern stopped for running past its time budget. */
+export const TOO_SLOW = 'Too slow to test: change the pattern to save the rule.'
+
+/**
+ * Whether a press of Save stores the rule now: it has something to match, and
+ * a Regex pattern's check has run to the end in time. A press while the check
+ * runs waits for it.
+ */
+export function canSave(draft: RuleDraft, run: RegexRun): boolean {
+  return hasValue(draft) && (checkedPattern(draft) === null || run.kind === 'done')
+}
+
+/**
+ * Save as drawn: off while there is nothing to match, and off with its reason
+ * for a pattern stopped for running too long, until a check of a changed one
+ * passes. A check under way after one that passed, or the first, leaves it on.
+ */
+export function saveButton(draft: RuleDraft, run: RegexRun): { off: boolean, reason: string | null } {
+  const slow = checkedPattern(draft) !== null && (run.kind === 'slow' || (run.kind === 'running' && run.last?.kind === 'slow'))
+  const reason = slow ? TOO_SLOW : null
+  return { off: !hasValue(draft) || reason !== null, reason }
 }
 
 /** The colour the draft's action draws, as stored: none for the target's default. */
@@ -225,47 +250,56 @@ export function valueField(target: RuleTarget, matcher: Rule['matcher'], value: 
   return { label, placeholder, help, byId }
 }
 
+/**
+ * The pattern a draft's check runs, as its live rule runs it: in Regex mode, a
+ * work's or a series' trimmed, any other's as typed. None runs in another mode,
+ * while a work's or a series' number matches its id, or for a blank pattern or
+ * one the engine refuses.
+ */
+export function checkedPattern(draft: Pick<RuleDraft, 'target' | 'matcher' | 'value'>): string | null {
+  const { target, matcher, value } = draft
+  if (matcher !== 'regex' || matchesId(target, value))
+    return null
+  const pattern = isEntityTarget(target) ? value.trim() : value
+  return pattern.trim() === '' || typeof compilePattern(pattern) === 'string' ? null : pattern
+}
+
+/**
+ * The names a draft's pattern is checked over beside the tester's subject: for
+ * a tag, the names known here for its target (`known`), null while they load;
+ * for an author, a work or a series, none.
+ */
+export function checkedNames(target: RuleTarget, known: { target: RuleTarget, names: readonly string[] } | null): readonly string[] | null {
+  if (!isTagTarget(target))
+    return []
+  return known?.target === target ? known.names : null
+}
+
 /** What the regex tester says of the pattern against the text typed to test it. */
-export type RegexVerdict = { kind: 'none' } | { kind: 'invalid', reason: string } | { kind: 'match' | 'miss' }
-
-/** The flags a rule's regex runs under, which the engine names when it refuses a pattern. */
-const RULE_REGEX_FLAGS = 'i'
+export type RegexVerdict = { kind: 'none' } | { kind: 'invalid', reason: string } | { kind: 'match' | 'miss' | 'slow' | 'checking' }
 
 /**
- * Why the engine refuses a pattern. V8 starts its message by repeating the
- * pattern ("Invalid regular expression: /(/i: Unterminated group"), and
- * SpiderMonkey's starts in lower case ("unterminated parenthetical").
+ * The regex tester's verdict on `subject`, from the run of the pattern's
+ * check, which tests it as a live rule does (`ruleValueMatches`). A pattern the
+ * engine refuses says so at once, whatever is typed to test; a blank pattern,
+ * which can't be saved, gives no verdict, nor does nothing to test. Past its
+ * time budget, a pattern is too slow, whatever is typed; while its check runs,
+ * what is typed is being checked.
  */
-function refusal(pattern: string, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
-  const preamble = `Invalid regular expression: /${pattern}/${RULE_REGEX_FLAGS}: `
-  const reason = message.startsWith(preamble) ? message.slice(preamble.length) : message
-  return reason.charAt(0).toUpperCase() + reason.slice(1)
-}
-
-/** The pattern compiled as a rule compiles it, or the engine's reason for refusing it. */
-export function compilePattern(pattern: string): RegExp | string {
-  try {
-    return new RegExp(pattern, RULE_REGEX_FLAGS)
-  }
-  catch (error) {
-    return refusal(pattern, error)
-  }
-}
-
-/**
- * The regex tester's verdict, reached as a live rule reaches it
- * ({@link ruleValueMatches}). A pattern the engine refuses says so at once,
- * whatever is typed to test; a blank pattern, which can't be saved, or
- * nothing to test gives no verdict.
- */
-export function regexVerdict(pattern: string, subject: string): RegexVerdict {
+export function regexVerdict(pattern: string, subject: string, run: RegexRun): RegexVerdict {
   const regex = compilePattern(pattern)
   if (typeof regex === 'string')
     return { kind: 'invalid', reason: regex }
-  if (pattern.trim() === '' || subject === '')
+  if (pattern.trim() === '')
     return { kind: 'none' }
-  return { kind: ruleValueMatches({ value: pattern, matcher: 'regex' }, subject) ? 'match' : 'miss' }
+  if (run.kind === 'slow')
+    return { kind: 'slow' }
+  if (subject === '' || run.kind === 'idle')
+    return { kind: 'none' }
+  if (run.kind === 'running')
+    return { kind: 'checking' }
+  const span = run.matches.get(subject)
+  return span === undefined ? { kind: 'checking' } : { kind: span ? 'match' : 'miss' }
 }
 
 /** What the regex tester shows: its field's placeholder, the verdict and the words on it, and the line under it. */
@@ -276,26 +310,31 @@ export interface RegexTester {
   help: string
 }
 
-const VERDICT_LABELS = { match: 'Matches', miss: 'No match', invalid: 'Invalid pattern' } as const
+const VERDICT_LABELS = { match: 'Matches', miss: 'No match', invalid: 'Invalid pattern', slow: 'Too slow', checking: 'Checking…' } as const
+
+const TESTER_HELP = 'Checks the pattern as you type. Nothing is saved from here.'
 
 /**
  * The regex tester, in Regex mode, unless a work's or a series' number matches
  * its id and the matcher means nothing. It tests the pattern as the rule's live
- * matcher would: a work's or a series' trimmed, any other as typed.
+ * matcher would: a work's or a series' trimmed, any other as typed. `run` is
+ * the run of the draft's check, whose names include `subject`.
  */
-export function regexTester(draft: Pick<RuleDraft, 'target' | 'matcher' | 'value'>, subject: string): RegexTester | null {
+export function regexTester(draft: Pick<RuleDraft, 'target' | 'matcher' | 'value'>, subject: string, run: RegexRun): RegexTester | null {
   const { target, matcher, value } = draft
   if (matcher !== 'regex' || matchesId(target, value))
     return null
   const noun = isTagTarget(target) ? 'tag' : subjectNoun(target)
-  const verdict = regexVerdict(isEntityTarget(target) ? value.trim() : value, subject)
+  const verdict = regexVerdict(isEntityTarget(target) ? value.trim() : value, subject, run)
   return {
     placeholder: `Type a ${noun} to test the pattern against`,
     verdict,
     label: verdict.kind !== 'none'
       ? VERDICT_LABELS[verdict.kind]
       : value.trim() === '' ? 'No pattern yet' : `Type a ${noun}`,
-    help: verdict.kind === 'invalid' ? verdict.reason : 'Checks the pattern as you type. Nothing is saved from here.',
+    help: verdict.kind === 'invalid'
+      ? verdict.reason
+      : verdict.kind === 'slow' ? 'Testing stopped: the pattern took too long.' : TESTER_HELP,
   }
 }
 

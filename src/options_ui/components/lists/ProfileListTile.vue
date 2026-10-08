@@ -63,12 +63,12 @@ function remove(event: Event): void {
 /**
  * The menu's items: a name and a line on what it does. The menu is drawn
  * outside the tile, where the tile's own styles don't reach, so these are
- * utility classes. Armed, Remove fills with the destructive colour.
+ * utility classes. Armed, Remove fills with the armed red.
  */
 const ITEM = 'flex flex-col items-start gap-0.5 px-[11px] py-2'
 const NAME = 'text-[12.5px] font-500 leading-[17px]'
 const NOTE = 'text-[11.5px] leading-4 text-muted-fg'
-const ARMED = '!bg-destructive !text-destructive-fg [&>*]:!text-destructive-fg'
+const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
 
 /** Run one of the copy's jobs. */
 function run(start: (row: SiteExportListRow) => unknown): void {

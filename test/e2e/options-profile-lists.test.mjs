@@ -304,7 +304,7 @@ describe('options UI — User profile lists', { skip }, () => {
     await until('the menu to close', async () => (await options.controls(page, 'menuitem')).length === 0)
 
     const read = await tile('read-works')
-    await until('the tile to say how a copy is kept', async () => /None yet\. Press Search read items on your History page on AO3/.test(await options.text(await tile('read-works'))))
+    await until('the tile to say how a copy is kept', async () => /None yet\. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here\./.test(await options.text(await tile('read-works'))))
     assert.equal(await read.$('[role="img"]'), null)
     assert.deepEqual(await options.controls(await tile('read-works'), 'button', 'Refresh list'), [])
     assert.equal(await (await inTile('read-works', 'link', 'View Read works on AO3')).evaluate(a => a.getAttribute('href')), `${READ_PAGE}#ao3e-open=read-works`, 'its open URL on the reader\'s own page, from their account')
@@ -325,10 +325,10 @@ describe('options UI — User profile lists', { skip }, () => {
     await until('the tile to count what was cached', async () => (await options.lines(await tile('marked-for-later'))).some(line => /^2 cached \(/.test(line)))
   })
 
-  test('nothing threw along the way', () => {
+  test('nothing threw along the way, and no Stop was logged as an error', () => {
     // Chrome logs every non-2xx response as a console error of its own, and
-    // the runner logs a refresh stopped part-way; both are the subject of a test.
-    assert.deepEqual(options.problems(/status of 404|Site export job stopped/), [])
+    // a work AO3 no longer has is the subject of a test.
+    assert.deepEqual(options.problems(/status of 404/), [])
   })
 })
 
@@ -391,10 +391,11 @@ describe('options UI — User profile lists, when AO3 says no', { skip }, () => 
     assert.deepEqual(job.steps, ['caching'])
   })
 
-  test('nothing threw along the way', () => {
-    // The refusals the stub serves, and the signed-out refresh the runner logs
-    // as it stops, are the subject of a test.
-    assert.deepEqual(options.problems(/status of 429|Site export job stopped/), [])
+  test('the signed-out refresh is logged as the error it is, and the Stop isn\'t', () => {
+    // The refusals the stub serves are the subject of a test.
+    const problems = options.problems(/status of 429/)
+    assert.equal(problems.length, 1, JSON.stringify(problems))
+    assert.match(problems[0], /Site export job stopped/)
   })
 })
 

@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { BUILD_CHECK_TIMEOUT_MS } from '../../src/common/constants.ts'
 import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
-import { sleep } from './helpers.mjs'
+import { outlast } from './helpers.mjs'
 import { scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
 
 /** This build's sync version, and a newer build's. */
@@ -390,8 +390,8 @@ describe('options UI — the sync panel', { skip }, () => {
   test('a current background, or none at all, raises nothing', async () => {
     const options = await open({ 'sync.enabled': true })
     try {
-      // Past the wait, by a margin, so a background that never answered would have been called out of date.
-      await sleep(BUILD_CHECK_TIMEOUT_MS * 1.2)
+      // Past the wait, so a background that never answered would have been called out of date.
+      await outlast(options.page, BUILD_CHECK_TIMEOUT_MS)
       assert.equal(await options.page.$('[data-sync-stale]'), null)
     }
     finally {

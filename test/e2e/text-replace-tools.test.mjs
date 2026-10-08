@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -82,7 +83,7 @@ describe('text replacement tools on a work page', { skip }, () => {
     await tab.evaluateOnNewDocument(js)
     await tab.goto(WORK_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
-    await sleep(1500)
+    await settled(tab)
   }, { timeout: 300000 })
 
   after(async () => {
@@ -127,7 +128,7 @@ describe('text replacement tools on a work page', { skip }, () => {
 
   test('clicking a replaced run opens that rule', async () => {
     await tab.evaluate(() => document.querySelector('.AO3E--replaced').click())
-    await sleep(200)
+    await tab.waitForSelector('.AO3E--replace-editor')
     const editor = await tab.evaluate(() => {
       const el = document.querySelector('.AO3E--replace-editor')
       if (!el)
@@ -148,12 +149,11 @@ describe('text replacement tools on a work page', { skip }, () => {
   })
 
   test('saving writes the edited rule back in place', async () => {
-    await tab.evaluate(() => {
+    await rerun(tab, () => tab.evaluate(() => {
       const el = document.querySelector('.AO3E--replace-editor')
       el.querySelector('.AO3E--replace-editor--replace').value = 'final'
       el.querySelector('.AO3E--replace-editor--save').click()
-    })
-    await sleep(300)
+    }))
     const written = await tab.evaluate(() => {
       const write = window.__writes.findLast(w => 'option.textReplacements' in w)
       return write?.['option.textReplacements']
@@ -169,8 +169,6 @@ describe('text replacement tools on a work page', { skip }, () => {
   })
 
   test('selecting work text offers to make a rule out of it', async () => {
-    // The rebuild after that save re-ran every unit; let it settle first.
-    await sleep(1200)
     await tab.evaluate(() => {
       const node = document.querySelector('.summary blockquote p').firstChild
       const range = document.createRange()
@@ -180,7 +178,7 @@ describe('text replacement tools on a work page', { skip }, () => {
       selection.removeAllRanges()
       selection.addRange(range)
     })
-    await sleep(300)
+    await tab.waitForSelector('.AO3E--replace-selection')
     const button = await tab.evaluate(() => {
       const el = document.querySelector('.AO3E--replace-selection')
       return el ? { text: el.textContent, fixed: getComputedStyle(el).position } : null
@@ -192,7 +190,7 @@ describe('text replacement tools on a work page', { skip }, () => {
 
   test('the selection button opens a new rule with the selection in Find', async () => {
     await tab.evaluate(() => document.querySelector('.AO3E--replace-selection').click())
-    await sleep(200)
+    await tab.waitForSelector('.AO3E--replace-editor')
     const editor = await tab.evaluate(() => {
       const el = document.querySelector('.AO3E--replace-editor')
       return el && {

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { menuClosed, openMenu, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -86,11 +87,9 @@ describe('tag and fandom menus in the search view', { skip }, () => {
     await page.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1200)
-
-    // The view opens by itself on the Marked for Later page; wait for the
-    // scrape and the first render.
-    await sleep(1500)
+    await settled(page)
+    // The view opens by itself on the Marked for Later page.
+    await viewDrawn(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -109,20 +108,19 @@ describe('tag and fandom menus in the search view', { skip }, () => {
    * a real right-click delivers to the delegated listener.
    */
   const openMenuOn = async (selector, text) => {
-    await page.evaluate(([sel, want]) => {
+    await openMenu(page, () => page.evaluate(([sel, want]) => {
       const link = [...document.querySelectorAll(`.AO3E--search-view--results ${sel}`)]
         .find(a => a.textContent.trim() === want)
       if (!link)
         throw new Error(`no ${sel} reading "${want}"`)
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
-    }, [selector, text])
-    await sleep(250)
+    }, [selector, text]))
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .map(el => el.querySelector('.AO3E--menu--label').textContent))
   }
 
-  /** Click the open menu's row starting with `prefix`. */
+  /** Click the open menu's row starting with `prefix`, and wait for the menu to close behind it. */
   const pick = async (prefix) => {
     await page.evaluate((p) => {
       const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
@@ -131,8 +129,7 @@ describe('tag and fandom menus in the search view', { skip }, () => {
         throw new Error(`no menu row starting "${p}"`)
       row.click()
     }, prefix)
-    // Long enough for the re-render and for the REOPEN_GUARD to lapse.
-    await sleep(400)
+    await menuClosed(page)
   }
 
   /** The indicator suffixes shown next to a tag/fandom link with this text. */
@@ -198,7 +195,6 @@ describe('tag and fandom menus in the search view', { skip }, () => {
     await pick('Require in filter')
     assert.deepEqual(await indicatorsOn('ul.tags a.tag', 'Fluff'), ['require'])
     await page.click('.AO3E--search-view--reset')
-    await sleep(400)
     assert.equal((await visibleTitles()).length, 4)
     assert.deepEqual(await indicatorsOn('ul.tags a.tag', 'Fluff'), [])
   })
@@ -220,6 +216,6 @@ describe('tag and fandom menus in the search view', { skip }, () => {
     assert.ok(labels.includes('Exclude from filter'), labels.join(' | '))
     assert.ok(labels.includes('Require in filter'), labels.join(' | '))
     await page.keyboard.press('Escape')
-    await sleep(300)
+    await menuClosed(page)
   })
 })

@@ -40,6 +40,9 @@ export const COLORS = {
     'muted': ['#f4f4f5', '#71717a'],
     'accent': ['#60a5fa', '#18181b'],
     'destructive': ['#ef4444', '#fafafa'],
+    // A destructive control asking to be pressed again: a deeper red than
+    // `destructive`, on which its words read at AA.
+    'armed': ['#dc2626', '#fafafa'],
     'border': '#e4e4e7',
     'input': '#e4e4e7',
     'ring': '#60a5fa',
@@ -58,6 +61,7 @@ export const COLORS = {
     'muted': ['#27272a', '#a1a1aa'],
     'accent': ['#3b82f6', '#f1f5f9'],
     'destructive': ['#dc2626', '#fafafa'],
+    'armed': ['#dc2626', '#fafafa'],
     'border': '#3f3f46',
     'input': '#3f3f46',
     'ring': '#3b82f6',
@@ -224,14 +228,16 @@ const OTHER_SHORTCUTS: UserShortcuts<PresetWind3Theme> = {
   // of a settings row's other controls (28 px), and at 48% while inert; below
   // 768 px, where it is touched, 36 px. `small-btn` makes it the 26 px of a
   // list's or a tile's own actions (34 px below 768 px). Its look is one of the
-  // three below: `outline-btn` is framed on the page's ground; `ghost-btn` has
+  // four below: `outline-btn` is framed on the page's ground; `ghost-btn` has
   // no frame, and recedes to the muted colour until hovered; `primary-btn` is
-  // filled, for the one thing a place most wants pressed.
+  // filled, for the one thing a place most wants pressed; `armed-btn` is filled
+  // red, for a destructive button asking to be pressed again.
   'label-btn': 'input-ring h-7 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-solid px-[11px] text-[12.5px] cursor-pointer disabled:cursor-default disabled:op-48 lt-md:h-9 lt-md:rounded-lg lt-md:px-[13px] lt-md:text-[13px]',
   'small-btn': 'h-[26px]! px-[9px]! text-[12px]! lt-md:h-[34px]! lt-md:px-[13px]! lt-md:text-[13px]!',
   'outline-btn': 'label-btn border-input bg-default text-default-fg enabled:hover:border-muted-fg enabled:hover:bg-[var(--row-hover)]',
   'ghost-btn': 'label-btn border-transparent bg-transparent text-muted-fg enabled:hover:text-default-fg',
   'primary-btn': 'label-btn border-primary bg-primary text-primary-fg font-600 enabled:hover:bg-primary/90',
+  'armed-btn': 'label-btn border-armed armed font-600',
 }
 
 function presetAnimations(): Preset {

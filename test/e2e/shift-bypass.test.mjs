@@ -2,10 +2,9 @@ import assert from 'node:assert/strict'
 import { after, before, beforeEach, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { REOPEN_GUARD_MS } from '../../src/common/constants.ts'
-import { ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome, installMock } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { inject } from './trackedPages.mjs'
+import { inject, menuGuardOver, openMenu } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -139,45 +138,47 @@ describe('Shift bypass', { skip }, () => {
   })
 
   /**
-   * What a gesture is waited out for: our menu opening; the page's own
+   * What a gesture that opens no menu of ours is waited out for: the page's own
    * listener hearing the event, after the extension's has had its say; or the
    * link being opened, in this tab or another, whether the browser opened it or
    * we did.
    */
   const OUTCOMES = {
-    menu: async () => (await page.$('.AO3E--menu')) !== null,
     event: () => page.evaluate(() => window.__events.length > 0),
     open: () => navigations.length + newTabs.length > 0,
   }
 
-  /** When a menu of ours was last seen open: the content script opens no other until its guard has passed. */
-  let menuSeenAt = 0
-
   /**
-   * Click `selector` for real while holding `keys`, wait for its `outcome`
-   * ({@link OUTCOMES}), and report what followed. Waiting for what the gesture
-   * brings about, rather than for a while, is what keeps a tab the browser is
-   * slow to open counted against its own gesture, and not the next one. A
-   * gesture that opens a menu first sits out what is left of the guard after
-   * the last one ({@link REOPEN_GUARD_MS}), which would otherwise swallow it.
+   * Click `selector` for real while holding `keys`, wait for its `outcome` (our
+   * `menu` opening, or one of {@link OUTCOMES}), and report what followed.
+   * Waiting for what the gesture brings about, rather than for a while, is what
+   * keeps a tab the browser is slow to open counted against its own gesture,
+   * and not the next one. Every gesture first sits out what is left of the
+   * menu guard ({@link menuGuardOver}), which would otherwise swallow whatever
+   * menu it opens: the one it should, or one it should not have.
    */
   async function gesture(selector, { button = 'left', keys = [], outcome }) {
-    if (outcome === 'menu')
-      await sleep(Math.max(0, menuSeenAt + REOPEN_GUARD_MS - Date.now()))
+    await menuGuardOver(page)
     navigations = []
     newTabs = []
-    for (const key of keys)
-      await page.keyboard.down(key)
-    try {
-      await page.click(selector, { button })
+    const click = async () => {
+      for (const key of keys)
+        await page.keyboard.down(key)
+      try {
+        await page.click(selector, { button })
+      }
+      finally {
+        for (const key of [...keys].reverse())
+          await page.keyboard.up(key)
+      }
     }
-    finally {
-      for (const key of [...keys].reverse())
-        await page.keyboard.up(key)
+    if (outcome === 'menu') {
+      await openMenu(page, click)
     }
-    await until(`the ${outcome} to follow`, OUTCOMES[outcome])
-    if (outcome === 'menu')
-      menuSeenAt = Date.now()
+    else {
+      await click()
+      await until(`the ${outcome} to follow`, OUTCOMES[outcome])
+    }
     // A modified click can open a *foreground* tab, which backgrounds ours
     // — and puppeteer can't drive input on a backgrounded tab. Close whatever
     // opened and take the focus back before the next gesture.
@@ -202,25 +203,31 @@ describe('Shift bypass', { skip }, () => {
   /**
    * A browser under load can open a modified click's tab well after the click
    * itself has been handled. A link here stands in for that: its click is
-   * handled at once, and the tab it opens follows `LATE_MS` later.
+   * handled at once, and the tab it opens is held back until the test lets it
+   * go (`window.__openLate()`), once the click has reached the page.
    */
   const LATE_URL = 'https://archiveofourown.org/tags/Late/works'
-  const LATE_MS = 2000
 
   test('a tab the browser is slow to open is its own gesture\'s, and not the next one\'s', async () => {
-    await page.evaluate((url, ms) => {
+    await page.evaluate((url) => {
       const link = document.createElement('a')
       link.id = 'late'
       link.href = url
       link.textContent = 'Opens late'
+      const held = new Promise((resolve) => {
+        window.__openLate = resolve
+      })
       link.addEventListener('click', (event) => {
         event.preventDefault()
-        setTimeout(() => window.open(url, '_blank'), ms)
+        void held.then(() => window.open(url, '_blank'))
       })
       document.getElementById('main').append(link)
-    }, LATE_URL, LATE_MS)
+    }, LATE_URL)
 
-    const late = await gesture('#late', { outcome: 'open' })
+    const opening = gesture('#late', { outcome: 'open' })
+    await until('the click to reach the page', () => page.evaluate(() => window.__events.some(e => e.type === 'click')))
+    await page.evaluate(() => window.__openLate())
+    const late = await opening
     assert.deepEqual(late.opened, [LATE_URL])
 
     const next = await gesture('#tag-fluff', { button: 'right', outcome: 'menu' })

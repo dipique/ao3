@@ -121,25 +121,44 @@ const RULE_COMPARE: Record<RuleSortKey, Compare<Rule>> = {
  *
  * Unsorted, the rules are grouped by their stored target, then by text, which
  * puts like rules together. Sorted, ties go to the text, ascending whichever
- * way the key points.
+ * way the key points. By priority, the rules that show none come after the
+ * numbered ones whichever way the sort points, in the unsorted order: a
+ * number they store but don't show would put them in an order nobody can see.
  */
 export function shownRules(rules: readonly Rule[], query: string, sort: KeySort<RuleSortKey>): number[] {
   const needle = query.trim().toLowerCase()
   const kept = [...rules.keys()].filter(at => rules[at]!.value.toLowerCase().includes(needle))
   const rule = (compare: Compare<Rule>): Compare<number> => (a, b) => compare(rules[a]!, rules[b]!)
-  if (!sort.key)
-    return sortRows(kept, rule((a, b) => a.target.localeCompare(b.target) || a.value.localeCompare(b.value)))
-  return sortRows(kept, rule(RULE_COMPARE[sort.key]), { direction: sort.direction, then: rule(byText) })
+  const unsorted = rule((a, b) => a.target.localeCompare(b.target) || a.value.localeCompare(b.value))
+  const { key, direction } = sort
+  if (!key)
+    return sortRows(kept, unsorted)
+  const sorted = (rows: number[]): number[] => sortRows(rows, rule(RULE_COMPARE[key]), { direction, then: rule(byText) })
+  if (key !== 'priority')
+    return sorted(kept)
+  return [
+    ...sorted(kept.filter(at => showsPriority(rules[at]!))),
+    ...sortRows(kept.filter(at => !showsPriority(rules[at]!)), unsorted),
+  ]
+}
+
+/**
+ * Whether a rule's row shows its priority. Highlight and hide-tag rules show
+ * none, since they never take part in deciding whether a work is shown.
+ */
+function showsPriority(rule: Pick<Rule, 'behavior'>): boolean {
+  const behavior = rule.behavior ?? 'hide'
+  return behavior !== 'highlight' && behavior !== 'hideFilter'
 }
 
 /**
  * A rule's priority as its row shows it: the number, and whether the rule set
- * it rather than taking its action's default. Highlight and hide-tag rules
- * show none, since they never take part in deciding whether a work is shown.
+ * it rather than taking its action's default; or "–" for a rule that shows
+ * none ({@link showsPriority}).
  */
 export function rulePriorityCell(rule: Pick<Rule, 'behavior' | 'priority'>): { text: string, title: string, custom: boolean } {
   const behavior = rule.behavior ?? 'hide'
-  if (behavior === 'highlight' || behavior === 'hideFilter') {
+  if (!showsPriority(rule)) {
     const kind = behavior === 'highlight' ? 'Highlight' : 'Hide-tag'
     return { text: '–', title: `${kind} rules have no priority: they never conflict with other rules`, custom: false }
   }

@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
-import { ARCHIVE, contrastRatio, skip, startOptions, stubArchive } from './optionsPage.mjs'
+import { ARCHIVE, contrastRatio, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 
 /** AO3's answers to its tag autocomplete, recorded signed out and trimmed to a few names each, keyed by request. */
 const RECORDED = JSON.parse(readFileSync(new URL('../options/ao3-autocomplete.json', import.meta.url), 'utf8'))
@@ -19,9 +18,6 @@ const recordedReply = url => ({ json: recorded(new URL(url).pathname) })
 
 /** The request for `term` from AO3's autocomplete for `kind`, as the stub sees it. */
 const asking = (kind, term) => `${ARCHIVE}/autocomplete/${kind}?term=${encodeURIComponent(term)}`
-
-/** Longer than the pause in typing the editor waits for, with room for an answer. */
-const SETTLE_MS = 700
 
 const PAUSED = 'AO3 asked us to slow down — suggestions are paused'
 const UNAVAILABLE = 'Suggestions unavailable'
@@ -61,18 +57,15 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
 
   // --- helpers bound to the live page ---
   const dialog = async () => {
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 })
+    await page.waitForSelector('[role="dialog"]')
     return page.$('[role="dialog"]')
   }
-  const openAddRule = async () => {
-    await options.press(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-    await dialog()
-    await sleep(400)
-  }
-  /** One of a radio group's choices, the group by its name, such as “What the rule matches”. */
+  const openAddRule = async () => options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
+  /** One of a radio group's choices, the group by its name, such as “What the rule matches”, once it is the one chosen. */
   const pick = async (group, name) => {
-    await options.press(await options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name))
-    await sleep(200)
+    const choice = await options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name)
+    await options.press(choice)
+    await page.waitForFunction(el => el.getAttribute('aria-checked') === 'true', {}, choice)
   }
   /** The value field: a combobox while it offers suggestions, a plain text field otherwise. */
   const valueField = async () => {
@@ -90,7 +83,7 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
       .map(node => node.textContent)
       .join('')
       .trim()))
-  const showsSuggestions = () => page.waitForFunction(() => document.querySelectorAll('[role="dialog"] [role="option"]').length > 0, { timeout: 5000 })
+  const showsSuggestions = () => page.waitForFunction(() => document.querySelectorAll('[role="dialog"] [role="option"]').length > 0)
   /** The suggestion with this name. */
   const suggestion = async (name) => {
     for (const option of await page.$$('[role="dialog"] [role="option"]')) {
@@ -100,19 +93,12 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     assert.fail(`no suggestion “${name}”`)
   }
   /** The box's note, once it is this one. */
-  const note = kind => page.waitForSelector(`[role="dialog"] [data-suggest="${kind}"]`, { timeout: 5000 })
-  /** Wait until `check` holds, or fail after `ms`. */
-  const until = async (check, ms = 5000) => {
-    const end = Date.now() + ms
-    while (!(await check())) {
-      assert.ok(Date.now() < end, 'timed out')
-      await sleep(50)
-    }
-  }
+  const note = kind => page.waitForSelector(`[role="dialog"] [data-suggest="${kind}"]`)
+  /** Add rule, or Save when editing; the dialog closes and the rules are written. */
   const saveDialog = async (name) => {
     await options.press(await options.control(await dialog(), 'button', name))
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-    await sleep(1000)
+    await options.saved()
   }
   const storedRule = async value => (await options.lastWrite('option.rules'))?.filters?.find(f => f.value === value)
 
@@ -163,7 +149,10 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     await page.keyboard.press('ArrowDown')
     assert.equal(await expanded(), 'true', 'an arrow opens the list again')
     await page.keyboard.press('Escape')
-    await sleep(200)
+    // The list goes at once; were the dialog closing too, it would be gone
+    // once its closing animation had run.
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"] [data-suggest]'))
+    await options.calm()
     assert.equal(await expanded(), 'false')
     assert.ok(await page.$('[role="dialog"]'), 'Escape closed the list, not the dialog')
     await page.keyboard.press('Escape')
@@ -189,7 +178,8 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
       await typeValue('pot')
       await showsSuggestions()
       await page.keyboard.press('ArrowDown')
-      await sleep(100)
+      await page.waitForSelector('[role="dialog"] [role="option"][aria-selected="true"]')
+      await options.calm()
 
       /** The colour just inside an option's start edge, half way down. */
       const edge = async (index) => {
@@ -207,9 +197,9 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     await typeValue('pot')
     await showsSuggestions()
     await typeValue('t')
-    await until(() => archive.asked.length === 2)
+    await until('“pott” to be asked', () => archive.asked.length === 2)
     await page.keyboard.press('Backspace')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked, [asking('fandom', 'pot'), asking('fandom', 'pott')], 'going back to “pot” asks nothing')
     assert.deepEqual(await suggestions(), FANDOMS)
 
@@ -224,20 +214,24 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
   })
 
   test('a newer term gives up the request still on its way, and only its own answer shows', async () => {
-    reply = url => (url === asking('fandom', 'pot')
-      ? new Promise(resolve => setTimeout(resolve, 1500, { json: [{ id: 'Too Late', name: 'Too Late' }] }))
-      : recordedReply(url))
+    /** The answer to “pot”, held back until the test lets it go, so it is still on its way when “pott” is typed. */
+    let answerPot
+    const potAnswer = new Promise((resolve) => {
+      answerPot = () => resolve({ json: [{ id: 'Too Late', name: 'Too Late' }] })
+    })
+    reply = url => (url === asking('fandom', 'pot') ? potAnswer : recordedReply(url))
     await openAddRule()
     await pick('What the rule matches', 'Fandom')
     await typeValue('pot')
-    await until(() => archive.asked.length === 1)
+    await until('“pot” to be asked', () => archive.asked.length === 1)
     await typeValue('t')
     await showsSuggestions()
 
     assert.deepEqual(archive.asked, [asking('fandom', 'pot'), asking('fandom', 'pott')])
-    await until(() => archive.abandoned.length === 1)
+    await until('“pot” to be given up', () => archive.abandoned.length === 1)
     assert.deepEqual(archive.abandoned, [asking('fandom', 'pot')])
-    await sleep(1500)
+    answerPot()
+    await archive.answered()
     assert.deepEqual(await suggestions(), FANDOMS, 'the older answer never shows')
   })
 
@@ -252,7 +246,7 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     assert.equal(await options.text(paused), PAUSED)
     assert.ok(await options.contrast(paused) >= 4.5, 'the note reads at AA')
     await typeValue('t')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked, [asking('fandom', 'pot')], 'nothing is sent under the refusal')
     assert.ok(await page.$('[role="dialog"] [data-suggest="paused"]'), 'still paused')
 
@@ -271,7 +265,7 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     assert.equal(await options.text(unavailable), UNAVAILABLE)
     assert.ok(await options.contrast(unavailable) >= 4.5, 'the note reads at AA')
     await typeValue('ter')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked, [asking('fandom', 'pot')], 'no retry')
     assert.equal(await page.$$eval('[role="dialog"] [data-suggest]', boxes => boxes.length), 1, 'one note')
 
@@ -280,24 +274,22 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
   })
 
   test('nothing is asked on opening a rule, in Contains or Regex mode, or for an author; a rating offers the archive\'s names', async () => {
-    await options.press(await options.control(await options.list('rules'), 'button', 'Edit rule “Harry Potter - J. K. Rowling”'))
-    await dialog()
-    await sleep(SETTLE_MS)
-    await page.keyboard.press('Escape')
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
+    await options.openDialog(await options.control(await options.list('rules'), 'button', 'Edit rule “Harry Potter - J. K. Rowling”'))
+    await options.suggestionsAsked(archive)
+    await options.closeDialog()
 
     await openAddRule()
     await pick('What the rule matches', 'Fandom')
     await pick('How to match', 'Contains')
     await typeValue('potter')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     await pick('How to match', 'Regex')
     await typeValue('s')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     await pick('What the rule matches', 'Author')
     await pick('How to match', 'Exact')
     await typeValue('x')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.equal(await page.$('[role="dialog"] [data-suggest]'), null, 'no suggestions shown')
     assert.deepEqual(archive.asked, [])
 
@@ -309,7 +301,7 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     assert.deepEqual(await suggestions(), ['Teen And Up Audiences'])
     await options.press(await suggestion('Teen And Up Audiences'))
     assert.equal(await fieldValue(), 'Teen And Up Audiences')
-    await sleep(SETTLE_MS)
+    await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked, [], 'the rating\'s names are the archive\'s fixed ones, not asked for')
   })
 })

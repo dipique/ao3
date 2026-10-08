@@ -1,11 +1,13 @@
 import type { RuleTarget } from '../../common/data.ts'
 import type { FandomCache } from '../../common/fandomCache.ts'
 import type { ArchivePause } from '../../content_script/archiveFetch.ts'
+import type { RegexRun, Span } from './regexCheck.ts'
 import type { RuleDraft } from './ruleEditor.ts'
 import type { SuggestRequest, SuggestState } from './tagSuggestions.ts'
 
 import { isTagTarget, TagType } from '../../common/data.ts'
-import { compilePattern, suggestSource } from './ruleEditor.ts'
+import { compilePattern } from './regexCheck.ts'
+import { suggestSource } from './ruleEditor.ts'
 import { markSpans } from './settingsSearch.ts'
 import { MIN_TERM, suggestRequest, whenDue } from './tagSuggestions.ts'
 
@@ -17,6 +19,11 @@ import { MIN_TERM, suggestRequest, whenDue } from './tagSuggestions.ts'
  * rating, warning and category names. Each press of the preview also asks
  * AO3's autocomplete about the pattern's longest literal runs, a few at most,
  * and filters its answers through the pattern too.
+ *
+ * The pattern is never run here: the names known here are filtered by the
+ * rule editor's check of the pattern, and AO3's answers by a run of their own,
+ * each in a worker under the time budget (`regexCheck.ts`). The preview reads
+ * what those runs found.
  *
  * Asking AO3 reuses the suggestions' {@link SuggestState}: what a press asks
  * is kept until the editor closes, and a refusal, a breather or a failure
@@ -196,20 +203,17 @@ export interface CanonicalMatch extends PoolTag {
   html: string
 }
 
-export type CanonicalMatches = { shown: CanonicalMatch[], total: number, poolSize: number } | { invalid: string }
+export interface CanonicalMatches {
+  shown: CanonicalMatch[]
+  total: number
+  poolSize: number
+}
 
 /**
- * The names in `pool` the pattern matches, as a live rule matches them
- * (ignoring case), A to Z, at most `cap` of them, each with its match marked;
- * or the engine's reason for refusing the pattern. A name known from several
- * places counts once, in a spelling of its own rather than the bundled list's
- * lower case.
+ * The names in `pool`, a name known from several places once (ignoring case),
+ * in a spelling of its own rather than the bundled list's lower case.
  */
-export function canonicalMatches(pattern: string, pool: readonly PoolTag[], cap: number): CanonicalMatches {
-  const regex = compilePattern(pattern)
-  if (typeof regex === 'string')
-    return { invalid: regex }
-
+export function knownOnce(pool: readonly PoolTag[]): PoolTag[] {
   const known = new Map<string, PoolTag>()
   for (const tag of pool) {
     const key = tag.name.toLowerCase()
@@ -217,22 +221,32 @@ export function canonicalMatches(pattern: string, pool: readonly PoolTag[], cap:
     if (!had || (had.from === 'bundled' && tag.from !== 'bundled'))
       known.set(key, tag)
   }
+  return [...known.values()]
+}
 
-  const matched: { key: string, tag: PoolTag, match: RegExpExecArray }[] = []
-  for (const [key, tag] of known) {
-    const match = regex.exec(tag.name)
-    if (match)
-      matched.push({ key, tag, match })
+/**
+ * The names in `pool` the pattern matches, A to Z ignoring case, at most `cap`
+ * of them, each with its match marked. `spanOf` says where a run of the
+ * pattern found a name's match, as a live rule matches it (ignoring case). A
+ * name known from several places counts once ({@link knownOnce}).
+ */
+export function canonicalMatches(pool: readonly PoolTag[], spanOf: (name: string) => Span | null | undefined, cap: number): CanonicalMatches {
+  const known = knownOnce(pool)
+  const matched: { key: string, tag: PoolTag, span: Span }[] = []
+  for (const tag of known) {
+    const span = spanOf(tag.name)
+    if (span)
+      matched.push({ key: tag.name.toLowerCase(), tag, span })
   }
   matched.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
 
   return {
-    shown: matched.slice(0, cap).map(({ tag, match }) => ({
+    shown: matched.slice(0, cap).map(({ tag, span: [start, end] }) => ({
       ...tag,
-      html: markSpans(tag.name, match[0] ? [[match.index, match.index + match[0].length]] : []),
+      html: markSpans(tag.name, end > start ? [[start, end]] : []),
     })),
     total: matched.length,
-    poolSize: known.size,
+    poolSize: known.length,
   }
 }
 
@@ -362,6 +376,9 @@ const NOTES = {
   paced: 'Requests to AO3 are pausing for a moment',
 } as const
 
+/** What the preview says, in place of any names, of a pattern stopped for running past its time budget. */
+const TOO_SLOW = 'The pattern is too slow to test, so no matches are shown.'
+
 /** What a note adds while there are names known here to show. */
 const LOCAL_ONLY = ' — showing known tags only'
 
@@ -383,24 +400,60 @@ function askNote(state: SuggestState, asks: readonly CanonicalAsk[], local: bool
 
 const count = (n: number) => n.toLocaleString('en')
 
+/** The asks AO3 has answered, and its answers. */
+function answeredAsks(asks: readonly CanonicalAsk[], state: SuggestState): { answered: CanonicalAsk[], tags: PoolTag[] } {
+  const answered = asks.filter(({ request }) => Object.hasOwn(state.answers, request.path))
+  return { answered, tags: answered.flatMap(({ request }) => state.answers[request.path]!.map(name => ({ name, from: 'ao3' as const }))) }
+}
+
+/**
+ * The names among AO3's answers to `asks` that the pattern must run over for
+ * the preview: those it shows (once each, {@link knownOnce}) that aren't among
+ * the names known here, which the editor's check runs over already.
+ */
+export function answeredNames(local: readonly PoolTag[], asks: readonly CanonicalAsk[], state: SuggestState): string[] {
+  const { tags } = answeredAsks(asks, state)
+  if (!tags.length)
+    return []
+  const known = new Set(knownOnce(local).map(tag => tag.name))
+  return knownOnce([...local, ...tags]).map(tag => tag.name).filter(name => !known.has(name))
+}
+
+const LOADING: CanonicalPreview = { ...BLANK, head: 'Loading the known tags…' }
+
 /**
  * The preview of the canonical tags `pattern` matches, from the names known
  * here for the target (`local`, null while they load) and AO3's answers to the
- * last press's `asks`. Under a refusal, offline, or due a breather, the names
- * known here show with a note; a target with none shows only the note.
+ * last press's `asks`. `check` is the run of the editor's check of the pattern,
+ * over the names known here; `answers` the run over AO3's answers
+ * ({@link answeredNames}). Under a refusal, offline, or due a breather, the
+ * names known here show with a note; a target with none shows only the note.
+ * Past the time budget, either run stops the preview, with a note. While
+ * either is under way there is nothing new to show, and the editor keeps
+ * showing what it showed.
  */
-export function canonicalPreview(input: { target: RuleTarget, pattern: string, local: readonly PoolTag[] | null, asks: readonly CanonicalAsk[], state: SuggestState }): CanonicalPreview {
-  const { target, pattern, local, asks, state } = input
+export function canonicalPreview(input: { target: RuleTarget, pattern: string, local: readonly PoolTag[] | null, asks: readonly CanonicalAsk[], state: SuggestState, check: RegexRun, answers: RegexRun }): CanonicalPreview {
+  const { target, pattern, local, asks, state, check, answers } = input
   if (!local)
-    return { ...BLANK, head: 'Loading the known tags…' }
+    return LOADING
   if (!pattern.trim())
     return { ...BLANK, head: 'No pattern yet' }
-
-  const answered = asks.filter(({ request }) => Object.hasOwn(state.answers, request.path))
-  const ao3 = answered.flatMap(({ request }) => state.answers[request.path]!.map(name => ({ name, from: 'ao3' as const })))
-  const found = canonicalMatches(pattern, [...local, ...ao3], CANONICAL_CAP)
-  if ('invalid' in found)
+  if (typeof compilePattern(pattern) === 'string')
     return { ...BLANK, head: 'Fix the pattern to see matches' }
+  if (check.kind === 'slow' || answers.kind === 'slow')
+    return { ...BLANK, note: TOO_SLOW }
+  if (check.kind === 'running' || answers.kind === 'running')
+    return LOADING
+
+  const { answered, tags: ao3 } = answeredAsks(asks, state)
+  const spanOf = (name: string) => {
+    for (const run of [check, answers]) {
+      if (run.kind === 'done' && run.matches.has(name))
+        return run.matches.get(name)
+    }
+    return undefined
+  }
+  const found = canonicalMatches([...local, ...ao3], spanOf, CANONICAL_CAP)
 
   const noun = isTagTarget(target) ? NOUNS[target] : NOUNS.tag
   const note = askNote(state, asks, local.length > 0)

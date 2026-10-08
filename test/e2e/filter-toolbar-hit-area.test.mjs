@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { openToolbar, rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -53,7 +54,7 @@ describe('floating toolbar — collapsed hit area', { skip }, () => {
 
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -124,10 +125,8 @@ describe('floating toolbar — collapsed hit area', { skip }, () => {
   })
 
   test('pills are clickable once expanded', async () => {
-    const ok = await page.evaluate(async () => {
-      const fab = document.querySelector('.AO3E--filter-toolbar--fab')
-      fab.click()
-      await new Promise(r => setTimeout(r, 400))
+    await openToolbar(page)
+    const ok = await page.evaluate(() => {
       const pill = document.querySelector('.AO3E--filter-toolbar--button')
       if (!pill)
         return { ok: false, why: 'no pill rendered' }
@@ -173,7 +172,7 @@ describe('floating toolbar — while a toast is up', { skip }, () => {
     })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1500)
+    await settled(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -181,13 +180,27 @@ describe('floating toolbar — while a toast is up', { skip }, () => {
   })
 
   /**
+   * Wait for the corner to hold still. The toolbar publishes what it takes from
+   * a resize observer, which reports a toolbar just put up in the next frame,
+   * and the toast moves to clear what is published.
+   */
+  const still = async () => {
+    await page.evaluate(() => new Promise(requestAnimationFrame))
+    await page.waitForFunction(() => [document, ...[...document.body.children].flatMap(el => el.shadowRoot ?? [])]
+      .every(root => root.getAnimations().every(animation => animation.playState !== 'running')))
+  }
+
+  /**
    * Put a toast up the way the background does — one that never times out, so
    * the state under test doesn't expire halfway through the file.
    */
   const raiseToast = async (message = 'Saved.') => {
     await page.evaluate(m => window.__message({ toast: [m, { type: 'success', timeout: 0 }] }), message)
-    // Past the toast's own entrance transition.
-    await sleep(600)
+    // Sorted into first place, which is what starts its entrance.
+    await page.waitForFunction(m => [...document.body.children]
+      .some(el => [...el.shadowRoot?.querySelectorAll('.toast.toast-1') ?? []]
+        .some(t => t.querySelector('.message')?.textContent === m)), {}, message)
+    await still()
   }
 
   /**
@@ -263,7 +276,7 @@ describe('floating toolbar — while a toast is up', { skip }, () => {
 
   test('a real click on the launcher opens the panel', async () => {
     await page.click('.AO3E--filter-toolbar--fab')
-    await sleep(400)
+    await still()
     const state = await corner()
     assert.equal(state.open, true, 'the click should have reached the launcher')
     assert.ok(state.pills.length > 0, 'the panel should have pills in it')
@@ -280,10 +293,10 @@ describe('floating toolbar — while a toast is up', { skip }, () => {
   })
 
   test('a real click on a pill still does what it says', async () => {
-    await page.click('.AO3E--filter-toolbar--menus')
     // The write re-runs every unit, which rebuilds the toolbar — collapsed, and
     // measured afresh. The toast is not ours to remove, so it rides that out.
-    await sleep(1500)
+    await rerun(page, () => page.click('.AO3E--filter-toolbar--menus'))
+    await still()
     const wrote = await page.evaluate(() =>
       (window.__writes ?? []).some(w => 'option.contextMenusEnabled' in w))
     assert.ok(wrote, 'the click should have reached the pill and saved the setting')

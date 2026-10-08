@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { rerun, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -136,7 +137,7 @@ describe('hidden works in the search view', { skip }, () => {
     await page.goto(TAG_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -149,8 +150,12 @@ describe('hidden works in the search view', { skip }, () => {
       .filter(li => li.style.display !== 'none' && !li.classList.contains('AO3E--search-view--hidden'))
       .map(li => li.querySelector('h4.heading a').textContent))
 
-  /** The peek pill's text, or null when it isn't being offered. */
-  const peekPill = () => page.evaluate(() => {
+  /**
+   * The peek pill's text, or null when it isn't being offered. Read a frame on:
+   * the pill follows the view on the next one.
+   */
+  const peekPill = () => page.evaluate(async () => {
+    await new Promise(requestAnimationFrame)
     const toolbar = document.querySelector('.AO3E--filter-toolbar')
     if (!toolbar || toolbar.hidden)
       return null
@@ -179,7 +184,7 @@ describe('hidden works in the search view', { skip }, () => {
 
   test('the pill appears once the view pulls in the pages that do', async () => {
     await page.click('.AO3E--search-tag-works--link')
-    await sleep(2500)
+    await viewDrawn(page)
     // Both hidden works are in the view now: the rule-hidden one and the one in
     // a language the reader doesn't read.
     assert.equal(await peekPill(), 'Show 2 filtered works')
@@ -228,7 +233,6 @@ describe('hidden works in the search view', { skip }, () => {
         .find(b => /filtered work/.test(b.textContent))
         .click()
     })
-    await sleep(200)
     assert.equal(await shown(), 'block')
     assert.equal(await peekPill(), 'Hide 2 filtered works')
     await page.evaluate(() => {
@@ -236,7 +240,6 @@ describe('hidden works in the search view', { skip }, () => {
         .find(b => /filtered work/.test(b.textContent))
         .click()
     })
-    await sleep(200)
     assert.equal(await shown(), 'none')
   })
 
@@ -248,8 +251,8 @@ describe('hidden works in the search view', { skip }, () => {
     // works it was already showing. HideWorks is the one decoration that
     // *rewrites* a blurb rather than adding to it, so a copy handed back without
     // being stripped first shows as a reason line inside a reason line.
-    await page.evaluate(() => browser.storage.local.set({ 'option.showKudosHitsRatio': true }))
-    await sleep(2500)
+    await rerun(page, () => page.evaluate(() => browser.storage.local.set({ 'option.showKudosHitsRatio': true })))
+    await viewDrawn(page)
     assert.ok(
       await page.evaluate(() => document.querySelector('.AO3E--search-view--results')?.dataset.stale === undefined),
       'the view should have reopened',
@@ -272,7 +275,6 @@ describe('hidden works in the search view', { skip }, () => {
   test('a rule-hidden work offers to exclude the tag that hid it', async () => {
     assert.deepEqual((await visibleTitles()).length, PAGES * PER_PAGE)
     assert.ok(await clickExclude('HideMe'), 'the reason line should carry an exclude button')
-    await sleep(400)
     const titles = await visibleTitles()
     assert.ok(!titles.includes('A rule-hidden one'), 'the collapsed work should leave the results')
     assert.equal(titles.length, PAGES * PER_PAGE - 1)
@@ -284,7 +286,6 @@ describe('hidden works in the search view', { skip }, () => {
 
   test('a language-hidden work offers the same, which AO3 itself cannot', async () => {
     assert.ok(await clickExclude('Español'), 'the language reason should carry an exclude button too')
-    await sleep(400)
     const titles = await visibleTitles()
     assert.ok(!titles.includes('A Spanish one'))
     assert.equal(titles.length, PAGES * PER_PAGE - 2)

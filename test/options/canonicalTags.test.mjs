@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { ruleValueMatches, TagType } from '../../src/common/data.ts'
-import { CANONICAL_CAP, canonicalAsks, canonicalMatches, canonicalPool, canonicalPreview, literalRuns, nextAsk, offersCanonical, usesBundledFandoms, withPress } from '../../src/options_ui/model/canonicalTags.ts'
+import { answeredNames, CANONICAL_CAP, canonicalAsks, canonicalMatches, canonicalPool, canonicalPreview, knownOnce, literalRuns, nextAsk, offersCanonical, usesBundledFandoms, withPress } from '../../src/options_ui/model/canonicalTags.ts'
+import { ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
 import { NO_ANSWERS, withAnswer, withFailure, withRefusal } from '../../src/options_ui/model/tagSuggestions.ts'
 
 const REFUSED = { reason: 'refused', until: 1_000_000 }
@@ -13,6 +14,15 @@ const pool = (names, from = 'learned') => names.map(name => ({ name, from }))
 
 /** The names `canonicalMatches` shows. */
 const shownNames = found => found.shown.map(tag => tag.name)
+
+/** A check of `pattern` that ran to the end over `subjects`. */
+const finished = (pattern, subjects) => ended({ pattern, subjects }, matchSpans(pattern, subjects))
+
+/** The names in `tags` that `pattern` matches, as a finished run over them finds them. */
+const found = (pattern, tags, cap = 50) => {
+  const { matches } = finished(pattern, tags.map(tag => tag.name))
+  return canonicalMatches(tags, name => matches.get(name), cap)
+}
 
 /** What the browsing cache holds, from the names in each of its kinds. */
 const learned = ({ fandoms = [], characters = [], relationships = [] } = {}) => {
@@ -88,52 +98,68 @@ describe('literalRuns', () => {
 describe('canonicalMatches', () => {
   test('keeps the names the pattern matches, as a live rule matches them, ignoring case', () => {
     const names = ['Fluff', 'Fluff and Angst', 'Angst', 'Tooth-Rotting Fluff']
-    const found = canonicalMatches('^fluff', pool(names), 50)
-    assert.deepEqual(shownNames(found), ['Fluff', 'Fluff and Angst'])
-    assert.equal(found.total, 2)
-    assert.equal(found.poolSize, 4)
+    const matched = found('^fluff', pool(names))
+    assert.deepEqual(shownNames(matched), ['Fluff', 'Fluff and Angst'])
+    assert.equal(matched.total, 2)
+    assert.equal(matched.poolSize, 4)
     for (const name of names)
-      assert.equal(shownNames(found).includes(name), ruleValueMatches({ value: '^fluff', matcher: 'regex' }, name), name)
+      assert.equal(shownNames(matched).includes(name), ruleValueMatches({ value: '^fluff', matcher: 'regex' }, name), name)
   })
 
   test('marks each name\'s match, escaping the rest', () => {
-    const [tag] = canonicalMatches('comfort', pool(['Hurt/Comfort & <Fluff>']), 50).shown
+    const [tag] = found('comfort', pool(['Hurt/Comfort & <Fluff>'])).shown
     assert.equal(tag.html, 'Hurt/<mark>Comfort</mark> &amp; &lt;Fluff&gt;')
   })
 
   test('a match of nothing marks nothing', () => {
-    const [tag] = canonicalMatches('^', pool(['Fluff & Angst']), 50).shown
+    const [tag] = found('^', pool(['Fluff & Angst'])).shown
     assert.equal(tag.html, 'Fluff &amp; Angst')
   })
 
   test('shows the names A to Z, ignoring case', () => {
-    assert.deepEqual(shownNames(canonicalMatches('a', pool(['beta', 'Alpha', 'gamma', 'alpaca'])), 50), ['alpaca', 'Alpha', 'beta', 'gamma'])
+    assert.deepEqual(shownNames(found('a', pool(['beta', 'Alpha', 'gamma', 'alpaca']))), ['alpaca', 'Alpha', 'beta', 'gamma'])
   })
 
   test('shows no more than the cap, and counts every match', () => {
     const names = Array.from({ length: 60 }, (_, i) => `Tag ${String(i).padStart(2, '0')}`)
-    const found = canonicalMatches('^tag', pool(names), 50)
-    assert.equal(found.shown.length, 50)
-    assert.equal(found.total, 60)
-    assert.equal(found.poolSize, 60)
+    const matched = found('^tag', pool(names))
+    assert.equal(matched.shown.length, 50)
+    assert.equal(matched.total, 60)
+    assert.equal(matched.poolSize, 60)
   })
 
   test('a name known from several places is one, in AO3\'s spelling rather than the bundled list\'s lower case', () => {
     const bundled = { name: 'harry potter - j. k. rowling', from: 'bundled' }
     const spelled = { name: 'Harry Potter - J. K. Rowling', from: 'ao3' }
     for (const tags of [[bundled, spelled], [spelled, bundled]]) {
-      const found = canonicalMatches('^harry', tags, 50)
-      assert.deepEqual(found.shown.map(({ name, from }) => ({ name, from })), [spelled])
-      assert.equal(found.poolSize, 1)
+      const matched = found('^harry', tags)
+      assert.deepEqual(matched.shown.map(({ name, from }) => ({ name, from })), [spelled])
+      assert.equal(matched.poolSize, 1)
     }
   })
 
   test('a bundled name no other place spells is shown in lower case', () => {
-    assert.deepEqual(shownNames(canonicalMatches('hack', pool(['.hack//sign'], 'bundled'), 50)), ['.hack//sign'])
+    assert.deepEqual(shownNames(found('hack', pool(['.hack//sign'], 'bundled'))), ['.hack//sign'])
+  })
+})
+
+describe('knownOnce and answeredNames', () => {
+  const bundled = { name: 'harry potter - j. k. rowling', from: 'bundled' }
+  const learnedName = { name: 'Good Omens (TV)', from: 'learned' }
+
+  test('a name known from several places is kept once, in a spelling of its own over the bundled lower case', () => {
+    const spelled = { name: 'Harry Potter - J. K. Rowling', from: 'ao3' }
+    assert.deepEqual(knownOnce([bundled, learnedName, spelled, { name: 'good omens (tv)', from: 'bundled' }]), [spelled, learnedName])
   })
 
-  test('a pattern the engine refuses gives its reason', () => {
-    assert.deepEqual(canonicalMatches('(fluff', pool(['Fluff']), 50), { invalid: 'Unterminated group' })
+  test('AO3\'s answers to run the pattern over are those the names known here don\'t already spell so', () => {
+    const asks = canonicalAsks(TagType.Fandom, 'potter|omens')
+    const state = withAnswer(withAnswer(NO_ANSWERS, asks[0].request, ['Harry Potter - J. K. Rowling', 'Good Omens (TV)']), asks[1].request, ['Good Omens - Neil Gaiman & Terry Pratchett'])
+    assert.deepEqual(answeredNames([bundled, learnedName], asks, state), ['Harry Potter - J. K. Rowling', 'Good Omens - Neil Gaiman & Terry Pratchett'])
+  })
+
+  test('none before AO3 has answered', () => {
+    assert.deepEqual(answeredNames([bundled], canonicalAsks(TagType.Fandom, 'potter'), NO_ANSWERS), [])
   })
 })
 
@@ -260,12 +286,22 @@ describe('nextAsk and withPress', () => {
 })
 
 describe('canonicalPreview', () => {
+  /** The preview once the check of the pattern over the names known here, and the run over AO3's answers, have run to the end. */
+  const ran = (input) => {
+    const known = knownOnce(input.local ?? []).map(tag => tag.name)
+    const answers = answeredNames(input.local ?? [], input.asks, input.state)
+    return canonicalPreview({
+      check: finished(input.pattern, ['', ...known]),
+      answers: answers.length ? finished(input.pattern, answers) : IDLE_RUN,
+      ...input,
+    })
+  }
   const CHARACTERS = ['Original Female Character(s)', 'Original Male Character(s)', 'Harry Potter']
   const local = canonicalPool(TagType.Character, { bundled: [], learned: learned({ characters: CHARACTERS }) })
   const asks = canonicalAsks(TagType.Character, '^Original (Female|Child)')
   const [original, female] = asks.map(ask => ask.request)
   const answered = withAnswer(withAnswer(NO_ANSWERS, original, ['Original Child Character(s)', 'Original Female Character(s)']), female, ['Female Shepard (Mass Effect)'])
-  const preview = (input = {}) => canonicalPreview({ target: TagType.Character, pattern: '^Original (Female|Child)', local, asks, state: answered, ...input })
+  const preview = (input = {}) => ran({ target: TagType.Character, pattern: '^Original (Female|Child)', local, asks, state: answered, ...input })
 
   test('counts the matches among every name known, and names AO3\'s part', () => {
     const shown = preview()
@@ -312,20 +348,20 @@ describe('canonicalPreview', () => {
   test('additional tags, with no names of their own, show only the note', () => {
     const freeform = canonicalAsks(TagType.Freeform, 'Fluff')
     const asked = nextAsk(withPress(NO_ANSWERS), freeform, null).state
-    const shown = canonicalPreview({ target: TagType.Freeform, pattern: 'Fluff', local: [], asks: freeform, state: withFailure(asked) })
+    const shown = ran({ target: TagType.Freeform, pattern: 'Fluff', local: [], asks: freeform, state: withFailure(asked) })
     assert.deepEqual(shown, { head: null, sources: null, rows: [], more: null, empty: null, note: 'AO3’s suggestions are unavailable' })
   })
 
   test('additional tags show AO3\'s answer, from it alone', () => {
     const freeform = canonicalAsks(TagType.Freeform, 'Fluff')
     const state = withAnswer(NO_ANSWERS, freeform[0].request, ['Fluff', 'Fluff and Angst', 'Angst'])
-    const shown = canonicalPreview({ target: TagType.Freeform, pattern: '^Fluff', local: [], asks: freeform, state })
+    const shown = ran({ target: TagType.Freeform, pattern: '^Fluff', local: [], asks: freeform, state })
     assert.equal(shown.head, '2 of 3 known canonical Additional Tags')
     assert.equal(shown.sources, 'from AO3’s suggestions for “Fluff”')
   })
 
   test('with nothing known and nothing to ask, says so', () => {
-    const shown = canonicalPreview({ target: TagType.Freeform, pattern: '^.{3}$', local: [], asks: [], state: withPress(NO_ANSWERS) })
+    const shown = ran({ target: TagType.Freeform, pattern: '^.{3}$', local: [], asks: [], state: withPress(NO_ANSWERS) })
     assert.deepEqual(shown, { head: null, sources: null, rows: [], more: null, empty: 'No known canonical Additional Tags, and nothing in the pattern to ask AO3 for.', note: null })
   })
 
@@ -337,7 +373,7 @@ describe('canonicalPreview', () => {
 
   test('shows the first fifty, and says so', () => {
     const many = pool(Array.from({ length: 1480 }, (_, i) => `Character ${i}`))
-    const shown = canonicalPreview({ target: TagType.Character, pattern: '^Character', local: many, asks: [], state: NO_ANSWERS })
+    const shown = ran({ target: TagType.Character, pattern: '^Character', local: many, asks: [], state: NO_ANSWERS })
     assert.equal(shown.head, '1,480 of 1,480 known canonical Characters')
     assert.equal(shown.rows.length, CANONICAL_CAP)
     assert.equal(shown.more, 'The first 50 are shown.')
@@ -353,7 +389,7 @@ describe('canonicalPreview', () => {
       [TagType.Category]: 'Categories',
     }
     for (const [target, noun] of Object.entries(nouns)) {
-      const shown = canonicalPreview({ target, pattern: 'x', local: pool(['x']), asks: [], state: NO_ANSWERS })
+      const shown = ran({ target, pattern: 'x', local: pool(['x']), asks: [], state: NO_ANSWERS })
       assert.equal(shown.head, `1 of 1 known canonical ${noun}`, target)
     }
   })
@@ -365,5 +401,21 @@ describe('canonicalPreview', () => {
   test('with no pattern, or one the engine refuses, shows no names', () => {
     assert.deepEqual(preview({ pattern: '  ' }), { head: 'No pattern yet', sources: null, rows: [], more: null, empty: null, note: null })
     assert.deepEqual(preview({ pattern: '(Original' }), { head: 'Fix the pattern to see matches', sources: null, rows: [], more: null, empty: null, note: null })
+  })
+
+  const TOO_SLOW = { head: null, sources: null, rows: [], more: null, empty: null, note: 'The pattern is too slow to test, so no matches are shown.' }
+
+  test('stops, with a note, when the check of the pattern ran past the budget', () => {
+    assert.deepEqual(preview({ check: { kind: 'slow', job: { pattern: '(a+)+$', subjects: [] } } }), TOO_SLOW)
+  })
+
+  test('stops, with a note, when the run over AO3\'s answers did', () => {
+    assert.deepEqual(preview({ answers: { kind: 'slow', job: { pattern: '(a+)+$', subjects: [] } } }), TOO_SLOW)
+  })
+
+  test('shows nothing found while either runs: the editor keeps what it showed before', () => {
+    const loading = { head: 'Loading the known tags…', sources: null, rows: [], more: null, empty: null, note: null }
+    assert.deepEqual(preview({ check: { kind: 'running', last: null } }), loading)
+    assert.deepEqual(preview({ answers: { kind: 'running', last: null } }), loading)
   })
 })

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { pressFacet, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -127,9 +128,9 @@ describe('auto-excluding what the rules hide, in a search view', { skip }, () =>
     await page.goto(TAG_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(1200)
+    await settled(page)
     await page.click('.AO3E--search-tag-works--link')
-    await sleep(2500)
+    await viewDrawn(page)
   }, { timeout: 180000 })
 
   after(async () => {
@@ -200,13 +201,7 @@ describe('auto-excluding what the rules hide, in a search view', { skip }, () =>
   })
 
   test('lifting the exclusion brings the work back collapsed, not as a blank slot', async () => {
-    await page.evaluate(() => {
-      for (const name of document.querySelectorAll('.AO3E--search-view--row-name')) {
-        if (name.textContent.trim() === 'Gone')
-          name.closest('.AO3E--search-view--row').querySelector('.AO3E--search-view--toggle-exclude').click()
-      }
-    })
-    await sleep(600)
+    await pressFacet(page, 'Gone', 'exclude')
     assert.ok((await visibleTitles()).includes('A rule-gone one'))
     const collapsed = await page.evaluate(() => {
       const li = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]

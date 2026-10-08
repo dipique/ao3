@@ -10,7 +10,6 @@
     "#uno.config": "./uno.config.ts",
     "#dom": "./src/common/dom.ts",
     "#common": "./src/common/index.ts",
-    "#img/*": "./src/img/*",
     "#icons/*": "./src/icons/*",
     "#content_script/*": "./src/content_script/*"
   },

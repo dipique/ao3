@@ -22,9 +22,18 @@ export interface ProfileList {
   id: ProfileListId
   name: string
   note: string
-  /** With no copy kept: how one is. */
+  /**
+   * With no copy kept and no View on AO3 to keep one, the reader's account
+   * not known: the page on AO3 and the switch that keep one.
+   */
   empty: string
 }
+
+/**
+ * With no copy kept: how one is, by the tile's own View on AO3, which opens
+ * the list's search view and keeps a copy whatever its search switch says.
+ */
+const KEEP_BY_VIEW = 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.'
 
 export const PROFILE_LISTS: readonly ProfileList[] = [
   {
@@ -103,7 +112,8 @@ export function profileTiles({ copies, userId, job, now }: ProfileTilesInput): P
     const page = hostPage(ref, null, userId) ?? copy?.listUrl
     const base = { id: list.id, name: list.name, note: list.note, view: page ? openLink(ref, page) : null }
     if (!copy) {
-      return { ...base, empty: list.empty, figure: null, bar: null, figures: null, actions: null, offlineOff: null, job: false, retry: 0, cached: 0 }
+      const empty = base.view ? KEEP_BY_VIEW : list.empty
+      return { ...base, empty, figure: null, bar: null, figures: null, actions: null, offlineOff: null, job: false, retry: 0, cached: 0 }
     }
 
     const { actions, off, here } = listJob(job, copy.key)

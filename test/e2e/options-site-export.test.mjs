@@ -292,19 +292,28 @@ describe('options UI — site export', { skip }, () => {
   })
 
   test('"Cache works" fetches and stores each work\'s sanitized text', async () => {
-    await pressInTile('Cache works')
-
     // Work 12 is refused once with `Retry-After: 3` (see `rateLimitOnce`), so
     // there is a window in which the tile has to be counting down rather than
-    // sitting mute. Caught here because it only exists while the run is in it.
-    await until('the tile to say what it is waiting for', async () => {
-      waitLine = await tileText()
-      waitState = await (await tile()).evaluate((el) => {
-        const line = el.querySelector('[data-job-state]')
-        return line ? { state: line.dataset.jobState, wait: line.dataset.jobWait ?? null } : null
-      })
-      return /trying again in/.test(waitLine)
-    })
+    // sitting mute. It only exists while the run is in it, so the page itself
+    // watches the tile from before the press, and keeps what it first says
+    // of the wait.
+    await page.evaluate((id) => {
+      const look = () => {
+        const tile = document.querySelector(`[data-tile="${id}"]`)
+        const text = tile?.textContent.replace(/\s+/g, ' ').trim() ?? ''
+        if (!/trying again in/.test(text))
+          return false
+        const line = tile.querySelector('[data-job-state]')
+        window.__waitSeen = { text, state: line ? { state: line.dataset.jobState, wait: line.dataset.jobWait ?? null } : null }
+        return true
+      }
+      const watch = new MutationObserver(() => look() && watch.disconnect())
+      watch.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true })
+    }, TILE)
+    await pressInTile('Cache works')
+
+    await page.waitForFunction(() => window.__waitSeen)
+    ;({ text: waitLine, state: waitState } = await page.evaluate(() => window.__waitSeen))
 
     await until('the work-text index to be written', async () => {
       const index = await lastWrite('workTextIndex')
@@ -1538,7 +1547,7 @@ describe('options UI — a saved list\'s job, from the keyboard', { skip }, () =
     assert.equal(await focused(), `Download ${NAME}`)
   })
 
-  test('nothing threw along the way, but the stops', () => {
-    assert.deepEqual(options.problems(/Site export job stopped/), [])
+  test('nothing threw along the way, and no Stop was logged as an error', () => {
+    assert.deepEqual(options.problems(), [])
   })
 })

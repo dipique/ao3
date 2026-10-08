@@ -95,6 +95,18 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
         targets: LIGHTNING_CSS_TARGET(asset),
       },
     },
+    // A worker (`new Worker(new URL('./x.ts', import.meta.url))`) is bundled on
+    // its own, beside the page. Named as the page's entries are, not hashed:
+    // the builder never empties `dist/`, so a hashed name would leave every
+    // older copy behind, to be packaged.
+    worker: {
+      rolldownOptions: {
+        output: {
+          entryFileNames: '[name].js',
+          chunkFileNames: '[name].js',
+        },
+      },
+    },
     build: {
       sourcemap: process.env.NODE_ENV === 'development' ? 'inline' : true,
       target: ESBUILD_TARGET(asset),

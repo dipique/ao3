@@ -4,8 +4,10 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { until } from './optionsPage.mjs'
+import { pressFacet, rerun, settled } from './trackedPages.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -85,12 +87,13 @@ describe('tracked review: the pages hold still', { skip }, () => {
       const buttons = [...document.querySelectorAll('.AO3E--search-view--pager button, .AO3E--search-view--pager a')]
       buttons.find(el => el.textContent.trim() === String(want)).click()
     }, number)
-    await sleep(600)
+    await until(`the pager to be on page ${number}`, async () => await currentPage() === String(number))
   }
 
+  /** Write an option, and wait for the re-run it causes and the review it reopens. */
   const setOption = async (key, value) => {
-    await tab.evaluate((k, v) => browser.storage.local.set({ [k]: v }), key, value)
-    await sleep(2500)
+    await rerun(tab, () => tab.evaluate((k, v) => browser.storage.local.set({ [k]: v }), key, value))
+    await reviewDrawn(tab)
   }
 
   test('fifteen works over three pages, and the reader walks to page 2', async () => {
@@ -103,7 +106,8 @@ describe('tracked review: the pages hold still', { skip }, () => {
     await tab.goto(REVIEW_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await sleep(3200)
+    await settled(tab)
+    await reviewDrawn(tab)
 
     assert.deepEqual((await slots()).map(slot => slot.id), all.slice(0, 5).map(work => work.id))
     await goToPage(2)
@@ -154,12 +158,7 @@ describe('tracked review: the pages hold still', { skip }, () => {
   test('a filter the reader changes themselves does re-lay the pages', async () => {
     // Every work carries this fandom, so the filter changes nothing about which
     // works match — only that the reader asked, which is what re-lays the pages.
-    await tab.evaluate(() => {
-      const row = Array.from(document.querySelectorAll('.AO3E--search-view--row'))
-        .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent?.trim() === 'Fandom')
-      row.querySelector('.AO3E--search-view--toggle-include').click()
-    })
-    await sleep(800)
+    await pressFacet(tab, 'Fandom')
     assert.equal(await currentPage(), '1', 'a reshuffle is always something the reader started')
     const shown = await slots()
     assert.equal(shown.length, 5)

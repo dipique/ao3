@@ -5,8 +5,9 @@ import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
 import { formatDay } from '../../src/common/trackedLists.ts'
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, search, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { pressFacet, settled } from './trackedPages.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, search, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -103,10 +104,10 @@ describe('tracked review: the window', { skip }, () => {
     }
   })
 
-  /** Click the toolbar's − day (0) or + day (1). */
+  /** Click the toolbar's − day (0) or + day (1), and wait for the range it gathers. */
   const stepDay = async (index) => {
     await tab.evaluate(i => document.querySelectorAll('.AO3E--tracked-review--bar--step')[i].click(), index)
-    await sleep(1500)
+    await reviewDrawn(tab)
   }
 
   const shownCount = () => tab.evaluate(() =>
@@ -123,15 +124,6 @@ describe('tracked review: the window', { skip }, () => {
     }))
   }, group)
 
-  const includeFacet = async (value) => {
-    await tab.evaluate((want) => {
-      const row = Array.from(document.querySelectorAll('.AO3E--search-view--row'))
-        .find(el => el.querySelector('.AO3E--search-view--row-name')?.textContent?.trim() === want)
-      row.querySelector('.AO3E--search-view--toggle-include').click()
-    }, value)
-    await sleep(500)
-  }
-
   const open = async (url, seed = SEED) => {
     const page = await browser.newPage()
     fetched = []
@@ -143,12 +135,13 @@ describe('tracked review: the window', { skip }, () => {
     await page.goto(url, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    await sleep(3000)
+    await settled(page)
     return page
   }
 
   test('the hash opens the review, and the page says which list it is showing', async () => {
     tab = await open(`${HISTORY_URL}#ao3e-tracked`)
+    await reviewDrawn(tab)
     assert.ok(await tab.$('.AO3E--search-host.AO3E--tracked-review'), 'the review view should be up')
 
     const chrome = await tab.evaluate(() => {
@@ -206,9 +199,9 @@ describe('tracked review: the window', { skip }, () => {
   })
 
   test('narrowing to one list shows exactly its works', async () => {
-    await includeFacet('Beta')
+    await pressFacet(tab, 'Beta')
     assert.equal(await shownCount(), 1)
-    await includeFacet('Beta')
+    await pressFacet(tab, 'Beta')
     assert.equal(await shownCount(), 10)
   })
 
@@ -253,7 +246,7 @@ describe('tracked review: the window', { skip }, () => {
 
   test('clicking it opens the review in place, over History', async () => {
     await tab.click('.AO3E--tracked-review--button')
-    await sleep(3000)
+    await reviewDrawn(tab)
     assert.ok(await tab.$('.AO3E--search-host.AO3E--tracked-review'))
     assert.ok(await tab.$('.AO3E--search-view--back'), 'opened over History, "Back to list" means History')
     assert.equal(await shownCount(), 10)

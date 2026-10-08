@@ -414,7 +414,7 @@ function removeTheList(): void {
             <span class="i-tabler-player-play" aria-hidden="true" />
             Continue
           </button>
-          <button type="button" class="ghost-btn small-btn" @click="discard()">
+          <button type="button" class="saved-list__discard ghost-btn small-btn" @click="discard()">
             Discard
           </button>
         </template>
@@ -506,8 +506,8 @@ function removeTheList(): void {
           <div v-if="offline.remove" class="saved-list__remove">
             <button
               type="button"
-              class="saved-list__btn outline-btn"
-              :class="{ 'saved-list__btn--armed': confirm.armed(removeCopyId) }"
+              class="saved-list__btn"
+              :class="confirm.armed(removeCopyId) ? 'armed-btn' : 'outline-btn'"
               :title="offline.remove.off ? withReason('Remove offline copy', offline.remove.off) : undefined"
               :disabled="!!offline.remove.off"
               :aria-describedby="offline.remove.off ? ids.removeCopyOff : undefined"
@@ -563,8 +563,8 @@ function removeTheList(): void {
         <div v-if="tracking.remove" class="saved-list__remove">
           <button
             type="button"
-            class="saved-list__btn outline-btn"
-            :class="{ 'saved-list__btn--armed': confirm.armed(removeListId) }"
+            class="saved-list__btn"
+            :class="confirm.armed(removeListId) ? 'armed-btn' : 'outline-btn'"
             :title="tracking.remove.off ? withReason('Remove list', tracking.remove.off) : undefined"
             :disabled="!!tracking.remove.off"
             :aria-describedby="tracking.remove.off ? ids.removeListOff : undefined"
@@ -590,13 +590,20 @@ function removeTheList(): void {
   stacks its switch over its word and the controls are glyphs a finger can
   find.
 */
+/*
+  The row's quieter words are `--quiet-fg`: muted, but the text colour at 57%
+  under a job's brand tint, where muted is under AA in light. The job's line
+  reads it too.
+*/
 .saved-list {
+  --quiet-fg: rgb(var(--color-muted-fg));
   border-top: 1px solid rgb(var(--color-hair));
 }
 .saved-list:first-child {
   border-top-width: 0;
 }
 .saved-list--job {
+  --quiet-fg: rgb(var(--color-default-fg) / 0.57);
   background-color: color-mix(in srgb, rgb(var(--color-brand-fg)) 4%, rgb(var(--color-default)));
 }
 
@@ -657,7 +664,7 @@ function removeTheList(): void {
   white-space: nowrap;
 }
 .saved-list__name--raw {
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
   font-family: ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
   font-size: 11.5px;
 }
@@ -673,7 +680,7 @@ function removeTheList(): void {
   min-width: 0;
   padding-left: 8px;
   overflow: hidden;
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
   font-size: 11px;
   line-height: 16px;
   white-space: nowrap;
@@ -790,11 +797,11 @@ function removeTheList(): void {
   font-size: 12px;
 }
 .saved-list__l2 {
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
   font-size: 11px;
 }
 .saved-list__lines--muted .saved-list__l1 {
-  color: rgb(var(--color-muted-fg));
+  color: var(--quiet-fg);
 }
 /* Wrapped rather than cut, so nothing clips the link's hit area on a phone. */
 .saved-list__hint {
@@ -831,6 +838,9 @@ function removeTheList(): void {
 
 .saved-list__job {
   padding: 0 12px 10px 18px;
+}
+.saved-list__discard {
+  color: var(--quiet-fg);
 }
 
 .saved-list__details {
@@ -926,13 +936,7 @@ function removeTheList(): void {
   cursor: default;
   opacity: 0.45;
 }
-.saved-list__btn--armed {
-  border-color: rgb(var(--color-destructive));
-  background-color: rgb(var(--color-destructive));
-  color: rgb(var(--color-destructive-fg));
-  font-weight: 600;
-}
-.saved-list__btn--armed .saved-list__remove-glyph {
+.armed-btn > .saved-list__remove-glyph {
   color: inherit;
 }
 
@@ -1000,7 +1004,7 @@ function removeTheList(): void {
     align-items: center;
   }
   .saved-list__status .saved-list__l1 {
-    color: rgb(var(--color-muted-fg));
+    color: var(--quiet-fg);
     font-size: 10.5px;
   }
   .saved-list__status .saved-list__l2 {

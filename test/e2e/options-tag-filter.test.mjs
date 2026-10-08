@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { sleep } from './helpers.mjs'
 import { skip, startOptions, stubArchive } from './optionsPage.mjs'
 
 /** A highlight in a colour of its own, a disabled rule, and a collapse rule to switch off. */
@@ -17,6 +16,8 @@ describe('options UI — rules dialog', { skip }, () => {
   let session
   let options
   let page
+  /** The stand-in for AO3. */
+  let archive
 
   before(async () => {
     session = await startOptions()
@@ -24,7 +25,9 @@ describe('options UI — rules dialog', { skip }, () => {
       seed: SEED,
       hash: '#customize-search-results',
       // A value typed in Exact mode asks AO3 for suggestions; none are wanted here.
-      prepare: tab => stubArchive(tab, () => ({ json: [] })),
+      prepare: async (tab) => {
+        archive = await stubArchive(tab, () => ({ json: [] }))
+      },
     })
     page = options.page
   }, { timeout: 180000 })
@@ -42,20 +45,20 @@ describe('options UI — rules dialog', { skip }, () => {
     return !!(d && d.querySelector('[i-codicon-regex]') && d.querySelector('[i-codicon-whole-word]'))
   })
   const openAddRuleDialog = async () => {
-    await options.press(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-    await sleep(400)
+    await options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
     return ruleDialogOpen()
   }
   const openEditRuleDialog = async (value) => {
-    await options.press(await options.control(await options.list('rules'), 'button', `Edit rule “${value}”`))
-    await sleep(400)
+    await options.openDialog(await options.control(await options.list('rules'), 'button', `Edit rule “${value}”`))
     return ruleDialogOpen()
   }
   /** One of a radio group's choices, the group by its name, such as “What the rule does”. */
   const choice = async (group, name) => options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name)
+  /** Choose it, and wait until it is the one chosen. */
   const pick = async (group, name) => {
-    await options.press(await choice(group, name))
-    await sleep(200)
+    const chosen = await choice(group, name)
+    await options.press(chosen)
+    await page.waitForFunction(el => el.getAttribute('aria-checked') === 'true', {}, chosen)
   }
   const checked = handle => handle.evaluate(el => el.getAttribute('aria-checked') === 'true')
   const disabled = handle => handle.evaluate(el => el.disabled)
@@ -72,14 +75,9 @@ describe('options UI — rules dialog', { skip }, () => {
   const saveDialog = async (name) => {
     await options.press(await options.control(await dialog(), 'button', name))
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-    await sleep(1000)
+    await options.saved()
   }
   const storedRule = async value => (await options.lastWrite('option.rules'))?.filters?.find(f => f.value === value)
-  const closeDialog = async () => {
-    await page.keyboard.press('Escape')
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-    await sleep(250)
-  }
 
   test('matcher icons render (codicon collection loaded)', async () => {
     assert.ok(await openAddRuleDialog(), 'the Add-rule dialog should open')
@@ -97,7 +95,7 @@ describe('options UI — rules dialog', { skip }, () => {
     const renders = s => s && (/url\(/.test(s.mask) || /url\(/.test(s.bg))
     assert.ok(renders(styles.regex), `regex icon should render an image, got ${JSON.stringify(styles.regex)}`)
     assert.ok(renders(styles.contains), `contains icon should render an image, got ${JSON.stringify(styles.contains)}`)
-    await closeDialog()
+    await options.closeDialog()
   })
 
   test('creating a rule with the Regex matcher persists', async () => {
@@ -142,14 +140,12 @@ describe('options UI — rules dialog', { skip }, () => {
 
   test('Your default highlight colours opens their dialog over the editor, and Escape goes back to the editor', async () => {
     assert.ok(await openEditRuleDialog('amber'), 'the Edit-rule dialog should open')
-    await options.press(await options.control(await dialog(), 'button', 'Your default highlight colours'))
-    await sleep(400)
+    await options.openDialog(await options.control(await dialog(), 'button', 'Your default highlight colours'))
     const titles = () => page.$$eval('[role="dialog"]', dialogs => dialogs.map(d => d.querySelector('h1, h2')?.textContent.trim()))
     assert.deepEqual(await titles(), ['Edit rule', 'Default highlight colors'])
-    await page.keyboard.press('Escape')
-    await sleep(400)
+    await options.closeDialog()
     assert.deepEqual(await titles(), ['Edit rule'])
-    await closeDialog()
+    await options.closeDialog()
   })
 
   test('a rule with a colour of its own opens on Custom, with the picker on that colour', async () => {
@@ -160,7 +156,7 @@ describe('options UI — rules dialog', { skip }, () => {
     const fields = await options.controls(await dialog(), 'textbox')
     const values = await Promise.all(fields.map(field => field.evaluate(el => el.value)))
     assert.ok(values.includes('#123456'), `the picker shows the colour, got ${JSON.stringify(values)}`)
-    await closeDialog()
+    await options.closeDialog()
   })
 
   test('Rule Enabled off writes behavior none, and leaves Then inert', async () => {
@@ -168,7 +164,7 @@ describe('options UI — rules dialog', { skip }, () => {
     const toggle = await enabledSwitch()
     assert.equal(await toggle.evaluate(el => el.getAttribute('aria-checked')), 'true')
     await options.press(toggle)
-    await sleep(200)
+    await page.waitForFunction(el => el.getAttribute('aria-checked') !== 'true', {}, toggle)
     assert.equal(await (await enabledSwitch()).evaluate(el => el.getAttribute('aria-checked')), 'false')
     const collapse = await choice('What the rule does', 'Collapse')
     assert.ok(await checked(collapse), 'Then shows the rule\'s choice')
@@ -191,7 +187,7 @@ describe('options UI — rules dialog', { skip }, () => {
     try {
       /** The verdict, once it is this one: its words, as a screen reader reads them, and how well they read. */
       const verdict = async (kind) => {
-        const handle = await page.waitForSelector(`[role="dialog"] [data-regex-verdict="${kind}"]`, { timeout: 2000 })
+        const handle = await page.waitForSelector(`[role="dialog"] [data-regex-verdict="${kind}"]`)
         return { text: await options.text(handle), aa: await options.contrast(handle) >= 4.5 }
       }
       const replace = async (field, text) => {
@@ -219,11 +215,13 @@ describe('options UI — rules dialog', { skip }, () => {
       await replace(value, '^slow')
       assert.deepEqual(await verdict('match'), { text: 'Matches', aa: true })
 
-      await closeDialog()
+      await options.suggestionsAsked(archive)
+      await options.closeDialog()
     }
     finally {
       page.off('request', onRequest)
     }
+    await options.saved()
     assert.equal(await ruleWrites(), before, 'no rule is written')
     assert.deepEqual(requests, [], 'nothing is fetched')
   })
@@ -236,10 +234,11 @@ describe('options UI — rules dialog', { skip }, () => {
     for (const action of then)
       assert.ok(await disabled(action), await options.name(action))
     assert.ok(await checked(await choice('What the rule does', 'Hide Work')))
-    await options.press(await enabledSwitch())
-    await sleep(200)
+    const toggle = await enabledSwitch()
+    await options.press(toggle)
+    await page.waitForFunction(el => el.getAttribute('aria-checked') === 'true', {}, toggle)
     assert.equal(await disabled(await choice('What the rule does', 'Collapse')), false, 'switched on, Then is live again')
-    await closeDialog()
+    await options.closeDialog()
   })
 
   test('dialogs declare an accessible description (no reka warning)', () => {

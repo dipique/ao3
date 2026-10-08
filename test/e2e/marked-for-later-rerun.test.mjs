@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep, storedLists } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, storedLists } from './helpers.mjs'
+import { rerun, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -137,8 +138,8 @@ describe('Marked for Later across a re-run', { skip }, () => {
     await tab.goto(URL_TO_READ, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
-    await tab.waitForSelector('.AO3E--search-view--results > li.blurb', { timeout: 20000 })
-    await sleep(500)
+    await settled(tab)
+    await viewDrawn(tab)
 
     // Scrolled into the list, as a reader coming back to it would be.
     await tab.evaluate(() => window.scrollTo(0, 1500))
@@ -163,8 +164,8 @@ describe('Marked for Later across a re-run', { skip }, () => {
       }
       requestAnimationFrame(tick)
     })
-    await tab.evaluate(marks => browser.storage.local.set({ 'option.workMarks': marks }), workMarks('1'))
-    await sleep(4000)
+    await rerun(tab, () => tab.evaluate(marks => browser.storage.local.set({ 'option.workMarks': marks }), workMarks('1')))
+    await viewDrawn(tab)
 
     const frames = await tab.evaluate(() => window.__frames)
     // The view mounts a blurb when its page is first shown, so what is on screen

@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { menuClosed, openMenu, pressFacet, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -82,36 +83,24 @@ describe('the search view selection sections', { skip }, () => {
     await page.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
-    // The view opens by itself here; wait for the scrape and the first render.
-    await sleep(2500)
+    await settled(page)
+    // The view opens by itself here.
+    await viewDrawn(page)
   }, { timeout: 180000 })
 
   after(async () => {
     await browser?.close()
   })
 
-  /** Click a facet row's require/include/exclude button for `value`. */
-  const toggleRow = async (value, dir) => {
-    await page.evaluate(([want, d]) => {
-      const row = [...document.querySelectorAll('.AO3E--search-view--row')]
-        .find(r => r.querySelector('.AO3E--search-view--row-name')?.textContent === want)
-      if (!row)
-        throw new Error(`no facet row for "${want}"`)
-      row.querySelector(`.AO3E--search-view--toggle-${d}`).click()
-    }, [value, dir])
-    await sleep(400)
-  }
-
   /** The same toggle from the other end: a blurb's tag menu inside the view. */
   const toggleFromTagMenu = async (value, label) => {
-    await page.evaluate((want) => {
+    await openMenu(page, () => page.evaluate((want) => {
       const link = [...document.querySelectorAll('.AO3E--search-view--results ul.tags a.tag')]
         .find(a => a.textContent.trim() === want)
       if (!link)
         throw new Error(`no tag link reading "${want}" in the results`)
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
-    }, value)
-    await sleep(250)
+    }, value))
     await page.evaluate((l) => {
       const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .find(el => el.textContent.startsWith(l))
@@ -119,7 +108,7 @@ describe('the search view selection sections', { skip }, () => {
         throw new Error(`no "${l}" row on the tag menu`)
       row.click()
     }, label)
-    await sleep(500)
+    await menuClosed(page)
   }
 
   /** Where `value`'s row sits in `group`, and whether the reader can see it. */
@@ -153,11 +142,10 @@ describe('the search view selection sections', { skip }, () => {
         throw new Error(`no "${want}" heading in ${g}`)
       head.click()
     }, [group, label])
-    await sleep(300)
   }
 
   test('files an excluded value under a heading that starts shut', async () => {
-    await toggleRow('Fluff', 'exclude')
+    await pressFacet(page, 'Fluff', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Fluff'), {
       section: 'Excluded',
       visible: false,
@@ -166,15 +154,15 @@ describe('the search view selection sections', { skip }, () => {
   })
 
   test('leaves the other two sections open, so their values stay in sight', async () => {
-    await toggleRow('Angst', 'include')
+    await pressFacet(page, 'Angst', 'include')
     assert.deepEqual(await placement(GROUP, 'Angst'), { section: 'Included', visible: true, heading: 'Included1' })
 
-    await toggleRow('Angst', 'require')
+    await pressFacet(page, 'Angst', 'require')
     assert.deepEqual(await placement(GROUP, 'Angst'), { section: 'Required', visible: true, heading: 'Required1' })
   })
 
   test('keeps a shut section shut as more values land in it', async () => {
-    await toggleRow('Quiet', 'exclude')
+    await pressFacet(page, 'Quiet', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Quiet'), {
       section: 'Excluded',
       visible: false,
@@ -186,13 +174,13 @@ describe('the search view selection sections', { skip }, () => {
     await clickHeading(GROUP, 'Excluded')
     assert.deepEqual(await placement(GROUP, 'Fluff'), { section: 'Excluded', visible: true, heading: 'Excluded2' })
 
-    await toggleRow('Hurt/Comfort', 'exclude')
+    await pressFacet(page, 'Hurt/Comfort', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Hurt/Comfort'), { section: 'Excluded', visible: true, heading: 'Excluded3' })
   })
 
   test('a blurb tag menu files its value in the same place a facet row would', async () => {
     await clickHeading(GROUP, 'Excluded')
-    await toggleRow('Angst', 'require')
+    await pressFacet(page, 'Angst', 'require')
     assert.equal((await placement(GROUP, 'Angst'))?.section, null, 'Angst starts unselected')
 
     // "Both at once" carries Angst and is still on the page, so its menu is the
@@ -207,7 +195,7 @@ describe('the search view selection sections', { skip }, () => {
 
   test('leaves an unselected value outside the sections', async () => {
     assert.deepEqual(await placement(GROUP, 'Quiet'), { section: 'Excluded', visible: false, heading: 'Excluded4' })
-    await toggleRow('Quiet', 'exclude')
+    await pressFacet(page, 'Quiet', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Quiet'), { section: null, visible: true, heading: null })
   })
 })
