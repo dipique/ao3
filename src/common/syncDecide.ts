@@ -1,9 +1,9 @@
 import type { Options } from './options.ts'
-import type { Manifest } from './syncCodec.ts'
+import type { Line, Manifest, Upload } from './syncCodec.ts'
 import type { PullLoss } from './syncGuard.ts'
 import type { SyncPause } from './syncMeta.ts'
 
-import { buildLocalUpdate, diffOptions, pruneToSynced, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
+import { buildLocalUpdate, diffOptions, lineOf, pruneToSynced, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
 import { assessPull } from './syncGuard.ts'
 
 /**
@@ -42,6 +42,17 @@ export interface LocalMeta {
    * met no copy with one since.
    */
   i?: string
+  /**
+   * The *Keep* the agreed upload's line comes from ({@link Manifest.p}),
+   * which this browser's next upload carries on, as it does `o`. Where it is
+   * this browser's own *Keep* (or its settings sent over a copy holding
+   * nothing beyond defaults), a copy under the agreed ID that never saw it is
+   * weighed as one another browser started (see {@link weighCopy}). An
+   * agreement from before the line carries none, and remembers no *Keep*.
+   */
+  p?: Upload
+  /** The agreed upload's {@link Manifest.o}. */
+  o?: Upload
 }
 
 export type Decision = 'noop' | 'push' | 'pull' | 'blocked' | 'wait'
@@ -157,14 +168,19 @@ export type CopyWeight
  * answer: the copy's, or for a copy without one this browser's own, which its
  * next upload puts on the copy.
  *
- * Where either side has no ID, the copy is an update. A copy with none was
- * written by a build from before the ID, over whichever copy it had agreed
- * with, which can't be told. A browser with none synced on such a build, and
- * can't say which copy it agreed with either: it takes the first copy that
- * has one as an update, so out-of-date settings without an ID give way to a
- * copy with one.
+ * Where either side has no ID, the copy is an update. A copy with none can't
+ * say which copy it was written over. A browser with none synced on a build
+ * from before the ID, and can't say which copy it agreed with either: it
+ * takes the first copy that has one as an update, so out-of-date settings
+ * without an ID give way to a copy with one.
+ *
+ * Under the agreed ID, where the agreed line comes from this browser's
+ * own *Keep*, a copy that never saw that *Keep* is weighed as one another
+ * browser started: two browsers that answered *Keep* over one copy before
+ * either received the other's upload both uploaded under its ID. `device` is
+ * this browser's ID, which tells its own *Keep* apart.
  */
-export function weighCopy(agreed: LocalMeta, copy: Pick<Manifest, 'i'>): CopyWeight {
+export function weighCopy(agreed: LocalMeta, copy: Pick<Manifest, 'i'> & Line, device = ''): CopyWeight {
   const id = copy.i ?? agreed.i
   if (agreed.g === 0)
     return id ? { weigh: 'first', id } : { weigh: 'first' }
@@ -172,7 +188,40 @@ export function weighCopy(agreed: LocalMeta, copy: Pick<Manifest, 'i'>): CopyWei
     return id ? { weigh: 'update', id } : { weigh: 'update' }
   if (agreed.i && agreed.i !== copy.i)
     return { weigh: 'other', id: copy.i }
+  const kept = ownKeep(agreed, device)
+  if (kept && !sawKeep(kept, copy))
+    return { weigh: 'other', id: copy.i }
   return { weigh: 'update', id: copy.i }
+}
+
+/** A writer token: the writing device's ID and a random part, so every upload writes one of its own. */
+export function writerToken(device: string, random: string): string {
+  return `${device}.${random}`
+}
+
+/**
+ * The line an upload carries ({@link Line}). A *Keep*, or settings sent over
+ * a copy holding nothing beyond defaults, starts one of its own: `keep` is
+ * that upload, chosen over a copy whose line is `over`. Any other upload
+ * carries on the line of `agreed`, the upload its writer agreed with.
+ */
+export function uploadLine(agreed: Line, keep?: { upload: Upload, over: Line }): Line {
+  if (keep)
+    return lineOf({ p: keep.upload, o: keep.over.p })
+  return lineOf(agreed)
+}
+
+/** This browser's own *Keep*, where the line it agrees with comes from one. */
+function ownKeep(agreed: LocalMeta, device: string): Upload | undefined {
+  return agreed.p?.w.startsWith(writerToken(device, '')) ? agreed.p : undefined
+}
+
+/**
+ * Whether `copy` saw the *Keep* `kept`: its line comes from it, or from
+ * a *Keep* chosen over a copy whose line did.
+ */
+function sawKeep(kept: Upload, copy: Line): boolean {
+  return [copy.p, copy.o].some(upload => upload?.g === kept.g && upload.w === kept.w)
 }
 
 /**
@@ -183,12 +232,12 @@ export function weighCopy(agreed: LocalMeta, copy: Pick<Manifest, 'i'>): CopyWei
  *
  * Otherwise it is the agreed ID. A browser with none writes over the copy it
  * agreed with under that copy's ID, which a build from before the ID agreed
- * with but didn't record, and writes none over a copy at this sync version
- * that has none, so it syncs with builds from before the ID as it did. Over
- * an empty store, or a copy at an older sync version, which is never adopted,
- * it starts a copy of its own, and over a copy whose ID it never agreed with
- * (an older generation, which isn't pulled) it writes over one another
- * browser started: each under a new ID, from `fresh`.
+ * with but didn't record, and none over a copy at this sync version that has
+ * none, which can't say which copy it was written over either. Over an empty
+ * store, or a copy at an older sync version, which is never adopted, it
+ * starts a copy of its own, and over a copy whose ID it never agreed with (an
+ * older generation, which isn't pulled) it writes over one another browser
+ * started: each under a new ID, from `fresh`.
  */
 export function uploadId(agreed: LocalMeta, remote: Manifest | null, force: boolean, fresh: () => string, version = SYNC_SCHEMA_VERSION): string | undefined {
   if (force && remote?.i)
@@ -203,13 +252,16 @@ export function uploadId(agreed: LocalMeta, remote: Manifest | null, force: bool
 }
 
 /**
- * Whether the question a copy under another ID raised has gone: the cloud
- * holds a copy under this browser's agreed ID again, its own seed landing
- * after the other browser's, say. The copy it asked about isn't there to
- * use or keep.
+ * Whether the question a copy another browser started raised has gone: the
+ * cloud holds a copy under this browser's agreed ID again, one that saw its
+ * own *Keep* where its line comes from one: its own seed landing after the
+ * other browser's, say, or its own *Keep* upload after one that never saw
+ * it. The engine asks only of a copy no newer than its agreement. The copy it
+ * asked about isn't there to use or keep.
  */
-export function questionGone(pause: SyncPause | null, agreed: LocalMeta, remote: Manifest | null): boolean {
+export function questionGone(pause: SyncPause | null, agreed: LocalMeta, remote: Manifest | null, device = ''): boolean {
   return pause?.reason === 'first-sync' && pause.otherCopy === true && !!agreed.i && remote?.i === agreed.i
+    && weighCopy(agreed, remote, device).weigh === 'update'
 }
 
 /** A pause that waits on the reader's answer: nothing is applied or pushed until they give it. */

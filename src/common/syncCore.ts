@@ -7,9 +7,9 @@ import type { CopyFound, Inconsistency } from './syncConsistency.ts'
 import type { Question } from './syncDecide.ts'
 import type { SyncMeta, SyncPause } from './syncMeta.ts'
 
-import { buildLocalUpdate, canonicalStringify, decode, diffChunks, diffOptions, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
+import { buildLocalUpdate, canonicalStringify, decode, diffChunks, diffOptions, encode, hash, lineOf, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
 import { answerRefusal, checkCopy, foundOf, nextInconsistency, ownCopyReplaces, recheckIn } from './syncConsistency.ts'
-import { decideFirstPull, decidePull, decidePush, questionGone, refuseUnbacked, uploadId, weighCopy } from './syncDecide.ts'
+import { decideFirstPull, decidePull, decidePush, questionGone, refuseUnbacked, uploadId, uploadLine, weighCopy, writerToken } from './syncDecide.ts'
 import { assessPull } from './syncGuard.ts'
 
 /**
@@ -233,7 +233,9 @@ export function createSyncEngine(deps: SyncDeps) {
    * backup yet. With none made, the backup it points to already holds them,
    * and no second one is written. `keep` saves the synced copy as a backup, so
    * whatever the other browser had is still restorable, and pushes this
-   * browser's settings over it, under the copy's ID.
+   * browser's settings over it, under the copy's ID, in a line of their own
+   * chosen over that copy's: an upload landing after it was read never saw
+   * them.
    *
    * Either is refused while the synced copy can't be read whole: `keep` can't
    * back it up, and `accept` can't apply it. Nothing is backed up, sent,
@@ -261,14 +263,14 @@ export function createSyncEngine(deps: SyncDeps) {
         await pull({ acceptLoss: true, daily: false, items })
       }
       else {
+        const remote = items[MANIFEST_KEY] as Manifest | undefined
         const result = await decode(items, version())
         if (result.ok) {
-          const remote = items[MANIFEST_KEY] as Manifest
-          const incoming = buildLocalUpdate(result.options, defaults, await deps.readOptions(), remote.k)
+          const incoming = buildLocalUpdate(result.options, defaults, await deps.readOptions(), remote!.k)
           await backups.create('sync-declined', incoming)
         }
         await meta.set({ pause: null })
-        await push({ force: true })
+        await push({ force: true, over: remote })
       }
 
       // Answered either way, even if the cloud couldn't be read just now: the
@@ -359,13 +361,16 @@ export function createSyncEngine(deps: SyncDeps) {
   }
 
   /**
-   * `force` pushes over a newer cloud copy, under its ID: the reader chose
-   * this browser's settings, or the copy held nothing beyond defaults.
+   * `force` pushes over a newer cloud copy: the reader chose this browser's
+   * settings over `over`, the copy they were asked about, or that copy held
+   * nothing beyond defaults. It goes under that copy's ID, and starts a line
+   * of its own, chosen over that copy's, so an upload landing since is one
+   * that never saw it, and the browsers on that copy's line see it.
    * `fresh` pushes over a copy that can't be read whole, under a new ID: the
    * reader chose to replace it. Once it lands, a question asked over the copy
    * it replaced is over.
    */
-  async function push({ force = false, fresh = false }: { force?: boolean, fresh?: boolean } = {}): Promise<void> {
+  async function push({ force = false, over, fresh = false }: { force?: boolean, over?: Manifest, fresh?: boolean } = {}): Promise<void> {
     const { enabled, meta: agreed, pause, staleBuild, inconsistent } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild', 'inconsistent'])
     if (!enabled || staleBuild)
       return
@@ -403,10 +408,11 @@ export function createSyncEngine(deps: SyncDeps) {
     }
 
     const device = await getDeviceId()
-    const token = `${device}.${randomId()}`
-    const newGen = Math.max(agreed.g, remote?.g ?? 0) + 1
-    const id = fresh ? newCopyId(device) : uploadId(agreed, remote, force, () => newCopyId(device), version())
-    const { chunks, manifest } = await encode(opts, defaults, newGen, token, version(), id)
+    const token = writerToken(device, randomId())
+    const newGen = Math.max(agreed.g, remote?.g ?? 0, over?.g ?? 0) + 1
+    const id = fresh ? newCopyId(device) : uploadId(agreed, over ?? remote, force, () => newCopyId(device), version())
+    const line = uploadLine(agreed, force ? { upload: { g: newGen, w: token }, over: over ?? {} } : undefined)
+    const { chunks, manifest } = await encode(opts, defaults, newGen, token, version(), id, line)
 
     const currentItems = await sync.get(null)
     const { toSet, toRemove } = diffChunks(pickChunks(currentItems), chunks)
@@ -429,7 +435,7 @@ export function createSyncEngine(deps: SyncDeps) {
     if (after && after.w === token) {
       // The synced copy is this browser's own now, whole.
       await meta.set({
-        meta: { g: newGen, h: localHash, w: token, ...(id ? { i: id } : {}) },
+        meta: { g: newGen, h: localHash, w: token, ...(id ? { i: id } : {}), ...line },
         dirty: false,
         dirtySince: 0,
         lastError: '',
@@ -486,7 +492,7 @@ export function createSyncEngine(deps: SyncDeps) {
     if (decision === 'noop') {
       // The copy another browser started gave way to this browser's own: there
       // is nothing left to answer, and what was edited meanwhile can go out.
-      if (questionGone(pause, agreed, remote)) {
+      if (questionGone(pause, agreed, remote, await getDeviceId())) {
         await meta.set({ pause: null })
         logger.log('the synced copy asked about gave way to this browser\'s own')
         if ((await meta.get(['dirty'])).dirty)
@@ -535,18 +541,19 @@ export function createSyncEngine(deps: SyncDeps) {
     const desired = buildLocalUpdate(result.options, defaults, current, remote?.k)
 
     // Nothing agreed yet, as after turning sync on, or a copy another browser
-    // started under an ID of its own: adopting it would replace settings this
+    // started under an ID of its own, or one that never saw the Keep this
+    // browser's line comes from: adopting it would replace settings this
     // browser has never shared, so where both hold settings of their own that
     // differ, the reader chooses. The question stands in for the deletion
     // guard, and nothing is applied or pushed until it is answered. Every
     // outcome agrees on the copy's ID.
-    const weight = weighCopy(agreed, remote!)
+    const weight = weighCopy(agreed, remote!, await getDeviceId())
     if (weight.weigh !== 'update' && !acceptLoss) {
       const first = decideFirstPull(current, result.options, defaults, remote!.k)
       if (first.kind === 'send') {
         if (isQuestion(pause))
           await meta.set({ pause: null })
-        await push({ force: true })
+        await push({ force: true, over: remote! })
         return
       }
       if (first.kind === 'ask') {
@@ -593,7 +600,7 @@ export function createSyncEngine(deps: SyncDeps) {
     // that had just adopted a copy used to push it straight back, claiming
     // defaults for everything the copy lacked.
     await meta.set({
-      meta: { g: remote!.g, h: await currentHash(), w: remote!.w, ...(weight.id ? { i: weight.id } : {}) },
+      meta: { g: remote!.g, h: await currentHash(), w: remote!.w, ...(weight.id ? { i: weight.id } : {}), ...lineOf(remote!) },
       dirty: false,
       dirtySince: 0,
       lastError: '',

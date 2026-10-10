@@ -1,5 +1,6 @@
 import type { BackupSummary } from './api.ts'
 import type { Inconsistency } from './syncConsistency.ts'
+import type { LocalMeta } from './syncDecide.ts'
 import type { PullLoss } from './syncGuard.ts'
 
 import { createStorage } from './storage.ts'
@@ -77,9 +78,10 @@ export interface SyncMeta {
    * The sync generation/hash/writer-token this device's working copy agrees
    * with, and the ID of the synced copy they belong to, kept over a copy that
    * has none. Turning sync off gives a new ID. Absent where this browser
-   * synced on a build from before the ID, until a copy brings one.
+   * synced on a build from before the ID, until a copy brings one. And the
+   * agreed upload's line: the *Keep* it comes from (see {@link LocalMeta}).
    */
-  meta: { g: number, h: string, w: string, i?: string }
+  meta: LocalMeta
   /** A local option change is pending push. */
   dirty: boolean
   /** Epoch ms the current dirty streak started (for the max-wait push ceiling). */

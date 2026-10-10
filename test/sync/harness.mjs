@@ -6,7 +6,7 @@ import { createBackupStore } from '../../src/common/backupStore.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { createSavedListsReconciler } from '../../src/common/savedLists.ts'
 import { decode, encode, MANIFEST_KEY } from '../../src/common/syncCodec.ts'
-import { ALARM_CONSISTENCY, createSyncEngine } from '../../src/common/syncCore.ts'
+import { ALARM_CONSISTENCY, ALARM_PUSH, createSyncEngine } from '../../src/common/syncCore.ts'
 import { SYNC_META_DEFAULTS } from '../../src/common/syncMetaDefaults.ts'
 import { createDefaultMarks, localMarkIds, markItems, packIds } from '../../src/common/workMarks.ts'
 
@@ -112,9 +112,10 @@ export function createCloud() {
  * too, whenever daily backups are on, since a failed one never counts as the
  * day's. `breakBackups()` does the same from then on.
  *
- * `ids: false` is a build at this sync version from before the synced copy
- * carried an ID: it never sees one on a copy, writes none, and keeps none with
- * its agreement. `restart({ ids: true })` updates it.
+ * `ids: false` is a build from before the synced copy carried an ID, which
+ * speaks sync version 11 at most (`version`): it never sees a copy's ID, or
+ * the line an upload carries, on a copy, writes neither, and keeps neither
+ * with its agreement. `restart({ version, ids: true })` updates it.
  *
  * The engine and the backups read one clock, which stands still until
  * `advance` moves it; each backup is taken a millisecond after the last. The push's and the read retry's alarms fire at the next
@@ -139,8 +140,8 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
   let knowsIds = ids
   let planner = Promise.resolve()
 
-  /** `value` as a build that knows no copy's ID has it: a manifest, or an agreement, without one. */
-  const asItKnows = value => (knowsIds || !value || typeof value !== 'object' ? value : (({ i, ...rest }) => rest)(value))
+  /** `value` as a build that knows no copy's ID has it: a manifest, or an agreement, without one or a line. */
+  const asItKnows = value => (knowsIds || !value || typeof value !== 'object' ? value : (({ i, p, o, ...rest }) => rest)(value))
 
   const peer = {
     name,
@@ -327,6 +328,19 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
         alarms.delete(alarm)
       for (const alarm of due)
         engine.onAlarm({ name: alarm })
+      await device.settle()
+      return true
+    },
+
+    /**
+     * Its pending push runs while it is offline, as a browser cut off from the
+     * sync service still writes to its synced storage: the upload waits in its
+     * outbox until it is back. Whether a push was pending.
+     */
+    async pushOffline() {
+      if (!alarms.delete(ALARM_PUSH))
+        return false
+      engine.onAlarm({ name: ALARM_PUSH })
       await device.settle()
       return true
     },

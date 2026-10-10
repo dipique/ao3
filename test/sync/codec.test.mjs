@@ -171,6 +171,18 @@ describe('encode/decode round-trip', () => {
     assert.deepEqual((await decode(asItems(withId))).options, pruneToSynced(options, defaults))
   })
 
+  test('the manifest carries the line it is given, as uploads alone, and has no key for what it isn\'t given', async () => {
+    const line = { p: { g: 5, w: 'tok-1' }, o: { g: 2, w: 'tok-0' } }
+    const withLine = await encode(options, defaults, 5, 'tok-1', SYNC_SCHEMA_VERSION, 'copy-1', { p: { ...line.p, x: 1 }, o: line.o })
+    const onlyP = await encode(options, defaults, 5, 'tok-1', SYNC_SCHEMA_VERSION, 'copy-1', { p: line.p })
+    const without = await encode(options, defaults, 5, 'tok-1', SYNC_SCHEMA_VERSION, 'copy-1')
+    assert.deepEqual([withLine.manifest.p, withLine.manifest.o], [line.p, line.o])
+    assert.equal('o' in onlyP.manifest, false)
+    assert.equal('p' in without.manifest || 'o' in without.manifest, false)
+    assert.deepEqual(withLine.chunks, without.chunks)
+    assert.equal(withLine.manifest.h, without.manifest.h)
+  })
+
   test('large payloads split into multiple chunks, each within the item limit', async () => {
     const rand = mulberry32(42)
     const big = Array.from({ length: 1500 }, () => ({

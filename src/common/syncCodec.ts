@@ -44,8 +44,14 @@ import type { Options } from './options.ts'
  * each list's title kept in a saved-list record that never syncs. An older build
  * adopting such a copy would drop the untracked lists it still holds as
  * entries, titles and all; at a version it doesn't speak, it waits instead.
+ *
+ * 12 was another, though the options didn't move: a build at 11 from before
+ * the manifest's {@link Manifest.i} would take a copy another browser started
+ * as an update, and pass it on without its ID, which every browser holding
+ * one takes as an update too. It carries no line ({@link Manifest.p}) on
+ * either. At 12 it waits, and every copy at 12 carries an ID.
  */
-export const SYNC_SCHEMA_VERSION = 11
+export const SYNC_SCHEMA_VERSION = 12
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400
@@ -93,10 +99,43 @@ export interface Manifest {
    * none the ID turning sync off gave it. A browser keeps the ID
    * of the copy it agreed with, so it can tell an update to that copy from a
    * copy another browser started (see `weighCopy` in `syncDecide.ts`).
-   * Optional, and ignored by older readers, as {@link Manifest.k} is: copies
-   * written by a build from before it carry none.
+   * Copies written by a build at an older sync version from before it carry
+   * none.
    */
   i?: string
+  /**
+   * The *Keep* this upload's line comes from: the upload itself for a *Keep*,
+   * or for settings sent over a copy holding nothing beyond defaults;
+   * otherwise the one the upload its writer agreed with carries. None where
+   * no *Keep* is in its line, as in a seed's. A browser whose line comes from
+   * its own *Keep* weighs a copy that saw it in neither this nor
+   * {@link Manifest.o} as one another browser started (see `weighCopy` in
+   * `syncDecide.ts`).
+   */
+  p?: Upload
+  /**
+   * For a *Keep*, or settings sent, the {@link Manifest.p} of the copy chosen
+   * over, as read at the press; every upload in its line carries it on. None
+   * where that copy carries none.
+   */
+  o?: Upload
+}
+
+/**
+ * One upload of the synced copy, told apart by its manifest's generation and
+ * writer token: every upload writes a token of its own.
+ */
+export interface Upload { g: number, w: string }
+
+/** The line an upload carries, or an agreement carries on: {@link Manifest.p} and {@link Manifest.o}. */
+export type Line = Pick<Manifest, 'p' | 'o'>
+
+/** `of`'s line alone, with a key only for what it carries: a manifest's, say, or an agreement's. */
+export function lineOf(of: Line): Line {
+  return {
+    ...(of.p ? { p: { g: of.p.g, w: of.p.w } } : {}),
+    ...(of.o ? { o: { g: of.o.g, w: of.o.w } } : {}),
+  }
 }
 
 export type DecodeResult
@@ -257,7 +296,10 @@ function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
 // Encode / decode / diff
 // ---------------------------------------------------------------------------
 
-/** `id` is the copy's {@link Manifest.i}; without one, the manifest carries none. */
+/**
+ * `id` is the copy's {@link Manifest.i}, and `line` the line the upload
+ * carries ({@link Line}); the manifest carries none of them it isn't given.
+ */
 export async function encode(
   options: Options,
   defaults: Options,
@@ -265,6 +307,7 @@ export async function encode(
   token: string,
   version = SYNC_SCHEMA_VERSION,
   id?: string,
+  line: Line = {},
 ): Promise<{ chunks: Record<string, string>, manifest: Manifest }> {
   const pruned = pruneToSynced(options, defaults)
   const canonical = canonicalStringify(pruned)
@@ -276,7 +319,7 @@ export async function encode(
   for (let i = 0; i < n; i++)
     chunks[`${CHUNK_PREFIX}${i}`] = b64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
 
-  return { chunks, manifest: { v: version, n, g: generation, h, w: token, k: syncedKeys(defaults), ...(id ? { i: id } : {}) } }
+  return { chunks, manifest: { v: version, n, g: generation, h, w: token, k: syncedKeys(defaults), ...(id ? { i: id } : {}), ...lineOf(line) } }
 }
 
 /**

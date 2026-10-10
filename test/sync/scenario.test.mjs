@@ -18,6 +18,8 @@ import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixtur
 const LEGACY_KNOWN = Object.keys(OPTION_DEFAULTS).filter(key => !['rules', 'workMarks', 'pruneOrphanedBlurbs'].includes(key))
 /** An option only the first sync build had, which newer builds drop on read. */
 const LEGACY_ONLY = { hideTags: { enabled: true, filters: [{ name: 'An old tag', matcher: 'exact' }] } }
+/** The newest sync version a build from before the synced copy's ID speaks. */
+const BEFORE_IDS = 11
 
 /** A reader's worth of data. */
 const MAIN = { rules: rulesFixture(40), workMarks: marksFixture(range(1000, 60)), textReplacements: textReplacementsFixture(10), trackedLists: trackedListsFixture(12) }
@@ -25,6 +27,19 @@ const MAIN = { rules: rulesFixture(40), workMarks: marksFixture(range(1000, 60))
 /** A browser with a reader's worth of data in it. */
 function mainBrowser(cloud, name = 'laptop', settings = {}) {
   return createDevice(cloud, name, { options: MAIN, ...settings })
+}
+
+/** Browsers syncing the reader's data, one after another. */
+async function inSync(...names) {
+  const cloud = createCloud()
+  const browsers = []
+  for (const name of names) {
+    const browser = browsers.length ? createDevice(cloud, name) : mainBrowser(cloud, name)
+    await browser.enableSync()
+    await cloud.run()
+    browsers.push(browser)
+  }
+  return { cloud, browsers }
 }
 
 /** The question a pause asks, as the options page words it: its backup note and its answers. */
@@ -698,13 +713,13 @@ describe('sync scenarios', () => {
       test('takes the first copy with one as an ordinary update, and its ID, with no question', async () => {
         // On a build from before the ID, the desktop seeds as the laptop does; its copy lands first.
         const cloud = createCloud()
-        const desktop = createDevice(cloud, 'desktop', { options: OWN, ids: false })
+        const desktop = createDevice(cloud, 'desktop', { options: OWN, version: BEFORE_IDS, ids: false })
         const laptop = mainBrowser(cloud)
         await desktop.settle()
         await laptop.settle()
         await desktop.enableSync()
         await laptop.enableSync()
-        await desktop.restart({ ids: true })
+        await desktop.restart({ version: SYNC_SCHEMA_VERSION, ids: true })
         assert.equal(desktop.meta.meta.i, undefined, 'precondition: agreed, with no ID')
         assert.equal(typeof laptop.meta.meta.i, 'string', 'precondition: the laptop seeded under one')
 
@@ -722,44 +737,27 @@ describe('sync scenarios', () => {
         assert.equal(laptop.meta.pause, null)
       })
 
-      test('writes none over a copy without one, so builds with and without the ID sync as before', async () => {
+      test('agreed on a copy with one as a build from before the ID, moves it up under that copy\'s ID, which the browsers holding it take as an update', async () => {
         const cloud = createCloud()
-        const laptop = mainBrowser(cloud, 'laptop', { ids: false })
+        const laptop = mainBrowser(cloud, 'laptop', { version: BEFORE_IDS })
         await laptop.enableSync()
         await cloud.run()
-        const desktop = createDevice(cloud, 'desktop', { ids: false })
-        await desktop.enableSync()
-        await cloud.run()
-        await desktop.restart({ ids: true })
-
-        await desktop.edit({ wordsPerMinute: 330 })
-        await cloud.run()
-        assert.match(cloud.manifest().w, /^desktop-/)
-        assert.equal('i' in cloud.manifest(), false)
-        assert.equal(laptop.options.wordsPerMinute, 330)
-        await laptop.edit({ wordsPerMinute: 340 })
-        await cloud.run()
-        assert.equal(desktop.options.wordsPerMinute, 340)
-        assert.equal(desktop.meta.pause, null)
-      })
-
-      test('agreed on a copy with one as a build from before the ID, uploads under that copy\'s ID, which the browsers holding it take as an update', async () => {
-        const cloud = createCloud()
-        const laptop = mainBrowser(cloud)
-        await laptop.enableSync()
-        await cloud.run()
-        const desktop = createDevice(cloud, 'desktop', { ids: false })
+        const desktop = createDevice(cloud, 'desktop', { version: BEFORE_IDS, ids: false })
         await desktop.enableSync()
         await cloud.run()
         const id = cloud.manifest().i
         assert.equal(typeof id, 'string', 'precondition: the laptop seeded under an ID')
-        await desktop.restart({ ids: true, init: true })
+        await desktop.restart({ version: SYNC_SCHEMA_VERSION, ids: true, init: true })
         assert.equal(desktop.meta.meta.i, undefined, 'precondition: agreed on the laptop\'s copy, with no ID')
 
         await desktop.edit({ wordsPerMinute: 330 })
         await cloud.run()
+        assert.equal(cloud.manifest().v, SYNC_SCHEMA_VERSION)
         assert.equal(cloud.manifest().i, id)
         assert.equal(desktop.meta.meta.i, id)
+
+        await laptop.restart({ version: SYNC_SCHEMA_VERSION, init: true })
+        await cloud.run()
         assert.equal(laptop.meta.pause, null, 'an ordinary update')
         assert.equal(laptop.options.wordsPerMinute, 330)
       })
@@ -777,7 +775,7 @@ describe('sync scenarios', () => {
     }
 
     test('a browser with no ID moving the synced copy up from an older sync version starts it under a new ID, which the browsers updated after it take', async () => {
-      const { cloud, browsers } = await upgradedTogether({ version: SYNC_SCHEMA_VERSION - 1 })
+      const { cloud, browsers } = await upgradedTogether({ version: BEFORE_IDS })
       const [laptop, ...rest] = browsers
       await laptop.restart({ version: SYNC_SCHEMA_VERSION, ids: true, init: true })
       await cloud.run()
@@ -798,30 +796,40 @@ describe('sync scenarios', () => {
       }
     })
 
-    test('turning sync off gives a browser a new ID, which its next upload puts on a copy that has none, and the browsers with none take it', async () => {
-      const { cloud, browsers } = await upgradedTogether()
-      for (const browser of browsers)
-        await browser.restart({ ids: true, init: true })
-      const [laptop, desktop] = browsers
-      await laptop.edit({ wordsPerMinute: 250 })
+    /**
+     * A build at 11 from before the ID, taking a copy another browser started
+     * as an update, would pass it on without its ID, as an update to every
+     * browser that holds one. At a sync version it doesn't speak, it waits.
+     */
+    test('a build at 11 from before the ID pauses for a copy at this sync version, passing nothing on without its ID, and takes it once updated', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud, 'laptop', { version: BEFORE_IDS })
+      await laptop.enableSync()
       await cloud.run()
-      assert.equal('i' in cloud.manifest(), false, 'precondition: a copy with no ID')
-
-      await desktop.disableSync()
-      assert.equal(typeof desktop.meta.meta.i, 'string', 'a new ID as sync turns off')
-      await desktop.enableSync()
-      await cloud.run()
-      assert.equal(desktop.meta.pause, null, 'precondition: joined with no question')
-
-      await desktop.edit({ wordsPerMinute: 260 })
+      const older = createDevice(cloud, 'older', { version: BEFORE_IDS, ids: false })
+      await older.enableSync()
       await cloud.run()
       const id = cloud.manifest().i
-      assert.equal(typeof id, 'string')
-      for (const browser of browsers) {
-        assert.equal(browser.meta.pause, null, browser.name)
-        assert.equal(browser.options.wordsPerMinute, 260, browser.name)
-        assert.equal(browser.meta.meta.i, id, browser.name)
-      }
+      assert.equal(typeof id, 'string', 'precondition: the laptop seeded under an ID')
+
+      await laptop.restart({ version: SYNC_SCHEMA_VERSION, init: true })
+      await laptop.edit({ wordsPerMinute: 250 })
+      await cloud.run()
+      assert.deepEqual([cloud.manifest().v, cloud.manifest().i], [SYNC_SCHEMA_VERSION, id], 'precondition: the updated laptop moved the copy up under its ID')
+      assert.equal(older.meta.pause?.reason, 'newer-version')
+      assert.equal(older.options.wordsPerMinute, 200, 'not taken')
+
+      await older.edit({ wordsPerMinute: 260 })
+      await cloud.run()
+      assert.deepEqual([cloud.manifest().w, cloud.manifest().i], [laptop.meta.meta.w, id], 'nothing passed on')
+      assert.equal(laptop.options.wordsPerMinute, 250)
+
+      await older.restart({ version: SYNC_SCHEMA_VERSION, ids: true, init: true })
+      await cloud.run()
+      assert.equal(older.meta.pause, null)
+      assert.equal(older.options.wordsPerMinute, 250, 'the copy, taken as an update')
+      assert.equal(older.meta.meta.i, id)
+      assert.deepEqual(older.backups.map(b => b.kind), ['pre-sync'], 'no question: only the backup turning sync on took')
     })
 
     test('turning sync off gives a browser a new ID in place of the one it agreed on', async () => {
@@ -835,39 +843,6 @@ describe('sync scenarios', () => {
       await laptop.disableSync()
       assert.equal(typeof laptop.meta.meta.i, 'string')
       assert.notEqual(laptop.meta.meta.i, id)
-    })
-
-    test('a copy with no ID, from a build at this sync version from before it, is an ordinary update, and the next upload puts the ID back', async () => {
-      const cloud = createCloud()
-      const laptop = mainBrowser(cloud)
-      await laptop.enableSync()
-      await cloud.run()
-      const desktop = createDevice(cloud, 'desktop')
-      await desktop.enableSync()
-      await cloud.run()
-      const id = cloud.manifest().i
-      assert.equal(typeof id, 'string', 'precondition: the laptop seeded under an ID')
-      assert.equal(desktop.meta.meta.i, id, 'precondition: both agreed on the laptop\'s copy')
-      const older = createDevice(cloud, 'older', { ids: false })
-      await older.enableSync()
-      await cloud.run()
-
-      await older.edit({ wordsPerMinute: 250 })
-      await cloud.run()
-      assert.equal('i' in cloud.manifest(), false, 'precondition: a copy with no ID')
-      for (const browser of [laptop, desktop]) {
-        assert.equal(browser.meta.pause, null, browser.name)
-        assert.equal(browser.options.wordsPerMinute, 250, browser.name)
-        assert.equal(browser.meta.meta.i, id, `${browser.name} keeps its ID`)
-      }
-
-      await laptop.edit({ wordsPerMinute: 260 })
-      await cloud.run()
-      assert.equal(cloud.manifest().i, id)
-      for (const browser of [desktop, older]) {
-        assert.equal(browser.meta.pause, null, browser.name)
-        assert.equal(browser.options.wordsPerMinute, 260, browser.name)
-      }
     })
 
     test('turned off and on again, a browser that seeds does so under a new ID', async () => {
@@ -896,6 +871,433 @@ describe('sync scenarios', () => {
       assert.equal(typeof cloud.manifest().i, 'string')
       assert.notEqual(cloud.manifest().i, first)
       assert.equal(laptop.meta.meta.i, cloud.manifest().i)
+    })
+
+    /**
+     * No build writes a copy at this sync version without an ID. One that
+     * arrives anyway can't say which copy it was written over: it is taken as
+     * an update, and the browser keeps its ID, which its next upload puts back.
+     */
+    test('a copy at this sync version with no ID is an ordinary update, and the next upload puts the ID back', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      const id = laptop.meta.meta.i
+      assert.equal(desktop.meta.meta.i, id, 'precondition: both agreed on the laptop\'s copy')
+      laptop.peer.online = false
+      await laptop.edit({ wordsPerMinute: 250 })
+      assert.equal(await laptop.pushOffline(), true)
+      const { i, ...unnamed } = laptop.synced[MANIFEST_KEY]
+      await desktop.receive({ ...laptop.synced, [MANIFEST_KEY]: unnamed })
+      assert.deepEqual([desktop.meta.pause, desktop.options.wordsPerMinute, desktop.meta.meta.i], [null, 250, id])
+
+      await desktop.edit({ wordsPerMinute: 260 })
+      laptop.peer.online = true
+      await cloud.run()
+      assert.deepEqual([cloud.manifest().i, laptop.meta.pause, laptop.options.wordsPerMinute], [id, null, 260])
+    })
+  })
+
+  /**
+   * Two browsers answering *Keep* over one copy before either has received
+   * the other's upload both upload under the copy's ID. Each *Keep* starts a
+   * line of its own, chosen over the copy's, which every upload after it
+   * carries on, and a browser whose line comes from its own *Keep* weighs a
+   * copy that never saw it as a copy another browser started: asked about,
+   * backed up first. Ordinary edits made at once stay last-writer-wins.
+   */
+  describe('two browsers keeping their own settings at once', () => {
+    /** The desktop's settings of its own and the tablet's: the reader's, each with rules more and a reading speed of its own. */
+    const DESKTOP = { ...MAIN, rules: rulesFixture(41), wordsPerMinute: 320 }
+    const TABLET = { ...MAIN, rules: rulesFixture(42), wordsPerMinute: 310 }
+    const SETTINGS = { desktop: DESKTOP, tablet: TABLET }
+
+    /**
+     * A laptop syncing the reader's data, then a desktop and a tablet with
+     * settings of their own turning sync on over it, each asked which to keep.
+     * `order` is the order they reach the sync service in: the second's
+     * writes land last.
+     */
+    async function bothAsked(order = ['desktop', 'tablet']) {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const browsers = Object.fromEntries(order.map(name => [name, createDevice(cloud, name, { options: SETTINGS[name] })]))
+      for (const name of order) {
+        await browsers[name].settle()
+        await browsers[name].enableSync()
+      }
+      await cloud.run()
+      for (const name of order)
+        assert.equal(browsers[name].meta.pause?.reason, 'first-sync', `precondition: ${name} asked`)
+      return { cloud, laptop, ...browsers }
+    }
+
+    /** `browsers` each answer *Keep* before any has received another's upload. */
+    async function allKeep(...browsers) {
+      for (const browser of browsers)
+        assert.equal(await browser.resolveHeld('keep'), true, `${browser.name} answered`)
+    }
+
+    /** The settings that tell the reader's browsers apart. */
+    const ownOf = browser => [browser.options.wordsPerMinute, browser.options.rules.filters.length]
+
+    test('the one whose upload lands first is asked again over the other\'s, backed up first, with nothing replaced', async () => {
+      const { cloud, laptop, desktop, tablet } = await bothAsked(['desktop', 'tablet'])
+      const id = cloud.manifest().i
+      await allKeep(desktop, tablet)
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^tablet-/, 'precondition: the tablet\'s upload landed last')
+      assert.equal(cloud.manifest().i, id, 'precondition: both under the copy\'s ID')
+
+      const { at, ...pause } = desktop.meta.pause ?? {}
+      assert.deepEqual(pause, { reason: 'first-sync', otherCopy: true, g: cloud.manifest().g, w: cloud.manifest().w, backedUp: true, backupFailed: false, loss: null })
+      assert.deepEqual(ownOf(desktop), [320, 41], 'nothing replaced')
+      assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320], ['sync-declined', 200], ['sync-held', 320]], 'backed up as it is asked again')
+      assert.deepEqual(tablet.meta.pause, null)
+      assert.deepEqual(ownOf(laptop), [310, 42], 'the laptop, which kept nothing, takes the copy as an update')
+
+      // Answered, the desktop's settings go up over the tablet's, which it has seen: an update to the rest.
+      assert.equal(await desktop.resolveHeld('keep'), true)
+      await cloud.run()
+      for (const browser of [desktop, laptop, tablet]) {
+        assert.equal(browser.meta.pause, null, browser.name)
+        assert.deepEqual(ownOf(browser), [320, 41], browser.name)
+      }
+      await tablet.edit({ wordsPerMinute: 330 })
+      await cloud.run()
+      assert.deepEqual([desktop.meta.pause, desktop.options.wordsPerMinute], [null, 330], 'syncing as one from then on')
+    })
+
+    /**
+     * A browser takes no notice of an upload that loses the generation's
+     * tie-break to the one it agreed with, so the two stand apart until one
+     * uploads again. That upload carries on its writer's own *Keep*'s line,
+     * which the other's never saw.
+     */
+    test('one whose upload lands last but loses the tie-break is asked once the other uploads again, whichever does', async () => {
+      for (const next of ['tablet', 'desktop']) {
+        const { cloud, laptop, desktop, tablet } = await bothAsked(['tablet', 'desktop'])
+        await allKeep(desktop, tablet)
+        await cloud.run()
+        assert.match(cloud.manifest().w, /^desktop-/, 'precondition: the desktop\'s upload landed last')
+        assert.deepEqual([tablet.meta.pause, ...ownOf(tablet)], [null, 310, 42], 'precondition: the tablet took no notice of it')
+        assert.deepEqual([desktop.meta.pause, laptop.meta.pause], [null, null])
+
+        const uploader = { tablet, desktop }[next]
+        const asked = next === 'tablet' ? desktop : tablet
+        await uploader.edit({ wordsPerMinute: 333 })
+        await cloud.run()
+        assert.match(cloud.manifest().w, new RegExp(`^${next}-`), `precondition: the ${next} uploaded`)
+        assert.equal(asked.meta.pause?.reason, 'first-sync', `${asked.name} asked once the ${next} uploads`)
+        assert.equal(asked.meta.pause.otherCopy, true)
+        assert.deepEqual(ownOf(asked), ownOf({ options: SETTINGS[asked.name] }), `nothing of the ${asked.name}'s replaced`)
+        assert.deepEqual(asked.backups.at(-1), { kind: 'sync-held', options: asked.options }, `the ${asked.name} backed up first`)
+      }
+    })
+
+    test('three seeding at once: the two asked over the third\'s copy keep their own at once, and the one replaced unseen is asked again', async () => {
+      const cloud = createCloud()
+      const desktop = createDevice(cloud, 'desktop', { options: DESKTOP })
+      const laptop = mainBrowser(cloud)
+      const tablet = createDevice(cloud, 'tablet', { options: TABLET })
+      for (const browser of [desktop, laptop, tablet])
+        await browser.settle()
+      for (const browser of [desktop, laptop, tablet])
+        await browser.enableSync()
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^tablet-/, 'precondition: the tablet\'s seed landed last')
+      for (const browser of [desktop, laptop])
+        assert.equal(browser.meta.pause?.otherCopy, true, `precondition: ${browser.name} asked over it`)
+
+      await allKeep(desktop, laptop)
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^laptop-/, 'precondition: the laptop\'s upload landed last')
+      assert.equal(desktop.meta.pause?.otherCopy, true, 'the desktop asked again')
+      assert.deepEqual(ownOf(desktop), [320, 41], 'nothing replaced')
+      assert.equal(desktop.meta.pause.backedUp, true)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['sync-held', 'sync-declined'], 'its settings are the ones the backup taken as it was first asked holds')
+      assert.deepEqual(desktop.backups[0].options, desktop.options)
+      assert.equal(laptop.meta.pause, null)
+    })
+
+    /**
+     * Settings sent over a copy holding nothing beyond defaults are sent as
+     * a *Keep* sends them, unasked: two browsers turning sync on at once over
+     * such a copy each send theirs, and the one whose upload is replaced
+     * unseen would lose its settings with no backup at all.
+     */
+    test('two sending their settings over a copy holding nothing beyond defaults at once: the one replaced unseen is asked, backed up first', async () => {
+      const cloud = createCloud()
+      const laptop = createDevice(cloud, 'laptop')
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: DESKTOP })
+      const tablet = createDevice(cloud, 'tablet', { options: TABLET })
+      for (const browser of [desktop, tablet])
+        await browser.settle()
+      for (const browser of [desktop, tablet])
+        await browser.enableSync()
+      await cloud.run()
+
+      assert.match(cloud.manifest().w, /^tablet-/, 'precondition: the tablet\'s settings landed last')
+      assert.equal(desktop.meta.pause?.otherCopy, true, 'the desktop asked')
+      assert.deepEqual(ownOf(desktop), [320, 41], 'nothing replaced')
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'sync-held'])
+      assert.deepEqual(desktop.backups.at(-1).options, desktop.options)
+      assert.deepEqual([tablet.meta.pause, laptop.meta.pause], [null, null])
+      assert.deepEqual(ownOf(laptop), [310, 42])
+    })
+
+    test('a held update kept by two browsers at once: the one replaced unseen is asked where the two differ, and settles silently where they don\'t', async () => {
+      for (const differ of [true, false]) {
+        const { cloud, browsers: [laptop, desktop, tablet] } = await inSync('laptop', 'desktop', 'tablet')
+        await laptop.edit({ rules: rulesFixture(1) })
+        await cloud.run()
+        for (const browser of [desktop, tablet])
+          assert.equal(browser.meta.pause?.reason, 'held', `precondition: ${browser.name} held`)
+        if (differ)
+          await desktop.edit({ wordsPerMinute: 300 })
+
+        await allKeep(desktop, tablet)
+        await cloud.run()
+        assert.match(cloud.manifest().w, /^tablet-/, 'precondition: the tablet\'s upload landed last')
+        assert.equal(tablet.meta.pause, null)
+        assert.equal(desktop.options.rules.filters.length, 40, 'nothing replaced')
+        if (differ) {
+          assert.equal(desktop.meta.pause?.otherCopy, true, 'asked again')
+          assert.equal(desktop.options.wordsPerMinute, 300)
+          assert.deepEqual(desktop.backups.at(-1), { kind: 'sync-held', options: desktop.options })
+        }
+        else {
+          assert.equal(desktop.meta.pause, null, 'the same settings: nothing to ask')
+        }
+      }
+    })
+
+    test('asked again over an upload the service then gives way to this browser\'s own, the question goes', async () => {
+      const { cloud, desktop, tablet } = await bothAsked(['tablet', 'desktop'])
+      await allKeep(desktop, tablet)
+      await desktop.receive(tablet.synced)
+      assert.equal(desktop.meta.pause?.otherCopy, true, 'precondition: asked over the tablet\'s upload')
+
+      cloud.deliver()
+      await desktop.settle()
+      assert.match(cloud.manifest().w, /^desktop-/, 'precondition: the desktop\'s landed last')
+      assert.equal(desktop.meta.pause, null)
+      assert.deepEqual(ownOf(desktop), [320, 41], 'nothing applied')
+    })
+
+    /**
+     * A *Keep* backs up the copy it read, then uploads over whatever is there
+     * by then, under that copy's ID, in a line of its own chosen over the
+     * copy it read: another *Keep* landing in between never saw it.
+     */
+    test('a Keep upload landing between another\'s reading the copy and uploading: its browser is asked again, backed up first', async () => {
+      const { cloud, desktop, tablet } = await bothAsked(['desktop', 'tablet'])
+      assert.equal(await tablet.resolveHeld('keep'), true)
+      desktop.whileBackingUp(() => cloud.deliver())
+      assert.equal(await desktop.resolveHeld('keep'), true)
+      assert.match(desktop.synced[MANIFEST_KEY].w, /^desktop-/)
+      assert.equal(desktop.backups.at(-1).options.wordsPerMinute, 200, 'precondition: the desktop backed up the copy it read, not the tablet\'s')
+
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^desktop-/, 'precondition: the desktop\'s upload went over the tablet\'s')
+      assert.equal(tablet.meta.pause?.otherCopy, true, 'the tablet asked again')
+      assert.deepEqual(ownOf(tablet), [310, 42], 'nothing replaced')
+      assert.deepEqual(tablet.backups.at(-1), { kind: 'sync-held', options: tablet.options })
+    })
+
+    test('an ordinary upload landing there is replaced as last-writer-wins replaces any', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: DESKTOP })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync', 'precondition: asked')
+
+      await laptop.edit({ wordsPerMinute: 250 })
+      await laptop.react()
+      desktop.whileBackingUp(() => cloud.deliver())
+      assert.equal(await desktop.resolveHeld('keep'), true)
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^desktop-/)
+      assert.equal(laptop.meta.pause, null, 'no question')
+      assert.deepEqual(ownOf(laptop), [320, 41])
+    })
+
+    /** The desktop keeps its own settings over the laptop's, which the laptop takes. */
+    async function keptOver() {
+      const cloud = createCloud()
+      const desktop = createDevice(cloud, 'desktop', { options: DESKTOP })
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync', 'precondition: asked')
+      assert.equal(await desktop.resolveHeld('keep'), true)
+      await cloud.run()
+      assert.deepEqual(ownOf(laptop), [320, 41], 'precondition: the laptop took the desktop\'s settings')
+      return { cloud, desktop, laptop }
+    }
+
+    /** Two browsers' edits, each pushed before either has received the other's; the second's lands last. */
+    async function editAtOnce(cloud, [first, second]) {
+      await first.edit({ wordsPerMinute: 330 })
+      await second.edit({ wordsPerMinute: 340 })
+      await first.react()
+      await second.react()
+      await cloud.run()
+      assert.match(cloud.manifest().w, new RegExp(`^${second.name}-`), `precondition: the ${second.name}'s edit landed last`)
+    }
+
+    test('ordinary edits made at once stay last-writer-wins, with no question', async () => {
+      const cloud = createCloud()
+      const desktop = createDevice(cloud, 'desktop')
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      await desktop.enableSync()
+      await cloud.run()
+      await editAtOnce(cloud, [desktop, laptop])
+      for (const browser of [desktop, laptop]) {
+        assert.equal(browser.meta.pause, null, browser.name)
+        assert.equal(browser.options.wordsPerMinute, 340, browser.name)
+      }
+    })
+
+    test('right after a Keep too: the edit of a browser that took it is an ordinary update', async () => {
+      const { cloud, desktop, laptop } = await keptOver()
+      await editAtOnce(cloud, [desktop, laptop])
+      for (const browser of [desktop, laptop]) {
+        assert.equal(browser.meta.pause, null, browser.name)
+        assert.equal(browser.options.wordsPerMinute, 340, browser.name)
+      }
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'sync-declined'], 'nothing asked, nothing backed up')
+    })
+
+    /**
+     * Each upload carries on the line of the *Keep* it comes from: a browser
+     * that took the *Keep* upload and then uploads twice, the first never
+     * reaching the browser that kept, has still seen it.
+     */
+    test('right after a Keep, however many uploads a browser that took it makes before one reaches the browser that kept, they are ordinary updates', async () => {
+      const { cloud, desktop, laptop } = await keptOver()
+      desktop.peer.online = false
+      for (const wordsPerMinute of [350, 360]) {
+        await laptop.edit({ wordsPerMinute })
+        await cloud.run()
+      }
+      desktop.peer.online = true
+      await cloud.run()
+      assert.deepEqual([desktop.meta.pause, desktop.options.wordsPerMinute], [null, 360])
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'sync-declined'], 'nothing asked, nothing backed up')
+    })
+
+    /**
+     * Every upload carries on the line of the *Keep* it comes from, so the
+     * browser that kept sees its *Keep* in an upload however many browsers'
+     * uploads came between, the ones before it missed included.
+     */
+    test('right after a Keep or a send, a run of other browsers\' edits the browser that kept missed the first of: ordinary updates', async () => {
+      for (const sent of [false, true]) {
+        const cloud = createCloud()
+        const laptop = createDevice(cloud, 'laptop', { options: sent ? {} : MAIN })
+        const tablet = createDevice(cloud, 'tablet')
+        for (const browser of [laptop, tablet]) {
+          await browser.enableSync()
+          await cloud.run()
+        }
+        const desktop = createDevice(cloud, 'desktop', { options: DESKTOP })
+        await desktop.settle()
+        await desktop.enableSync()
+        await cloud.run()
+        if (!sent)
+          assert.equal(await desktop.resolveHeld('keep'), true)
+        await cloud.run()
+        assert.deepEqual(ownOf(tablet), [320, 41], 'precondition: the tablet took the desktop\'s settings')
+
+        desktop.peer.online = false
+        await laptop.edit({ wordsPerMinute: 330 })
+        await cloud.run()
+        await tablet.edit({ wordsPerMinute: 340 })
+        await cloud.run()
+        desktop.peer.online = true
+        await cloud.run()
+        const what = sent ? 'sent' : 'kept'
+        assert.deepEqual([desktop.meta.pause, ...ownOf(desktop)], [null, 340, 41], what)
+        assert.deepEqual(desktop.backups.map(b => b.kind), sent ? ['pre-sync'] : ['pre-sync', 'sync-declined'], `${what}: nothing asked, nothing backed up`)
+      }
+    })
+
+    /**
+     * The browser that kept goes on weighing what arrives against its *Keep*
+     * while the line it agrees with comes from it, past the first upload that
+     * saw it: the other browser's *Keep* can still arrive later, in an upload
+     * written over it.
+     */
+    test('the other browser that kept, offline across the race, landing an edit over uploads that saw the first\'s Keep: the first is asked, backed up first', async () => {
+      const { cloud, laptop, desktop, tablet } = await bothAsked(['desktop', 'tablet'])
+      tablet.peer.online = false
+      await allKeep(desktop, tablet)
+      await cloud.run()
+      await laptop.edit({ wordsPerMinute: 330 })
+      await cloud.run()
+      assert.deepEqual([desktop.meta.pause, ...ownOf(desktop)], [null, 330, 41], 'precondition: the desktop took the laptop\'s edit over its settings')
+
+      await tablet.edit({ wordsPerMinute: 311 })
+      assert.equal(await tablet.pushOffline(), true)
+      tablet.peer.online = true
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^tablet-/, 'precondition: the tablet\'s edit landed last')
+      assert.equal(desktop.meta.pause?.otherCopy, true, 'the desktop asked')
+      assert.deepEqual(ownOf(desktop), [330, 41], 'nothing replaced')
+      assert.deepEqual(desktop.backups.at(-1), { kind: 'sync-held', options: desktop.options })
+      assert.equal(tablet.meta.pause, null)
+    })
+
+    /**
+     * A question a copy that never saw this browser's *Keep* raised goes only
+     * once a copy that did is there again: an upload of an older line, under
+     * the copy's ID, doesn't end it.
+     */
+    test('a question over a copy that never saw this browser\'s Keep stands over an older upload landing under the copy\'s ID, and this browser\'s edits wait', async () => {
+      const { cloud, browsers: [laptop, phone] } = await inSync('laptop', 'phone')
+      phone.peer.online = false
+      await phone.edit({ wordsPerMinute: 205 })
+      assert.equal(await phone.pushOffline(), true)
+      await laptop.edit({ wordsPerMinute: 210 })
+      await cloud.run()
+
+      const desktop = createDevice(cloud, 'desktop', { options: DESKTOP })
+      const tablet = createDevice(cloud, 'tablet', { options: TABLET })
+      for (const browser of [desktop, tablet])
+        await browser.settle()
+      for (const browser of [desktop, tablet])
+        await browser.enableSync()
+      await cloud.run()
+      await allKeep(desktop, tablet)
+      await cloud.run()
+      await laptop.edit({ wordsPerMinute: 330 })
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.otherCopy, true, 'precondition: the desktop asked over the laptop\'s edit to the tablet\'s settings')
+      const asked = { g: desktop.meta.pause.g, w: desktop.meta.pause.w }
+
+      phone.peer.online = true
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^phone-/, 'precondition: the phone\'s upload, from before either Keep, landed last')
+      assert.ok(cloud.manifest().g < desktop.meta.meta.g, 'precondition: at an older generation, which isn\'t pulled')
+      assert.deepEqual({ g: desktop.meta.pause?.g, w: desktop.meta.pause?.w }, asked, 'still asked')
+
+      await desktop.edit({ wordsPerMinute: 321 })
+      await desktop.edit({ wordsPerMinute: 322 })
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^phone-/, 'nothing of the desktop\'s sent')
+      assert.deepEqual(ownOf(tablet), [330, 42])
     })
   })
 
@@ -928,19 +1330,6 @@ describe('sync scenarios', () => {
 
     /** The synced copy as the sync service holds it, decoded. */
     const served = cloud => decode(Object.fromEntries(cloud.server))
-
-    /** Browsers syncing the reader's data, one after another. */
-    async function inSync(...names) {
-      const cloud = createCloud()
-      const browsers = []
-      for (const name of names) {
-        const browser = browsers.length ? createDevice(cloud, name) : mainBrowser(cloud, name)
-        await browser.enableSync()
-        await cloud.run()
-        browsers.push(browser)
-      }
-      return { cloud, browsers }
-    }
 
     /** What the options page says of `browser`'s sync. */
     const panelOf = browser => syncStatusView({ ...browser.meta, staleBuild: false, backgroundOutdated: false }, SYNC_SCHEMA_VERSION)
@@ -1269,6 +1658,67 @@ describe('sync scenarios', () => {
       assert.equal(tablet.meta.inconsistent, null)
       assert.equal(tablet.meta.meta.i, cloud.manifest().i)
       assert.deepEqual(tablet.backups, tabletBackups, 'nothing to back up')
+    })
+
+    /**
+     * Each replacement goes up under a new ID of its own, so the browser
+     * whose replacement is replaced weighs the other's as a copy another
+     * browser started, as every other browser does. Where the two stand
+     * apart, a replacement losing the generation's tie-break, the next upload
+     * of either is weighed so by the other.
+     */
+    test('two browsers replacing the synced copy at about once: the one replaced asks before using the other\'s, backed up first', async () => {
+      for (const order of [['desktop', 'tablet'], ['tablet', 'desktop']]) {
+        const { cloud, browsers } = await inSync('laptop', ...order)
+        const { laptop, desktop, tablet } = Object.fromEntries(browsers.map(browser => [browser.name, browser]))
+        await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+        // Edits made while the copy can't be read whole wait here.
+        await desktop.edit({ wordsPerMinute: 300 })
+        await tablet.edit({ wordsPerMinute: 310 })
+        for (const browser of [desktop, tablet])
+          browser.advance(WAIT)
+        await cloud.run()
+        for (const browser of [desktop, tablet])
+          assert.equal(browser.meta.inconsistent?.replaceable, true, `precondition: ${browser.name} offered`)
+
+        assert.equal(await desktop.replace(), true)
+        assert.equal(await tablet.replace(), true)
+        await cloud.run()
+        assert.match(cloud.manifest().w, new RegExp(`^${order[1]}-`), `precondition: the ${order[1]}'s replacement landed last`)
+        if (order[1] === 'desktop') {
+          assert.equal(tablet.meta.pause, null, 'precondition: the tablet, whose replacement wins the tie-break, took no notice of the desktop\'s')
+          await tablet.edit({ wordsPerMinute: 311 })
+          await cloud.run()
+        }
+        assert.equal(desktop.meta.pause?.otherCopy, true, `${order}: the desktop asked`)
+        assert.equal(desktop.options.wordsPerMinute, 300, `${order}: nothing replaced`)
+        assert.deepEqual(desktop.backups.at(-1), { kind: 'sync-held', options: desktop.options }, `${order}: backed up first`)
+        assert.equal(laptop.meta.pause?.otherCopy, true, `${order}: the laptop asked`)
+        assert.equal(laptop.options.wordsPerMinute, 250, `${order}: nothing replaced`)
+      }
+    })
+
+    test('two browsers keeping their own over the replacement at about once: the one replaced unseen is asked again', async () => {
+      const { cloud, browsers: [laptop, desktop, tablet] } = await inSync('laptop', 'desktop', 'tablet')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      await tablet.edit({ wordsPerMinute: 310 })
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(await desktop.replace(), true)
+      await cloud.run()
+      for (const browser of [laptop, tablet])
+        assert.equal(browser.meta.pause?.otherCopy, true, `precondition: ${browser.name} asked over the replacement`)
+
+      for (const browser of [laptop, tablet])
+        assert.equal(await browser.resolveHeld('keep'), true)
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^tablet-/, 'precondition: the tablet\'s landed last')
+      assert.equal(laptop.meta.pause?.otherCopy, true, 'the laptop asked again')
+      assert.equal(laptop.meta.pause.backedUp, true)
+      assert.equal(laptop.options.wordsPerMinute, 250, 'nothing replaced')
+      assert.deepEqual(laptop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['sync-held', 250], ['sync-declined', 200]], 'the backup taken as it was first asked holds its settings')
+      assert.equal(tablet.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 310, 'the desktop, which kept nothing over it, takes the tablet\'s')
     })
 
     /**

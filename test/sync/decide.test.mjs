@@ -3,14 +3,14 @@ import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { pruneToSynced, SYNC_SCHEMA_VERSION, syncedKeys } from '../../src/common/syncCodec.ts'
-import { decideFirstPull, decidePull, decidePush, isRemoteNewer, questionGone, refuseUnbacked, uploadId, weighCopy } from '../../src/common/syncDecide.ts'
+import { decideFirstPull, decidePull, decidePush, isRemoteNewer, questionGone, refuseUnbacked, uploadId, uploadLine, weighCopy, writerToken } from '../../src/common/syncDecide.ts'
 import { rulesFixture, textReplacementsFixture } from './harness.mjs'
 
 const V = SYNC_SCHEMA_VERSION
 
-/** Build a manifest with sensible defaults, and the copy's ID `i` where one is given. */
-function m({ g = 1, h = 'H', w = 'wA', v = V, n = 1, i } = {}) {
-  return { v, n, g, h, w, ...(i ? { i } : {}) }
+/** Build a manifest with sensible defaults, and the copy's ID `i` and its line `p` and `o` where they are given. */
+function m({ g = 1, h = 'H', w = 'wA', v = V, n = 1, i, p, o } = {}) {
+  return { v, n, g, h, w, ...(i ? { i } : {}), ...(p ? { p } : {}), ...(o ? { o } : {}) }
 }
 
 describe('isRemoteNewer', () => {
@@ -287,6 +287,94 @@ describe('the synced copy\'s ID', () => {
       assert.equal(questionGone(held, agreed(), m({ g: 5, w: 'wA', i: 'mine' })), false)
       assert.equal(questionGone({ reason: 'older-cloud', remoteVersion: V - 1 }, agreed(), m({ i: 'mine' })), false)
       assert.equal(questionGone(null, agreed(), m({ i: 'mine' })), false)
+    })
+  })
+})
+
+/**
+ * Two browsers answering *Keep* over one copy before either has received the
+ * other's upload both upload under the copy's ID. Each *Keep* starts a line of
+ * its own, which every upload after it carries on, and a browser whose line
+ * comes from its own *Keep* weighs a copy that never saw it as a copy another
+ * browser started.
+ */
+describe('two Keeps at once', () => {
+  const ME = 'me'
+  const mine = random => writerToken(ME, random)
+  /** The line of the copy kept over: another browser's Keep before. */
+  const BEFORE = { p: { g: 3, w: writerToken('them', 'b') } }
+  /** This browser's Keep upload. */
+  const KEEP = { g: 6, w: mine('k') }
+  /** The line this browser's Keep starts. */
+  const LINE = { p: KEEP, o: BEFORE.p }
+  /** Agreed with an upload in the line of this browser's Keep: the Keep itself, or one after it, another browser's or its own. */
+  const keeping = (g = KEEP.g, w = KEEP.w) => ({ g, h: 'H', w, i: 'copy', ...LINE })
+  /** Another browser's Keep. */
+  const THEIRS = { g: 8, w: writerToken('them', 'k') }
+
+  describe('uploadLine', () => {
+    test('a Keep, or settings sent, starts a line of its own, chosen over the copy\'s', () => {
+      assert.deepEqual(uploadLine(keeping(), { upload: THEIRS, over: LINE }), { p: THEIRS, o: KEEP })
+      assert.deepEqual(uploadLine({}, { upload: KEEP, over: {} }), { p: KEEP }, 'over a copy whose line has no Keep')
+    })
+
+    test('any other upload carries on the line of the upload its writer agreed with', () => {
+      assert.deepEqual(uploadLine(keeping(9, writerToken('them', 'x'))), { p: KEEP, o: BEFORE.p })
+      assert.deepEqual(uploadLine({ g: 4, h: 'H', w: mine('seed'), i: 'copy' }), {}, 'a line with no Keep: none')
+      assert.deepEqual(uploadLine({ g: 0, h: '', w: '' }), {}, 'nothing agreed')
+    })
+
+    test('an upload is carried as its generation and writer token alone', () => {
+      assert.deepEqual(uploadLine({ p: { ...KEEP, x: 1 }, o: { ...BEFORE.p, x: 1 } }), { p: KEEP, o: BEFORE.p })
+    })
+  })
+
+  describe('weighCopy, where the agreed line comes from this browser\'s Keep', () => {
+    test('a copy that saw it: an ordinary update', () => {
+      const update = { weigh: 'update', id: 'copy' }
+      const copy = (g, w, line) => m({ g, w, i: 'copy', ...line })
+      assert.deepEqual(weighCopy(keeping(), copy(7, writerToken('them', 'd'), LINE), ME), update, 'another browser\'s edit in its line')
+      assert.deepEqual(weighCopy(keeping(9, mine('e')), copy(12, writerToken('third', 'e'), LINE), ME), update, 'however many uploads came between, whoever made them')
+      assert.deepEqual(weighCopy(keeping(), copy(8, THEIRS.w, { p: THEIRS, o: KEEP }), ME), update, 'another browser\'s Keep chosen over a copy in its line')
+      assert.deepEqual(weighCopy(keeping(), copy(9, writerToken('third', 'e'), { p: THEIRS, o: KEEP }), ME), update, 'an edit in that Keep\'s line')
+    })
+
+    test('a copy that never saw it: weighed as a copy another browser started, under its ID', () => {
+      const other = { weigh: 'other', id: 'copy' }
+      const copy = line => m({ g: 6, w: writerToken('them', 'k'), i: 'copy', ...line })
+      assert.deepEqual(weighCopy(keeping(), copy({ p: { g: 6, w: writerToken('them', 'k') }, o: BEFORE.p }), ME), other, 'another Keep over the same copy')
+      assert.deepEqual(weighCopy(keeping(), copy(BEFORE), ME), other, 'an edit in the line before')
+      assert.deepEqual(weighCopy(keeping(), copy({}), ME), other, 'a line with no Keep')
+      assert.deepEqual(weighCopy(keeping(), copy({ p: { g: 4, w: mine('earlier') } }), ME), other, 'a line from an earlier Keep of this browser\'s')
+    })
+
+    test('its own Keep is told by the writer token\'s first part, not by a token that merely starts with its ID', () => {
+      const lookalike = { g: 6, w: writerToken(`${ME}2`, 'k') }
+      assert.deepEqual(weighCopy({ ...keeping(), p: lookalike }, m({ g: 7, w: writerToken('them', 'd'), i: 'copy', ...BEFORE }), ME), { weigh: 'update', id: 'copy' })
+    })
+
+    test('a line from another browser\'s Keep, or none: an update whatever the copy\'s line', () => {
+      const update = { weigh: 'update', id: 'copy' }
+      assert.deepEqual(weighCopy({ ...keeping(), p: THEIRS }, m({ g: 9, w: writerToken('third', 'd'), i: 'copy', ...BEFORE }), ME), update)
+      const { p, o, ...none } = keeping()
+      assert.deepEqual(weighCopy(none, m({ g: 7, w: writerToken('them', 'd'), i: 'copy', ...BEFORE }), ME), update)
+    })
+
+    test('a copy under another ID is weighed so already', () => {
+      assert.deepEqual(weighCopy(keeping(), m({ g: 7, i: 'theirs', p: KEEP }), ME), { weigh: 'other', id: 'theirs' })
+    })
+  })
+
+  describe('questionGone, where the agreed line comes from this browser\'s Keep', () => {
+    /** The question a copy that never saw this browser's Keep raised. */
+    const ASKED = { reason: 'first-sync', otherCopy: true, g: 7, w: writerToken('them', 'k'), at: 0, backedUp: true, backupFailed: false, loss: null }
+
+    test('it goes once a copy under the agreed ID that saw the Keep is there again: this browser\'s own Keep upload landing last, say', () => {
+      assert.equal(questionGone(ASKED, keeping(), m({ g: 6, w: KEEP.w, i: 'copy', ...LINE }), ME), true)
+    })
+
+    test('it stands over an older upload under the agreed ID that never saw it', () => {
+      assert.equal(questionGone(ASKED, keeping(), m({ g: 5, w: writerToken('third', 'x'), i: 'copy', ...BEFORE }), ME), false)
     })
   })
 })

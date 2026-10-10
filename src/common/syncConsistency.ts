@@ -1,5 +1,5 @@
 import type { Options } from './options.ts'
-import type { DecodeResult, Manifest } from './syncCodec.ts'
+import type { DecodeResult, Manifest, Upload } from './syncCodec.ts'
 
 import { SYNC_CONSISTENCY_WAIT_MS } from './constants.ts'
 import { decode, encode, MANIFEST_KEY, pruneToSynced, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
@@ -17,12 +17,6 @@ import { decode, encode, MANIFEST_KEY, pruneToSynced, SYNC_SCHEMA_VERSION } from
  * upload so, no browser is taken to be sending the rest any more, and the
  * copy can be replaced with this browser's settings.
  */
-
-/**
- * One upload of the synced copy, told apart by its manifest's generation and
- * writer token: every upload writes a token of its own.
- */
-export interface Upload { g: number, w: string }
 
 /**
  * What a read of the synced store found: a copy at this sync version, `whole`
