@@ -153,7 +153,8 @@ export type RunnerEffect
  * isn't worth a new worker. The one running then ends unseen, unless it runs
  * past the budget, when it is stopped as any other. A job is timed from when
  * the worker says it began it, so a worker slow to start takes nothing from
- * its budget.
+ * its budget. A worker that fails is stopped, with a job or without, so the
+ * next job goes to a new one; the job it had ends as one past the budget.
  */
 export function runnerStep(state: RunnerState, event: RunnerEvent): { state: RunnerState, effects: RunnerEffect[] } {
   switch (event.kind) {
@@ -171,6 +172,8 @@ export function runnerStep(state: RunnerState, event: RunnerEvent): { state: Run
     case 'timeout':
     case 'error': {
       const running = state.running
+      if (!running && event.kind === 'error')
+        return { state, effects: [{ kind: 'stop' }] }
       if (!running || ('id' in event && event.id !== running.id))
         return { state, effects: [] }
       const finished = event.kind === 'done'

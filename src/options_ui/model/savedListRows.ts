@@ -8,7 +8,7 @@ import { hostPage, openLink } from '../../common/listLinks.ts'
 import { aliasOf, defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
 import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, TRACKED_TYPE_LABELS, trackedMeta } from '../../common/trackedLists.ts'
 import { bucketBar, formatBytes } from './buckets.ts'
-import { isRunning, jobVerb, listJob, removeOff } from './jobView.ts'
+import { isRunning, jobIsOn, jobVerb, listJob, removeOff } from './jobView.ts'
 import { timeAgo } from './moments.ts'
 import { sentence, withReason } from './phrases.ts'
 
@@ -50,8 +50,12 @@ export function blurbsOnRemove(prune: boolean): string {
 
 /** What a row's Caching cell shows. */
 export type SavedListCaching
-  /** The stored list at its address, by its key. */
-  = | { kind: 'copy', key: string, buckets: CachingBuckets, scrapedAt: number, unstored: number }
+  /**
+   * The stored list at its address, by its key, and `keys`: every copy at the
+   * address, newest first, `key` first. A job on any of them is the row's, and
+   * removing the offline copy takes them all.
+   */
+  = | { kind: 'copy', key: string, keys: string[], buckets: CachingBuckets, scrapedAt: number, unstored: number }
     /** Not cached: nothing is stored at the list's address. */
     | { kind: 'none' }
 
@@ -115,8 +119,8 @@ export interface SavedListRowsContext {
   copy: (key: string) => { buckets: CachingBuckets, unstored: number }
   /** Whether *Tracked lists* is on: with it off, no list can be tracked or stopped. */
   review: boolean
-  /** Why a running job keeps one stored list's offline actions off, or null. */
-  jobOff: (key: string) => string | null
+  /** Why a running job keeps a row's offline actions off, or null: the row is its copies, by key. */
+  jobOff: (keys: readonly string[]) => string | null
 }
 
 /**
@@ -157,9 +161,9 @@ export function savedListRows(join: SavedListJoin, ctx: SavedListRowsContext): S
       since: entry?.since,
       sharedTitle: (titles.get(titleKey(list.title)) ?? 0) > 1,
       sameAddressAs: one.sameAddress.map(nameOf),
-      caching: copy ? cachingOf(copy, ctx) : { kind: 'none' },
-      trackOff: trackOff(pending, true, ctx.review),
-      offlineOff: copy ? ctx.jobOff(copy.key) ?? undefined : undefined,
+      caching: copy ? cachingOf(copy, one.copyKeys, ctx) : { kind: 'none' },
+      trackOff: trackOff(pending, true, ctx.review, !!entry),
+      offlineOff: copy ? ctx.jobOff(one.copyKeys) ?? undefined : undefined,
     })
   })
 
@@ -181,9 +185,9 @@ export function savedListRows(join: SavedListJoin, ctx: SavedListRowsContext): S
       pending,
       sharedTitle: false,
       sameAddressAs: [],
-      caching: cachingOf(copy, ctx),
-      trackOff: trackOff(pending, savedSearch, ctx.review),
-      offlineOff: pending === 'needs-visit' ? OFFLINE_OFF.undescribed : ctx.jobOff(copy.key) ?? undefined,
+      caching: cachingOf(copy, [copy.key], ctx),
+      trackOff: trackOff(pending, savedSearch, ctx.review, false),
+      offlineOff: pending === 'needs-visit' ? OFFLINE_OFF.undescribed : ctx.jobOff([copy.key]) ?? undefined,
     })
   })
 
@@ -212,20 +216,25 @@ function badge(meta: TrackedMeta | null, kind: TrackedKind): Pick<SavedListRow, 
   }
 }
 
-/** Why a row's toggle is off, if it is: what keeps the list from ever being tracked first, then Tracked lists being off. */
-function trackOff(pending: SavedListRow['pending'], search: boolean, review: boolean): string | undefined {
+/**
+ * Why a row's toggle is off, if it is: what keeps the list from ever being
+ * tracked first, then Tracked lists being off. A tracked list at an address
+ * that isn't the archive's can still be stopped, so it stops syncing to the
+ * reader's other browsers, though never tracked again.
+ */
+function trackOff(pending: SavedListRow['pending'], search: boolean, review: boolean, tracked: boolean): string | undefined {
   if (pending === 'needs-visit')
     return TRACK_OFF.needsVisit
-  if (pending === 'not-archive')
+  if (pending === 'not-archive' && !tracked)
     return TRACK_OFF.notArchive
   if (!search)
     return TRACK_OFF.notSearch
   return review ? undefined : TRACK_OFF.review
 }
 
-function cachingOf(copy: StoredListRef, ctx: SavedListRowsContext): SavedListCaching {
+function cachingOf(copy: StoredListRef, keys: string[], ctx: SavedListRowsContext): SavedListCaching {
   const { buckets, unstored } = ctx.copy(copy.key)
-  return { kind: 'copy', key: copy.key, buckets, scrapedAt: copy.scrapedAt, unstored }
+  return { kind: 'copy', key: copy.key, keys, buckets, scrapedAt: copy.scrapedAt, unstored }
 }
 
 /** The row without the fields it has no value for. */
@@ -282,6 +291,9 @@ export const NOT_ARCHIVE_NOTE = 'This address isn\'t a page on AO3, so it can\'t
 /** What stopping tracking keeps, and what tracking again won't fill in. */
 export const STOP_NOTE = 'It stays a Saved list, title and all. Tracking it again starts from that day, so anything it turns up in between is never reviewed.'
 
+/** What stopping tracking keeps of a list at an address that isn't the archive's, which can't be tracked again. */
+export const NOT_ARCHIVE_STOP_NOTE = 'It stays a Saved list, title and all, but can\'t be tracked again: its address isn\'t a page on AO3.'
+
 const STATUS_TIPS = {
   tracked: 'Tracked for your review: its new and updated works are gathered there. It does everything any other saved list does as well.',
   saved: 'Saved: kept, refreshed, cached and editable like any list, but not tracked for review. Switch it on to track it from today.',
@@ -335,9 +347,19 @@ function counted(n: number, one: string, many: string): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`
 }
 
-/** What a job on this row's copy is doing while it runs, in the word that names it ({@link jobVerb}), or null. */
+/** The job as the row's offline controls see it ({@link listJob}): a job on any of its copies is its own. Null with no copy. */
+export function rowJob(row: SavedListRow, view: JobView): ReturnType<typeof listJob> | null {
+  return row.caching.kind === 'copy' ? listJob(view, row.caching.keys) : null
+}
+
+/** Whether the job is on one of the row's copies. */
+function jobHere(row: SavedListRow, view: JobView): boolean {
+  return row.caching.kind === 'copy' && jobIsOn(view, row.caching.keys)
+}
+
+/** What a job on this row's copies is doing while it runs, in the word that names it ({@link jobVerb}), or null. */
 function runningHere(row: SavedListRow, view: JobView): string | null {
-  return row.caching.kind === 'copy' && view.key === row.caching.key && isRunning(view) ? jobVerb(view) : null
+  return jobHere(row, view) && isRunning(view) ? jobVerb(view) : null
 }
 
 /**
@@ -387,9 +409,10 @@ export type SavedListRowAction
     | { kind: 'none' }
 
 export function rowAction(row: SavedListRow, view: JobView): SavedListRowAction {
-  if (row.caching.kind !== 'copy')
+  const job = rowJob(row, view)
+  if (!job)
     return { kind: 'none' }
-  const { actions } = listJob(view, row.caching.key)
+  const { actions } = job
   if (actions === 'stop')
     return { kind: 'stop', verb: runningHere(row, view) ?? 'working' }
   if (actions === 'resume')
@@ -450,7 +473,7 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
   removing.push('Opening the list on AO3 again brings it straight back.')
   if (others.length)
     removing.push(`${titlesInWords(others)} ${others.length === 1 ? 'shares this copy, and loses' : 'share this copy, and lose'} it too.`)
-  if (view.key === caching.key && view.state === 'stopped')
+  if (jobHere(row, view) && view.state === 'stopped')
     removing.push('Its stopped job is discarded with it.')
 
   return {
@@ -460,7 +483,7 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
     off,
     retry: failed + staleFailures,
     cached,
-    remove: { off: removeOff(view, caching.key), note: removing.join(' ') },
+    remove: { off: removeOff(view, caching.keys), note: removing.join(' ') },
   }
 }
 
@@ -468,39 +491,48 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
  * The Tracking half of a row's details: what its status means, and what it
  * searches while it is tracked; what is wrong with it, for one at no address on
  * the archive; Stop tracking or Track this list, off with the reason while
- * Tracked lists is off; and Remove list, on every list with a record. A row
- * that can't be tracked from here says why, muted.
+ * Tracked lists is off, and what stopping keeps; and Remove list, on every list
+ * with a record. A row that can't be tracked from here says why, muted. A
+ * tracked list at no address on the archive can be stopped, but once saved it
+ * can't be tracked again.
  */
 export interface SavedListTrackingDetails {
   state: string | null
   muted: boolean
   what: string | null
   problem: string | null
-  action: { kind: 'stop' | 'track', off: string | null } | null
+  action: { kind: 'stop' | 'track', off: string | null, note: string | null } | null
   remove: SavedListRemove | null
 }
 
 export function trackingDetails(row: SavedListRow, view: JobView, prune: boolean): SavedListTrackingDetails {
   const none = { state: null, muted: false, what: null, problem: null, action: null, remove: null }
-  const copyKey = row.caching.kind === 'copy' ? row.caching.key : null
-  const removeList = (note: string): SavedListRemove | null => (row.titleEditable ? { off: copyKey ? removeOff(view, copyKey) : null, note } : null)
-  if (row.pending === 'not-archive')
-    return { ...none, problem: NOT_ARCHIVE_NOTE, remove: removeList('Forgets the list and its title. Its address isn\'t a page on AO3, so nothing was ever fetched for it.') }
+  const copyKeys = row.caching.kind === 'copy' ? row.caching.keys : null
+  const removeList = (note: string): SavedListRemove | null => (row.titleEditable ? { off: copyKeys ? removeOff(view, copyKeys) : null, note } : null)
+  const tracked = row.status === 'tracked'
+  const stopsTracking = tracked ? ', and stops tracking it' : ''
+  if (row.pending === 'not-archive') {
+    return {
+      ...none,
+      problem: NOT_ARCHIVE_NOTE,
+      action: tracked ? { kind: 'stop', off: row.trackOff ?? null, note: NOT_ARCHIVE_STOP_NOTE } : null,
+      remove: removeList(`Forgets the list and its title${stopsTracking}. Its address isn't a page on AO3, so nothing was ever fetched for it.`),
+    }
+  }
   if (row.pending === 'needs-visit')
     return { ...none, state: 'Can\'t be tracked until it has been opened on AO3 once — the same visit that lets it refresh.', muted: true }
   if (row.trackOff === TRACK_OFF.notSearch)
     return { ...none, state: 'Can\'t be tracked: only a search, an uncommon tag or a series can be.', muted: true }
 
-  const tracked = row.status === 'tracked'
   const state = tracked
     ? `Tracked since ${formatDay(row.since ?? 0)}. Its new and updated works turn up in your review.`
-    : copyKey
+    : copyKeys
       ? 'Not tracked. Tracking starts from today: however many works the offline copy already holds, none of them reaches the review.'
       : 'Not tracked. Tracking starts from today, so nothing from before it reaches the review.'
 
   const others = row.sameAddressAs
-  const removing = [`Forgets the list and its title${tracked ? ', and stops tracking it' : ''}.`]
-  if (copyKey) {
+  const removing = [`Forgets the list and its title${stopsTracking}.`]
+  if (copyKeys) {
     removing.push(others.length
       ? `Its offline copy stays: ${titlesInWords(others)} ${others.length === 1 ? 'searches' : 'search'} the same thing.`
       : `Its offline copy goes too. ${blurbsOnRemove(prune)} Cached work text stays.`)
@@ -513,7 +545,7 @@ export function trackingDetails(row: SavedListRow, view: JobView, prune: boolean
     muted: false,
     what: tracked ? [row.kind, row.filters.text].filter(Boolean).join(' · ') || null : null,
     problem: null,
-    action: { kind: tracked ? 'stop' : 'track', off: row.trackOff ?? null },
+    action: { kind: tracked ? 'stop' : 'track', off: row.trackOff ?? null, note: tracked ? STOP_NOTE : null },
     remove: removeList(removing.join(' ')),
   }
 }

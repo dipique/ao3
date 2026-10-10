@@ -15,8 +15,11 @@ const READINGS = 'https://archiveofourown.org/users/tester/readings#ao3e-tracked
 /** The review's open URL, on the reader's readings. */
 const OPEN = '/users/tester/readings#ao3e-open=tracked-review'
 
+/** The window's works in the cache's buckets: none cached, unless told otherwise. */
+const buckets = (fields = {}) => ({ total: 37, cached: 0, failed: 0, unfetched: 37, bytes: 0, staleFailures: 0, ...fields })
+
 /** The review's stored window: 37 works, gathered 22 minutes ago, none cached. */
-const WINDOW = { key: REVIEW, count: 37, cached: 0, scrapedAt: NOW - 22 * 60_000, listUrl: READINGS }
+const WINDOW = { key: REVIEW, count: 37, buckets: buckets(), scrapedAt: NOW - 22 * 60_000, listUrl: READINGS }
 
 /** The job as the page reads it: on `key`, running unless told otherwise. */
 function job(key, { job: fields, ...status } = {}) {
@@ -91,7 +94,7 @@ describe('the review settings', () => {
 
 describe('This review', () => {
   test('its count, when it was gathered, and how much of it is cached', () => {
-    const view = block({ window: { ...WINDOW, cached: 12 } })
+    const view = block({ window: { ...WINDOW, buckets: buckets({ cached: 12, unfetched: 25 }) } })
     assert.deepEqual(view.figure, { count: '37 works', detail: `gathered ${timeAgo(WINDOW.scrapedAt, NOW)} · 12 cached` })
     assert.equal(view.empty, null)
     assert.equal(block({ window: { ...WINDOW, count: 1 } }).figure.count, '1 work')
@@ -116,12 +119,22 @@ describe('This review', () => {
     assert.equal(view.job, false)
   })
 
+  test('More: a retry while any of its works has failed, stale ones included, and a download without refreshing once any is cached', () => {
+    const view = block({ window: { ...WINDOW, buckets: buckets({ cached: 12, failed: 2, staleFailures: 1, unfetched: 23 }) } })
+    assert.equal(view.retry, 3)
+    assert.equal(view.cached, 12)
+    assert.equal(block().retry, 0)
+    assert.equal(block().cached, 0)
+  })
+
   test('with no window yet, the cell says so and has nothing to cache, and Start Review opens the review on the reader\'s readings, which gathers the first', () => {
     const view = block({ window: null })
     assert.equal(view.figure, null)
     assert.equal(view.empty, 'Nothing gathered yet.')
     assert.equal(view.actions, null)
     assert.equal(view.offlineOff, null)
+    assert.equal(view.retry, 0)
+    assert.equal(view.cached, 0)
     assert.deepEqual(view.start, { href: OPEN, label: 'Start the review', off: null })
   })
 
@@ -133,12 +146,14 @@ describe('This review', () => {
     assert.equal(START_OFF.noWindow, 'off until your first review is gathered on AO3')
   })
 
-  test('with Tracked lists off, Start Review is off and says why, and the offline copy still works', () => {
-    const view = block({ enabled: false })
+  test('with Tracked lists off, Start Review is off and says why, and the offline copy still works, More included', () => {
+    const view = block({ enabled: false, window: { ...WINDOW, buckets: buckets({ cached: 12, failed: 2, unfetched: 23 }) } })
     assert.deepEqual(view.start, { href: null, label: 'Start the review: 37 works', off: TRACK_OFF.review })
     assert.ok(view.figure)
     assert.equal(view.actions, 'offline')
     assert.equal(view.offlineOff, null)
+    assert.equal(view.retry, 2)
+    assert.equal(view.cached, 12)
   })
 
   test('Tracked lists being off comes first, before anything else that keeps Start Review off', () => {

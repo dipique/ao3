@@ -27,7 +27,13 @@ const ADVICE = 'You\'re close to the sync storage limit. Reduce large filter lis
 
 const none = { removed: 0, of: 0 }
 const LOSS = { rules: { removed: 18, of: 22 }, markedWorks: { removed: 204, of: 374 }, textReplacements: none, trackedLists: { removed: 5, of: 7 }, marks: ['Favorite', 'Ongoing'] }
-const HELD = { reason: 'held', g: 5, w: 'desktop.x', at: 0, backedUp: true, loss: LOSS }
+const HELD = { reason: 'held', g: 5, w: 'desktop.x', at: 0, backedUp: true, backupFailed: false, loss: LOSS }
+const BACKED_UP = 'A backup of this browser\'s settings was saved first.'
+const REPLACES = 'Replaces this browser\'s settings with the other browser\'s.'
+const KEEPS = 'Sends this browser\'s settings to your other browsers. What the update had is kept as a backup first.'
+
+/** What a held update's answer `choice` says it does. */
+const consequence = (decision, choice) => decision.answers.find(answer => answer.choice === choice).consequence
 
 const REFUSAL = `Can't turn on sync: your synced settings need a newer version of AO3 Enhancements (sync version 9; this browser has ${V}). Update or reload the extension first.`
 
@@ -140,18 +146,83 @@ describe('syncStatusView', () => {
       })
     })
 
-    test('without a backup, claims none', () => {
-      const { decision } = syncStatusView({ ...ON, pause: { ...HELD, backedUp: false } }, V).callouts[0]
+    test('backed up as it was held: accepting points to the backup', () => {
+      const { decision } = syncStatusView({ ...ON, pause: HELD }, V).callouts[0]
+      assert.equal(decision.backup, BACKED_UP)
+      assert.equal(consequence(decision, 'accept'), `${REPLACES} Yours were backed up when sync held.`)
+      assert.equal(consequence(decision, 'keep'), KEEPS)
+    })
+
+    test('its backup couldn\'t be written: accepting says yours aren\'t backed up, and why', () => {
+      const { decision } = syncStatusView({ ...ON, pause: { ...HELD, backedUp: false, backupFailed: true } }, V).callouts[0]
       assert.equal(decision.backup, null)
-      const accept = decision.answers.find(answer => answer.choice === 'accept')
-      assert.equal(accept.consequence, 'Replaces this browser\'s settings with the other browser\'s.')
-      assert.match(decision.answers.find(answer => answer.choice === 'keep').consequence, /kept as a backup first/, 'declining always keeps the update')
+      assert.equal(consequence(decision, 'accept'), `${REPLACES} Yours aren't backed up: the backup couldn't be saved.`)
+      assert.equal(consequence(decision, 'keep'), KEEPS, 'declining always keeps the update')
+    })
+
+    /** An older build backed up a hold only with daily backups on, and recorded no failure. */
+    test('held by an older build with no backup: accepting says daily backups were off when it held', () => {
+      const { backupFailed, ...older } = HELD
+      const { decision } = syncStatusView({ ...ON, pause: { ...older, backedUp: false } }, V).callouts[0]
+      assert.equal(decision.backup, null)
+      assert.equal(consequence(decision, 'accept'), `${REPLACES} Yours aren't backed up: daily backups were off when sync held.`)
+      assert.equal(consequence(decision, 'keep'), KEEPS, 'declining always keeps the update')
     })
 
     test('reads a loss stored by a build that weighed fewer collections', () => {
       const { trackedLists, ...older } = LOSS
       const { decision } = syncStatusView({ ...ON, pause: { ...HELD, loss: older } }, V).callouts[0]
       assert.deepEqual(decision.lines, ['18 of your 22 rules', '204 of your 374 marked works', 'the marks “Favorite”, “Ongoing”'])
+    })
+  })
+
+  /**
+   * Sync turned on over a synced copy that differs from this browser's own
+   * settings: drawn as a held update is, asking which to keep.
+   */
+  describe('asked which settings to keep, as sync turns on', () => {
+    const FIRST = { reason: 'first-sync', g: 5, w: 'desktop.x', at: 0, backedUp: true, backupFailed: false, loss: null }
+    const USES = 'Replaces this browser\'s settings with your synced settings.'
+    const KEEPS_OWN = 'Replaces your synced settings with this browser\'s, on every browser that syncs. The synced settings are kept as a backup first.'
+
+    test('asks: the two answers with their consequences, and the backup', () => {
+      assert.deepEqual(syncStatusView({ ...ON, lastSyncAt: 0, pause: FIRST, usage: usage(68) }, V), {
+        chip: { state: 'first-sync', word: 'On hold', detail: 'Turning on sync is waiting for your answer.', severity: 'warning' },
+        lastSynced: 'Not synced yet',
+        callouts: [{
+          state: 'first-sync',
+          severity: 'warning',
+          text: 'Your synced settings differ from this browser\'s. Which do you want to keep?',
+          hook: { 'data-sync-pause': 'first-sync' },
+          decision: {
+            lines: [],
+            backup: BACKED_UP,
+            answers: [
+              { choice: 'keep', label: 'Keep this browser\'s settings', consequence: KEEPS_OWN },
+              { choice: 'accept', label: 'Use the synced settings', consequence: `${USES} Yours were backed up first.` },
+            ],
+          },
+        }],
+        usage: HEALTHY_USAGE,
+      })
+    })
+
+    test('where the deletion guard would hold the synced settings, says what using them would remove', () => {
+      const { text, decision } = syncStatusView({ ...ON, pause: { ...FIRST, loss: LOSS } }, V).callouts[0]
+      assert.equal(text, 'Your synced settings differ from this browser\'s. Using them would remove:')
+      assert.deepEqual(decision.lines, ['18 of your 22 rules', '204 of your 374 marked works', '5 of your 7 tracked lists (they stay saved on this browser if you keep a copy)', 'the marks “Favorite”, “Ongoing”'])
+      assert.deepEqual(decision.answers.map(answer => answer.choice), ['keep', 'accept'])
+    })
+
+    test('its backup couldn\'t be written: using the synced settings says yours aren\'t backed up, and why', () => {
+      const { decision } = syncStatusView({ ...ON, pause: { ...FIRST, backedUp: false, backupFailed: true } }, V).callouts[0]
+      assert.equal(decision.backup, null)
+      assert.equal(consequence(decision, 'accept'), `${USES} Yours aren't backed up: the backup couldn't be saved.`)
+      assert.equal(consequence(decision, 'keep'), KEEPS_OWN, 'keeping this browser\'s always keeps the synced settings')
+    })
+
+    test('says nothing once sync is off', () => {
+      assert.deepEqual(syncStatusView({ ...OFF, pause: FIRST }, V), { callouts: [] })
     })
   })
 

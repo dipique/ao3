@@ -2,7 +2,7 @@ import type { BlurbMeta, cache, Language, Rule, RuleColors, RuleTarget, StoredLi
 
 import { BLURB_INDEX_KEY, blurbDataKey, blurbKey, createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, LEGACY_SNAPSHOTS_KEY, legacyMarkIcon, MARKS_VERSION, migratedBlurbMeta, normalizeMarkOrder, packIds, planLegacyMigration, RULE_TARGETS, TagType, unpackIds } from '#common'
 
-import { reconcileSavedLists } from './savedLists.ts'
+import { reconcileSavedLists, refileListings } from './savedLists.ts'
 
 /** The pre-merge `hideAuthors` filter shape. */
 interface LegacyAuthorFilter { userId: string, pseud?: string, behavior?: Rule['behavior'], color?: string }
@@ -164,8 +164,11 @@ export async function migrate() {
   await migrateSearchSnapshots()
   // Last, over the stored lists in their current layout: entries that aren't
   // tracked leave `trackedLists` for saved-list records, and every list gets a
-  // record. Running it again changes nothing.
+  // record. Then what was kept under an address the key no longer gives is
+  // refiled at the one it gives, over those records. Running either again
+  // changes nothing.
   await reconcileSavedLists()
+  await refileListings()
 }
 
 /**

@@ -306,6 +306,27 @@ export function toasts(tab) {
     .map(el => el.textContent.trim()))
 }
 
+/** The links the toasts on screen offer, as `{ label, href }`, `href` as the page resolves it. */
+export function toastLinks(tab) {
+  return tab.evaluate(() => [...document.querySelectorAll('body > div')]
+    .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast a.link') ?? []])
+    .map(a => ({ label: a.textContent.trim(), href: a.href })))
+}
+
+/** Follow the toast's link with this text, as a click on it does. */
+export function clickToastLink(tab, label) {
+  return tab.evaluate((text) => {
+    for (const el of document.querySelectorAll('body > div')) {
+      const link = [...el.shadowRoot?.querySelectorAll('.toast a.link') ?? []].find(a => a.textContent.trim() === text)
+      if (link) {
+        link.click()
+        return true
+      }
+    }
+    return false
+  }, label)
+}
+
 /** Click a toast's action button (its **Undo**). */
 export function clickToastAction(tab, label) {
   return tab.evaluate((text) => {
@@ -379,6 +400,9 @@ export const SIDEBAR_CHARACTERS = [
  * last. What's ticked follows the address, as it does on the archive.
  *
  * `tagId` is the name as `tag_id` spells it, the archive's own escapes included.
+ * `collection` (`{ name, title, number }`) makes it that collection's listing
+ * instead, whose sidebar submits the collection's own path with its number as
+ * `collection_id`, as the archive's does.
  *
  * `subnav` draws the row of actions the archive puts above a listing (Works,
  * Bookmarks, and the Filters link a narrow screen opens the sidebar by), which
@@ -386,7 +410,7 @@ export const SIDEBAR_CHARACTERS = [
  * pagination, above and below the works, on the page the address names, and
  * `total` is how many works the heading says the listing holds.
  */
-export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)], subnav = false, pages = 1, total = blurbs.length }) {
+export function listingPage(url, { tagId, collection, blurbs = [blurb(101), blurb(102)], subnav = false, pages = 1, total = blurbs.length }) {
   const values = name => url.searchParams.getAll(name)
   const excluded = values('exclude_work_search[character_ids][]')
   const complete = url.searchParams.get('work_search[complete]') ?? ''
@@ -397,7 +421,14 @@ export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)], sub
     </label></li>`
   const radio = (value, label) => `
     <li><label><input type="radio" name="work_search[complete]" value="${value}"${complete === value ? ' checked' : ''} /> <span>${label}</span></label></li>`
-  const name = tagId.replace(/\*s\*/g, '/').replace(/\*a\*/g, '&').replace(/\*d\*/g, '.').replace(/\*q\*/g, '?').replace(/\*h\*/g, '#')
+  const owner = collection
+    ? { name: collection.title, home: `/collections/${collection.name}`, action: `/collections/${collection.name}/works`, hidden: ['collection_id', collection.number] }
+    : {
+        name: tagId.replace(/\*s\*/g, '/').replace(/\*a\*/g, '&').replace(/\*d\*/g, '.').replace(/\*q\*/g, '?').replace(/\*h\*/g, '#'),
+        home: `/tags/${encodeURIComponent(tagId)}`,
+        action: '/works',
+        hidden: ['tag_id', tagId],
+      }
   const page = Number(url.searchParams.get('page') ?? 1)
   const first = (page - 1) * blurbs.length + 1
   const pagination = pages > 1
@@ -411,22 +442,22 @@ export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)], sub
       <h3 class="landmark heading">Navigation and Actions</h3>
       <ul class="user navigation actions" role="navigation">
         <li><span class="current">Works</span></li>
-        <li><a href="/tags/${encodeURIComponent(tagId)}/bookmarks">Bookmarks</a></li>
+        <li><a href="${owner.home}/bookmarks">Bookmarks</a></li>
         <li class="narrow-shown hidden"><a href="#work-filters" id="go_to_filters">Filters</a></li>
       </ul>
     </div>`
     : ''
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Works in ${escape(name)}</title></head>
+<html><head><meta charset="utf-8"><title>Works in ${escape(owner.name)}</title></head>
 <body>
   ${HEADER}
   <div id="main" class="works-index region">
-    <h2 class="heading">${first} - ${first + blurbs.length - 1} of ${total} Works in <a class="tag" href="/tags/${encodeURIComponent(tagId)}">${escape(name)}</a></h2>
+    <h2 class="heading">${first} - ${first + blurbs.length - 1} of ${total} Works in <a class="tag" href="${owner.home}">${escape(owner.name)}</a></h2>
     ${actions}
     ${pagination}
     <ol class="work index group">${blurbs.join('')}</ol>
     ${pagination}
-    <form class="narrow-hidden filters" id="work-filters" action="/works" accept-charset="UTF-8" method="get">
+    <form class="narrow-hidden filters" id="work-filters" action="${owner.action}" accept-charset="UTF-8" method="get">
       <input name="utf8" type="hidden" value="✓" />
       <select name="work_search[sort_column]" id="work_search_sort_column"><option value="revised_at" selected>Date Updated</option></select>
       <dl class="filters">
@@ -439,7 +470,7 @@ export function listingPage(url, { tagId, blurbs = [blurb(101), blurb(102)], sub
           <ul>${radio('', 'All works')}${radio('T', 'Complete works only')}${radio('F', 'Works in progress only')}</ul>
         </dd>
       </dl>
-      <input type="hidden" name="tag_id" value="${escape(tagId)}" />
+      <input type="hidden" name="${owner.hidden[0]}" value="${escape(owner.hidden[1])}" />
       <input type="submit" name="commit" value="Sort and Filter" />
     </form>
   </div>

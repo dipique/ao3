@@ -838,6 +838,70 @@ describe('options UI — the saved lists\' frame', { skip }, () => {
   })
 })
 
+/**
+ * Tracked lists at addresses that aren't AO3's, as a sync or an old settings
+ * file can bring them. Nothing can be reviewed from one, and while it is
+ * tracked it syncs to every other browser; so it can be stopped, by its switch
+ * or in its details, and stays a Saved list, pending. Once saved it can't be
+ * tracked again.
+ */
+describe('options UI — a tracked list at an address that isn\'t AO3\'s', { skip }, () => {
+  const BY_SWITCH = { id: 'br0k3n', kind: 'tag-works', url: 'https://example.com/tags/elsewhere', alias: 'Elsewhere', tracked: true, since: TODAY - 3 }
+  const BY_DETAILS = { id: 'f4r', kind: 'tag-works', url: 'https://example.com/tags/far', alias: 'Far away', tracked: true, since: TODAY - 3 }
+  let session
+  let options
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed: listsSeed([BY_SWITCH, BY_DETAILS], [recordOf(BY_SWITCH), recordOf(BY_DETAILS)]),
+      hash: '#saved-lists',
+      viewport: { width: 1440, height: 900 },
+    })
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  const entryIds = async () => ((await options.stored('option.trackedLists'))?.lists ?? []).map(entry => entry.id)
+
+  /** The row has stopped: saved, pending, its record kept, and its switch off with the reason it can't be tracked again. */
+  async function stoppedAndKept(list) {
+    const row = await options.savedList(list.id)
+    await until('the row to say it is saved', async () => (await part(row, 'status')).join(' ') === 'Saved (pending) not an AO3 address')
+    assert.deepEqual((await options.stored('option.savedLists')).lists[list.id], recordOf(list), 'the record stays as it was')
+    const toggle = await options.control(row, 'switch', `Track ${list.alias}`)
+    assert.equal(await isOn(toggle), false)
+    assert.equal(await toggle.evaluate(el => el.disabled), true, 'and it can\'t be tracked again')
+    assert.equal(await options.description(toggle), `${TRACK_OFF.notArchive.charAt(0).toUpperCase()}${TRACK_OFF.notArchive.slice(1)}.`)
+  }
+
+  test('its switch stops tracking it: the entry goes, so it no longer syncs, and the list stays saved', async () => {
+    const row = await options.savedList(BY_SWITCH.id)
+    assert.deepEqual(await part(row, 'status'), ['Tracked (pending)', 'not an AO3 address'])
+    const toggle = await options.control(row, 'switch', `Track ${BY_SWITCH.alias}`)
+    assert.equal(await isOn(toggle), true)
+    assert.equal(await toggle.evaluate(el => el.disabled), false, 'its switch is live while it is tracked')
+
+    await options.press(toggle)
+    await until('the entry to go', async () => !(await entryIds()).includes(BY_SWITCH.id))
+    assert.deepEqual(await entryIds(), [BY_DETAILS.id], 'only its own')
+    await stoppedAndKept(BY_SWITCH)
+  })
+
+  test('Stop tracking, in its details, does the same, and says it can\'t be tracked again', async () => {
+    const details = await options.savedListDetails(BY_DETAILS.id)
+    assert.match(await options.text(details), /It stays a Saved list, title and all, but can't be tracked again: its address isn't a page on AO3\./)
+    await options.press(await options.control(details, 'button', 'Stop tracking'))
+    await until('the entry to go', async () => (await entryIds()).length === 0)
+    await stoppedAndKept(BY_DETAILS)
+    assert.deepEqual(await options.controls(await options.savedListDetails(BY_DETAILS.id), 'button', 'Track this list'), [], 'nothing offers to track it again')
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(options.problems(), [])
+  })
+})
+
 /** A fresh install: no lists, and the header keeps its place. */
 describe('options UI — no saved lists yet', { skip }, () => {
   let session

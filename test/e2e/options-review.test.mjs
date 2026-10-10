@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { formatDay, isoDay, utcToday } from '../../src/common/trackedLists.ts'
-import { START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
+import { sentence } from '../../src/options_ui/model/phrases.ts'
+import { REVIEW_NAME, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { storedLists } from './helpers.mjs'
 import { ARCHIVE, captureDownloads, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
@@ -20,6 +21,8 @@ const REVIEW_OPEN = `${ARCHIVE}/users/reader/readings#ao3e-open=tracked-review`
 const OTHER = 'tag-works:Coffee%20Shop%20AU'
 const OTHER_JOB = 'off for now: one job at a time, and Tag: Coffee Shop AU is caching'
 const REVIEW_JOB = 'off for now: one job at a time, and this review is caching'
+/** This review's More menu's trigger. */
+const MORE = `More for ${REVIEW_NAME}`
 
 const COFFEE = { id: 'c0ffee', kind: 'text-search', url: '/works/search?work_search%5Bquery%5D=coffee', alias: 'Coffee shop AUs', tracked: true, since: TODAY - 5 }
 
@@ -151,6 +154,7 @@ describe('options UI — the Review block', { skip }, () => {
     assert.equal(await options.text(start), 'Start Review')
     await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
     await saysOn(await inCell('this-review', 'button', 'Download Offline Copy'), 'Download Offline Copy')
+    assert.deepEqual(await options.controls(await cell('this-review'), 'button', MORE), [], 'with nothing failed and nothing cached, More has nothing to offer')
   })
 
   test('the review\'s window is This review, not a row of its own under Saved lists', async () => {
@@ -325,6 +329,172 @@ describe('options UI — the Review block', { skip }, () => {
   })
 })
 
+/** When the work that failed last failed: just now, so only a retry that waits out no delay asks for it again. */
+const FAILED_AT = Date.now()
+
+/** The review's window with something for More to offer: work 61 failed, work 62 cached, and work 63 new. */
+const MORE_SEED = {
+  'option.user': { userId: 'reader' },
+  ...listsSeed(),
+  ...storedLists({ [WINDOW]: { ...WINDOW_COPY, blurbsHtml: [blurb(61), blurb(62), blurb(63)] }, [OTHER]: OTHER_COPY }),
+  'workTextIndex': {
+    61: { size: 0, updatedAt: 0, chapters: 0, words: 0, fetchedAt: 0, v: 1, failure: 'notfound', attempts: 1, attemptedAt: FAILED_AT },
+    62: { size: 64, updatedAt: 0, chapters: 1, words: 1000, fetchedAt: FAILED_AT, v: 1 },
+  },
+  'workText.62': { html: '<div class="userstuff"><p>The text of work 62.</p></div>' },
+}
+
+/**
+ * This review's More: what its window offers beyond its buttons, as a tile's
+ * More does — a retry of the works that failed, and a download of what is
+ * cached, asking AO3 for nothing. There is no refresh, since no one listing is
+ * behind the window, and no remove.
+ *
+ * The stand-in for AO3 holds every request, so a job is caught running.
+ */
+describe('options UI — This review\'s More', { skip }, () => {
+  let session
+  let options
+  let page
+  let release
+  const held = new Promise((resolve) => {
+    release = resolve
+  })
+  /** Every address the page asked AO3 for. */
+  const asked = []
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed: MORE_SEED,
+      hash: '#review',
+      viewport: { width: 1440, height: 900 },
+      prepare: async (p) => {
+        await stubArchive(p, async (url) => {
+          asked.push(new URL(url).pathname)
+          await held
+          return { status: 404 }
+        })
+        await p.evaluateOnNewDocument(captureDownloads)
+      },
+    })
+    page = options.page
+  }, { timeout: 180000 })
+
+  after(() => {
+    release()
+    return session?.close()
+  })
+
+  const cell = async () => {
+    const handle = await page.$('[data-review-cell="this-review"]')
+    assert.ok(handle, 'no This review')
+    return handle
+  }
+  const more = async () => options.control(await cell(), 'button', MORE)
+  const jobState = async scope => scope.evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
+  const writes = () => page.evaluate(() => window.__writes.length)
+  /** The first job stored after the page's first `n` writes: the one an action then started. */
+  const jobFrom = n => page.evaluate(k => window.__writes.slice(k).find(w => 'siteExportJob' in w)?.siteExportJob ?? null, n)
+  const items = ['Retry failed works now', 'Download without refreshing']
+
+  test('More offers a retry of the work that failed and a download of the one cached: no refresh, and no remove', async () => {
+    await until('the cell to count the cached work', async () => / · 1 cached/.test(await options.text(await cell())))
+    const trigger = await more()
+    assert.equal(await trigger.evaluate(el => el.title), 'Retry failed works, download without refreshing')
+
+    await options.openMenu(trigger)
+    const names = await options.menuItems()
+    assert.equal(names.length, 2, JSON.stringify(names))
+    assert.match(names[0], /^Retry failed works now\b.* on the 1 work that failed\b/)
+    assert.match(names[1], /^Download without refreshing\b.* as up to date as the 1 saved work are\./)
+
+    await options.closeMenu()
+    await until('focus to go back to More', () => trigger.evaluate(el => document.activeElement === el))
+  })
+
+  test('Download without refreshing runs a job on the window that packages what is cached, asking AO3 for nothing', async () => {
+    const from = await writes()
+    const downloads = await page.evaluate(() => window.__downloads.length)
+    const requests = asked.length
+    await options.openMenu(await more())
+    await options.press(await options.menuItem('Download without refreshing'))
+    await until('the file to be handed over', () => page.evaluate(n => window.__downloads.length > n, downloads))
+
+    const job = await jobFrom(from)
+    assert.equal(job.cacheKey, WINDOW)
+    assert.deepEqual(job.steps, ['exporting'])
+    assert.deepEqual(asked.slice(requests), [], 'nothing was asked of AO3')
+
+    const { text } = await options.lastDownload()
+    const open = text.indexOf('<script type="application/json" id="ao3e-data">')
+    const start = text.indexOf('>', open) + 1
+    const { manifest } = JSON.parse(text.slice(start, text.indexOf('</script>', start)))
+    assert.deepEqual([manifest.counts.total, manifest.counts.cached], [3, 1])
+
+    await until('the job to finish, and More to be back with the actions', async () => await jobState(await cell()) === 'finished'
+      && (await options.controls(await cell(), 'button', MORE)).length === 1)
+  })
+
+  test('Retry failed works now caches the window, asking at once for the work that failed; while its job is on the window, More goes with the actions', async () => {
+    const from = await writes()
+    await options.openMenu(await more())
+    await options.press(await options.menuItem('Retry failed works now'))
+    await until('the job to be running', async () => await jobState(await cell()) === 'running')
+
+    const job = await jobFrom(from)
+    assert.equal(job.cacheKey, WINDOW)
+    assert.deepEqual(job.steps, ['caching'])
+    assert.equal(job.retryNow, true)
+    await until('the work that failed to be asked for again', () => asked.includes('/works/61'))
+    assert.deepEqual(await options.controls(await cell(), 'button', MORE), [], 'Stop takes the actions\' place, and More\'s')
+
+    await options.press(await options.control(await cell(), 'button', 'Stop'))
+    await until('the job to stop', async () => await jobState(await cell()) === 'stopped')
+    assert.deepEqual(await options.controls(await cell(), 'button', MORE), [], 'so do Continue and Discard')
+    await options.press(await options.control(await cell(), 'button', 'Discard'))
+    await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
+    await until('More to be back', async () => (await options.controls(await cell(), 'button', MORE)).length === 1)
+  })
+
+  test('another list\'s job turns More\'s items off, each saying why', async () => {
+    await options.press(await options.control(await options.savedListDetails(copyRow(OTHER)), 'button', 'Cache works'))
+    await until('the job to be running', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'running')
+
+    await options.openMenu(await more())
+    for (const name of items) {
+      const item = await options.menuItem(name)
+      assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), true, `${name} should be off`)
+      assert.equal(await item.evaluate(el => el.title), `${name} — ${OTHER_JOB}`)
+      assert.equal(await options.description(item), `${sentence(OTHER_JOB)}.`)
+    }
+    await options.closeMenu()
+
+    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Stop caching Tag: Coffee Shop AU'))
+    await until('the job to stop', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'stopped')
+    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Discard'))
+    await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
+  })
+
+  test('with Tracked lists off, More stays, and its items are on', async () => {
+    await options.press(await options.control(await options.row(ROW), 'switch'))
+    await until('the switch to be written', async () => (await options.lastWrite('option.trackedLists'))?.enabled === false)
+
+    await options.openMenu(await more())
+    for (const name of items) {
+      const item = await options.menuItem(name)
+      assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), false, `${name} should be on`)
+      assert.equal(await item.evaluate(el => el.title), name)
+      assert.equal(await item.evaluate(el => el.getAttribute('aria-describedby')), null)
+    }
+    await options.closeMenu()
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(options.problems(), [])
+  })
+})
+
 /**
  * Start Review opens the review from lists that are tracked, on the reader's
  * readings, which gathers the first one; with no account known, only a
@@ -360,6 +530,7 @@ describe('options UI — This review with nothing to start', { skip }, () => {
     assert.doesNotMatch(await options.text(review), /your first review is gathered/, 'Start Review gathers it, so the cell doesn\'t send the reader to AO3 for it')
     assert.deepEqual(await options.controls(review, 'button', 'Cache works'), [])
     assert.deepEqual(await options.controls(review, 'button', 'Download Offline Copy'), [])
+    assert.deepEqual(await options.controls(review, 'button', MORE), [])
     assert.deepEqual(options.problems(), [])
     await options.close()
   })

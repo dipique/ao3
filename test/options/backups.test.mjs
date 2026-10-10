@@ -91,6 +91,16 @@ describe('backupList', () => {
     })
   })
 
+  test('with daily backups off, still lists the backups taken as sync held an update, kept apart', () => {
+    const view = backupList([backup('sync-held', oct1), backup('daily', sep28)], { enabled: false, count: 7 }, NOW)
+    assert.equal(view.empty, null)
+    assert.equal(view.count, '2 · newest first')
+    assert.deepEqual(view.rows.map(row => [row.kind, row.label, row.retention]), [
+      ['sync-held', 'Before a held sync update', KEPT_APART],
+      ['daily', 'Daily backup', 'daily · the newest 7 are kept'],
+    ])
+  })
+
   test('with none yet and daily backups off, promises none', () => {
     assert.deepEqual(backupList([], { enabled: false, count: 7 }, NOW).empty, { title: 'No backups yet', text: 'Daily backups are off.' })
   })

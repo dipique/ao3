@@ -1,5 +1,6 @@
 import type { ListRef } from '../../common/listLinks.ts'
 import type { Day } from '../../common/trackedLists.ts'
+import type { CachingBuckets } from '../../content_script/siteExport/workText.ts'
 import type { JobActions, JobView } from './jobView.ts'
 
 import { hostPage, openLink } from '../../common/listLinks.ts'
@@ -7,6 +8,7 @@ import { formatDay, isoDay } from '../../common/trackedLists.ts'
 import { toEpochDays } from '../../common/workProgress.ts'
 import { listJob } from './jobView.ts'
 import { timeAgo } from './moments.ts'
+import { moreCounts } from './moreMenu.ts'
 import { TRACK_OFF } from './savedListRows.ts'
 
 /**
@@ -64,7 +66,8 @@ export interface ReviewWindow {
   /** Its stored key, which is also what a job names it by. */
   key: string
   count: number
-  cached: number
+  /** Its works in the cache's buckets: cached, failed and new. */
+  buckets: CachingBuckets
   scrapedAt: number
   /** The page it was gathered on. */
   listUrl?: string
@@ -100,6 +103,10 @@ export interface ReviewBlockView {
   job: boolean
   /** Start Review: where it goes, its name, and why it is off. */
   start: { href: string | null, label: string, off: string | null }
+  /** The works a retry asks for again, stale ones included; with none, More offers no retry. */
+  retry: number
+  /** The cached works; with none, More offers no download without refreshing. */
+  cached: number
 }
 
 export function reviewBlock({ enabled, tracking, window, userId, job, now }: ReviewBlockInput): ReviewBlockView {
@@ -123,6 +130,8 @@ export function reviewBlock({ enabled, tracking, window, userId, job, now }: Rev
       offlineOff: null,
       job: false,
       start,
+      retry: 0,
+      cached: 0,
     }
   }
 
@@ -131,13 +140,14 @@ export function reviewBlock({ enabled, tracking, window, userId, job, now }: Rev
     settingsOff,
     figure: {
       count: works(window.count),
-      detail: `gathered ${timeAgo(window.scrapedAt, now)} · ${window.cached.toLocaleString()} cached`,
+      detail: `gathered ${timeAgo(window.scrapedAt, now)} · ${window.buckets.cached.toLocaleString()} cached`,
     },
     empty: null,
     actions,
     offlineOff: off,
     job: here,
     start,
+    ...moreCounts(window.buckets),
   }
 }
 

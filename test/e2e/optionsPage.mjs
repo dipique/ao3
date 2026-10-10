@@ -27,7 +27,10 @@ import { ensureBuilt, findChrome, installMock, launch, outlast, serveDist, sleep
  *   ({@link OptionsPage.description}), and what its tooltip says
  *   ({@link OptionsPage.tooltip});
  * - a dialog, opened and closed ({@link OptionsPage.openDialog},
- *   {@link OptionsPage.closeDialog});
+ *   {@link OptionsPage.closeDialog}), and a menu, opened from its trigger,
+ *   read, and closed ({@link OptionsPage.openMenu},
+ *   {@link OptionsPage.menuItems}, {@link OptionsPage.menuItem},
+ *   {@link OptionsPage.closeMenu});
  * - what the page stored, read back from the storage mock rather than off the
  *   screen ({@link OptionsPage.stored}, {@link OptionsPage.lastWrite}) once it
  *   has saved ({@link OptionsPage.saved}), and the files it saved
@@ -664,6 +667,29 @@ export class OptionsPage {
   /** Click the element from inside the page, where nothing drawn over it can take the click instead. */
   press(handle) {
     return handle.evaluate(el => el.click())
+  }
+
+  /** Open the menu `trigger` opens, from the keyboard, as a person would, and wait for its items. */
+  async openMenu(trigger) {
+    await trigger.focus()
+    await this.page.keyboard.press('Enter')
+    await until('the menu to open', async () => (await this.controls(this.page, 'menuitem')).length > 0)
+  }
+
+  /** The open menu's items' names, in order: what each is called, then what it does. */
+  async menuItems() {
+    return Promise.all((await this.controls(this.page, 'menuitem')).map(item => this.name(item)))
+  }
+
+  /** The open menu's item whose name begins with `start`. */
+  menuItem(start) {
+    return this.control(this.page, 'menuitem', new RegExp(`^${start.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+  }
+
+  /** Press Escape, which closes the open menu, and wait until it has gone. */
+  async closeMenu() {
+    await this.page.keyboard.press('Escape')
+    await until('the menu to close', async () => (await this.controls(this.page, 'menuitem')).length === 0)
   }
 
   /**

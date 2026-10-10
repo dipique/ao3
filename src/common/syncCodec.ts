@@ -45,7 +45,7 @@ import type { Options } from './options.ts'
  * adopting such a copy would drop the untracked lists it still holds as
  * entries, titles and all; at a version it doesn't speak, it waits instead.
  */
-export const SYNC_SCHEMA_VERSION = 10
+export const SYNC_SCHEMA_VERSION = 11
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400
@@ -156,6 +156,16 @@ export function buildLocalUpdate(
   for (const key of LOCAL_ONLY)
     write[key] = existing[key]
   return out
+}
+
+/** The options of `desired` that differ from `current`: what applying it writes. */
+export function diffOptions(current: Options, desired: Options): Partial<Options> {
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(desired) as (keyof Options)[]) {
+    if (!isDeepEqual(current[key], desired[key]))
+      out[key] = desired[key]
+  }
+  return out as Partial<Options>
 }
 
 /** The option keys a device writes into {@link Manifest.k} — everything it syncs. */

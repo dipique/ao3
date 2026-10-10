@@ -5,7 +5,6 @@ import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 import type { ProfileListId, ProfileTileView } from '../../model/profileLists.ts'
 
 import { sentence, withReason } from '../../model/phrases.ts'
-import { blurbsOnRemove } from '../../model/savedListRows.ts'
 
 /**
  * One of the reader's own profile lists, as a tile: what it is, its offline
@@ -26,7 +25,7 @@ const props = defineProps<{
   loading: boolean
 }>()
 
-const { refreshList, cacheWorks, refreshAndCache, downloadSite, downloadCached, deleteList, stop, resume, discard } = useSiteExport()
+const { refreshList, cacheWorks, downloadSite, stop, resume, discard } = useSiteExport()
 
 const { id, visible, titleHtml, subtitleHtml } = useSearchableRow(() => ({ title: props.tile.name, subtitle: props.tile.note }))
 
@@ -42,33 +41,6 @@ const offlineOffId = useId()
 const refreshLabel = computed(() => `Refresh the list of works in ${props.tile.name}`)
 const cacheLabel = computed(() => (props.tile.cached ? 'Update the cached works' : 'Cache this list\'s works'))
 const downloadLabel = 'Refresh, cache, then save this list as one HTML file'
-
-/** Whether removing the copy takes its blurbs now, which the menu says. */
-const prune = useOption('pruneOrphanedBlurbs')
-
-/** Removing the copy asks a second time in its own place, with the menu left open between the two. */
-const confirm = useConfirmInPlace()
-const removeId = computed(() => `remove-copy:${props.row?.key ?? props.tile.id}`)
-
-function remove(event: Event): void {
-  if (!props.row)
-    return
-  if (!confirm.press(removeId.value)) {
-    event.preventDefault()
-    return
-  }
-  void deleteList(props.row)
-}
-
-/**
- * The menu's items: a name and a line on what it does. The menu is drawn
- * outside the tile, where the tile's own styles don't reach, so these are
- * utility classes. Armed, Remove fills with the armed red.
- */
-const ITEM = 'flex flex-col items-start gap-0.5 px-[11px] py-2'
-const NAME = 'text-[12.5px] font-500 leading-[17px]'
-const NOTE = 'text-[11.5px] leading-4 text-muted-fg'
-const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
 
 /** Run one of the copy's jobs. */
 function run(start: (row: SiteExportListRow) => unknown): void {
@@ -196,67 +168,16 @@ function run(start: (row: SiteExportListRow) => unknown): void {
         Download Offline Copy
       </button>
       <span class="tile__spacer" />
-      <DropdownMenu :modal="false">
-        <DropdownMenuTrigger>
-          <button
-            type="button"
-            class="icon-btn"
-            :aria-label="`More for ${tile.name}`"
-            title="Refresh the list first, retry failed works, download without refreshing, remove"
-          >
-            <span class="i-tabler-dots" text="[16px]" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" class="max-w-[calc(100vw-32px)] w-[310px] p-[5px]">
-          <DropdownMenuItem
-            :disabled="!!tile.offlineOff"
-            :title="withReason('Refresh the list first', tile.offlineOff)"
-            :aria-describedby="tile.offlineOff ? offlineOffId : undefined"
-            :class="ITEM"
-            @select="run(refreshAndCache)"
-          >
-            <span :class="NAME">Refresh the list first</span>
-            <span :class="NOTE">
-              Re-scrape the list, then cache against it. Slower, and the only way the
-              &ldquo;has this work changed?&rdquo; check can be accurate.
-            </span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            v-if="tile.retry"
-            :disabled="!!tile.offlineOff"
-            :title="withReason('Retry failed works now', tile.offlineOff)"
-            :aria-describedby="tile.offlineOff ? offlineOffId : undefined"
-            :class="ITEM"
-            @select="row && cacheWorks(row, { retryNow: true })"
-          >
-            <span :class="NAME">Retry failed works now</span>
-            <span :class="NOTE">
-              Don't wait out the retry delay on the {{ tile.retry.toLocaleString() }}
-              {{ tile.retry === 1 ? 'work' : 'works' }} that failed &mdash; for after signing back in to AO3.
-            </span>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            v-if="tile.cached"
-            :disabled="!!tile.offlineOff"
-            :title="withReason('Download without refreshing', tile.offlineOff)"
-            :aria-describedby="tile.offlineOff ? offlineOffId : undefined"
-            :class="ITEM"
-            @select="run(downloadCached)"
-          >
-            <span :class="NAME">Download without refreshing</span>
-            <span :class="NOTE">
-              Package exactly what is saved here now, without asking AO3 for anything. Quick, and as up to date as
-              the {{ tile.cached.toLocaleString() }} saved {{ tile.cached === 1 ? 'work' : 'works' }} are.
-            </span>
-          </DropdownMenuItem>
-          <DropdownMenuItem :class="[ITEM, confirm.armed(removeId) ? ARMED : '']" @select="remove">
-            <span :class="NAME">{{ confirm.armed(removeId) ? 'Remove offline copy?' : 'Remove offline copy' }}</span>
-            <span :class="NOTE">
-              Opening the list on AO3 keeps a copy again. Its cached work text stays. {{ blurbsOnRemove(prune) }}
-            </span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <OfflineMoreMenu
+        :name="tile.name"
+        :row="row"
+        :retry="tile.retry"
+        :cached="tile.cached"
+        :off="tile.offlineOff"
+        :off-id="offlineOffId"
+        refresh
+        remove
+      />
     </div>
   </article>
 </template>

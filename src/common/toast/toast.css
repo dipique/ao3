@@ -99,8 +99,10 @@
         }
       }
 
-      .action {
+      .action,
+      .link {
         display: block;
+        width: fit-content;
         margin-top: 8px;
         padding: 0;
         border: 0;

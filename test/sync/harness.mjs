@@ -104,8 +104,12 @@ export function createCloud() {
  * runs the background's half of them, the saved-list planner, one run at a time:
  * once as it is installed (the migration), whenever its tracked lists or stored
  * lists change, and inside the engine before a pull is applied.
+ *
+ * Its daily backups aren't kept. `failBackups` makes every backup it takes fail
+ * to be written, as a full or broken `storage.local` would: a daily one too,
+ * whenever daily backups are on, since a failed one never counts as the day's.
  */
-export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true, savedLists = true, stored = {} } = {}) {
+export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true, savedLists = true, stored = {}, failBackups = false } = {}) {
   let opts = clone({ ...OPTION_DEFAULTS, ...options })
   let searchLists = clone(stored)
   const state = { ...clone(SYNC_META_DEFAULTS), ...clone(meta) }
@@ -183,8 +187,13 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       clear: async alarm => alarms.delete(alarm),
     },
     backups: {
-      maybeDaily: async () => {},
+      async maybeDaily() {
+        if (failBackups && state.backupsEnabled)
+          throw new Error(`${name}: the daily backup could not be written`)
+      },
       async create(kind, snapshot) {
+        if (failBackups)
+          throw new Error(`${name}: the ${kind} backup could not be written`)
         backups.push({ kind, options: clone(snapshot ?? opts) })
       },
     },
@@ -255,12 +264,18 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       return result
     },
 
+    async disableSync() {
+      const result = await engine.setEnabled(false)
+      await device.settle()
+      return result
+    },
+
     /** Write device-local sync state directly, as the background does outside the engine. */
     async setMeta(update) {
       Object.assign(state, clone(update))
     },
 
-    /** The reader answers a held update. */
+    /** The reader answers a held update, or which settings to keep as sync turns on. */
     async resolveHeld(choice) {
       const resolved = await engine.resolveHeld(choice)
       await device.settle()

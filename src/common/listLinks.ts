@@ -13,7 +13,7 @@ import type { SnapshotDescriptor } from './cache.ts'
 import type { SavedList } from './savedLists.ts'
 import type { TrackedKind } from './trackedLists.ts'
 
-import { fragmentParam, fragmentText, isListId, listPage, onListPage, parseArchiveUrl } from './trackedLists.ts'
+import { fragmentParam, fragmentText, isListId, listPage, onListPage, parseArchiveUrl, sourceLabel } from './trackedLists.ts'
 
 /** What an open URL names: a saved list, by its id, or a list that has no record. */
 export type ListRef = { kind: 'list', id: string } | { kind: 'marked-for-later' | 'read-works' | 'review' }
@@ -35,6 +35,13 @@ const BUILTIN_NAMES: Readonly<Record<BuiltinKind, string>> = {
   'marked-for-later': 'marked-for-later',
   'read-works': 'read-works',
   'review': 'tracked-review',
+}
+
+/** What each list without a record is called where a link names it. */
+const BUILTIN_TITLES: Readonly<Record<BuiltinKind, string>> = {
+  'marked-for-later': 'Marked for Later',
+  'read-works': 'Read works',
+  'review': 'the review',
 }
 
 /** Where each list without a record is, under the reader's `/users/<id>`. */
@@ -118,6 +125,29 @@ export function openAsk(ref: ListRef, lists: readonly SavedList[], href: string)
   const half = readingsHalf(href)
   const here = ref.kind === 'marked-for-later' ? half === 'to-read' : half !== null
   return here ? { ref, host: ref.kind, list: null } : null
+}
+
+/** A link to a list's own page, named for the list. */
+export interface OwnPageLink {
+  label: string
+  /** The list's open URL there ({@link openLink}), as a path for the page to resolve. */
+  href: string
+}
+
+/**
+ * Where to point the reader of an open URL that its page doesn't open
+ * ({@link openAsk}), when the ref names a list known here: the list's open URL
+ * on its own page ({@link hostPage}). That is a saved list of `lists` with an
+ * address on the archive, an open URL kept from before the list was saved
+ * back to another search among them; or, with the reader's account known, a
+ * list without a record, on their readings. Null for an id none of `lists`
+ * has, and for a list with no page to point to.
+ */
+export function ownPageLink(ref: ListRef, lists: readonly SavedList[], userId?: string): OwnPageLink | null {
+  const list = ref.kind === 'list' ? lists.find(one => one.id === ref.id) ?? null : null
+  const page = hostPage(ref, list, userId)
+  const name = ref.kind !== 'list' ? BUILTIN_TITLES[ref.kind] : list && `“${sourceLabel({ id: list.id, alias: list.title, url: list.url })}”`
+  return page && name ? { label: `Open ${name}`, href: openLink(ref, page) } : null
 }
 
 /** Which of a reader's two readings pages `href` is, or null for any other page. */

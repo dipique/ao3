@@ -10,6 +10,7 @@ import { readListLinks } from './lists/openLink.ts'
 import { serveMarkRequests } from './markForLater.ts'
 import { captureSearchBaseline, installPendingSearch } from './pendingSearch.ts'
 import { NO_RUNS, runAsked, runFinished, runProgressMarks, runStarted } from './runProgress.ts'
+import { settleSearchView } from './searchView/host.tsx'
 import { applySurfaceTheme } from './theme.ts'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
@@ -106,7 +107,14 @@ async function run() {
   // listing on screen came from. A no-op on every run after the first.
   captureSearchBaseline()
 
-  await Promise.all(enabled.map(u => u.ready()))
+  try {
+    await Promise.all(enabled.map(u => u.ready()))
+  }
+  finally {
+    // A search view still opening when this run took the page down, which no
+    // unit took back as it ran, is stopped and the listing put back.
+    settleSearchView()
+  }
 }
 
 function waitForReady(): Promise<void> {

@@ -2,6 +2,7 @@ import type { OpenOptions, SearchSource } from '#content_script/searchView/host.
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
+import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
@@ -125,6 +126,7 @@ export class SearchSeriesWorks extends Unit {
       pageUrl: page => getArchiveLink(`/series/${id}?page=${page}`),
       pageCount: () => detectPageCount(document),
       resultCount: seriesWorkCount,
+      refreshInterval: () => refreshIntervalMs(this.options.searchListingsRefreshHours),
       blurbSelector: BLURB_SELECTOR,
       // The list and its pagination, plus the button that opened the view — the
       // view has its own "Back to list", and all three come back with the list.

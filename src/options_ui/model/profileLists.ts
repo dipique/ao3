@@ -6,6 +6,7 @@ import { hostPage, openLink } from '../../common/listLinks.ts'
 import { bucketBar, bucketFigures } from './buckets.ts'
 import { listJob } from './jobView.ts'
 import { timeAgo } from './moments.ts'
+import { moreCounts } from './moreMenu.ts'
 
 /**
  * The reader's own profile lists — Marked for Later and the works they have
@@ -129,8 +130,7 @@ export function profileTiles({ copies, userId, job, now }: ProfileTilesInput): P
       actions,
       offlineOff: off,
       job: here,
-      retry: copy.buckets.failed + copy.buckets.staleFailures,
-      cached: copy.buckets.cached,
+      ...moreCounts(copy.buckets),
     }
   })
 }

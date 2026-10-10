@@ -2,6 +2,7 @@ import type { OpenOptions, SearchSource } from '#content_script/searchView/host.
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
+import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
@@ -106,6 +107,7 @@ export class SearchTagWorks extends Unit {
       // built from the path alone so opening from page 3 still starts at page 1.
       pageUrl: page => getArchiveLink(`${location.pathname}?page=${page}`),
       pageCount: () => detectPageCount(listbox),
+      refreshInterval: () => refreshIntervalMs(this.options.searchListingsRefreshHours),
       blurbSelector: BLURB_SELECTOR,
       // The native list, and the link that opened the view — the view has its own
       // "Back to list" button, and both come back when it does. The sentence

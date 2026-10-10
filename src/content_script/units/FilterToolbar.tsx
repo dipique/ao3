@@ -14,7 +14,7 @@ import type { ListState, SaveBackDone, SaveBackPage, SaveBackPlan, SaveBackUndoP
 import type { DetachedSnapshot } from '#content_script/searchView/cache.ts'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, aliasOf, api, cache, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, aliasOf, api, cache, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { holdSearchPrompt } from '#content_script/pendingSearch.ts'
@@ -1479,17 +1479,37 @@ async function restoreCopies(detached: readonly DetachedSnapshot[]): Promise<voi
     await restoreSnapshot(one)
 }
 
-/** Let go of copies set aside for an Undo that won't come ({@link pruneDetached}). */
-function letGo(detached: readonly DetachedSnapshot[]): void {
-  if (detached.length)
-    void pruneDetached(detached).catch(err => FilterToolbar.logger.error('Could not discard what the old copies held.', err))
+/**
+ * Settle the copies set aside for an Undo that won't come ({@link planLetGo}),
+ * against the lists as they stand now: a list may have come to their address
+ * meanwhile, by a sync or from another tab, and then they are its copies, put
+ * back as they were. The rest go for good ({@link pruneDetached}), and so does
+ * one whose key has had a list stored under it since, which stands in for it.
+ */
+async function letGo(detached: readonly DetachedSnapshot[]): Promise<void> {
+  if (!detached.length || !extensionAlive())
+    return
+  try {
+    const setAside = storedListRefs(Object.fromEntries(detached.map(one => [one.key, one.list])))
+    const { restore } = planLetGo(await readListState(), setAside, storedListRefs(await cache.get('searchLists')))
+    const gone: DetachedSnapshot[] = []
+    for (const one of detached) {
+      if (!restore.includes(one.key) || !await restoreSnapshot(one))
+        gone.push(one)
+    }
+    if (gone.length)
+      await pruneDetached(gone)
+  }
+  catch (err) {
+    FilterToolbar.logger.error('Could not settle the old copies.', err)
+  }
 }
 
 /**
  * The toast after a save-back, which can take it back for a while. It outlives
  * the rebuild the save-back's own write may cause, so it works from storage,
  * not from this page's copy of the lists. When it goes without being used, the
- * copies set aside go for good.
+ * copies set aside are settled ({@link letGo}).
  */
 function offerUndo(done: SaveBackDone, detached: readonly DetachedSnapshot[], wasRefining: boolean): void {
   let undone = false
@@ -1505,7 +1525,7 @@ function offerUndo(done: SaveBackDone, detached: readonly DetachedSnapshot[], wa
     },
     onHide: () => {
       if (!undone)
-        letGo(detached)
+        void letGo(detached)
     },
   })
 }
@@ -1523,8 +1543,8 @@ async function undoSaveBack(done: SaveBackDone, detached: readonly DetachedSnaps
     const state = await readListState()
     const plan = planUndoSaveBack(state, done)
     if (!plan.ok) {
-      letGo(detached)
       toast(undoRefusal(plan, label), { type: 'error' })
+      await letGo(detached)
       return
     }
     // Back to where the reader was: refining the list, from the page as it is.

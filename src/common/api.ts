@@ -150,7 +150,12 @@ export const api = /* @__PURE__ */ createAPI<{
   // Sync + backups (all handled in the background context).
   // Void-ish actions return `true` so the message channel always sends a response.
   setSyncEnabled: (enabled: boolean) => Promise<SetSyncResult>
-  /** Answer a sync update held back by the deletion guard. Always answers (`resolved: false` when nothing was held). */
+  /**
+   * Answer what sync asks: a sync update held back by the deletion guard, or
+   * which settings to keep as sync turned on over synced settings that differ
+   * (`accept` uses the synced ones). Always answers (`resolved: false` when
+   * nothing was asked).
+   */
   resolveHeldSync: (choice: 'accept' | 'keep') => Promise<{ resolved: boolean }>
   /** Which build the background is running, for the options page to compare with its own. */
   getBuildInfo: () => Promise<{ buildId: string, syncVersion: number }>

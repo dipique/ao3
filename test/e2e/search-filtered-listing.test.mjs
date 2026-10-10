@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { ensureBuilt, findChrome, storedListIds } from './helpers.mjs'
+import { planSavedLists, storedListRefs } from '../../src/common/savedLists.ts'
+import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
 import { startOptions, until } from './optionsPage.mjs'
-import { ARCHIVE, blurb, launch, listingPage, openTab, pillText, stored, visit } from './trackedPages.mjs'
+import { ARCHIVE, blurb, keptStore, launch, listingPage, navigateBy, openTab, pillText, stored, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -202,6 +203,60 @@ describe('search a filtered listing\'s works', { skip }, () => {
     finally {
       await tab.close()
     }
+  })
+
+  describe('a collection\'s listing, reached by its sidebar', () => {
+    const COLLECTION = { name: 'yuletide', title: 'Yuletide', number: '1' }
+    const PATH = '/collections/yuletide/works'
+    const ADDRESS = `works-filter:${PATH}`
+    /** The link's list, saved here, and its copy, kept at its address: none of the works the archive lists now. */
+    const LIST = { id: 'y00l', kind: 'works-filter', url: PATH, title: 'Collection: yuletide', type: 'collection', entity: 'yuletide' }
+    const KEPT = ['901', '902']
+    const LIVE = ['101', '102', '103']
+    const SEED = {
+      ...ON,
+      'option.savedLists': { v: 1, lists: { [LIST.id]: LIST } },
+      ...storedLists({ [ADDRESS]: { scrapedAt: 1_000, blurbsHtml: KEPT.map(id => blurb(id)), descriptor: { sourceId: 'works-filter', label: 'Collection: yuletide', listUrl: `${ARCHIVE}${PATH}` } } }),
+    }
+
+    test('a submit that sets no filter is the link\'s list: its view opens on that list\'s copy, and keeps no second copy or list', async () => {
+      /** While set, the walk of the listing waits for it to settle. */
+      let held = Promise.withResolvers()
+      const tab = await openTab(browser, {
+        seed: SEED,
+        route: async (url) => {
+          if (url.pathname !== PATH)
+            return null
+          if (held && url.searchParams.has('page'))
+            await held.promise
+          return listingPage(url, { collection: COLLECTION, blurbs: LIVE.map(id => blurb(id)), subnav: true })
+        },
+      })
+      try {
+        await visit(tab, `${ARCHIVE}${PATH}`)
+        await navigateBy(tab, () => tab.click('#work-filters input[type="submit"]'))
+        const submitted = new URL(tab.url())
+        assert.equal(submitted.pathname, PATH, 'the sidebar submits the collection\'s own path')
+        assert.equal(submitted.searchParams.get('collection_id'), COLLECTION.number, 'with its number added')
+
+        await tab.click(BUTTON)
+        // The walk is held, so the works can only have come from the copy.
+        await until('the view to draw the link\'s copy', async () => (await shownIds(tab)).join() === KEPT.join())
+        held.resolve()
+        held = null
+        await until('the copy to be read again', async () => storedListIds((await stored(tab, 'cache.searchLists'))?.[ADDRESS]).join() === LIVE.join())
+
+        const kept = await keptStore(tab)
+        assert.deepEqual(Object.keys(kept['cache.searchLists']), [ADDRESS], 'one copy, at the link\'s address')
+        assert.deepEqual(kept['option.savedLists'], SEED['option.savedLists'])
+        const plan = planSavedLists({ tracked: { lists: [] }, saved: kept['option.savedLists'] }, storedListRefs(kept['cache.searchLists']))
+        assert.deepEqual(plan.changed, { tracked: false, saved: false }, 'the planner makes no second list of it')
+      }
+      finally {
+        held?.resolve()
+        await tab.close()
+      }
+    })
   })
 
   test('switched off, a saved list\'s link still puts its view filter back, so its Update can\'t save the list without it', async () => {

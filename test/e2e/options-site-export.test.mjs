@@ -1480,6 +1480,126 @@ describe('options UI — site export, one job at a time', { skip }, () => {
 })
 
 /**
+ * One search stored in two sort orders, and a job left stopped on the older:
+ * started on it before the newer was stored. The row shows the newer copy, and
+ * the job is the row's all the same, since it reads and writes one of the
+ * copies the row's removals would take.
+ */
+describe('options UI — a job on an older sort order of a saved list\'s search', { skip }, () => {
+  const NEWER = 'text-search:work_search%5Bquery%5D=latte'
+  const OLDER = 'text-search:work_search%5Bquery%5D=latte&work_search%5Bsort_column%5D=kudos_count'
+  const OLDER_COPY = {
+    scrapedAt: Date.now() - 4 * 60 * 60 * 1000,
+    blurbsHtml: [blurb(72, 'Work number 72')],
+    descriptor: { sourceId: 'text-search', label: 'Works search — latte', listUrl: `${ARCHIVE}/works/search?work_search%5Bquery%5D=latte&work_search%5Bsort_column%5D=kudos_count` },
+  }
+  const LIST = 'l4tte'
+  const NAME = 'Latte art'
+  const OWN = 'off while this list is caching'
+
+  const seed = {
+    'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [] },
+    'option.savedLists': { v: 1, lists: { [LIST]: { id: LIST, kind: 'text-search', url: '/works/search?work_search[query]=latte', title: NAME, type: 'search', entity: 'latte' } } },
+    ...storedLists({
+      [NEWER]: {
+        scrapedAt: Date.now() - 60 * 60 * 1000,
+        blurbsHtml: [blurb(71, 'Work number 71')],
+        descriptor: { sourceId: 'text-search', label: 'Works search — latte', listUrl: `${ARCHIVE}/works/search?work_search%5Bquery%5D=latte` },
+      },
+      [OLDER]: OLDER_COPY,
+    }),
+    'siteExportJob': {
+      cacheKey: OLDER,
+      descriptor: OLDER_COPY.descriptor,
+      steps: ['caching'],
+      queue: ['72'],
+      done: 0,
+      total: 1,
+      startedAt: Date.now() - 5 * 60 * 60 * 1000,
+      updatedAt: Date.now() - 5 * 60 * 60 * 1000,
+      errors: [],
+      errorCount: 0,
+    },
+  }
+
+  let session
+  let options
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed,
+      hash: '#saved-lists',
+      viewport: { width: 1440, height: 900 },
+      // AO3 never answers, so a job runs until it is stopped.
+      prepare: p => standInForArchive(p, () => new Promise(() => {})),
+    })
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  const row = () => options.savedList(LIST)
+  const details = () => options.savedListDetails(LIST)
+  const jobState = async () => (await row()).evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
+
+  /** The control is off, and says why in its tooltip, after its own label, and in what describes it. */
+  async function saysOff(control, label, reason) {
+    assert.equal(await control.evaluate(el => el.disabled), true, `${label} should be off`)
+    assert.equal(await control.evaluate(el => el.title), `${label} — ${reason}`)
+    assert.equal(await options.description(control), `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`)
+  }
+
+  test('stopped, its line is under the row, with Continue and Discard, and removing the copy says it goes too', async () => {
+    await until('the row to show the job', async () => await jobState() === 'stopped')
+    assert.ok(await options.control(await row(), 'button', 'Continue'))
+    assert.ok(await options.control(await row(), 'button', 'Discard'))
+    assert.deepEqual(await options.controls(await row(), 'button', `Download ${NAME}`), [], 'its Download waits on the job')
+    assert.match(await options.text(await details()), /Its stopped job is discarded with it\./)
+  })
+
+  test('running, the row is busy itself: Stop, caching now, and neither removal can take a copy from under it', async () => {
+    await options.press(await options.control(await row(), 'button', 'Continue'))
+    await until('the job to run', async () => await jobState() === 'running')
+    assert.ok(await options.control(await row(), 'button', `Stop caching ${NAME}`))
+    assert.match(await options.text(await row()), /caching now/)
+    await saysOff(await options.control(await details(), 'button', 'Cache works'), 'Cache this list\'s works', OWN)
+
+    const removeCopy = await options.control(await details(), 'button', 'Remove offline copy')
+    const removeList = await options.control(await details(), 'button', 'Remove list')
+    await saysOff(removeCopy, 'Remove offline copy', OWN)
+    await saysOff(removeList, 'Remove list', OWN)
+    for (const remove of [removeCopy, removeList]) {
+      await options.press(remove)
+      await options.press(remove)
+    }
+    await options.saved()
+    const stored = await options.stored('cache.searchLists')
+    assert.ok(NEWER in stored && OLDER in stored, 'both copies stay')
+    assert.ok((await options.stored('option.savedLists')).lists[LIST], 'and so does the list')
+    assert.equal(await jobState(), 'running')
+  })
+
+  test('stopped again, Remove offline copy takes both copies and the job on the older', async () => {
+    await options.press(await options.control(await row(), 'button', `Stop caching ${NAME}`))
+    await until('the job to stop', async () => await jobState() === 'stopped')
+    const remove = await options.control(await details(), 'button', 'Remove offline copy')
+    await options.press(remove)
+    await until('it to ask', async () => await options.name(remove) === 'Remove it?')
+    await options.press(remove)
+    await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
+    await until('both copies to go', async () => {
+      const stored = await options.stored('cache.searchLists')
+      return !(NEWER in stored) && !(OLDER in stored)
+    })
+    assert.ok((await options.stored('option.savedLists')).lists[LIST], 'the list stays')
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(options.problems(), [])
+  })
+})
+
+/**
  * A row's job, driven from the keyboard: Download turns into Stop, Stop leaves
  * Continue and Discard in the job's line, and each press takes away the control
  * that was pressed. Focus stays in the row, on the control in its place.

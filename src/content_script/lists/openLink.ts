@@ -1,8 +1,8 @@
 import type { ListHost, OpenAsk, Options } from '#common'
 import type { OpenOptions } from '#content_script/searchView/host.tsx'
 
-import { openAsk, openTarget, savedListsOf, toast } from '#common'
-import { isOpening, takeReopen } from '#content_script/searchView/host.tsx'
+import { openAsk, openTarget, ownPageLink, savedListsOf, toast } from '#common'
+import { isOpening, resumeSearchView } from '#content_script/searchView/host.tsx'
 import { arrivingList } from '#content_script/tracked/refining.ts'
 import { restoreListFilter } from '#content_script/tracked/restore.ts'
 import { filterStateOf } from '#content_script/tracked/viewFilter.ts'
@@ -47,7 +47,8 @@ let links: PageLinks | null = null
  * list a refining link has brought the tab here to refine. For the first run
  * of the page, before any unit is built, since what they ask for decides which
  * units run. An open URL naming no list this page opens is said so, once the
- * page is there to say it on.
+ * page is there to say it on, with a link to the list's own page when it names
+ * a list known here. Nothing goes there by itself.
  */
 export function readListLinks(options: Options): void {
   if (links)
@@ -66,8 +67,10 @@ export function readListLinks(options: Options): void {
     owed: !!ask,
     hosts: new Set([ask?.host, restoring].filter((host): host is ListHost => !!host)),
   }
-  if (target && !ask)
-    whenShown(() => toast(UNKNOWN_LINK, { type: 'error' }))
+  if (target && !ask) {
+    const link = ownPageLink(target, lists, options.user.userId) ?? undefined
+    whenShown(() => toast(UNKNOWN_LINK, { type: 'error', link }))
+  }
 }
 
 /** Whether a list's own link asked this page for `host`'s view: for its unit's `enabled`. */
@@ -81,9 +84,13 @@ export function linkedTo(host: ListHost): boolean {
  * when the link asks nothing of `host`, or its view is already opened.
  *
  * The view is owed until an open of it has settled, opened, failed or
- * cancelled. A re-run can take the page down around a view still loading, and
- * then opens it again from here; so an open that a newer one of the same view
- * has taken over leaves it owed, for that one to settle.
+ * cancelled. A re-run that takes the page down around a view still loading
+ * hands that view's opening to the re-run's own open of it
+ * ({@link resumeSearchView}), and the open made here settles when that one
+ * does. A re-run can also overtake an open still reading what it needs before
+ * it opens anything, and open the view again from here; so an open that a
+ * newer one of the same view has taken over leaves it owed, for that one to
+ * settle.
  */
 export function openLinked(host: ListHost, cacheKey: string, open: (opts: OpenOptions) => Promise<void>): Promise<void> | null {
   const page = links
@@ -98,16 +105,14 @@ export function openLinked(host: ListHost, cacheKey: string, open: (opts: OpenOp
 }
 
 /**
- * Bring a unit's view up as this run of the page owes it: put back a view a
- * re-run took down, where the reader left it; failing that, open the list the
- * page's open URL names; failing that, put back the view filter of a list the
- * tab has come to refine ({@link restoreListFilter}).
+ * Bring a unit's view up as this run of the page owes it: put back what a
+ * re-run took down, a view where the reader left it or one still opening as far
+ * as it had got; failing that, open the list the page's open URL names; failing
+ * that, put back the view filter of a list the tab has come to refine
+ * ({@link restoreListFilter}).
  */
 export function resumeView(options: Options, host: ListHost, cacheKey: string, open: (opts: OpenOptions) => Promise<void>): void {
-  const pending = takeReopen(cacheKey)
-  if (pending)
-    void open({ initialState: pending, refresh: false })
-  else
+  if (!resumeSearchView(cacheKey, open))
     void (openLinked(host, cacheKey, open) ?? restoreListFilter(options, cacheKey, open))
 }
 

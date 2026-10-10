@@ -10,19 +10,22 @@ import type { SyncAnswer, SyncCallout, SyncState } from '../../model/syncStatus.
  *
  * A held update's callout is a question: what the update would remove, and
  * the two answers drawn alike, each with what it does, so that neither reads
- * as the one to pick.
+ * as the one to pick. Turning sync on over synced settings that differ from
+ * this browser's asks which to keep in the same way.
  */
 const { state, status, setEnabled, resolveHeld } = useSync()
 
 /**
  * The states with a glyph of their own; the rest take their severity's. A
  * pause is no fault, so it doesn't take the warning triangle: a hold is a pause
- * waiting on the reader, a version pause lifts once this browser updates, and
- * older synced settings wait for a save. Off is an empty ring.
+ * waiting on the reader, as is the question turning sync on asks, a version
+ * pause lifts once this browser updates, and older synced settings wait for a
+ * save. Off is an empty ring.
  */
 const GLYPHS: Partial<Record<SyncState, string>> = {
   'off': 'i-tabler-circle-dashed',
   'held': 'i-mdi-pause-circle-outline',
+  'first-sync': 'i-mdi-pause-circle-outline',
   'newer-version': 'i-tabler-player-pause',
   'older-cloud': 'i-tabler-clock',
 }
@@ -85,7 +88,7 @@ function consequenceId(answer: SyncAnswer): string {
           <p font-700>
             {{ callout.text }}
           </p>
-          <ul data-sync-losses class="sync-held__losses">
+          <ul v-if="callout.decision.lines.length" data-sync-losses class="sync-held__losses">
             <li v-for="line in callout.decision.lines" :key="line">
               {{ line }}
             </li>

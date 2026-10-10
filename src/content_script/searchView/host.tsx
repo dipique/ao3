@@ -11,13 +11,17 @@ import React from '#dom'
 
 import type { WriteSnapshotOptions } from './cache.ts'
 import type { FacetValueRef, FilterState } from './engine.ts'
+import type { Handover, OnPage } from './handover.ts'
 import type { SearchViewPrefs } from './prefs.ts'
+import type { ScrapeResult } from './scrape.ts'
 import type { DeferredUpdate, SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
 
 import { pristineBlurb, readSnapshot, snapshotSize, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { collapseWork, decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
+import { isFresh } from './freshness.ts'
+import { onClaim, onClose, onOpen, onRelease, onRunEnd, onSuspend } from './handover.ts'
 import { applyHidden } from './hidden.ts'
 import { loadPrefs, savePrefs } from './prefs.ts'
 import { isArchiveBusy, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
@@ -208,9 +212,10 @@ export interface SearchSource {
    * shows it without re-scraping the listing behind it. Absent or `0` refreshes
    * on every open, which suits a listing that costs a page or two.
    *
-   * Measured from the snapshot's `scrapedAt`, which only a real scrape moves.
-   * The view's Refresh button ignores it, as does a view opened with no stored
-   * copy at all.
+   * Measured from the snapshot's `scrapedAt`, which only a real scrape moves,
+   * and only for a snapshot read from the listing this source reads now: its
+   * descriptor's `listUrl` ({@link isFresh}). The view's Refresh button ignores
+   * it, as does a view opened with no stored copy at all.
    */
   refreshInterval?: () => number
   /**
@@ -487,15 +492,51 @@ interface Reopen {
 }
 
 /**
- * Set when a global re-run (e.g. an options change from a context menu) closed an
- * open view. Cleared by {@link closeSearchView}, so a user-initiated close (Back)
- * stays closed.
+ * A view on its way to the screen: from the moment its container goes into the
+ * page until its view is drawn there, or it closes. A first open of a list
+ * spends most of that walking the listing, which can take minutes, and a global
+ * re-run in the middle hands it over whole rather than closing it — walk,
+ * progress panel and all — for the re-run's own open of the list to take back
+ * ({@link file://./handover.ts}).
  */
-let reopen: Reopen | null = null
+interface Opening {
+  cacheKey: string
+  /** What it was opened with, which the open that takes it back is given too. */
+  opts: OpenOptions
+  /** The view's container, holding the walk's progress, or its limit gate. */
+  container: HTMLElement
+  /** The walk of its listing, once it has had to start one. */
+  walk: Walk | null
+  /**
+   * Settles when the opening is over: its view drawn, or closed, by whichever
+   * open has it by then, or stopped. An open that has handed its opening over
+   * waits for this, so that it settles when its view does.
+   */
+  done: Promise<void>
+  end: () => void
+}
+
+function newOpening(cacheKey: string, opts: OpenOptions, container: HTMLElement): Opening {
+  let end = (): void => {}
+  const done = new Promise<void>((resolve) => {
+    end = resolve
+  })
+  return { cacheKey, opts, container, walk: null, done, end }
+}
+
+/** The opening in the page, from its mount until it shows or closes. */
+let current: Opening | null = null
 /**
- * A {@link reopen} its unit has claimed through {@link takeReopen}, waiting for
- * the {@link openSearchView} that call leads to. Matched to it by the very state
- * object `takeReopen` handed out, so nothing but that open can pick it up.
+ * What the last global re-run took down and no unit has taken back yet: a view
+ * to put back where the reader left it, or an opening still under way. Cleared
+ * by {@link closeSearchView}, so a close the reader asked for (Back) stays
+ * closed.
+ */
+let handover: Handover<Reopen, Opening> | null = null
+/**
+ * A view its unit has claimed from the {@link handover}, waiting for the
+ * {@link openSearchView} the claim leads to. Matched to it by the very state
+ * object the claim handed out, so nothing but that open can pick it up.
  */
 let claimed: Reopen | null = null
 
@@ -507,7 +548,8 @@ export function isSearchViewOpen(): boolean {
 /**
  * Whether the view for `cacheKey` is on its way to the screen: an open of it has
  * started and not yet finished. A caller whose own open has just returned can
- * tell from this whether a newer one — a global re-run's — has taken over.
+ * tell from this whether a newer one has taken over: two runs of the page that
+ * overlap can each open the same list.
  */
 export function isOpening(cacheKey: string): boolean {
   return busy && mounted?.cacheKey === cacheKey
@@ -529,6 +571,12 @@ export function activeSearchFilter(): { descriptor: SnapshotDescriptor, filter: 
   return { descriptor: active.source.descriptor(), filter: active.view.getReaderFilter() }
 }
 
+/** End an opening for good: stop its walk, and let whatever waits on it settle. */
+function stopOpening(opening: Opening): void {
+  opening.walk?.controller.abort()
+  opening.end()
+}
+
 /** Restore the native page: abort any scrape, remove the view, un-hide the list. */
 export function closeSearchView(): void {
   generation++
@@ -536,8 +584,15 @@ export function closeSearchView(): void {
   controller = null
   active = null
   busy = false
-  // A close means "don't come back" unless the caller re-arms reopen after.
-  reopen = null
+  // A close means "don't come back" unless the caller re-arms a reopen after,
+  // and an opening a re-run took down is over with it.
+  const { stopped } = onClose(handover)
+  handover = null
+  if (stopped)
+    stopOpening(stopped)
+  if (current)
+    stopOpening(current)
+  current = null
   for (const el of document.querySelectorAll(`.${HOST}`))
     el.remove()
   // Before the native page comes back, so the source's stand-ins are never on
@@ -555,39 +610,101 @@ export function closeSearchView(): void {
   refreshFilterToolbar()
 }
 
-/**
- * Close the view but remember where it was, so the unit's next `ready()` can put
- * it back. For a unit's static `clean()`, which runs on every global re-run.
- */
-export function suspendSearchView(): void {
-  // Every unit's clean() runs on a re-run, so this is called once per search-view
-  // unit. Only the one that had a view open has anything to suspend; the rest
-  // must leave an already-armed reopen alone.
-  if (!active)
-    return
-  const { source, view, scrapedAt, prefs } = active
-  const snapshot: Reopen = {
-    cacheKey: source.cacheKey,
-    state: view.getState(),
-    works: view.getWorks(),
-    scrapedAt,
-    prefs,
-    scrollY: window.scrollY,
-  }
-  closeSearchView()
-  reopen = snapshot
+/** Hand what a re-run took down over ({@link file://./handover.ts}), stopping an opening it replaces. */
+function handOver(page: OnPage<Reopen, Opening>): void {
+  const next = onSuspend(handover, page)
+  handover = next.handover
+  if (next.stopped)
+    stopOpening(next.stopped)
 }
 
 /**
- * Claim the pending reopen state for `cacheKey`, if a {@link suspendSearchView}
- * left one. One-shot: a reopen is only ever honoured once.
+ * Take the view down for a global re-run, handing it over for the unit's next
+ * `ready()` to take back ({@link resumeSearchView}). A view on screen is closed,
+ * and remembered as the reader left it. A view still opening is not closed: its
+ * walk carries on off the page, the native listing stays hidden behind it, and
+ * the open that was bringing it up leaves it to whichever open takes it back.
+ * For a unit's static `clean()`, which runs on every global re-run.
  */
-export function takeReopen(cacheKey: string): ViewState | null {
-  if (!reopen || reopen.cacheKey !== cacheKey)
-    return null
-  claimed = reopen
-  reopen = null
-  return claimed.state
+export function suspendSearchView(): void {
+  // Every unit's clean() runs on a re-run, so this is called once per search-view
+  // unit. Only the one that had a view up has anything to suspend; the rest must
+  // leave what is already handed over alone.
+  if (active) {
+    const { source, view, scrapedAt, prefs } = active
+    const snapshot: Reopen = {
+      cacheKey: source.cacheKey,
+      state: view.getState(),
+      works: view.getWorks(),
+      scrapedAt,
+      prefs,
+      scrollY: window.scrollY,
+    }
+    closeSearchView()
+    handOver({ view: { cacheKey: source.cacheKey, view: snapshot } })
+    return
+  }
+  const opening = current
+  if (!opening)
+    return
+  generation++
+  busy = false
+  controller = null
+  current = null
+  opening.container.remove()
+  const was = mounted
+  mounted = null
+  was?.unmount?.()
+  handOver({ opening: { cacheKey: opening.cacheKey, opening } })
+}
+
+/**
+ * Put back what a global re-run took down of `cacheKey`'s view, through `open`,
+ * the unit's own way of opening it: a view, where the reader left it, or one
+ * still opening, as far as it had got — its walk is not started again. False
+ * when the re-run took down nothing of this list's.
+ *
+ * For a unit's `ready()`, which has to call this as it runs rather than after
+ * anything it awaits: an opening no unit has claimed by the end of the re-run
+ * is stopped ({@link settleSearchView}). One whose `open` gives up before
+ * taking it back is stopped then.
+ */
+export function resumeSearchView(cacheKey: string, open: (opts: OpenOptions) => Promise<void>): boolean {
+  const next = onClaim(handover, cacheKey)
+  handover = next.handover
+  const taken = next.claimed
+  if (!taken)
+    return false
+  if (taken.kind === 'view') {
+    claimed = taken.view
+    void open({ initialState: taken.view.state, refresh: false })
+  }
+  else {
+    void open(taken.opening.opts).finally(() => {
+      const released = onRelease(handover, cacheKey)
+      handover = released.handover
+      if (released.stopped) {
+        stopOpening(released.stopped)
+        closeSearchView()
+      }
+    })
+  }
+  return true
+}
+
+/**
+ * The end of a global re-run, every unit ready: an opening the re-run took down
+ * that no unit claimed — its feature switched off by the change, say — is
+ * stopped, and the native page put back. For the content script, after every
+ * run of the page.
+ */
+export function settleSearchView(): void {
+  const next = onRunEnd(handover)
+  handover = next.handover
+  if (next.stopped) {
+    stopOpening(next.stopped)
+    closeSearchView()
+  }
 }
 
 /** The claimed reopen this open was handed, if it is one. One-shot, like the claim. */
@@ -639,11 +756,15 @@ async function persist(
     await source.onPersist?.(opts.listing ?? works)
 }
 
-/** Hide the source's native listing and insert an empty view container for it. */
-function mountContainer(source: SearchSource): HTMLElement {
+/**
+ * Hide the source's native listing and insert a view container for it: an
+ * empty one, or the container of an opening a re-run handed over, which puts
+ * that opening's progress back where it was.
+ */
+function mountContainer(source: SearchSource, existing?: HTMLElement): HTMLElement {
   for (const el of source.nativeElements())
     el.classList.add(NATIVE_HIDDEN_CLASS)
-  const container = (<div class={`${ADDON_CLASS}  ${HOST}  ${ADDON_CLASS}--${source.id}`} />) as HTMLElement
+  const container = existing ?? (<div class={`${ADDON_CLASS}  ${HOST}  ${ADDON_CLASS}--${source.id}`} />) as HTMLElement
   mounted = source
   source.mount(container)
   return container
@@ -786,6 +907,92 @@ function mountLimitGate(
       </div>,
     )
   })
+}
+
+/**
+ * A first walk of a source's listing, or its own {@link SearchSource.load}: what
+ * an open with no stored copy has to do before there is anything to show. It
+ * runs apart from the open that started it, so that a global re-run can hand it
+ * to another open rather than lose it ({@link file://./handover.ts}); whichever
+ * open has it when it finishes writes the copy and draws the view.
+ */
+interface Walk {
+  controller: AbortController
+  outcome: Promise<WalkOutcome>
+}
+
+/**
+ * How a walk ended: with a source's own load, or a scrape of its listing; or
+ * `stopped` short of either, the reader having backed out at the limit gate,
+ * or the walk having been cancelled or stopped.
+ */
+type WalkOutcome
+  = | { kind: 'loaded', loaded: LoadResult }
+    | { kind: 'scraped', budget: Budget, result: ScrapeResult, completed: { works: Work[], blocked: boolean } }
+    | { kind: 'stopped' }
+    | { kind: 'failed', err: unknown }
+
+/**
+ * Start walking `source` behind a progress panel in `container`. A listing too
+ * big for the reader's ceiling gets a say-so first — it's their request being
+ * narrowed, not ours.
+ */
+function startWalk(source: SearchSource, options: Options, container: HTMLElement): Walk {
+  const controller = new AbortController()
+  return { controller, outcome: walk(source, options, container, controller.signal) }
+}
+
+async function walk(source: SearchSource, options: Options, container: HTMLElement, signal: AbortSignal): Promise<WalkOutcome> {
+  // Counting the listing's pages can itself be a request (see
+  // `SearchSource.pageCount`), so the progress panel — and its Cancel button
+  // — goes up before the count rather than after it.
+  let progress = mountProgress(container)
+  try {
+    if (source.load) {
+      // A source that produces its own works has no listing to budget, no
+      // pages to count and nothing for the limit gate to ask about — it has
+      // already decided how much to read.
+      // `applied`: there is nothing on screen yet for these works to
+      // interrupt, so the view they open is the works they brought.
+      return { kind: 'loaded', loaded: await source.load({ signal, onProgress: progress.onLoad, full: true, applied: true }) }
+    }
+    const budget = await budgetFor(source, options)
+    if (signal.aborted)
+      return { kind: 'stopped' }
+    // No gate for a source that selects: what the gate asks about is loading
+    // the first N of a listing instead of all of it, and for a haystack that
+    // is neither what is being loaded nor what the reader would get. Its page
+    // cap and `satisfied` bound the reading instead, and the progress panel's
+    // Cancel is the say-so.
+    if (isTruncated(budget) && !source.select) {
+      if (!await mountLimitGate(container, source, budget, signal))
+        return { kind: 'stopped' }
+      // The gate replaced the progress panel with its question; put it back.
+      progress.dispose()
+      progress = mountProgress(container)
+    }
+    const result = await scrapeListing({
+      pageCount: budget.pages,
+      pageUrl: source.pageUrl,
+      blurbSelector: source.blurbSelector,
+      firstPageDoc: source.firstPageDoc?.(),
+      satisfied: source.satisfied,
+      onProgress: progress.onProgress,
+      signal,
+    })
+    if (signal.aborted)
+      return { kind: 'stopped' }
+    const completed = result.blocked
+      ? { works: selected(source, result.works), blocked: true }
+      : await complete(source, selected(source, result.works), { signal, full: true, onProgress: progress.onRecover })
+    return { kind: 'scraped', budget, result, completed }
+  }
+  catch (err) {
+    return { kind: 'failed', err }
+  }
+  finally {
+    progress.dispose()
+  }
 }
 
 /**
@@ -960,7 +1167,12 @@ export interface OpenOptions {
 /**
  * Open the in-memory view for `source`, in place of its native listing. Renders
  * instantly from the cached snapshot when there is one (refreshing behind it);
- * otherwise scrapes the whole listing behind a progress bar first.
+ * otherwise scrapes the whole listing behind a progress bar first. An opening
+ * of the same list that a global re-run handed over is taken back instead, as
+ * far as it had got.
+ *
+ * Settles when the view is drawn or closed — whichever open has the opening by
+ * then, should a re-run hand it on.
  */
 export async function openSearchView(source: SearchSource, options: Options, opts: OpenOptions = {}): Promise<void> {
   // Claimed before anything can return early, so a reopen never outlives the
@@ -968,9 +1180,9 @@ export async function openSearchView(source: SearchSource, options: Options, opt
   const carried = takeClaimed(source, opts)
   // This list is already on screen, or on its way there: a second click, or a
   // unit re-running, has nothing to add. "On screen" is the container being in
-  // the page — a global re-run removes it mid-load, and a load with nowhere to
-  // render has to be started again, not waited for.
-  if (isSearchViewOpen() && mounted?.cacheKey === source.cacheKey)
+  // the page; a global re-run takes it out, and hands over the opening it held.
+  const step = onOpen(handover, source.cacheKey, isSearchViewOpen() && mounted?.cacheKey === source.cacheKey)
+  if (step.plan === 'stay')
     return
   // An orphaned page could still scrape the listing — the fetches are the
   // reader's own session, not ours — but nothing it learned would survive:
@@ -980,16 +1192,26 @@ export async function openSearchView(source: SearchSource, options: Options, opt
   // {@link file://./../extensionAlive.ts}).
   if (!extensionAlive())
     return
+  handover = step.handover
+  if (step.stopped)
+    stopOpening(step.stopped)
   // A different list is up, or loading: this one replaces it. Two readings lists
   // share one page, and the reader moving from one to the other should get the
   // one they asked for, not a refusal because the other got there first.
-  if (busy || isSearchViewOpen())
+  if (step.stopped || busy || isSearchViewOpen())
     closeSearchView()
   const gen = ++generation
   const stale = (): boolean => gen !== generation
   busy = true
+  let opening: Opening | null = null
   try {
-    const container = mountContainer(source)
+    const container = mountContainer(source, step.adopted?.container)
+    opening = step.adopted ?? newOpening(source.cacheKey, opts, container)
+    current = opening
+    // A walk taken back is this open's to cancel now, and to stop if the page
+    // moves on.
+    if (opening.walk)
+      controller = opening.walk.controller
     // Local (never-synced) layout prefs for this application of the view. A
     // reopen has the ones it was showing — and nothing on its way back to the
     // screen may wait on storage, or the page is drawn without it.
@@ -1086,78 +1308,98 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       return view
     }
 
-    const cached = carried && reusingWorks
-      ? { works: undecorated(carried.works), scrapedAt: carried.scrapedAt, missing: 0 }
-      : await readSnapshot(source.cacheKey)
+    // An opening taken back may have walked as far as it was going to already:
+    // a walk is never started twice, and its works don't wait on the copy.
+    if (!opening.walk) {
+      const cached = carried && reusingWorks
+        ? { works: undecorated(carried.works), scrapedAt: carried.scrapedAt, missing: 0, descriptor: source.descriptor() }
+        : await readSnapshot(source.cacheKey)
+      if (stale())
+        return
+      const kept = cached ? selected(source, cached.works) : []
+      if (cached && kept.length) {
+        // Works that stopped belonging since the snapshot was taken, or since the
+        // view a re-run closed was drawn — marked read off Marked for Later, or
+        // unmarked off the read list — come out of the stored copy now, not at the
+        // next reload. This is also how the change reaches the screen: an options
+        // change reopens the view through here.
+        if (kept.length < cached.works.length)
+          void persist(source, [...kept], { keepScrapedAt: true }).catch(err => log.error(`Failed to prune the stored copy of ${source.id}`, err))
+        // A snapshot taken under a higher ceiling than the reader now has; trim it
+        // to what they asked for rather than waiting for the refresh to say so.
+        // The ceiling alone: how long the listing is only matters to a scrape, and
+        // asking can cost a request.
+        const stored = applyLimit(kept, limitFor(options))
+        // The snapshot itself is already on disk — but whatever the source keeps in
+        // step with it may not be (a snapshot from before that record existed, or a
+        // refresh that failed), so re-derive it from the cache. The refresh below
+        // normally overwrites it within seconds. Not for a source that prunes its
+        // stored copy: that copy is no longer the listing (see `belongs`).
+        if (!source.belongs)
+          void source.onPersist?.(stored).catch(err => log.error(`Failed to seed records for ${source.id}`, err))
+        // Render instantly, then refresh in the background (unless the caller
+        // knows the works are fresh, e.g. a reopen right after a re-run).
+        const view = show(stored, cached.scrapedAt)
+        // Taking the old view down can shorten the page for as long as a layout
+        // lasts, and a shorter page pulls the scroll position up with it.
+        if (carried && window.scrollY !== carried.scrollY)
+          window.scrollTo({ top: carried.scrollY, behavior: 'instant' })
+        // A copy younger than the source's interval is taken as it is: reloading a
+        // long list on every visit is how a reader gets rate-limited, and the
+        // Refresh button is right there when they want it sooner.
+        const recent = isFresh(
+          { scrapedAt: cached.scrapedAt, missing: cached.missing, listUrl: cached.descriptor?.listUrl },
+          { intervalMs: source.refreshInterval?.() ?? 0, listUrl: source.descriptor().listUrl, now: Date.now() },
+        )
+        // `undefined` is a full reload, `null` is a top-up with nothing to find.
+        const plan = !recent && opts.refresh !== false && source.topUp ? source.topUp(stored) : undefined
+        if (opts.refresh !== false && !recent && plan !== null) {
+          view.setUpdating(true)
+          void refresh(source, view, options, plan ? { plan, stored } : undefined).finally(() => view.setUpdating(false))
+        }
+        return
+      }
+
+      // No cache: walk the listing behind a progress bar before showing the
+      // view. Its controller is registered before the count and the gate so a
+      // "Back", or a re-run's stop, which aborts the live controller, releases
+      // either of them rather than leaving one running behind a page that has
+      // moved on.
+      opening.walk = startWalk(source, options, container)
+      controller = opening.walk.controller
+    }
+    const walked = opening.walk
+    const outcome = await walked.outcome
+    // Handed on by a re-run, or replaced: what the walk found is the newer
+    // open's to show, and the view on screen now is not this one's to close.
     if (stale())
       return
-    const kept = cached ? selected(source, cached.works) : []
-    if (cached && kept.length) {
-      // Works that stopped belonging since the snapshot was taken, or since the
-      // view a re-run closed was drawn — marked read off Marked for Later, or
-      // unmarked off the read list — come out of the stored copy now, not at the
-      // next reload. This is also how the change reaches the screen: an options
-      // change reopens the view through here.
-      if (kept.length < cached.works.length)
-        void persist(source, [...kept], { keepScrapedAt: true }).catch(err => log.error(`Failed to prune the stored copy of ${source.id}`, err))
-      // A snapshot taken under a higher ceiling than the reader now has; trim it
-      // to what they asked for rather than waiting for the refresh to say so.
-      // The ceiling alone: how long the listing is only matters to a scrape, and
-      // asking can cost a request.
-      const stored = applyLimit(kept, limitFor(options))
-      // The snapshot itself is already on disk — but whatever the source keeps in
-      // step with it may not be (a snapshot from before that record existed, or a
-      // refresh that failed), so re-derive it from the cache. The refresh below
-      // normally overwrites it within seconds. Not for a source that prunes its
-      // stored copy: that copy is no longer the listing (see `belongs`).
-      if (!source.belongs)
-        void source.onPersist?.(stored).catch(err => log.error(`Failed to seed records for ${source.id}`, err))
-      // Render instantly, then refresh in the background (unless the caller
-      // knows the works are fresh, e.g. a reopen right after a re-run).
-      const view = show(stored, cached.scrapedAt)
-      // Taking the old view down can shorten the page for as long as a layout
-      // lasts, and a shorter page pulls the scroll position up with it.
-      if (carried && window.scrollY !== carried.scrollY)
-        window.scrollTo({ top: carried.scrollY, behavior: 'instant' })
-      // A copy younger than the source's interval is taken as it is: reloading a
-      // long list on every visit is how a reader gets rate-limited, and the
-      // Refresh button is right there when they want it sooner.
-      // Nor is a copy missing blurbs it names: only a reload can put them back.
-      const age = Date.now() - cached.scrapedAt
-      const recent = !cached.missing && age >= 0 && age < (source.refreshInterval?.() ?? 0)
-      // `undefined` is a full reload, `null` is a top-up with nothing to find.
-      const plan = !recent && opts.refresh !== false && source.topUp ? source.topUp(stored) : undefined
-      if (opts.refresh !== false && !recent && plan !== null) {
-        view.setUpdating(true)
-        void refresh(source, view, options, plan ? { plan, stored } : undefined).finally(() => view.setUpdating(false))
+    if (controller === walked.controller)
+      controller = null
+    const fail = (err: unknown): void => {
+      if ((err as Error)?.name !== 'AbortError') {
+        log.error(`Failed to load ${source.id}`, err)
+        // Counting the listing's pages is a request of its own for some sources
+        // ({@link SearchSource.pageCount}), so it can be refused before the
+        // scrape has fetched anything at all — which is not the source being
+        // unreachable, and should not be reported as though it were.
+        toast(isArchiveBusy(err) ? RATE_LIMITED : source.errorMessage, { type: 'error' })
       }
-      return
+      closeSearchView()
     }
-
-    // No cache: scrape with a progress bar before showing the view. A listing
-    // too big for the reader's ceiling gets a say-so first — it's their request
-    // being narrowed, not ours.
-    const own = new AbortController()
-    // Registered before the count and the gate so a "Back"/re-run teardown,
-    // which aborts the live controller, releases either of them rather than
-    // leaving one running behind a page that has moved on.
-    controller = own
-    // Counting the listing's pages can itself be a request (see
-    // `SearchSource.pageCount`), so the progress panel — and its Cancel button
-    // — goes up before the count rather than after it.
-    let progress = mountProgress(container)
     try {
-      if (source.load) {
-        // A source that produces its own works has no listing to budget, no
-        // pages to count and nothing for the limit gate to ask about — it has
-        // already decided how much to read. What follows the load is the same as
-        // what follows a scrape: the refusal and empty guards, the write, the
-        // view.
-        // `applied`: there is nothing on screen yet for these works to
-        // interrupt, so the view they open is the works they brought.
-        const loaded = await source.load({ signal: own.signal, onProgress: progress.onLoad, full: true, applied: true })
-        if (stale())
-          return
+      if (outcome.kind === 'failed') {
+        fail(outcome.err)
+        return
+      }
+      if (outcome.kind === 'stopped') {
+        closeSearchView()
+        return
+      }
+      if (outcome.kind === 'loaded') {
+        // What follows a source's own load is the same as what follows a
+        // scrape: the refusal and empty guards, the write, the view.
+        const { loaded } = outcome
         const works = renumber(belonging(source, loaded.works))
         // Not written when AO3 refused us outright and gave us nothing: an empty
         // load would otherwise overwrite a perfectly good stored list, and "AO3
@@ -1179,46 +1421,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
           toast('AO3 asked us to slow down before the whole list could be loaded. The rest will be tried again next time.', { type: 'error' })
         return
       }
-      const budget = await budgetFor(source, options)
-      if (stale())
-        return
-      if (own.signal.aborted) {
-        closeSearchView()
-        return
-      }
-      // No gate for a source that selects: what the gate asks about is loading
-      // the first N of a listing instead of all of it, and for a haystack that
-      // is neither what is being loaded nor what the reader would get. Its page
-      // cap and `satisfied` bound the reading instead, and the progress panel's
-      // Cancel is the say-so.
-      if (isTruncated(budget) && !source.select) {
-        const go = await mountLimitGate(container, source, budget, own.signal)
-        if (stale())
-          return
-        if (!go) {
-          closeSearchView()
-          return
-        }
-        // The gate replaced the progress panel with its question; put it back.
-        progress.dispose()
-        progress = mountProgress(container)
-      }
-      const result = await scrapeListing({
-        pageCount: budget.pages,
-        pageUrl: source.pageUrl,
-        blurbSelector: source.blurbSelector,
-        firstPageDoc: source.firstPageDoc?.(),
-        satisfied: source.satisfied,
-        onProgress: progress.onProgress,
-        signal: own.signal,
-      })
-      if (stale())
-        return
-      const completed = result.blocked
-        ? { works: selected(source, result.works), blocked: true }
-        : await complete(source, selected(source, result.works), { signal: own.signal, full: true, onProgress: progress.onRecover })
-      if (stale())
-        return
+      const { budget, result, completed } = outcome
       const works = applyLimit(renumber(completed.works), budget.limit)
       // Not persisted when the archive refused us outright: an empty scrape
       // would otherwise overwrite a perfectly good stored list with nothing,
@@ -1248,28 +1451,25 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       }
     }
     catch (err) {
-      // Replaced while it loaded: the abort is the replacement's doing, and the
-      // view on screen now is not this one's to close.
-      if (stale())
-        return
-      if ((err as Error)?.name !== 'AbortError') {
-        log.error(`Failed to load ${source.id}`, err)
-        // Counting the listing's pages is a request of its own for some sources
-        // ({@link SearchSource.pageCount}), so it can be refused before the
-        // scrape has fetched anything at all — which is not the source being
-        // unreachable, and should not be reported as though it were.
-        toast(isArchiveBusy(err) ? RATE_LIMITED : source.errorMessage, { type: 'error' })
-      }
-      closeSearchView()
-    }
-    finally {
-      progress.dispose()
-      if (controller === own)
-        controller = null
+      // Replaced while it was being written: the view on screen now is not
+      // this one's to close.
+      if (!stale())
+        fail(err)
     }
   }
   finally {
     if (!stale())
       busy = false
+    if (opening) {
+      if (!stale()) {
+        if (current === opening)
+          current = null
+        opening.end()
+      }
+      else {
+        // Handed on by a re-run, this open settles when the view does.
+        await opening.done
+      }
+    }
   }
 }

@@ -38,6 +38,7 @@ declare module 'vue' {
     ListRow: typeof import('./../options_ui/components/list/ListRow.vue')['default']
     ListSort: typeof import('./../options_ui/components/list/ListSort.vue')['default']
     NumberInput: typeof import('./../options_ui/components/basic/NumberInput.vue')['default']
+    OfflineMoreMenu: typeof import('./../options_ui/components/lists/OfflineMoreMenu.vue')['default']
     OptionCategory: typeof import('./../options_ui/components/OptionCategory.vue')['default']
     OptionDependents: typeof import('./../options_ui/components/OptionDependents.vue')['default']
     OptionForceAlignment: typeof import('./../options_ui/components/options/OptionForceAlignment.vue')['default']

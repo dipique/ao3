@@ -6,9 +6,8 @@ import { getArchiveLink, toast } from '#common'
 import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 import type { SavedListRow } from '../../model/savedListRows.ts'
 
-import { listJob } from '../../model/jobView.ts'
 import { sentence, withReason } from '../../model/phrases.ts'
-import { cachingCell, COPIED_MS, describeList, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, offlineDetails, rowAction, sameSearchNote, SHARED_TITLE_NOTE, statusCell, STOP_NOTE, titleRefusal, TRACK_OFF, trackingDetails, VIEW_EDIT_NOTE } from '../../model/savedListRows.ts'
+import { cachingCell, COPIED_MS, describeList, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, offlineDetails, rowAction, rowJob, sameSearchNote, SHARED_TITLE_NOTE, statusCell, titleRefusal, TRACK_OFF, trackingDetails, VIEW_EDIT_NOTE } from '../../model/savedListRows.ts'
 
 /**
  * One saved list, as a row of Saved lists: what it is, whether it is tracked,
@@ -75,8 +74,8 @@ const caching = computed(() => cachingCell(props.row, view.value, props.now))
 const cachingTip = computed(() => `${caching.value.line}\n${caching.value.detail}`)
 const action = computed(() => rowAction(props.row, view.value))
 const copyKey = computed(() => (props.row.caching.kind === 'copy' ? props.row.caching.key : null))
-/** The job's line is this row's: running, stopped or finished on its copy. */
-const job = computed(() => (copyKey.value ? listJob(view.value, copyKey.value) : null))
+/** The job's line is this row's: running, stopped or finished on any of its copies. */
+const job = computed(() => rowJob(props.row, view.value))
 
 const open = ref(false)
 const offline = computed(() => offlineDetails(props.row, view.value, props.now, prune.value))
@@ -558,7 +557,7 @@ function removeTheList(): void {
             <span :class="tracking.action.kind === 'stop' ? 'i-tabler-circle-minus' : 'i-tabler-circle-check'" aria-hidden="true" />
             {{ tracking.action.kind === 'stop' ? 'Stop tracking' : 'Track this list' }}
           </button>
-          <span v-if="tracking.action.kind === 'stop'" class="saved-list__why">{{ STOP_NOTE }}</span>
+          <span v-if="tracking.action.note" class="saved-list__why">{{ tracking.action.note }}</span>
         </div>
         <div v-if="tracking.remove" class="saved-list__remove">
           <button

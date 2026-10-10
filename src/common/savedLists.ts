@@ -22,7 +22,7 @@
 
 import type { Day, NormalizedTrackedUrl, TrackedFilter, TrackedKind, TrackedList, TrackedListsOption, TrackedMeta, TrackedQuery, TrackedType } from './trackedLists.ts'
 
-import { defaultTitle, entrySignature, fillMeta, isListId, newTrackedListId, normalizeTrackedUrl, queryOf, requery, sameTitle, titleAfterUpdate, titleTakenBy, trackedKey, trackedMeta, uniqueTitle, withQueryOf } from './trackedLists.ts'
+import { defaultTitle, entrySignature, fillMeta, isListId, newTrackedListId, normalizeTrackedUrl, parseArchiveUrl, queryOf, readUrl, requery, sameTitle, titleAfterUpdate, titleTakenBy, trackedKey, trackedMeta, uniqueTitle, withQueryOf } from './trackedLists.ts'
 
 /** One saved list: its identity, and what it searches. */
 export interface SavedList {
@@ -103,7 +103,11 @@ export function addressOf(url: string | undefined): string | null {
 export interface FilteredListing {
   /** Where its copy is stored: its address, which starts with its source, as every stored list's key does. */
   key: string
-  /** The listing as a saved list holds one, sort and all: a path, for the caller to make absolute. */
+  /**
+   * The listing as the page reads it ({@link readUrl}): a saved list's URL for
+   * it, sort and all, plus the date bounds a saved list leaves out. A path, for
+   * the caller to make absolute.
+   */
   url: string
   /** What it is a listing of, as a list made from it is titled. */
   label: string
@@ -123,7 +127,7 @@ export function filteredListing(href: string): FilteredListing | null {
   const normalized = normalizeTrackedUrl(href)
   if (normalized?.kind !== FILTERED_LISTING_SOURCE_ID)
     return null
-  return { key: normalized.key, url: normalized.url, label: defaultTitle(trackedMeta({ url: normalized.url })!) }
+  return { key: normalized.key, url: readUrl(href)!, label: defaultTitle(trackedMeta({ url: normalized.url })!) }
 }
 
 /**
@@ -372,6 +376,12 @@ export interface JoinedSavedList {
   address: string | null
   /** The newest stored list at its address: the list's offline copy, shared with every other list there. */
   copy: StoredListRef | null
+  /**
+   * The key of every stored list at its address, newest first, `copy`'s first:
+   * the older sort orders of its search are its copies too, and a job on any
+   * of them is the list's.
+   */
+  copyKeys: string[]
   /** The ids of the other saved lists at the same address. */
   sameAddress: string[]
 }
@@ -411,11 +421,15 @@ export const REVIEW_SOURCE_ID = 'tracked-review'
 export function joinSavedLists(state: ListState, stored: readonly StoredListRef[], userId?: string): SavedListJoin {
   const known = savedListsOf(state).map(({ list, entry }) => ({ list, entry, address: addressOf(list.url) }))
   const copies = addressed(stored)
-  const lists = known.map(one => ({
-    ...one,
-    copy: copiesAt(one.address, copies)[0] ?? null,
-    sameAddress: one.address === null ? [] : known.filter(other => other !== one && other.address === one.address).map(other => other.list.id),
-  }))
+  const lists = known.map((one) => {
+    const at = copiesAt(one.address, copies)
+    return {
+      ...one,
+      copy: at[0] ?? null,
+      copyKeys: at.map(copy => copy.key),
+      sameAddress: one.address === null ? [] : known.filter(other => other !== one && other.address === one.address).map(other => other.list.id),
+    }
+  })
 
   const claimed = new Set(known.map(one => one.address))
   const loose = [...copies].sort(newestFirst).filter(one => one.address === null || !claimed.has(one.address)).map(one => one.copy)
@@ -780,6 +794,181 @@ export function planUndoSaveBack(state: ListState, done: SaveBackDone): SaveBack
       saved: { ...state.saved, lists },
     },
   }
+}
+
+/**
+ * What becomes of the copies a save-back set aside ({@link SaveBackPlan}'s
+ * `dropCopies`) once its Undo won't come: its toast went unused, or the Undo
+ * was refused. Each is let go (`prune`) unless a list has come to its address
+ * since (`restore`), and then it is that list's copy, to be put back.
+ *
+ * A list can come back in the meantime: a sync puts the list itself back
+ * there, or brings another list to it; another tab tracks the old search; or
+ * another tab opens it, storing a copy (`stored` holds what is stored now)
+ * that the planner gives a record. Every list counts, an entry the planner has
+ * yet to file included, and so does a copy it will make a list of.
+ */
+export function planLetGo(state: ListState, setAside: readonly StoredListRef[], stored: readonly StoredListRef[]): { restore: string[], prune: string[] } {
+  const held = new Set<string | null>([...allLists(state), ...entriesOf(state).filter(isEntry)].map(list => addressOf(list.url)))
+  for (const copy of stored) {
+    if (SAVED_LIST_SOURCE_IDS.includes(copy.sourceId ?? ''))
+      held.add(addressOf(copy.listUrl))
+  }
+  const plan: { restore: string[], prune: string[] } = { restore: [], prune: [] }
+  for (const copy of setAside) {
+    const address = addressOf(copy.listUrl)
+    plan[address !== null && held.has(address) ? 'restore' : 'prune'].push(copy.key)
+  }
+  return plan
+}
+
+/** What {@link planListingRefile} makes of the lists and the copies. */
+export interface ListingRefilePlan {
+  /** The lists, merged where they are one search now: the state given, when none are. */
+  state: ListState
+  /**
+   * Each copy to refile, as `[the key it is stored under, its listing's
+   * address]`, in storage order: for {@link moveKeys} to make of every store
+   * keyed by a copy's key, and for anything else that names one.
+   */
+  moves: [string, string][]
+}
+
+/**
+ * Refile what was kept while a collection's sidebar submit had an address of its
+ * own. The sidebar submits the collection's own path with its number added as
+ * `collection_id`, which a listing's address leaves out
+ * ({@link normalizeTrackedUrl}); what was kept while the address held the number
+ * is keyed and listed apart from the link's.
+ *
+ * - **Copies.** The search view looks for a filtered listing's copy at its
+ *   address ({@link filteredListing}). One stored under any other key goes
+ *   there, unless a copy is there already: the newest, where several have one
+ *   address. One that can't go keeps its key, and is still among its list's
+ *   copies, as an older sort order's is ({@link joinSavedLists}), so nothing is
+ *   dropped.
+ * - **Lists.** Two saved lists that only the number set apart are one search
+ *   now, and are made one where neither loses anything by it: not both tracked,
+ *   and not each under a title of the reader's own, unless it is one title. The
+ *   one kept is the tracked one, else one the reader titled, else the link's;
+ *   it keeps its id, takes a title the other was given, on its entry too while
+ *   it is tracked, and is this browser's own from then on. Lists that can't be
+ *   made one stay two at one address, as lists a sync brings together do; so do
+ *   lists that were one search before.
+ *
+ * Copies join lists by the address each list's URL gives, so merging loses no
+ * list its copy, and moving one changes no list's. Running it on its own output
+ * changes nothing.
+ */
+export function planListingRefile(state: ListState, searchLists: unknown): ListingRefilePlan {
+  return { state: mergeNumbered(state), moves: refiledCopies(storedListRefs(searchLists)) }
+}
+
+/**
+ * `store` with each entry under a move's first key put under its second: for
+ * every store keyed by a copy's key. A move whose first key holds nothing moves
+ * nothing. The same object when nothing moves.
+ */
+export function moveKeys<T>(store: { [key: string]: T }, moves: readonly (readonly [string, string])[]): { [key: string]: T } {
+  const present = moves.filter(([from]) => Object.hasOwn(store, from))
+  if (!present.length)
+    return store
+  const out = { ...store }
+  for (const [from] of present)
+    delete out[from]
+  for (const [from, to] of present)
+    out[to] = store[from]!
+  return out
+}
+
+/** The moves {@link planListingRefile} makes of the stored lists. */
+function refiledCopies(stored: readonly StoredListRef[]): [string, string][] {
+  const taken = new Set(stored.map(copy => copy.key))
+  const astray = stored.flatMap((copy) => {
+    const address = copy.sourceId === FILTERED_LISTING_SOURCE_ID ? filteredListing(copy.listUrl ?? '')?.key : undefined
+    return address && address !== copy.key ? [{ copy, address }] : []
+  })
+  const moving = new Set<StoredListRef>()
+  for (const { copy, address } of [...astray].sort(newestFirst)) {
+    if (!taken.has(address)) {
+      taken.add(address)
+      moving.add(copy)
+    }
+  }
+  return astray.filter(({ copy }) => moving.has(copy)).map(({ copy, address }) => [copy.key, address])
+}
+
+/** The lists {@link planListingRefile} makes one. */
+function mergeNumbered(state: ListState): ListState {
+  const records = recordsOf(state)
+  const searches = new Map<string, SavedListState[]>()
+  for (const one of savedListsOf(state)) {
+    const key = trackedKey(one.list)
+    if (key !== null)
+      searches.set(key, [...searches.get(key) ?? [], one])
+  }
+
+  let lists: { [id: string]: SavedList } | null = null
+  let entries: TrackedList[] | null = null
+  for (const search of searches.values()) {
+    if (new Set(search.map(({ list }) => collectionNumber(list))).size < 2)
+      continue
+    // Stable: lists that rank alike keep the order they are stored in.
+    const [kept, ...others] = [...search].sort((a, b) => keepRank(a) - keepRank(b))
+    let title = kept!.list.title
+    let titled = ownTitle(kept!.list)
+    const merged: string[] = []
+    for (const { list, entry } of others) {
+      if (entry || collectionNumber(list) === collectionNumber(kept!.list) || !Object.hasOwn(records, list.id))
+        continue
+      if (titled && ownTitle(list) && !sameTitle(title, list.title))
+        continue
+      if (!titled && ownTitle(list)) {
+        title = list.title.trim()
+        titled = true
+      }
+      merged.push(list.id)
+    }
+    if (!merged.length)
+      continue
+
+    lists ??= { ...records }
+    for (const id of merged)
+      delete lists[id]
+    lists[kept!.list.id] = { ...withoutMirror(kept!.list), title }
+    if (kept!.entry && kept!.entry.alias !== title)
+      entries = (entries ?? entriesOf(state)).map(one => (isEntry(one) && one.id === kept!.list.id ? { ...one, alias: title } : one))
+  }
+
+  if (!lists)
+    return state
+  return {
+    tracked: entries ? { ...state.tracked, lists: entries } : state.tracked,
+    saved: { ...state.saved, lists },
+  }
+}
+
+/**
+ * Which of one search's lists {@link mergeNumbered} keeps first, lowest first:
+ * a tracked one, then one the reader titled, then one at the link's address.
+ */
+function keepRank({ list, entry }: SavedListState): number {
+  return (entry ? 0 : 4) + (ownTitle(list) ? 0 : 2) + (collectionNumber(list) ? 1 : 0)
+}
+
+/** Whether a list's title is one the reader gave it, not its default. */
+function ownTitle(list: SavedList): boolean {
+  return typeof list.title === 'string' && list.title.trim() !== '' && !sameTitle(list.title, defaultTitleOf(list))
+}
+
+/**
+ * The collection numbers a list's URL carries as `collection_id`, in one order:
+ * `''` for none. A listing's address leaves them out on a collection's path, so
+ * two lists of one address that differ in them were two addresses before.
+ */
+function collectionNumber(list: Pick<SavedList, 'url'>): string {
+  const numbers = parseArchiveUrl(list.url)?.searchParams.getAll('collection_id').filter(value => value.trim() !== '') ?? []
+  return [...new Set(numbers)].sort().join('&')
 }
 
 // ---------------------------------------------------------------------------

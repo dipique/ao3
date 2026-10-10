@@ -379,6 +379,13 @@ const DROPPED_PARAMS = new Set([
   'work_search[date_to]',
 ])
 
+/**
+ * The absolute date bounds a listing's sidebar and the search form set. Out of
+ * every stored URL and key ({@link DROPPED_PARAMS}), and still a bound on what
+ * a walk of the page reads ({@link readUrl}).
+ */
+const DATE_BOUND_PARAMS = new Set(['work_search[date_from]', 'work_search[date_to]'])
+
 /** Kept in the stored URL, left out of the key, and overridden at fetch time. */
 const SORT_PARAMS = new Set(['work_search[sort_column]', 'work_search[sort_direction]'])
 
@@ -406,9 +413,10 @@ const OVERRIDDEN_PARAMS = new Set([...SORT_PARAMS, RELATIVE_DATE_PARAM])
 
 /**
  * Query parameters that make `/works` somebody's listing — a tag's, a user's or
- * a collection's. They are what the Sort & Filter sidebar submits in place of
- * the path it was on ({@link listingOwner}). Bare `/works` is no particular list.
- * A `pseud_id` narrows a user's listing and means nothing without one.
+ * a collection's. A tag's and a user's are what their Sort & Filter sidebar
+ * submits in place of the path it was on ({@link listingOwner}). Bare `/works`
+ * is no particular list. A `pseud_id` narrows a user's listing and means nothing
+ * without one.
  */
 const OWNER_PARAMS = ['tag_id', 'user_id', 'collection_id']
 
@@ -440,13 +448,54 @@ export function normalizeTrackedUrl(href: string): NormalizedTrackedUrl | null {
   const parsed = parseTracked(href)
   if (!parsed)
     return null
-  const canonical = [...new Set(parsed.keyCriteria.map(serializeParam))].sort(compareStrings)
   return {
     kind: parsed.kind,
     url: withQuery(parsed.path, parsed.params.map(serializeParam)),
-    key: `${parsed.kind}:${withQuery(parsed.keyPath, canonical)}`,
+    key: keyOf(parsed),
     relativeDate: parsed.params.find(([name]) => name === RELATIVE_DATE_PARAM)?.[1] ?? null,
   }
+}
+
+/**
+ * The page at `href` as a walk of it reads it: its {@link normalizeTrackedUrl}
+ * URL, sort and all, with the page's date bounds kept on. A path, for the
+ * caller to make absolute; null for a page that isn't trackable.
+ */
+export function readUrl(href: string): string | null {
+  const parsed = parseTracked(href)
+  return parsed && withQuery(parsed.path, [...parsed.params, ...parsed.bounds].map(serializeParam))
+}
+
+/**
+ * Whether two addresses are one read of one listing, however each is spelt:
+ * the same key, and the same of what the key leaves out that still changes
+ * what a walk reads — the sort, which decides which works a walk cut short by
+ * the works ceiling reaches and in what order, and the date bounds, relative
+ * and absolute. A sort left to the archive and the same sort chosen are told
+ * apart, the archive's default not being ours to know.
+ *
+ * An address that isn't trackable (a reader's own readings) is the same read
+ * only as the very same address.
+ */
+export function sameReading(a: string, b: string): boolean {
+  const reading = readingOf(a)
+  const other = readingOf(b)
+  return reading === null && other === null ? a === b : reading === other
+}
+
+/** What {@link sameReading} compares: the key, then the sort and date bounds in one canonical order. */
+function readingOf(href: string): string | null {
+  const parsed = parseTracked(href)
+  if (!parsed)
+    return null
+  const read = [...parsed.params.filter(([name]) => OVERRIDDEN_PARAMS.has(name)), ...parsed.bounds]
+  return JSON.stringify([keyOf(parsed), read.map(serializeParam).sort(compareStrings)])
+}
+
+/** A parsed page's {@link NormalizedTrackedUrl.key}. */
+function keyOf(parsed: ParsedTracked): string {
+  const canonical = [...new Set(parsed.keyCriteria.map(serializeParam))].sort(compareStrings)
+  return `${parsed.kind}:${withQuery(parsed.keyPath, canonical)}`
 }
 
 /** A trackable page taken apart: what {@link normalizeTrackedUrl}, the root, the metadata and the diff are all read from. */
@@ -456,6 +505,8 @@ interface ParsedTracked {
   path: string
   /** Every parameter the stored URL keeps, in the page's order, sort included. */
   params: [string, string][]
+  /** The page's absolute date bounds, which {@link params} leaves out ({@link DATE_BOUND_PARAMS}). */
+  bounds: [string, string][]
   /** The ones that decide which works match: {@link params} less the sort and the relative date bound. */
   criteria: [string, string][]
   /** Whose listing a `works-filter` page is. Null for every other kind. */
@@ -477,9 +528,10 @@ function parseTracked(href: string): ParsedTracked | null {
   if (!kind)
     return null
 
-  const params = kind === 'works-filter' || kind === 'text-search'
-    ? [...url.searchParams].filter(([name, value]) => !DROPPED_PARAMS.has(name) && value.trim() !== '')
+  const query = kind === 'works-filter' || kind === 'text-search'
+    ? [...url.searchParams].filter(([, value]) => value.trim() !== '')
     : []
+  const params = query.filter(([name]) => !DROPPED_PARAMS.has(name))
   const criteria = params.filter(([name]) => !OVERRIDDEN_PARAMS.has(name))
   if (kind === 'text-search' && criteria.length === 0)
     return null
@@ -493,6 +545,7 @@ function parseTracked(href: string): ParsedTracked | null {
     kind,
     path,
     params,
+    bounds: query.filter(([name]) => DATE_BOUND_PARAMS.has(name)),
     criteria,
     owner,
     keyPath: owner?.path ?? path,
@@ -514,7 +567,7 @@ interface ListingOwner {
   path: string | null
   /** What every list of this owner shares: the author's for a pseud, else the owner's own listing. */
   root: string
-  /** The query parameters the path form stands for, so the key leaves them out. */
+  /** The query parameters the path form already says, so the key leaves them out. */
   folded: readonly string[]
 }
 
@@ -533,20 +586,26 @@ interface ListingOwner {
  * /tags/NAME/works                 →  /works?…&tag_id=NAME
  * /users/NAME/works                →  /works?…&user_id=NAME
  * /users/NAME/pseuds/PSEUD/works   →  /works?…&pseud_id=PSEUD&user_id=NAME
+ * /collections/NAME/works          →  /collections/NAME/works?…&collection_id=NUMBER
  * ```
  *
  * A list is usually tracked from the path form and refined in the query form,
  * so the key files both under the path form, or the reader's first filter would
  * move them off their own list.
  *
+ * A collection's sidebar stays on the collection's own path and adds the
+ * collection's **number** as `collection_id`. The archive goes by the path:
+ * `/works?collection_id=1` is its Recent Works, not the collection numbered 1.
+ * So on a collection's path the key leaves `collection_id` out, whatever its
+ * value, and a submit that sets no filter is the link's list. The query form by
+ * name, `/works?collection_id=NAME`, is served as the same listing, but the
+ * archive's pages haven't been seen to lead to it, and it keeps a key of its
+ * own.
+ *
  * An author's listing and one of their pseuds' keep **different** keys, since
  * they match different works. Their *root* is the same — the author's
  * ({@link trackedRoot}) — because a pseud is a filter of its author, not a root
  * of its own.
- *
- * A collection named in the query (`collection_id`) is left as it is: its
- * sidebar hasn't been seen to submit the same way, and folding it would be
- * guessing at a page the archive may never serve.
  *
  * When a query names more than one owner, the archive's own order decides whose
  * listing it is — an author (with their pseud) before a collection before a tag
@@ -599,7 +658,7 @@ function listingOwner(path: string, criteria: readonly [string, string][]): List
     return null
   const segment = decodeSegment(owner[2]!)
   const type = owner[1] === 'tags' ? 'tag' : owner[1] === 'users' ? 'author' : 'collection'
-  return { type, name: type === 'tag' ? unescapeTagName(segment) : segment, pseud: null, path, root: path, folded: [] }
+  return { type, name: type === 'tag' ? unescapeTagName(segment) : segment, pseud: null, path, root: path, folded: type === 'collection' ? ['collection_id'] : [] }
 }
 
 /**
@@ -1683,7 +1742,7 @@ function queryFilterCount(parsed: ParsedTracked): number {
   const subject = searchSubject(parsed)
   const isRoot = ([name, value]: [string, string]): boolean =>
     name === subject?.param
-    // The one owner the key doesn't fold into its path.
+    // A collection named in the query: the one owner the key doesn't fold into a path.
     || (name === 'collection_id' && owner?.type === 'collection' && value.trim() === owner.name)
   return new Set(filterParams(parsed).filter(param => !isRoot(param)).map(serializeParam)).size
 }

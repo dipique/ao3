@@ -59,7 +59,7 @@ describe('whose listing a query with several owners is', () => {
   test('the archive\'s order: an author, then a collection, then a tag', () => {
     assert.equal(key('/works?tag_id=Bees&user_id=someone'), 'works-filter:/users/someone/works?tag_id=Bees')
     assert.equal(root('/works?tag_id=Bees&user_id=someone'), 'works-filter:/users/someone/works')
-    // A collection isn't folded, and outranks the tag, which stays a filter of it.
+    // A collection named in the query isn't folded, and outranks the tag, which stays a filter of it.
     assert.equal(key('/works?tag_id=Bees&collection_id=SomeFest2026'), 'works-filter:/works?collection_id=SomeFest2026&tag_id=Bees')
     assert.equal(root('/works?tag_id=Bees&collection_id=SomeFest2026'), 'works-filter:/works?collection_id=SomeFest2026')
   })

@@ -65,7 +65,13 @@
         title="Reload your own lists"
         subtitle="How long the Marked for Later and read-works views reuse what they already have. Both can run to thousands of works — dozens of requests to AO3 — so raise this if yours are long; the view's own Refresh button reloads regardless."
       >
-        <OptionSearchRefreshHours />
+        <OptionSearchRefreshHours option-id="searchProfileListsRefreshHours" />
+      </OptionRow>
+      <OptionRow
+        title="Reload listings"
+        subtitle="How long the views of an uncommon tag, a series, a works search and a filtered listing reuse the copy they kept before reading the listing again. Every time reads it again on each open, up to the works ceiling; the view's own Refresh button reloads regardless."
+      >
+        <OptionSearchRefreshHours option-id="searchListingsRefreshHours" />
       </OptionRow>
       <OptionRow
         title="Search the works you've read"

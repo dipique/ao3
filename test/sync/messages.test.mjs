@@ -14,6 +14,15 @@ describe('sync messages', () => {
     assert.doesNotMatch(syncPauseMessage({ ...held, backedUp: false }, 2), /backup/)
   })
 
+  test('a question as sync turns on says nothing changes until it is answered, and whether a backup exists', () => {
+    const first = { reason: 'first-sync', g: 5, w: 'x', at: 0, backedUp: true, backupFailed: false, loss: null }
+    assert.equal(
+      syncPauseMessage(first, 2),
+      'Sync is on hold: your synced settings differ from this browser\'s. Nothing changes until you choose which to keep. A backup of this browser\'s settings was saved first.',
+    )
+    assert.doesNotMatch(syncPauseMessage({ ...first, backedUp: false, backupFailed: true }, 2), /backup/)
+  })
+
   test('an out-of-date background says whether sync has stopped', () => {
     assert.match(staleBackgroundMessage(true), /Reload AO3 Enhancements .*Sync is paused until then\.$/)
     assert.match(staleBackgroundMessage(false), /Sync may not work until then\.$/)

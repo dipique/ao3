@@ -50,6 +50,7 @@ export const OPTION_DEFAULTS: Options = {
   openMenuOnClick: false,
   searchMarkedForLater: true,
   searchProfileListsRefreshHours: 24,
+  searchListingsRefreshHours: 0,
   searchReadWorks: true,
   searchTagWorks: true,
   searchSeriesWorks: true,

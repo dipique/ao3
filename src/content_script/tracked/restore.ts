@@ -30,10 +30,11 @@ import { filterStateOf } from './viewFilter.ts'
  * **But not too soon.** The first visit to a list's page can itself write to the
  * options — filling in what the list is, a tag's category say — and so re-run the
  * page straight away. A view already on screen by then is carried through that
- * re-run like any other. One still loading is not: the re-run takes the page
- * down around it. So the mark is left alone while a newer open of the same view
- * has taken over, which is the re-run calling this again; that call finishes the
- * job, and clears it.
+ * re-run like any other, and so is one still loading, whose open here settles
+ * only once the re-run's open has brought it up. One the re-run overtakes before
+ * it has opened anything is opened again by the re-run calling this again; so
+ * the mark is left alone while a newer open of the same view has taken over,
+ * and that call finishes the job, and clears it.
  *
  * A list with no view filter has nothing to put back; the mark is cleared and
  * the page left as the archive drew it.
@@ -46,7 +47,7 @@ export async function restoreListFilter(options: Options, cacheKey: string, open
   if (seed)
     await open({ seed })
   // Opened, failed or cancelled, the arrival is over — unless a re-run has
-  // started this view again, and will be back here when it's done.
+  // opened this view again from here, and will be back when it's done.
   if (!isOpening(cacheKey))
     restoreDone(list.id)
 }

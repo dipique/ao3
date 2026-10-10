@@ -108,6 +108,14 @@ describe('options UI — matching canonical tags', { skip }, () => {
   /** One part of the preview, once it shows. */
   const part = name => page.waitForSelector(`[role="dialog"] [data-canonical] [data-canonical-part="${name}"]`)
   const partText = async name => options.text(await part(name))
+  /**
+   * The note, once it reads `words`: it shows as the press asks AO3, saying
+   * so, and reads what AO3's answer made of it only once that answer lands.
+   */
+  const noteReading = async (words) => {
+    await until(`the note to read “${words}”`, async () => (await partText('note')) === words)
+    return part('note')
+  }
   /** The names the preview shows, and the text marked in each. */
   const tags = () => page.$$eval('[role="dialog"] [data-canonical] [data-canonical-part="tag"]', els => els.map(el => el.textContent))
   const marked = () => page.$$eval('[role="dialog"] [data-canonical] [data-canonical-part="tag"]', els => els.map(el => [...el.querySelectorAll('mark')].map(mark => mark.textContent).join('|')))
@@ -193,8 +201,7 @@ describe('options UI — matching canonical tags', { skip }, () => {
     await regexRule('Character', '^Original (Female|Male) Character\\(s\\)')
     await press(SHOW)
 
-    const note = await part('note')
-    assert.equal(await options.text(note), 'AO3 asked us to slow down — showing known tags only')
+    const note = await noteReading('AO3 asked us to slow down — showing known tags only')
     assert.equal(await note.evaluate(el => el.getAttribute('role')), 'status')
     assert.deepEqual(await tags(), ['Original Female Character(s)', 'Original Male Character(s)'])
     assert.equal(await partText('head'), '2 of 3 known canonical Characters')
@@ -216,7 +223,7 @@ describe('options UI — matching canonical tags', { skip }, () => {
     await regexRule('Additional Tags', 'Fluff')
     await press(SHOW)
 
-    assert.equal(await partText('note'), 'AO3’s suggestions are unavailable')
+    await noteReading('AO3’s suggestions are unavailable')
     assert.equal(await page.$('[role="dialog"] [data-canonical-part="head"]'), null)
     assert.deepEqual(await tags(), [])
     assert.deepEqual(archive.asked, [asking('freeform', 'fluff')])

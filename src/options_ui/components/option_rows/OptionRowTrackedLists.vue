@@ -2,7 +2,7 @@
 import { getArchiveLink, isoDay, utcToday } from '#common'
 
 import { sentence, withReason } from '../../model/phrases.ts'
-import { latestReviewable, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, WORKS_PER_REVIEW } from '../../model/review.ts'
+import { latestReviewable, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, WORKS_PER_REVIEW } from '../../model/review.ts'
 
 /**
  * Tracked lists, and what shapes the review they are gathered into: how far
@@ -24,7 +24,7 @@ const block = computed(() => reviewBlock({
   window: review.value && {
     key: review.value.key,
     count: review.value.count,
-    cached: review.value.cached,
+    buckets: review.value.buckets,
     scrapedAt: review.value.scrapedAt,
     listUrl: review.value.listUrl,
   },
@@ -209,6 +209,15 @@ function download(): void {
                     <span class="i-tabler-download" aria-hidden="true" />
                     Download Offline Copy
                   </button>
+                  <span class="review__spacer" />
+                  <OfflineMoreMenu
+                    :name="REVIEW_NAME"
+                    :row="review"
+                    :retry="block.retry"
+                    :cached="block.cached"
+                    :off="block.offlineOff"
+                    :off-id="offlineOffId"
+                  />
                 </template>
                 <button v-else-if="block.actions === 'stop'" type="button" class="outline-btn small-btn" @click="stop()">
                   <span class="i-tabler-player-stop" aria-hidden="true" />
@@ -337,6 +346,9 @@ function download(): void {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+.review__spacer {
+  flex: 1;
 }
 .review__start {
   display: flex;

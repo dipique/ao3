@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
-import { decidePull, decidePush, isRemoteNewer } from '../../src/common/syncDecide.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { pruneToSynced, SYNC_SCHEMA_VERSION, syncedKeys } from '../../src/common/syncCodec.ts'
+import { decideFirstPull, decidePull, decidePush, isRemoteNewer } from '../../src/common/syncDecide.ts'
+import { rulesFixture, textReplacementsFixture } from './harness.mjs'
 
 const V = SYNC_SCHEMA_VERSION
 
@@ -107,5 +109,68 @@ describe('decidePull', () => {
   test('never adopts an older build\'s copy, however new', () => {
     assert.equal(decidePull(local, m({ g: 9, v: V - 1 })), 'wait')
     assert.equal(decidePull({ g: 0, h: '', w: '' }, m({ g: 1, v: V - 1 })), 'wait')
+  })
+})
+
+/**
+ * The first pull a browser makes with nothing agreed, as sync is turned on:
+ * whether the synced copy is adopted, this browser's settings are sent over
+ * it, the two already agree, or the reader is asked which to keep.
+ */
+describe('decideFirstPull', () => {
+  /** A browser's options: the defaults, with `update` over them. */
+  const withOptions = (update = {}) => ({ ...structuredClone(OPTION_DEFAULTS), ...structuredClone(update) })
+  /** The synced copy a browser holding `update` writes. */
+  const copyOf = (update = {}) => pruneToSynced(withOptions(update), OPTION_DEFAULTS)
+  const KEYS = syncedKeys(OPTION_DEFAULTS)
+  const decide = (here, copy, keys = KEYS) => decideFirstPull(withOptions(here), copy, OPTION_DEFAULTS, keys)
+
+  const MINE = { rules: rulesFixture(40), wordsPerMinute: 350 }
+  const THEIRS = { rules: rulesFixture(38), textReplacements: textReplacementsFixture(3) }
+
+  test('a copy holding nothing beyond defaults: this browser\'s settings are sent', () => {
+    assert.deepEqual(decide(MINE, copyOf()), { kind: 'send' })
+  })
+
+  test('a new profile adopts the copy', () => {
+    assert.deepEqual(decide({}, copyOf(THEIRS)), { kind: 'adopt' })
+  })
+
+  test('both holding nothing beyond defaults agree, with nothing to send', () => {
+    assert.deepEqual(decide({}, copyOf()), { kind: 'agree' })
+  })
+
+  test('a matching copy agrees', () => {
+    assert.deepEqual(decide(MINE, copyOf(MINE)), { kind: 'agree' })
+  })
+
+  test('a copy that differs from this browser\'s own settings asks', () => {
+    assert.deepEqual(decide(MINE, copyOf(THEIRS)), { kind: 'ask', loss: null })
+    assert.deepEqual(decide(MINE, copyOf({ ...MINE, wordsPerMinute: 351 })), { kind: 'ask', loss: null }, 'however small the difference')
+  })
+
+  test('a copy the deletion guard would hold asks, saying what using it would remove', () => {
+    const { kind, loss } = decide(MINE, copyOf({ rules: rulesFixture(1) }))
+    assert.equal(kind, 'ask')
+    assert.deepEqual(loss.rules, { removed: 39, of: 40 })
+  })
+
+  test('device-local settings are not this browser\'s settings to send or lose', () => {
+    const local = { theme: { chosen: 'inherit', current: 'dark' }, user: { userId: 'reader' }, verbose: true, savedLists: { v: 1, lists: { a: { id: 'a', kind: 'tag-works', url: '/tags/Tea', title: 'Tea' } } } }
+    assert.deepEqual(decide(local, copyOf(THEIRS)), { kind: 'adopt' })
+    assert.deepEqual(decide({ ...local, ...THEIRS }, copyOf(THEIRS)), { kind: 'agree' })
+  })
+
+  describe('a writer that knew fewer options', () => {
+    const narrower = KEYS.filter(key => key !== 'wordsPerMinute')
+
+    test('what it never knew of is no difference', () => {
+      assert.deepEqual(decide(MINE, copyOf({ rules: MINE.rules }), narrower), { kind: 'agree' })
+      assert.deepEqual(decide(MINE, copyOf({ rules: MINE.rules }), KEYS), { kind: 'ask', loss: null }, 'a writer that knew it left it at its default')
+    })
+
+    test('a copy holding nothing beyond defaults still takes this browser\'s settings', () => {
+      assert.deepEqual(decide({ wordsPerMinute: 350 }, copyOf(), narrower), { kind: 'send' })
+    })
   })
 })

@@ -505,6 +505,62 @@ describe('saved lists: saving a refined search back', { skip }, () => {
 })
 
 /**
+ * A list come back to the old address while Undo's toast is up: here, another
+ * browser tracking the old search, whose entry a sync brings in. The copies the
+ * save-back set aside are that list's now, so when the toast goes they are put
+ * back as they were, not let go.
+ */
+describe('saved lists: a list back at the old address before Undo\'s time is up', { skip }, () => {
+  let browser
+  let tab
+  /** Another browser's list of the old search, as a sync brings its entry in. */
+  const THEIRS = { id: 'th3irs', kind: 'text-search', url: LATTE.url, alias: 'Their latte', type: 'search', entity: 'latte', tracked: true, since: TODAY }
+
+  before(async () => {
+    ensureBuilt()
+    browser = await launch(chromePath)
+    tab = await openTab(browser, { seed: UNTRACKED_SEED, route: untrackedRoute })
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  test('once the toast goes, the old copies are put back, byte for byte, with what they missed and their blurbs', async () => {
+    await visit(tab, `${ARCHIVE}${LATTE.url}#ao3e-list=l4tte`)
+    const held = { lists: await stored(tab, 'cache.searchLists'), misses: await stored(tab, 'cache.searchMisses') }
+    await visit(tab, MACCHIATO_URL)
+    await openBox(tab)
+    await clickBoxButton(tab, 'Update “Latte art”')
+    await until('the list to be saved back', async () => (await storedOption(tab, 'savedLists')).lists.l4tte.url === MACCHIATO)
+    assert.deepEqual(await stored(tab, 'cache.searchLists'), {}, 'the old copies are set aside')
+
+    await rerun(tab, () => tab.evaluate(entry => browser.storage.local.set({
+      'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [entry] },
+    }), THEIRS))
+    assert.ok(await undoShown(tab), 'within Undo\'s time')
+
+    // A pointer resting on a toast holds it up.
+    await tab.mouse.move(0, 0)
+    await until('Undo to time out', async () => !(await undoShown(tab)), SAVE_BACK_UNDO_TIMEOUT * 2)
+    await until('the old copies to be back', async () => {
+      const lists = await stored(tab, 'cache.searchLists')
+      return LATTE_KEY in lists && LATTE_BY_KUDOS in lists
+    })
+    assert.deepEqual(await stored(tab, 'cache.searchLists'), held.lists)
+    assert.deepEqual(await stored(tab, 'cache.searchMisses'), held.misses)
+    const blurbKeys = Object.keys(await tab.evaluate(() => browser.storage.local.get(null))).filter(key => key.startsWith('blurb.'))
+    for (const id of OLD_WORKS)
+      assert.ok(blurbKeys.includes(`blurb.${id.toString(36)}`), `work ${id}'s blurb stays`)
+
+    assert.deepEqual((await storedOption(tab, 'savedLists')).lists, { l4tte: { ...LATTE, url: MACCHIATO, entity: 'latte macchiato' } }, 'the saved-back list keeps its new search')
+    assert.deepEqual(await storedOption(tab), { enabled: true, target: 40, reviewedThrough: 0, lists: [THEIRS] })
+    const update = await reconcile(tab)
+    assert.deepEqual(Object.keys(update.savedLists.lists).sort(), ['l4tte', 'th3irs'], 'the background files the arrived list, and makes no list of the copies')
+  })
+})
+
+/**
  * Saving back belongs to saved lists, not to tracking: with *Tracked lists*
  * switched off, the refining link and the update still work, and only the offer
  * to track a page is gone.

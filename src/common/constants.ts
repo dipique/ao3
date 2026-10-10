@@ -27,6 +27,12 @@ export const BUILD_CHECK_TIMEOUT_MS = 5000
 export const OPTIONS_SAVE_DELAY_MS = 200
 
 /**
+ * Where the site export's job is kept. Outside the `cache.` prefix: a
+ * half-finished job is not a cache, and has no business travelling in an export.
+ */
+export const SITE_EXPORT_JOB_KEY = 'siteExportJob'
+
+/**
  * How long the rule editor lets a regex pattern run over the names it tests
  * before stopping it, in milliseconds. A pattern stopped for running longer
  * can't be saved: on AO3's pages nothing stops it.

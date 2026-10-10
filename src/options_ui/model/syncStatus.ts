@@ -153,6 +153,13 @@ function pauseState(pause: SyncPause, version: number): State {
         chip: { state, word: 'On hold', detail: 'An update from another browser is waiting for your answer.', severity: 'warning' },
         callout: { state, severity: 'warning', text: 'An update from another browser would remove:', hook, decision: heldDecision(pause) },
       }
+    case 'first-sync': {
+      const differ = 'Your synced settings differ from this browser\'s.'
+      return {
+        chip: { state, word: 'On hold', detail: 'Turning on sync is waiting for your answer.', severity: 'warning' },
+        callout: { state, severity: 'warning', text: pause.loss ? `${differ} Using them would remove:` : `${differ} Which do you want to keep?`, hook, decision: firstSyncDecision(pause) },
+      }
+    }
     case 'newer-version':
       return {
         chip: { state, word: 'Paused', detail: 'This browser is older than your synced settings. It lifts by itself once updated.', severity: 'warning' },
@@ -168,17 +175,39 @@ function pauseState(pause: SyncPause, version: number): State {
 
 /**
  * Keeping this browser's settings always backs up the update first. Accepting
- * the update can only point to a backup of this browser's settings if one was
- * taken as it was held, which daily backups being off prevents.
+ * the update points to the backup of this browser's settings taken as it was
+ * held, or says why there is none: its backup failed, or an older build held
+ * it with daily backups off.
  */
 function heldDecision(pause: Extract<SyncPause, { reason: 'held' }>): SyncDecision {
   const replaces = 'Replaces this browser\'s settings with the other browser\'s.'
+  const yours = pause.backedUp
+    ? 'Yours were backed up when sync held.'
+    : pause.backupFailed ? 'Yours aren\'t backed up: the backup couldn\'t be saved.' : 'Yours aren\'t backed up: daily backups were off when sync held.'
   return {
     lines: pullLossParts(pause.loss),
     backup: pause.backedUp ? HELD_BACKUP_NOTE : null,
     answers: [
       { choice: 'keep', label: 'Keep this browser\'s settings', consequence: 'Sends this browser\'s settings to your other browsers. What the update had is kept as a backup first.' },
-      { choice: 'accept', label: 'Accept the update', consequence: pause.backedUp ? `${replaces} Yours were backed up when sync held.` : replaces },
+      { choice: 'accept', label: 'Accept the update', consequence: `${replaces} ${yours}` },
+    ],
+  }
+}
+
+/**
+ * Turning sync on over synced settings that differ from this browser's asks
+ * which to keep, as a held update does. Keeping this browser's backs the
+ * synced settings up first. Using the synced settings points to the backup of
+ * this browser's taken as sync turned on, or says it couldn't be saved.
+ */
+function firstSyncDecision(pause: Extract<SyncPause, { reason: 'first-sync' }>): SyncDecision {
+  const yours = pause.backedUp ? 'Yours were backed up first.' : 'Yours aren\'t backed up: the backup couldn\'t be saved.'
+  return {
+    lines: pause.loss ? pullLossParts(pause.loss) : [],
+    backup: pause.backedUp ? HELD_BACKUP_NOTE : null,
+    answers: [
+      { choice: 'keep', label: 'Keep this browser\'s settings', consequence: 'Replaces your synced settings with this browser\'s, on every browser that syncs. The synced settings are kept as a backup first.' },
+      { choice: 'accept', label: 'Use the synced settings', consequence: `Replaces this browser's settings with your synced settings. ${yours}` },
     ],
   }
 }

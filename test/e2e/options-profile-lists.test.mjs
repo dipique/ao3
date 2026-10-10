@@ -138,27 +138,12 @@ describe('options UI — User profile lists', { skip }, () => {
   const inTile = async (id, role, name) => options.control(await tile(id), role, name)
   const jobWrites = () => page.evaluate(() => window.__writes.filter(w => 'siteExportJob' in w).length)
 
-  /** Open a tile's More menu from the keyboard, as a person would, and wait for its items. */
-  async function openMore(id, name) {
-    const more = await inTile(id, 'button', `More for ${name}`)
-    await more.focus()
-    await page.keyboard.press('Enter')
-    await until('the menu to open', async () => (await options.controls(page, 'menuitem')).length > 0)
-  }
-
-  /** The open menu's items' names: what each is called, then what it does. */
-  const menuItems = async () => Promise.all((await options.controls(page, 'menuitem')).map(item => options.name(item)))
-  /** The open menu's item whose name begins with `start`. */
-  const menuItem = start => options.control(page, 'menuitem', new RegExp(`^${start.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+  /** Open a tile's More menu. */
+  const openMore = async (id, name) => options.openMenu(await inTile(id, 'button', `More for ${name}`))
 
   /** The names begin, in order, with these. */
   function beginWith(names, expected) {
     assert.deepEqual(names.map((name, i) => (expected[i] && name.startsWith(expected[i]) ? expected[i] : name)), expected)
-  }
-
-  async function closeMenu() {
-    await page.keyboard.press('Escape')
-    await until('the menu to close', async () => (await options.controls(page, 'menuitem')).length === 0)
   }
 
   test('the reader\'s own Marked for Later and read works are tiles, named without an account', async () => {
@@ -243,19 +228,19 @@ describe('options UI — User profile lists', { skip }, () => {
 
   test('More: the list refreshed first, a retry while any work has failed, and a download without refreshing once any is cached', async () => {
     await openMore('marked-for-later', 'Marked for Later')
-    const markedItems = await menuItems()
+    const markedItems = await options.menuItems()
     beginWith(markedItems, ['Refresh the list first', 'Retry failed works now', 'Remove offline copy'])
     assert.match(markedItems[1], /on the 1 work that failed/)
-    await closeMenu()
+    await options.closeMenu()
 
     await openMore('read-works', 'Read works')
-    const readItems = await menuItems()
+    const readItems = await options.menuItems()
     beginWith(readItems, ['Refresh the list first', 'Download without refreshing', 'Remove offline copy'])
     assert.match(readItems[1], /as up to date as the 1 saved work are/)
-    await closeMenu()
+    await options.closeMenu()
 
     await openMore('marked-for-later', 'Marked for Later')
-    await options.press(await menuItem('Retry failed works now'))
+    await options.press(await options.menuItem('Retry failed works now'))
     await until('the job to be running', async () => await jobState(await tile('marked-for-later')) === 'running')
     const job = await options.lastWrite('siteExportJob')
     assert.equal(job.cacheKey, MARKED)
@@ -276,13 +261,13 @@ describe('options UI — User profile lists', { skip }, () => {
     const reason = 'off for now: one job at a time, and Tag: Coffee Shop AU is caching'
     await openMore('read-works', 'Read works')
     for (const [name, label] of [['Refresh the list first', 'Refresh the list first'], ['Download without refreshing', 'Download without refreshing']]) {
-      const item = await menuItem(name)
+      const item = await options.menuItem(name)
       assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), true, `${name} should be off`)
       assert.equal(await item.evaluate(el => el.title), `${label} — ${reason}`)
       assert.equal(await options.description(item), `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`)
     }
-    assert.equal(await (await menuItem('Remove offline copy')).evaluate(el => el.hasAttribute('data-disabled')), false)
-    await closeMenu()
+    assert.equal(await (await options.menuItem('Remove offline copy')).evaluate(el => el.hasAttribute('data-disabled')), false)
+    await options.closeMenu()
 
     await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Stop caching Tag: Coffee Shop AU'))
     await until('the job to stop', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'stopped')
@@ -292,10 +277,10 @@ describe('options UI — User profile lists', { skip }, () => {
 
   test('Remove offline copy asks a second time in its place, and the tile then says how a copy is kept', async () => {
     await openMore('read-works', 'Read works')
-    const item = await menuItem('Remove offline copy')
+    const item = await options.menuItem('Remove offline copy')
     assert.ok((await options.name(item)).endsWith(blurbsOnRemove(false)), 'it says what becomes of the blurbs')
     await options.press(item)
-    const armed = await menuItem('Remove offline copy?')
+    const armed = await options.menuItem('Remove offline copy?')
     assert.ok(armed, 'the first press arms it, and the menu stays open')
     assert.ok(READ in await options.stored('cache.searchLists'), 'arming removes nothing')
 

@@ -5,8 +5,8 @@ import type { Options } from './options.ts'
 import type { Manifest } from './syncCodec.ts'
 import type { SyncMeta, SyncPause } from './syncMeta.ts'
 
-import { buildLocalUpdate, canonicalStringify, decode, diffChunks, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
-import { decidePull, decidePush } from './syncDecide.ts'
+import { buildLocalUpdate, canonicalStringify, decode, diffChunks, diffOptions, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
+import { decideFirstPull, decidePull, decidePush } from './syncDecide.ts'
 import { assessPull } from './syncGuard.ts'
 
 /**
@@ -69,7 +69,7 @@ export interface SyncDeps {
   backups: {
     /** Snapshot the current options if today has no backup yet. */
     maybeDaily: () => Promise<void>
-    /** Snapshot `snapshot`, or the current options when it's absent. */
+    /** Snapshot `snapshot`, or the current options when it's absent. Rejects when the backup isn't written. */
     create: (kind: BackupKind, snapshot?: Partial<Options>) => Promise<void>
   }
   /**
@@ -169,9 +169,16 @@ export function createSyncEngine(deps: SyncDeps) {
     })
   }
 
+  /**
+   * Off at once, so nothing already queued syncs, and again in its turn, so a
+   * turning-on queued ahead of it can't leave sync on. On only in its turn, so
+   * nothing already queued runs on the agreement that turning on forgets.
+   */
   async function setEnabled(enabled: boolean): Promise<SetSyncResult> {
+    if (enabled)
+      return withLock(enable)
     await meta.set({ enabled })
-    return withLock(enabled ? enable : disable)
+    return withLock(disable)
   }
 
   /** Explicit "forget the cloud copy" action — removes this extension's sync keys. */
@@ -186,18 +193,24 @@ export function createSyncEngine(deps: SyncDeps) {
   }
 
   /**
-   * The reader's answer to a held update. `accept` applies it — this browser's
-   * settings were backed up when it was held. `keep` saves the incoming copy as
-   * a backup, so whatever the other browser had is still restorable, and pushes
-   * this browser's settings over it.
+   * The reader's answer to the question sync holds for: an update the deletion
+   * guard held, or which settings to keep as sync turned on over a copy that
+   * differs. `accept` applies the synced copy. This browser's settings were
+   * backed up as the question was asked, if `pause.backedUp` says so. Turning
+   * sync on's question backs them up again first, since edits made while it
+   * asked are in no backup yet. `keep` saves the synced copy as a backup, so
+   * whatever the other browser had is still restorable, and pushes this
+   * browser's settings over it.
    */
   async function resolveHeld(choice: 'accept' | 'keep'): Promise<boolean> {
     return withLock(async () => {
       const { pause } = await meta.get(['pause'])
-      if (pause?.reason !== 'held')
+      if (!isQuestion(pause))
         return false
 
       if (choice === 'accept') {
+        if (pause.reason === 'first-sync')
+          await backUp('pre-sync')
         await pull({ acceptLoss: true })
       }
       else {
@@ -214,7 +227,7 @@ export function createSyncEngine(deps: SyncDeps) {
 
       // Answered either way, even if the cloud couldn't be read just now: the
       // next update will be assessed afresh.
-      if ((await meta.get(['pause'])).pause?.reason === 'held')
+      if (isQuestion((await meta.get(['pause'])).pause))
         await meta.set({ pause: null })
       return true
     })
@@ -286,9 +299,9 @@ export function createSyncEngine(deps: SyncDeps) {
     const { enabled, meta: agreed, pause, staleBuild } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild'])
     if (!enabled || staleBuild)
       return
-    // While an update is held, pushing would answer the question for the reader.
-    if (pause?.reason === 'held' && !force) {
-      logger.log('push waits: an incoming update is held for the reader')
+    // While the reader is asked whether to take the synced settings, pushing would answer for them.
+    if (isQuestion(pause) && !force) {
+      logger.log('push waits: the reader has yet to answer', pause.reason)
       return
     }
 
@@ -358,8 +371,12 @@ export function createSyncEngine(deps: SyncDeps) {
     }
   }
 
-  /** `acceptLoss` applies an update the deletion guard would hold: the reader accepted it. */
-  async function pull({ acceptLoss = false }: { acceptLoss?: boolean } = {}): Promise<void> {
+  /**
+   * `acceptLoss` applies the copy whatever the deletion guard says, or whatever
+   * the first pull would ask: the reader accepted it. `firstBackup` is the
+   * backup turning sync on took, for the question if the first pull asks one.
+   */
+  async function pull({ acceptLoss = false, firstBackup }: { acceptLoss?: boolean, firstBackup?: BackupRecord } = {}): Promise<void> {
     const { enabled, meta: agreed, pause, staleBuild } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild'])
     if (!enabled || staleBuild)
       return
@@ -385,8 +402,8 @@ export function createSyncEngine(deps: SyncDeps) {
       await meta.set({ pause: null })
     if (decision === 'noop')
       return
-    // The copy already held: nothing new to assess until something newer arrives.
-    if (!acceptLoss && pause?.reason === 'held' && remote!.g === pause.g && remote!.w === pause.w)
+    // The copy already asked about: nothing new to assess until something newer arrives.
+    if (!acceptLoss && isQuestion(pause) && remote!.g === pause.g && remote!.w === pause.w)
       return
 
     const result = await decode(items, version())
@@ -412,27 +429,51 @@ export function createSyncEngine(deps: SyncDeps) {
     pullRetries = 0
 
     await deps.prePull?.()
-    // Back up the pre-pull state, then apply only the keys that actually change.
-    await backups.maybeDaily()
     const current = await deps.readOptions()
     // `remote.k` tells us which options the writing device knew about, so a device
     // on an older build can't silently reset (and wipe) ones it has never heard of.
     const desired = buildLocalUpdate(result.options, defaults, current, remote?.k)
 
+    // Nothing agreed yet, as after turning sync on: adopting the copy would
+    // replace settings this browser has never shared, so where both hold
+    // settings of their own that differ, the reader chooses. The question
+    // stands in for the deletion guard, and nothing is applied or pushed until
+    // it is answered.
+    if (agreed.g === 0 && !acceptLoss) {
+      const first = decideFirstPull(current, result.options, defaults, remote!.k)
+      if (first.kind === 'send') {
+        if (isQuestion(pause))
+          await meta.set({ pause: null })
+        await push({ force: true })
+        return
+      }
+      if (first.kind === 'ask') {
+        // Asked again over a newer copy, the backup taken as sync turned on still stands.
+        const backup = firstBackup
+          ?? (pause?.reason === 'first-sync' ? { backedUp: pause.backedUp, backupFailed: pause.backupFailed } : await backUp('pre-sync'))
+        await meta.set({ pause: { reason: 'first-sync', g: remote!.g, w: remote!.w, at: now(), ...backup, loss: first.loss } })
+        logger.warn('asking which settings to keep: the synced copy differs from this browser\'s own')
+        return
+      }
+    }
+
     // An update that would take away a large share of the rules, marked works or
     // text replacements waits for the reader — see syncGuard.ts for why no key
     // list or version can make that call. Nothing is applied and the agreement
-    // doesn't move, so this browser's pushes wait too.
+    // doesn't move, so this browser's pushes wait too. Accepting it replaces
+    // every setting here, so they're backed up as it's held.
     const loss = acceptLoss ? null : assessPull(current, desired)
     if (loss) {
-      const { backupsEnabled } = await meta.get(['backupsEnabled'])
-      if (backupsEnabled)
-        await backups.create('sync-held')
-      await meta.set({ pause: { reason: 'held', g: remote!.g, w: remote!.w, loss, at: now(), backedUp: backupsEnabled } })
+      const backup = await backUp('sync-held')
+      await meta.set({ pause: { reason: 'held', g: remote!.g, w: remote!.w, loss, at: now(), ...backup } })
       logger.warn('holding back a sync update that would remove', loss)
       return
     }
 
+    // Back up the day's first state, then apply only the keys that actually
+    // change. Only past the guard: a held update changes nothing, so a daily
+    // backup that can't be written mustn't keep it from being held.
+    await backups.maybeDaily()
     const update = diffOptions(current, desired)
     if (Object.keys(update).length)
       await deps.writeOptions(update)
@@ -449,45 +490,44 @@ export function createSyncEngine(deps: SyncDeps) {
       dirtySince: 0,
       lastError: '',
       lastSyncAt: now(),
-      ...(pause?.reason === 'held' ? { pause: null } : {}),
+      ...(isQuestion(pause) ? { pause: null } : {}),
     })
     logger.log('pull ok, gen', remote!.g)
   }
 
   async function enable(): Promise<SetSyncResult> {
     await getDeviceId()
-    // Forget any prior agreement so the cloud copy is treated as authoritative.
-    await meta.set({ meta: { g: 0, h: '', w: '' }, lastError: '', pause: null })
+    // Forget any prior agreement, so the first pull weighs the cloud copy
+    // against this browser's settings afresh.
+    await meta.set({ enabled: true, meta: { g: 0, h: '', w: '' }, lastError: '', pause: null })
 
     const remote = await readManifest()
-    if (remote && remote.v > version()) {
+    if (!remote) {
+      await push() // seed the cloud from this device
+      return { ok: true }
+    }
+    if (remote.v > version()) {
       // Refuse rather than pause: this browser was never syncing, so there's
       // nothing to resume, and a switch left on would suggest otherwise.
       await meta.set({ enabled: false })
       return { ok: false, reason: 'newer-version', remoteVersion: remote.v, version: version() }
     }
-    // Adopting replaces local settings wholesale, now or once a compatible copy
-    // arrives, so back them up first (a deliberate destructive adopt).
-    if (remote && (await meta.get(['backupsEnabled'])).backupsEnabled)
-      await backups.create('pre-sync')
-    if (remote && remote.v < version()) {
+    // The copy can replace every setting here, now or once a compatible copy
+    // arrives, so they are backed up first, whatever daily backups say.
+    const backup = await backUp('pre-sync')
+    if (remote.v < version()) {
       // Not adopted, and not seeded over either: nothing here has been agreed.
       await meta.set({ pause: { reason: 'older-cloud', remoteVersion: remote.v } })
       return { ok: true }
     }
-    if (remote) {
-      await pull()
-    }
-    else {
-      await push() // seed the cloud from this device
-    }
+    await pull({ firstBackup: backup })
     return { ok: true }
   }
 
   async function disable(): Promise<SetSyncResult> {
     await alarms.clear(ALARM_PUSH)
     await alarms.clear(ALARM_PULL_RETRY)
-    await meta.set({ dirty: false, dirtySince: 0, pause: null })
+    await meta.set({ enabled: false, dirty: false, dirtySince: 0, pause: null })
     // Cloud data is intentionally left intact — clearing would wipe other devices.
     return { ok: true }
   }
@@ -495,6 +535,24 @@ export function createSyncEngine(deps: SyncDeps) {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Back up this browser's settings where sync may replace every one of them,
+   * whatever daily backups say: as an update is held, as sync turns on over a
+   * synced copy, and as the synced settings are taken over this browser's.
+   * Answers what to record of it: one that can't be written doesn't stop what
+   * it guards, which then records that it failed.
+   */
+  async function backUp(kind: BackupKind): Promise<BackupRecord> {
+    try {
+      await backups.create(kind)
+      return { backedUp: true, backupFailed: false }
+    }
+    catch (e) {
+      logger.error(`going on without a ${kind} backup: it could not be written`, e)
+      return { backedUp: false, backupFailed: true }
+    }
+  }
 
   /**
    * Record a version pause, unless it's already recorded. A held update keeps
@@ -544,6 +602,16 @@ export function createSyncEngine(deps: SyncDeps) {
 
 export type SyncEngine = ReturnType<typeof createSyncEngine>
 
+/** A pause that waits on the reader's answer: nothing is applied or pushed until they give it. */
+type Question = Extract<SyncPause, { reason: 'held' | 'first-sync' }>
+
+/** What a question records of the backup taken for it. */
+type BackupRecord = Pick<Extract<SyncPause, { reason: 'first-sync' }>, 'backedUp' | 'backupFailed'>
+
+function isQuestion(pause: SyncPause | null): pause is Question {
+  return pause?.reason === 'held' || pause?.reason === 'first-sync'
+}
+
 /** A pause that lifts once this browser and the cloud copy speak the same sync version. */
 function isVersionPause(pause: SyncPause | null): boolean {
   return pause?.reason === 'newer-version' || pause?.reason === 'older-cloud'
@@ -556,15 +624,6 @@ function pickChunks(items: Record<string, unknown>): Record<string, string> {
       out[k] = v
   }
   return out
-}
-
-function diffOptions(current: Options, desired: Options): Partial<Options> {
-  const out: Record<string, unknown> = {}
-  for (const key of Object.keys(desired) as (keyof Options)[]) {
-    if (!isDeepEqual(current[key], desired[key]))
-      out[key] = desired[key]
-  }
-  return out as Partial<Options>
 }
 
 function quotaHint(msg: string): string {

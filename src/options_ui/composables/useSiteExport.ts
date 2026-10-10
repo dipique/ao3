@@ -243,7 +243,7 @@ const savedRows = computed(() => savedListRows(joined.value, {
     return { buckets: row?.buckets ?? NO_WORKS, unstored: row?.unstored ?? 0 }
   },
   review: reviewing.value,
-  jobOff: key => offReason(view.value, key),
+  jobOff: keys => offReason(view.value, keys),
 }))
 
 /** Re-read the lists and the cache index. Cheap enough to run after every action. */

@@ -47,6 +47,25 @@ const stubAssets = {
  * captures `storage.onChanged` as the barrel imports.
  */
 export async function loadModuleInPage(entry, globalName, { stubBrowser = false, prepare } = {}) {
+  const script = await bundleForPage(entry, globalName)
+  const browser = await puppeteer.launch({ executablePath: chromePath, headless: true })
+  const page = await browser.newPage()
+  await page.goto('about:blank')
+  if (stubBrowser)
+    await page.evaluate(installBrowserStub)
+  if (prepare)
+    await prepare(page)
+  await page.evaluate(script)
+  return { page, close: () => browser.close() }
+}
+
+/**
+ * `entry` (a repo-relative path) bundled as a script that exposes its exports
+ * as `globalName`, for a page to evaluate: a blank one, or a page of the
+ * built extension's (`evaluateOnNewDocument`) that needs a module it doesn't
+ * load itself.
+ */
+export async function bundleForPage(entry, globalName) {
   const built = await build({
     entryPoints: [join(REPO_ROOT, entry)],
     bundle: true,
@@ -65,15 +84,7 @@ export async function loadModuleInPage(entry, globalName, { stubBrowser = false,
     },
     plugins: [stubAssets],
   })
-  const browser = await puppeteer.launch({ executablePath: chromePath, headless: true })
-  const page = await browser.newPage()
-  await page.goto('about:blank')
-  if (stubBrowser)
-    await page.evaluate(installBrowserStub)
-  if (prepare)
-    await prepare(page)
-  await page.evaluate(built.outputFiles[0].text)
-  return { page, close: () => browser.close() }
+  return built.outputFiles[0].text
 }
 
 /** Runs in the page. Enough `browser` for `#common` to finish importing. */

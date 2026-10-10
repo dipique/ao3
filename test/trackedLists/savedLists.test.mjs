@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { addressOf, aliasOf, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, planRemoveList, planRetitle, planSaveBack, planSavedLists, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
+import { addressOf, aliasOf, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, moveKeys, planLetGo, planListingRefile, planRemoveList, planRetitle, planSaveBack, planSavedLists, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
 import { normalizeTrackedUrl, refineLink, trackedKey } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
@@ -109,6 +109,14 @@ describe('filteredListing', () => {
       assert.equal(filteredListing(href).key, 'works-filter:/tags/Bees/works', href)
     assert.equal(filteredListing(spellings[2]).url, `${BEES}?work_search[sort_column]=title`)
     assert.equal(filteredListing(spellings[3]).url, '/works?work_search[sort_column]=kudos_count&tag_id=Bees')
+  })
+
+  test('its own URL keeps the page\'s date bounds too, which its address leaves out, so its copy says which read it is', () => {
+    const bounded = `${AO3}/works?work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01&tag_id=Bees&page=2`
+    const listing = filteredListing(bounded)
+    assert.equal(listing.key, 'works-filter:/tags/Bees/works')
+    assert.equal(listing.url, '/works?tag_id=Bees&work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01')
+    assert.equal(addressOf(listing.url), listing.key)
   })
 
   test('what a listing is filtered by makes it another listing, with a copy of its own', () => {
@@ -905,6 +913,81 @@ describe('planUndoSaveBack', () => {
   })
 })
 
+describe('planLetGo', () => {
+  const meta = { type: 'search', entity: 'tea' }
+  const coffee = recordOf(entry('c', COFFEE, { alias: 'Coffee', type: 'search', entity: 'coffee shop' }))
+  const oldCopy = copy('text-search', 'coffee', { listUrl: `${AO3}${COFFEE}` })
+  const byKudos = copy('text-search', 'coffee-by-kudos', { listUrl: `${AO3}${COFFEE_BY_KUDOS}`, scrapedAt: 2_000 })
+  const newCopy = copy('text-search', 'tea', { listUrl: `${AO3}${TEA}`, scrapedAt: 3_000 })
+  const BOTH = [byKudos.key, oldCopy.key]
+
+  /**
+   * List `c` saved back from the coffee search to the tea one, as the toolbar
+   * does it: the lists as it left them, the copies it set aside, and what is
+   * still stored.
+   */
+  function savedBack(lists = [], records = [coffee]) {
+    const stored = deepFreeze([oldCopy, byKudos, newCopy])
+    const plan = planSaveBack(current(lists, records), 'c', { url: TEA, kind: 'text-search', meta }, stored)
+    assert.equal(plan.ok, true)
+    assert.deepEqual(plan.dropCopies, BOTH)
+    return { state: deepFreeze(plan.state), setAside: plan.dropCopies.map(key => stored.find(one => one.key === key)), stored: without(stored, plan.dropCopies) }
+  }
+
+  const withEntries = (state, lists) => ({ ...state, tracked: { ...state.tracked, lists } })
+  const withRecords = (state, ...more) => ({ ...state, saved: { ...state.saved, lists: { ...state.saved.lists, ...Object.fromEntries(more.map(one => [one.id, one])) } } })
+
+  test('with no list at their address since, every copy set aside goes', () => {
+    const { state, setAside, stored } = savedBack()
+    assert.deepEqual(planLetGo(state, setAside, stored), { restore: [], prune: BOTH })
+  })
+
+  test('a sync that put the list itself back there keeps them all, before the planner mirrors its entry and after', () => {
+    const tracked = entry('c', COFFEE, { alias: 'Coffee', type: 'search', entity: 'coffee shop' })
+    const { state, setAside, stored } = savedBack([tracked], [recordOf(tracked)])
+    const pulled = withEntries(state, [tracked])
+    assert.deepEqual(planLetGo(pulled, setAside, stored), { restore: BOTH, prune: [] })
+    assert.deepEqual(planLetGo(settle(pulled, stored).state, setAside, stored), { restore: BOTH, prune: [] })
+  })
+
+  test('a sync that brought another list there keeps them, filed or not', () => {
+    const { state, setAside, stored } = savedBack()
+    const arrived = entry('n', COFFEE_BY_KUDOS, { alias: 'Their coffee' })
+    const pulled = withEntries(state, [arrived])
+    assert.deepEqual(planLetGo(pulled, setAside, stored), { restore: BOTH, prune: [] })
+    assert.deepEqual(planLetGo(settle(pulled, stored).state, setAside, stored), { restore: BOTH, prune: [] })
+  })
+
+  test('another tab tracking the old search keeps them', () => {
+    const { state, setAside, stored } = savedBack()
+    const tracked = planTrackSearch(state, { kind: 'text-search', url: COFFEE, type: 'search', entity: 'coffee shop' }, '', TODAY)
+    assert.equal(tracked.ok, true)
+    assert.deepEqual(planLetGo(tracked.state, setAside, stored), { restore: BOTH, prune: [] })
+  })
+
+  test('another tab opening the old search keeps them: the copy it stored, before the planner files it, and the record after', () => {
+    const { state, setAside, stored } = savedBack()
+    const opened = [...stored, copy('text-search', 'coffee-again', { listUrl: `${AO3}${COFFEE}`, scrapedAt: 4_000 })]
+    assert.deepEqual(planLetGo(state, setAside, opened), { restore: BOTH, prune: [] })
+    assert.deepEqual(planLetGo(settle(state, opened).state, setAside, opened), { restore: BOTH, prune: [] })
+  })
+
+  test('a list or copy at another address keeps nothing, and neither does a copy no saved list is made from', () => {
+    const { state, setAside, stored } = savedBack()
+    const elsewhere = withRecords(state, recordOf(entry('o', TAG, { alias: 'Marriage' })))
+    const profile = copy('marked-for-later', 'reader', { listUrl: `${AO3}${COFFEE}` })
+    assert.deepEqual(planLetGo(elsewhere, setAside, [...stored, profile]), { restore: [], prune: BOTH })
+  })
+
+  test('put back, they are a list\'s copies again: the planner makes no list of them', () => {
+    const { state, setAside, stored } = savedBack()
+    const arrived = settle(withEntries(state, [entry('n', COFFEE, { alias: 'Their coffee' })]), stored).state
+    const { restore } = planLetGo(arrived, setAside, stored)
+    const back = [...stored, ...setAside.filter(one => restore.includes(one.key))]
+    assert.deepEqual(planSavedLists(arrived, back).changed, { tracked: false, saved: false })
+  })
+})
+
 describe('storedListRefs', () => {
   test('each stored list as the planner reads it, its descriptor flattened in', () => {
     const lists = {
@@ -962,14 +1045,14 @@ describe('joinSavedLists', () => {
   test('a list claims the newest copy at its address; the older sort orders are its too, and no rows', () => {
     const saved = recordOf(entry('s', COFFEE, { alias: 'Coffee' }))
     const join = joinSavedLists(current([], [saved]), [byDate, byKudos])
-    assert.deepEqual(join.lists, [{ list: saved, entry: null, address: addressOf(COFFEE), copy: byKudos, sameAddress: [] }])
+    assert.deepEqual(join.lists, [{ list: saved, entry: null, address: addressOf(COFFEE), copy: byKudos, copyKeys: [byKudos.key, byDate.key], sameAddress: [] }])
     assert.deepEqual(join.copies, [])
   })
 
   test('a tracked list with a view filter claims the copy of its page: its address leaves the filter out', () => {
     const filtered = entry('t', COFFEE, { alias: 'Coffee, slow', filter: SLOW_BURN })
     const join = joinSavedLists(current([filtered], [recordOf(filtered)]), [byKudos])
-    assert.deepEqual(join.lists, [{ list: recordOf(filtered), entry: filtered, address: addressOf(COFFEE), copy: byKudos, sameAddress: [] }])
+    assert.deepEqual(join.lists, [{ list: recordOf(filtered), entry: filtered, address: addressOf(COFFEE), copy: byKudos, copyKeys: [byKudos.key], sameAddress: [] }])
     assert.deepEqual(join.copies, [])
   })
 
@@ -980,15 +1063,16 @@ describe('joinSavedLists', () => {
     const join = joinSavedLists(current([tracked], [recordOf(tracked), saved, alone]), [byKudos])
     assert.deepEqual(claims(join), [['t', byKudos.key], ['s', byKudos.key], ['a', null]])
     assert.deepEqual(join.lists.map(one => one.sameAddress), [['s'], ['t'], []])
+    assert.deepEqual(join.lists.map(one => one.copyKeys), [[byKudos.key], [byKudos.key], []])
   })
 
   test('a list at no address on the archive claims nothing, and shares with nothing', () => {
     const broken = recordOf(entry('b', BROKEN, { kind: 'tag-works' }))
     const alsoBroken = recordOf(entry('c', BROKEN, { kind: 'tag-works' }))
     const join = joinSavedLists(current([], [broken, alsoBroken]), [copy('tag-works', 'x', { listUrl: BROKEN })])
-    assert.deepEqual(join.lists.map(({ address, copy, sameAddress }) => ({ address, copy, sameAddress })), [
-      { address: null, copy: null, sameAddress: [] },
-      { address: null, copy: null, sameAddress: [] },
+    assert.deepEqual(join.lists.map(({ address, copy, copyKeys, sameAddress }) => ({ address, copy, copyKeys, sameAddress })), [
+      { address: null, copy: null, copyKeys: [], sameAddress: [] },
+      { address: null, copy: null, copyKeys: [], sameAddress: [] },
     ])
   })
 
@@ -1227,5 +1311,131 @@ describe('planTrackCopy', () => {
       copy('text-search', 'nowhere', { listUrl: BROKEN }),
     ])
       assert.equal(planTrackCopy(current([], []), other, TODAY), null, other.key)
+  })
+})
+
+describe('planListingRefile', () => {
+  // A collection's sidebar submits the collection's own path with its number
+  // added, which a listing's address leaves out. Kept while the address still
+  // held it, a submit's copy is under a key with the number, and its list stands
+  // beside the link's.
+  const LINK = '/collections/yuletide/works'
+  const SUBMIT = `${LINK}?work_search[sort_column]=revised_at&collection_id=1`
+  const SUBMIT_EN = `${LINK}?work_search[language_id]=en&collection_id=1`
+  const ADDRESS = 'works-filter:/collections/yuletide/works'
+  const ADDRESS_EN = 'works-filter:/collections/yuletide/works?work_search[language_id]=en'
+  const NUMBERED = 'works-filter:/collections/yuletide/works?collection_id=1'
+  const NUMBERED_EN = 'works-filter:/collections/yuletide/works?collection_id=1&work_search[language_id]=en'
+
+  /** A filtered listing's copy as `cache.searchLists` holds it, read from `listUrl`. */
+  const kept = (listUrl, scrapedAt = 1_000) => ({ v: 3, scrapedAt, ids: 'a,b', descriptor: { sourceId: FILTERED_LISTING_SOURCE_ID, label: 'Collection: yuletide', listUrl: `${AO3}${listUrl}` } })
+
+  /** A saved list of the collection's, under its default title unless told otherwise. */
+  const list = (id, url, fields = {}) => ({ id, kind: 'works-filter', url, title: 'Collection: yuletide', type: 'collection', entity: 'yuletide', ...fields })
+
+  /** The plan, its moves made, and the plan again over what it left, which must change nothing. */
+  function refile(state, searchLists) {
+    deepFreeze(searchLists)
+    const first = planListingRefile(state, searchLists)
+    const lists = moveKeys(searchLists, first.moves)
+    const second = planListingRefile(first.state, lists)
+    assert.deepEqual(second.moves, [], 'the second run moves nothing')
+    assert.equal(second.state, first.state, 'and changes no list')
+    return { ...first, searchLists: lists }
+  }
+
+  test('a submit\'s copy kept under its number is refiled at its listing\'s address, its filters and all', () => {
+    const plan = refile(current([], [list('sub', SUBMIT)]), { [NUMBERED]: kept(SUBMIT), [NUMBERED_EN]: kept(SUBMIT_EN, 2_000) })
+    assert.deepEqual(plan.moves, [[NUMBERED, ADDRESS], [NUMBERED_EN, ADDRESS_EN]])
+    assert.deepEqual(plan.searchLists, { [ADDRESS]: kept(SUBMIT), [ADDRESS_EN]: kept(SUBMIT_EN, 2_000) })
+    assert.equal(filteredListing(`${AO3}${SUBMIT}`).key, ADDRESS, 'where the search view now looks for it')
+  })
+
+  test('every other copy stays where it is', () => {
+    const state = current([], [])
+    const searchLists = {
+      'works-filter:/tags/Bees/works': kept('/works?work_search[sort_column]=title&tag_id=Bees'),
+      [ADDRESS]: kept(LINK),
+      'works-filter:/works?collection_id=yuletide': kept('/works?collection_id=yuletide'),
+      'text-search:work_search%5Bquery%5D=tea': { ...kept(TEA), descriptor: { sourceId: 'text-search', label: 'Search: tea', listUrl: `${AO3}${TEA}` } },
+      'tag-works:old': { v: 3, scrapedAt: 1, ids: '' },
+      'works-filter:elsewhere': { ...kept(LINK), descriptor: { sourceId: FILTERED_LISTING_SOURCE_ID, label: 'Elsewhere', listUrl: BROKEN } },
+    }
+    const plan = refile(state, searchLists)
+    assert.deepEqual(plan.moves, [])
+    assert.equal(plan.searchLists, searchLists)
+    assert.equal(plan.state, state)
+  })
+
+  test('a copy at the address already stays, and the submit\'s keeps its own key: both are the list\'s, as two sort orders\' copies are', () => {
+    const plan = refile(current([], [list('l1nk', LINK)]), { [ADDRESS]: kept(LINK, 1_000), [NUMBERED]: kept(SUBMIT, 2_000) })
+    assert.deepEqual(plan.moves, [])
+    const join = joinSavedLists(plan.state, storedListRefs(plan.searchLists))
+    assert.deepEqual(join.lists.map(one => [one.list.id, one.copyKeys]), [['l1nk', [NUMBERED, ADDRESS]]], 'the newest is the one the row shows')
+    assert.deepEqual(join.copies, [])
+  })
+
+  test('of two numbered copies of one listing, the newest is refiled, and the other keeps its key', () => {
+    const other = 'works-filter:/collections/yuletide/works?collection_id=2'
+    const plan = refile(current([], []), { [NUMBERED]: kept(SUBMIT, 1_000), [other]: kept(`${LINK}?collection_id=2`, 2_000) })
+    assert.deepEqual(plan.moves, [[other, ADDRESS]])
+    assert.deepEqual(Object.keys(plan.searchLists).sort(), [ADDRESS, NUMBERED])
+  })
+
+  test('the link\'s list and a submit\'s, one search now, are one list: the link\'s, when nothing else sets them apart', () => {
+    const state = current([], [list('l1nk', LINK), list('sub', SUBMIT)])
+    const plan = refile(state, {})
+    assert.deepEqual(plan.state.saved.lists, { l1nk: list('l1nk', LINK) })
+    assert.equal(plan.state.tracked, state.tracked, 'nothing syncs')
+  })
+
+  test('a title the reader gave either is kept, with the list they gave it to', () => {
+    const titled = list('sub', SUBMIT, { title: 'Yuletide, all of it' })
+    assert.deepEqual(refile(current([], [list('l1nk', LINK), titled]), {}).state.saved.lists, { sub: titled })
+  })
+
+  test('a tracked one is the one kept, taking the other\'s title on its entry too, and is this browser\'s own from then on', () => {
+    const tracked = entry('sub', SUBMIT, { alias: 'Collection: yuletide', type: 'collection', entity: 'yuletide' })
+    const plan = refile(current([tracked], [list('l1nk', LINK, { title: 'Yule' }), recordOf(tracked, { mirror: true })]), {})
+    assert.deepEqual(plan.state.saved.lists, { sub: recordOf(tracked, { title: 'Yule' }) })
+    assert.deepEqual(plan.state.tracked.lists, [{ ...tracked, alias: 'Yule' }])
+  })
+
+  test('one title in two casings is one title', () => {
+    const plan = refile(current([], [list('l1nk', LINK, { title: 'Yule' }), list('sub', SUBMIT, { title: ' yule ' })]), {})
+    assert.deepEqual(plan.state.saved.lists, { l1nk: list('l1nk', LINK, { title: 'Yule' }) })
+  })
+
+  test('two titles the reader gave, or two tracked lists, stay two lists, since one would be lost', () => {
+    const titled = current([], [list('l1nk', LINK, { title: 'Yule' }), list('sub', SUBMIT, { title: 'Yuletide faves' })])
+    assert.equal(refile(titled, {}).state, titled)
+    const link = entry('l1nk', LINK, { alias: 'Yule' })
+    const submit = entry('sub', SUBMIT, { alias: 'Yuletide faves' })
+    const tracked = current([link, submit], [recordOf(link), recordOf(submit)])
+    assert.equal(refile(tracked, {}).state, tracked)
+  })
+
+  test('lists the number doesn\'t set apart stay apart: another view filter, another of the archive\'s filters, and two submits of one number', () => {
+    const state = current([], [
+      list('l1nk', LINK),
+      list('slow', SUBMIT, { filter: SLOW_BURN }),
+      list('en', SUBMIT_EN),
+      list('a', `${LINK}?work_search[complete]=T&collection_id=1`),
+      list('b', `${LINK}?collection_id=1&work_search[complete]=T&work_search[sort_column]=title`),
+    ])
+    assert.equal(refile(state, {}).state, state)
+  })
+})
+
+describe('moveKeys', () => {
+  test('each entry under a move\'s first key goes under its second; anything else stays', () => {
+    const store = deepFreeze({ a: 1, b: 2, c: 3 })
+    assert.deepEqual(moveKeys(store, [['a', 'x'], ['gone', 'y']]), { x: 1, b: 2, c: 3 })
+  })
+
+  test('with nothing to move, the same object', () => {
+    const store = deepFreeze({ a: 1 })
+    assert.equal(moveKeys(store, []), store)
+    assert.equal(moveKeys(store, [['gone', 'y']]), store)
   })
 })

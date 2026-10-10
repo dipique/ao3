@@ -6,7 +6,8 @@ const NOTICE_TIMEOUT_MS = 20_000
 
 /**
  * Say so on AO3 pages when sync has stopped on this browser for a reason the
- * reader has to act on: an update held back for deleting most of a list, a
+ * reader has to act on: an update held back for deleting most of a list,
+ * synced settings that differ from this browser's as sync was turned on, a
  * newer sync version the extension needs updating for, or a background running
  * an out-of-date build. The options page says the same, but a held update
  * usually arrives in the browser the reader *isn't* looking at, and they'd
@@ -31,8 +32,8 @@ export class SyncNotice extends Unit {
       key = `stale:${staleBuild.onDisk}`
       message = staleBackgroundMessage(true)
     }
-    else if (enabled && pause?.reason === 'held') {
-      key = `held:${pause.g}:${pause.w}`
+    else if (enabled && (pause?.reason === 'held' || pause?.reason === 'first-sync')) {
+      key = `${pause.reason}:${pause.g}:${pause.w}`
       message = syncPauseMessage(pause, SYNC_SCHEMA_VERSION)
     }
     else if (enabled && pause?.reason === 'newer-version') {

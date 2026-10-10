@@ -113,16 +113,28 @@ export function isRunning(view: JobView): boolean {
 }
 
 /**
- * Why a running job keeps one stored list's offline actions (refresh, cache,
+ * What a list is stored as, for the functions below: one stored list's key, or
+ * the keys of every copy at a saved list's address. One search stored in
+ * several sort orders is one list, and a job on any of its copies is its own.
+ */
+export type ListKeys = string | readonly string[]
+
+/** Whether the job is on the list `keys` names. */
+export function jobIsOn(view: JobView, keys: ListKeys): boolean {
+  return view.key !== null && (typeof keys === 'string' ? keys === view.key : keys.includes(view.key))
+}
+
+/**
+ * Why a running job keeps one list's offline actions (refresh, cache,
  * download) off, or null: there is one job at a time, so every other list
  * names the list that holds it and what it is doing, and the list it is on is
  * busy itself. Worded to follow the control's name after a dash.
  */
-export function offReason(view: JobView, key: string): string | null {
+export function offReason(view: JobView, keys: ListKeys): string | null {
   if (!isRunning(view))
     return null
   const verb = jobVerb(view)
-  return key === view.key
+  return jobIsOn(view, keys)
     ? `off while this list is ${verb}`
     : `off for now: one job at a time, and ${view.name} is ${verb}`
 }
@@ -135,15 +147,15 @@ export type JobActions = 'offline' | 'stop' | 'resume'
  * shows, why its actions are off, and whether the job's line is its own. A
  * finished job leaves its line, and the actions come back.
  */
-export function listJob(view: JobView, key: string): { actions: JobActions, off: string | null, here: boolean } {
-  const mine = view.key === key
+export function listJob(view: JobView, keys: ListKeys): { actions: JobActions, off: string | null, here: boolean } {
+  const mine = jobIsOn(view, keys)
   const actions: JobActions = mine && isRunning(view) ? 'stop' : mine && view.state === 'stopped' ? 'resume' : 'offline'
-  return { actions, off: actions === 'offline' ? offReason(view, key) : null, here: mine && view.state !== 'idle' }
+  return { actions, off: actions === 'offline' ? offReason(view, keys) : null, here: mine && view.state !== 'idle' }
 }
 
-/** Why removing a stored list is off, or null: only its own job, which is reading and writing it, stops it. */
-export function removeOff(view: JobView, key: string): string | null {
-  return key === view.key ? offReason(view, key) : null
+/** Why removing a list's copies is off, or null: only its own job, which is reading and writing one of them, stops it. */
+export function removeOff(view: JobView, keys: ListKeys): string | null {
+  return jobIsOn(view, keys) ? offReason(view, keys) : null
 }
 
 /** Why deleting cached work text is off, or null: a running job is writing it. */

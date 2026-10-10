@@ -3,7 +3,7 @@ import type { WaitReason } from '#content_script/archiveFetch.js'
 import type { Work } from '#content_script/blurb.js'
 import type { RefreshOptions } from '#content_script/searchView/refresh.js'
 
-import { createLogger, options, readWorkIds, saveAs } from '#common'
+import { createLogger, options, readWorkIds, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
 import { onArchiveWait, PATIENCE } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
@@ -43,12 +43,6 @@ import { readWorkTextIndex } from './workTextCache.ts'
  */
 
 const log = createLogger('siteExport')
-
-/**
- * Where the job lives. Outside the `cache.` prefix — a half-finished job is not
- * a cache, and has no business travelling in an export.
- */
-const JOB_KEY = 'siteExportJob'
 
 /** Failures kept for the UI's list. {@link ExportJob.errorCount} keeps the true total. */
 const MAX_ERRORS = 50
@@ -165,17 +159,17 @@ export function subscribeJob(listener: Listener): () => void {
 
 /** The stored job, if a previous run left one unfinished. */
 export async function readJob(): Promise<ExportJob | null> {
-  const stored = (await browser.storage.local.get(JOB_KEY))[JOB_KEY] as ExportJob | undefined
+  const stored = (await browser.storage.local.get(SITE_EXPORT_JOB_KEY))[SITE_EXPORT_JOB_KEY] as ExportJob | undefined
   return stored ?? null
 }
 
 async function persist(job: ExportJob): Promise<void> {
   job.updatedAt = Date.now()
-  await browser.storage.local.set({ [JOB_KEY]: job })
+  await browser.storage.local.set({ [SITE_EXPORT_JOB_KEY]: job })
 }
 
 async function forget(): Promise<void> {
-  await browser.storage.local.remove(JOB_KEY)
+  await browser.storage.local.remove(SITE_EXPORT_JOB_KEY)
 }
 
 /**

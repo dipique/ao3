@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { hostPage, listUrlFor, openAsk, openLink, openTarget } from '../../src/common/listLinks.ts'
+import { hostPage, listUrlFor, openAsk, openLink, openTarget, ownPageLink } from '../../src/common/listLinks.ts'
 import { isListId, onListPage } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
@@ -175,6 +175,74 @@ describe('what an open URL asks of the page it opens', () => {
         assert.deepEqual(openAsk(ref, LISTS, href), { ref, host: kind, list: null }, `${kind} at ${href}`)
       for (const href of [`${AO3}/users/me/readings/confirm_clear`, `${AO3}/users/me`, `${AO3}/series/9991`, 'https://example.com/users/me/readings'])
         assert.equal(openAsk(ref, LISTS, href), null, `${kind} at ${href}`)
+    }
+  })
+})
+
+describe('where a link its page can\'t open points the reader', () => {
+  const LISTS = [
+    record('f1lt3r', 'works-filter', '/tags/Bees/works', { title: 'Bees' }),
+    record('s34rch', 'text-search', '/works/search?work_search[query]=tea', { title: 'Search: tea' }),
+    record('t4g', 'tag-works', '/tags/marriage%20problems', { title: 'Tag: marriage problems' }),
+    record('s3r', 'series-works', '/series/9991', { title: 'Series: Bees' }),
+  ]
+
+  test('a saved list known here: its open URL on its own page, named for it', () => {
+    for (const list of LISTS) {
+      assert.deepEqual(ownPageLink({ kind: 'list', id: list.id }, LISTS), {
+        label: `Open “${list.title}”`,
+        href: `${list.url}#ao3e-open=${list.id}`,
+      }, list.kind)
+    }
+  })
+
+  test('the link opens the list on the page it names', () => {
+    for (const list of LISTS) {
+      const ref = { kind: 'list', id: list.id }
+      const { href } = ownPageLink(ref, LISTS)
+      assert.deepEqual(openAsk(openTarget(hashOf(href)), LISTS, new URL(href, AO3).href), { ref, host: list.kind, list }, list.kind)
+    }
+  })
+
+  test('an entry not yet filed is a list known here', () => {
+    const entry = record('n3w', 'series-works', '/series/1234', { title: 'Pulled' })
+    assert.deepEqual(ownPageLink({ kind: 'list', id: 'n3w' }, [...LISTS, entry]), { label: 'Open “Pulled”', href: '/series/1234#ao3e-open=n3w' })
+  })
+
+  test('a list with no title is named as the List source facet names it', () => {
+    const list = record('b4re', 'series-works', '/series/9991', { title: '  ' })
+    assert.deepEqual(ownPageLink({ kind: 'list', id: 'b4re' }, [list]), { label: 'Open “/series/9991”', href: '/series/9991#ao3e-open=b4re' })
+  })
+
+  test('nothing for an id no list here has', () => {
+    assert.equal(ownPageLink({ kind: 'list', id: 'g0n3' }, LISTS), null)
+    assert.equal(ownPageLink({ kind: 'list', id: 's3r' }, []), null)
+    assert.equal(ownPageLink({ kind: 'list', id: 's3r' }, [], 'me'), null, 'whoever the reader is')
+  })
+
+  test('nothing for a saved list with no page to link', () => {
+    const lists = [
+      record('b', 'tag-works', 'https://example.com/tags/x', { title: 'Elsewhere' }),
+      record('k', 'series-works', '/works/search?work_search[query]=tea', { title: 'Wrong kind' }),
+    ]
+    for (const { id } of lists)
+      assert.equal(ownPageLink({ kind: 'list', id }, lists, 'me'), null, id)
+  })
+
+  test('a list without a record, with the reader\'s account known: its open URL on their readings', () => {
+    const links = [
+      [{ kind: 'marked-for-later' }, { label: 'Open Marked for Later', href: '/users/me/readings?show=to-read#ao3e-open=marked-for-later' }],
+      [{ kind: 'read-works' }, { label: 'Open Read works', href: '/users/me/readings#ao3e-open=read-works' }],
+      [{ kind: 'review' }, { label: 'Open the review', href: '/users/me/readings#ao3e-open=tracked-review' }],
+    ]
+    for (const [ref, link] of links)
+      assert.deepEqual(ownPageLink(ref, LISTS, 'me'), link, ref.kind)
+  })
+
+  test('a list without a record, with the reader\'s account not known: nothing, as it has no page', () => {
+    for (const { ref } of BUILTINS) {
+      assert.equal(ownPageLink(ref, LISTS), null, ref.kind)
+      assert.equal(ownPageLink(ref, LISTS, ''), null, ref.kind)
     }
   })
 })

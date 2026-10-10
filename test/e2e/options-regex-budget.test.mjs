@@ -34,13 +34,16 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
 
   afterEach(() => options?.close())
 
-  const openPage = async (seed) => {
+  /** `script`: a page script of the test's own, run before the page's. */
+  const openPage = async (seed, script) => {
     options = await session.open({
       seed: { 'option.rules': { enabled: true, filters: [], colors: {} }, ...seed },
       hash: '#customize-search-results',
       // Nothing here is a pattern AO3 is asked about; the stand-in makes sure of it.
       prepare: async (tab) => {
         await stubArchive(tab, () => ({ json: [] }))
+        if (script)
+          await tab.evaluateOnNewDocument(script)
       },
     })
     page = options.page
@@ -140,6 +143,42 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
     await options.saved()
     assert.deepEqual((await options.lastWrite('option.rules')).filters, [{ ...rule, value: '^Harry' }])
   })
+
+  const BROKEN_WORKERS = {
+    'can\'t load its script': () => {
+      const Native = window.Worker
+      window.Worker = class extends Native {
+        constructor(url, options) {
+          super(`${url}-missing`, options)
+        }
+      }
+    },
+    'is refused by the browser': () => {
+      window.Worker = class {
+        constructor() {
+          throw new DOMException('Refused to start the worker.', 'SecurityError')
+        }
+      }
+    },
+  }
+
+  for (const [broken, script] of Object.entries(BROKEN_WORKERS)) {
+    test(`a worker that ${broken} ends the check as too slow, rather than leaving it under way`, async () => {
+      await openPage({ 'fandomCache.characters': learned(['Harry Potter']) }, script)
+      await options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
+      await pick('What the rule matches', 'Character')
+      await pick('How to match', 'Regex')
+      await (await testField()).type('Harry Potter')
+      await (await patternField()).type('^harry')
+      assert.equal(await verdict('slow', STOPPED_WITHIN), 'Error: Too slow')
+      const save = await saveButton('Add rule')
+      assert.equal(await save.evaluate(el => el.disabled), true)
+      await options.press(save)
+      await options.saved()
+      assert.equal(await options.lastWrite('option.rules'), null, 'nothing is written')
+      assert.deepEqual(options.problems(/^\[rule editor\] The worker testing a pattern failed/), [])
+    })
+  }
 
   test('an ordinary pattern is checked and saved as before', async () => {
     await openPage({ 'fandomCache.characters': learned(['Harry Potter']) })

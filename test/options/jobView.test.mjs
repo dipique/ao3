@@ -169,6 +169,11 @@ describe('offReason', () => {
     assert.equal(offReason(view({ running: false }), MINE), null)
     assert.equal(offReason(view({ job: job({ steps: [] }), running: false }), OTHER), null)
   })
+
+  test('a list held in several copies is busy itself while the job is on any of them', () => {
+    assert.equal(offReason(view(), [OTHER, MINE]), 'off while this list is caching')
+    assert.equal(offReason(view(), [OTHER]), 'off for now: one job at a time, and Marked for Later is caching')
+  })
 })
 
 describe('listJob', () => {
@@ -198,6 +203,14 @@ describe('listJob', () => {
     assert.deepEqual(listJob(view({ running: false }), OTHER), { actions: 'offline', off: null, here: false })
     assert.deepEqual(listJob(view({ job: job({ steps: [] }), running: false }), OTHER), { actions: 'offline', off: null, here: false })
   })
+
+  test('a job on any of a list\'s copies is its own: an older sort order of its search, say', () => {
+    const copies = [OTHER, MINE]
+    assert.deepEqual(listJob(view(), copies), { actions: 'stop', off: null, here: true })
+    assert.deepEqual(listJob(view({ running: false }), copies), { actions: 'resume', off: null, here: true })
+    assert.deepEqual(listJob(view({ job: job({ steps: [] }), running: false }), copies), { actions: 'offline', off: null, here: true })
+    assert.deepEqual(listJob(view(), [OTHER]), { actions: 'offline', off: 'off for now: one job at a time, and Marked for Later is caching', here: false })
+  })
 })
 
 describe('removeOff', () => {
@@ -208,6 +221,12 @@ describe('removeOff', () => {
   test('another list\'s job leaves it removable, and so does a stopped one', () => {
     assert.equal(removeOff(view(), OTHER), null)
     assert.equal(removeOff(view({ running: false }), MINE), null)
+  })
+
+  test('nor can a list held in several copies be removed while the job is on any of them', () => {
+    assert.equal(removeOff(view(), [OTHER, MINE]), 'off while this list is caching')
+    assert.equal(removeOff(view(), [OTHER]), null)
+    assert.equal(removeOff(view({ running: false }), [OTHER, MINE]), null)
   })
 })
 

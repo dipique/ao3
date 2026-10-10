@@ -3,7 +3,7 @@ import type { SyncPause } from './syncMeta.ts'
 
 import { describePullLoss } from './syncGuard.ts'
 
-/** Said of a held update when this browser's settings were backed up as it was held. */
+/** Said of what sync asks the reader when this browser's settings were backed up as it asked. */
 export const HELD_BACKUP_NOTE = `A backup of this browser's settings was saved first.`
 
 /**
@@ -16,6 +16,10 @@ export function syncPauseMessage(pause: SyncPause, version: number): string {
     case 'held': {
       const backup = pause.backedUp ? ` ${HELD_BACKUP_NOTE}` : ''
       return `Sync is on hold: an update from another browser would remove ${describePullLoss(pause.loss)}.${backup}`
+    }
+    case 'first-sync': {
+      const backup = pause.backedUp ? ` ${HELD_BACKUP_NOTE}` : ''
+      return `Sync is on hold: your synced settings differ from this browser's. Nothing changes until you choose which to keep.${backup}`
     }
     case 'newer-version':
       return `Sync is paused: ${versionPauseReason(pause, version)}`

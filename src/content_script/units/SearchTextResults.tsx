@@ -2,6 +2,7 @@ import type { OpenOptions, SearchSource } from '#content_script/searchView/host.
 
 import { ADDON_CLASS, getArchiveLink } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
+import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectFoundCount, detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
@@ -108,6 +109,7 @@ export class SearchTextResults extends Unit {
       pageUrl: page => getArchiveLink(`${location.pathname}?${pageQuery(page)}`),
       pageCount: () => detectPageCount(document),
       resultCount: foundCount,
+      refreshInterval: () => refreshIntervalMs(this.options.searchListingsRefreshHours),
       // The results, their pagination, and the count heading — which says how
       // many the Archive matched, not how many we loaded, so leaving it up over
       // a capped view would only mislead. The view carries its own count.

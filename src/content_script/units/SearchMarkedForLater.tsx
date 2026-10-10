@@ -1,13 +1,13 @@
 import type { Work } from '#content_script/blurb.js'
-import type { SearchSource } from '#content_script/searchView/host.tsx'
-import type { ViewState } from '#content_script/searchView/view.tsx'
+import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
 import { getArchiveLink, parseUser, readWorkIds, toast } from '#common'
 import { linkedTo } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, noteMarkedForLater, saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
 import { hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
-import { openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
+import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
+import { openSearchView, resumeSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -64,14 +64,15 @@ export class SearchMarkedForLater extends Unit {
     // Clearing the reader's whole history is History's business, not this list's.
     hideClearHistory()
 
-    // If a global re-run closed the view, put it back (from memory, no re-scrape)
-    // where the reader left off — so e.g. a "Hide tag" context-menu action
-    // doesn't reset their filters. Otherwise it simply opens, as the page.
-    const pending = takeReopen(snapshotKey(pageUser))
-    void this.openView(pageUser, pending ? { initialState: pending, refresh: false } : {})
+    // If a global re-run took the view down, put it back (from memory, no
+    // re-scrape) where the reader left off — so e.g. a "Hide tag" context-menu
+    // action doesn't reset their filters — or, still loading, as far as it had
+    // got. Otherwise it simply opens, as the page.
+    if (!resumeSearchView(snapshotKey(pageUser), opts => this.openView(pageUser, opts)))
+      void this.openView(pageUser)
   }
 
-  async openView(userId: string, opts: { initialState?: ViewState, refresh?: boolean } = {}): Promise<void> {
+  async openView(userId: string, opts: OpenOptions = {}): Promise<void> {
     // Loaded up front so a "Mark as Read" here can take the work out of it
     // straight away (`noteMarkedForLater` does nothing to an index it hasn't
     // read), rather than waiting for the next scrape to rewrite it.
@@ -98,7 +99,7 @@ export class SearchMarkedForLater extends Unit {
       belongs: work => !read.has(work.workId),
       // A to-read list runs to hundreds of works for some readers, and a full
       // reload on every visit is exactly what gets them rate-limited.
-      refreshInterval: () => Math.max(0, this.options.searchProfileListsRefreshHours || 0) * 60 * 60_000,
+      refreshInterval: () => refreshIntervalMs(this.options.searchProfileListsRefreshHours),
       // A to-read list is the reader's own: they put every work on it by hand,
       // and a rule taking one back off would only make the list they built lie
       // about what is on it.

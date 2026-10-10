@@ -136,6 +136,18 @@ export interface Options {
    */
   searchProfileListsRefreshHours: number
   /**
+   * How many hours the search views of the archive's listings — an uncommon
+   * tag's works, a series, a works search, a filtered listing — go on trusting
+   * the copy they kept before opening one reads the listing again. `0`, the
+   * default, reads it on every open. A view's own Refresh button always
+   * reloads, whatever this says.
+   *
+   * A walk reads a listing up to the works ceiling, which at the default is
+   * fifty pages. A filtered listing keeps one copy for every sort and date
+   * range, and a copy read in another of them is read again whatever its age.
+   */
+  searchListingsRefreshHours: number
+  /**
    * On your own readings pages, add a button that puts the works you have marked
    * read — the `read` mark and every verdict aliasing it — into the same
    * filterable view, where the Status facet narrows them to one. Needs

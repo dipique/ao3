@@ -24,7 +24,7 @@ const state = reactive({
   lastError: '',
   lastSyncAt: 0,
   pause: null as SyncPause | null,
-  /** An answer to a held update is on its way to the background. */
+  /** An answer to what sync asks (a held update, or which settings to keep) is on its way to the background. */
   resolving: false,
   /** Why turning sync on was just refused, until the switch is next touched. */
   refusal: '',
@@ -108,7 +108,7 @@ export function useSync() {
         await api.resolveHeldSync.sendToBackground(choice)
       }
       catch (error) {
-        toast('Could not answer the held sync update; see console for details', { type: 'error' })
+        toast('Could not send your answer to sync; see console for details', { type: 'error' })
         console.error(error)
       }
       finally {

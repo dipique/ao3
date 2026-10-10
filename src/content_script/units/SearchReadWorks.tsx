@@ -8,6 +8,7 @@ import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_s
 import { recoverReadWorks } from '#content_script/readWorks.ts'
 import { readMisses } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
+import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { limitFor, openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
@@ -170,7 +171,7 @@ export class SearchReadWorks extends Unit {
       // that page is itself a search view — so the subnav's Marked for Later
       // link is the way back. Over History, "Back to list" means History.
       replacesListing: !onHistoryPage(),
-      refreshInterval: () => Math.max(0, this.options.searchProfileListsRefreshHours || 0) * 60 * 60_000,
+      refreshInterval: () => refreshIntervalMs(this.options.searchProfileListsRefreshHours),
       // Thousands of works that almost never change: an automatic reload only
       // goes looking for works marked since the list was stored. Not for the
       // ones the last scrape already looked for and didn't find, either — a work

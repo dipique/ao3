@@ -14,8 +14,22 @@ export type SyncPause
    * An incoming update would remove a large share of this browser's rules,
    * marked works or text replacements (see `syncGuard.ts`). `g`/`w` name the
    * copy being held, so the same copy isn't assessed (and backed up) again.
+   * `backedUp` says whether this browser's settings were backed up as it was
+   * held, and `backupFailed` that the backup couldn't be written. A hold an
+   * older build recorded has no `backupFailed`: it backed up only with daily
+   * backups on, so with no backup they were off.
    */
-  = | { reason: 'held', g: number, w: string, loss: PullLoss, at: number, backedUp: boolean }
+  = | { reason: 'held', g: number, w: string, loss: PullLoss, at: number, backedUp: boolean, backupFailed?: boolean }
+  /**
+   * Sync was turned on over a synced copy holding settings that differ from
+   * this browser's own, and the reader is asked which to keep: until they
+   * answer, nothing is applied and nothing pushed. `g`/`w` name the copy asked
+   * over, as a hold's do. `backedUp` says whether this browser's settings were
+   * backed up as sync turned on, and `backupFailed` that the backup couldn't
+   * be written. `loss` is what using the synced settings would remove where
+   * the deletion guard would hold them, which the question then stands in for.
+   */
+    | { reason: 'first-sync', g: number, w: string, at: number, backedUp: boolean, backupFailed: boolean, loss: PullLoss | null }
   /**
    * The cloud copy was written at a higher sync version than this build speaks.
    * Lifts by itself once the extension is updated.

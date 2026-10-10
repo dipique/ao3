@@ -137,6 +137,14 @@ describe('runnerStep', () => {
     assert.deepEqual(effects.slice(2), [{ kind: 'stop' }, { kind: 'end', end: { kind: 'slow', job: first } }])
   })
 
+  test('a worker that fails with no job running is stopped all the same, so the next job goes to a new one', () => {
+    const idle = steps([{ kind: 'error' }])
+    assert.deepEqual(idle.effects, [{ kind: 'stop' }])
+    assert.deepEqual(steps([{ kind: 'run', id: 1, job: second }], idle.state).effects, [{ kind: 'post', id: 1, job: second }])
+    const between = steps([{ kind: 'run', id: 1, job: second }, { kind: 'started', id: 1 }, { kind: 'done', id: 1, spans: spans(second.pattern) }, { kind: 'error' }])
+    assert.deepEqual(between.effects.at(-1), { kind: 'stop' })
+  })
+
   test('a newer job waits for the one running, and replaces any already waiting', () => {
     const { effects, state } = steps([{ kind: 'run', id: 1, job: first }, { kind: 'run', id: 2, job: second }, { kind: 'run', id: 3, job: third }])
     assert.deepEqual(effects, [{ kind: 'post', id: 1, job: first }])

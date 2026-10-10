@@ -22,6 +22,14 @@ describe('planBackupPrune', () => {
     assert.equal(keep.filter(b => b.kind === 'sync-held').length, EVENT_BACKUPS_PER_KIND)
   })
 
+  test('a held update\'s backup keeps to its kind\'s newest five, and leaves the daily backups be', () => {
+    const daily = Array.from({ length: 3 }, (_, i) => backup('daily', i * DAY))
+    const held = Array.from({ length: EVENT_BACKUPS_PER_KIND + 1 }, (_, i) => backup('sync-held', 10 * DAY + i))
+    const { keep, remove } = planBackupPrune([...daily, ...held], 7)
+    assert.deepEqual(remove, [held[0].key], 'only the oldest held backup goes')
+    assert.deepEqual(keep.filter(b => b.kind === 'daily'), sortBackups(daily), 'the daily backups taken before stay')
+  })
+
   test('each event kind is counted on its own', () => {
     const declined = backup('sync-declined', 1)
     const restores = Array.from({ length: EVENT_BACKUPS_PER_KIND + 3 }, (_, i) => backup('pre-restore', 100 + i))

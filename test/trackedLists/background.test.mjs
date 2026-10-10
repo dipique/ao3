@@ -156,4 +156,42 @@ describe('saved lists in the background', { skip }, () => {
     assert.equal(steps.recordCount, 7, 'every record from before is kept')
     assert.deepEqual(steps.quiet, ['option.wordsPerMinute'])
   })
+
+  test('a collection\'s listing kept under its sidebar\'s number is refiled at its address, with what goes with its copy, and its two lists are one', async () => {
+    // The sidebar submits the collection's own path with its number added,
+    // which a listing's address leaves out.
+    const LINK = '/collections/yuletide/works'
+    const SUBMIT = `${LINK}?work_search[sort_column]=revised_at&collection_id=1`
+    const NUMBERED = 'works-filter:/collections/yuletide/works?collection_id=1'
+    const ADDRESS = 'works-filter:/collections/yuletide/works'
+    const link = { id: 'l1nk', kind: 'works-filter', url: LINK, title: 'Collection: yuletide', type: 'collection', entity: 'yuletide' }
+    const submit = { ...link, id: 'sub', url: SUBMIT, title: 'Yule' }
+    const descriptor = { sourceId: 'works-filter', label: 'Collection: yuletide', listUrl: `${AO3}${SUBMIT}` }
+    const kept = storedLists({ [NUMBERED]: { scrapedAt: 1_000, blurbsHtml: [blurb(7)], descriptor } })
+    const job = { cacheKey: NUMBERED, descriptor, steps: ['caching'], queue: ['7'], done: 0, total: 1, startedAt: 1_000, updatedAt: 1_000, errors: [], errorCount: 0 }
+    const seed = {
+      ...kept,
+      'option.trackedLists': { ...TRACKED_LISTS, lists: [] },
+      'option.savedLists': { v: 1, lists: { l1nk: link, sub: submit } },
+      'cache.searchMisses': { [NUMBERED]: '1', 'read-works:me': '2' },
+      'siteExportJob': job,
+    }
+
+    const result = await page.evaluate(async (seed) => {
+      await window.reset(seed)
+      await window.Background.migrate()
+      const migrated = await window.store()
+      window.__writes.length = 0
+      await window.Background.migrate()
+      await window.Background.reconcileSavedLists()
+      return { migrated, again: window.__writes.flatMap(write => Object.keys(write)) }
+    }, seed)
+
+    const { migrated } = result
+    assert.deepEqual(migrated['cache.searchLists'], { [ADDRESS]: kept['cache.searchLists'][NUMBERED] }, 'where the search view looks for it now')
+    assert.deepEqual(migrated['cache.searchMisses'], { [ADDRESS]: '1', 'read-works:me': '2' })
+    assert.deepEqual(migrated.siteExportJob, { ...job, cacheKey: ADDRESS }, 'a stopped job on it stays on it')
+    assert.deepEqual(migrated['option.savedLists'], { v: 1, lists: { sub: submit } }, 'one list, under the title the reader gave it')
+    assert.deepEqual(result.again, [], 'a second run writes nothing')
+  })
 })

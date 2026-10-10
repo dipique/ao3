@@ -17,8 +17,16 @@ export function useRegexRunner() {
   let jobs = 0
   const ended = shallowRef<RegexEnd | null>(null)
 
-  function start(): Worker {
-    const started = new Worker(new URL('../regexWorker.ts', import.meta.url))
+  /** A new worker, or null if the browser refuses to start one. */
+  function start(): Worker | null {
+    let started: Worker
+    try {
+      started = new Worker(new URL('../regexWorker.ts', import.meta.url))
+    }
+    catch (error) {
+      console.error('[rule editor] The worker testing a pattern failed:', error)
+      return null
+    }
     started.addEventListener('message', ({ data }: MessageEvent<RunnerEvent>) => dispatch(data))
     started.addEventListener('error', (event) => {
       console.error('[rule editor] The worker testing a pattern failed:', event.message)
@@ -37,7 +45,10 @@ export function useRegexRunner() {
     switch (effect.kind) {
       case 'post':
         worker ??= start()
-        worker.postMessage({ id: effect.id, ...effect.job })
+        if (worker)
+          worker.postMessage({ id: effect.id, ...effect.job })
+        else
+          queueMicrotask(() => dispatch({ kind: 'error' }))
         break
       case 'time':
         clearTimeout(timer)

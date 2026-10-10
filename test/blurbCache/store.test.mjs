@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { ORPHAN_GRACE_MS } from '../../src/common/blurbRecord.ts'
 import { installMock } from '../e2e/helpers.mjs'
 import { loadModuleInPage, skipWithoutChrome } from '../siteExport/helpers.mjs'
 
@@ -381,6 +382,26 @@ describe('searchView/blurbStore', { skip }, () => {
     assert.equal(result.restored, false)
     assert.equal(result.ids, '3')
     assert.deepEqual(result.misses, {}, 'nor what the older one missed')
+  })
+
+  test('a detached list let go once a newer one is stored under its key prunes only what nothing holds, the newer one\'s works kept', async () => {
+    const result = await page.evaluate(async ({ descriptor, past }) => {
+      const { writeSnapshot, detachSnapshot, restoreSnapshot, pruneDetached } = window.Store
+      const old = Date.now() - past
+      const blurbKeys = async () => Object.keys(await window.store()).filter(key => key.startsWith('blurb.')).sort()
+      await window.reset({ 'option.pruneOrphanedBlurbs': true })
+      await writeSnapshot('a', [window.scraped('1', { seenAt: old }), window.scraped('2', { seenAt: old })], descriptor)
+      const detached = await detachSnapshot('a')
+      await writeSnapshot('a', [window.scraped('2', { seenAt: old }), window.scraped('3', { seenAt: old })], descriptor)
+      const newer = (await window.store())['cache.searchLists'].a
+      const restored = await restoreSnapshot(detached)
+      await pruneDetached([detached])
+      return { restored, newer, after: (await window.store())['cache.searchLists'].a, blurbs: await blurbKeys() }
+    }, { descriptor: DESCRIPTOR, past: 2 * ORPHAN_GRACE_MS })
+
+    assert.equal(result.restored, false)
+    assert.deepEqual(result.after, result.newer, 'the newer list is left as it is')
+    assert.deepEqual(result.blurbs, ['blurb.2', 'blurb.3'], '1 went; 2 and 3 are the newer list\'s')
   })
 
   test('stored works stand in for a fetch only while they are recent', async () => {

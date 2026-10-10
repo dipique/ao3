@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { dayOf, normalizeTrackedUrl, pageUrl, sourceLabel, tagSearchUrl, trackedKey } from '../../src/common/trackedLists.ts'
+import { dayOf, describeFilters, normalizeTrackedUrl, onListPage, pageUrl, readUrl, sameReading, sameRoot, sourceLabel, tagSearchUrl, trackedKey, trackedRoot } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
 
@@ -150,9 +150,10 @@ describe('normalizeTrackedUrl — parameters', () => {
     )
   })
 
-  test('a user\'s listing folds like a tag\'s; a collection\'s stays where it is', () => {
+  test('a user\'s listing folds like a tag\'s; a collection named in the query stays where it is', () => {
     // The sidebar on /users/NAME/works submits user_id=NAME, exactly as a tag's
-    // submits tag_id. A collection's hasn't been seen to, so it isn't folded.
+    // submits tag_id. A collection's submits its own path instead, so the query
+    // form by name is one no sidebar lands on, and it isn't folded.
     assert.equal(normalizeTrackedUrl(`${AO3}/works?user_id=someone`).key, 'works-filter:/users/someone/works')
     assert.equal(
       normalizeTrackedUrl(`${AO3}/works?user_id=someone`).key,
@@ -196,6 +197,59 @@ describe('normalizeTrackedUrl — parameters', () => {
     const b = normalizeTrackedUrl(`${AO3}/tags/Café%20AU/works`)
     assert.equal(a.key, b.key)
     assert.equal(a.url, '/tags/Caf%C3%A9%20AU/works')
+  })
+})
+
+describe('a collection\'s listing, reached by its Sort & Filter sidebar', () => {
+  // The sidebar submits to the collection's own path, adding the collection's
+  // number (Yuletide's is 1) as `collection_id`, which the archive ignores: the
+  // path is what names the collection.
+  const LINK = '/collections/yuletide/works'
+  const SUBMIT = `${LINK}?utf8=%E2%9C%93&commit=Sort+and+Filter&work_search%5Bsort_column%5D=revised_at&work_search%5Bother_tag_names%5D=&work_search%5Blanguage_id%5D=&collection_id=1`
+  const FILTERS = 'work_search[complete]=T&work_search[language_id]=en'
+
+  test('a submit that sets no filter keys as the link', () => {
+    assert.equal(normalizeTrackedUrl(`${AO3}${SUBMIT}`).key, 'works-filter:/collections/yuletide/works')
+    assert.equal(normalizeTrackedUrl(`${AO3}${SUBMIT}`).key, normalizeTrackedUrl(`${AO3}${LINK}`).key)
+  })
+
+  test('one that sets filters keys as the link with just those, whatever the number and wherever it sits', () => {
+    const link = normalizeTrackedUrl(`${AO3}${LINK}?${FILTERS}`).key
+    assert.equal(link, `works-filter:/collections/yuletide/works?${FILTERS}`)
+    for (const query of [
+      `${FILTERS}&collection_id=1`,
+      `collection_id=1&${FILTERS}`,
+      'work_search[language_id]=en&collection_id=27&work_search[complete]=T',
+      `${FILTERS}&collection_id=999999&collection_id=4`,
+    ]) {
+      assert.equal(normalizeTrackedUrl(`${AO3}${LINK}?${query}`).key, link, query)
+    }
+  })
+
+  test('the stored URL keeps the number, as the reader had it', () => {
+    assert.equal(normalizeTrackedUrl(`${AO3}${SUBMIT}`).url, `${LINK}?work_search[sort_column]=revised_at&collection_id=1`)
+  })
+
+  test('it roots where the link does', () => {
+    assert.equal(trackedRoot({ url: SUBMIT }), 'works-filter:/collections/yuletide/works')
+    assert.equal(sameRoot({ url: SUBMIT }, { url: LINK }), true)
+    assert.equal(sameRoot({ url: `${LINK}?${FILTERS}&collection_id=1` }, { url: LINK }), true)
+  })
+
+  test('the number is no search filter', () => {
+    assert.deepEqual(describeFilters({ url: SUBMIT }), { text: '', full: '', more: 0 })
+    assert.equal(describeFilters({ url: `${LINK}?${FILTERS}&collection_id=1` }).full, '2 search filters')
+  })
+
+  test('a list kept at either spelling has its page at the other', () => {
+    const list = url => ({ kind: 'works-filter', url })
+    assert.equal(onListPage(list(LINK), `${AO3}${SUBMIT}`), true)
+    assert.equal(onListPage(list(normalizeTrackedUrl(`${AO3}${SUBMIT}`).url), `${AO3}${LINK}#ao3e-open=y00l`), true)
+    assert.equal(onListPage(list(LINK), `${AO3}${LINK}?${FILTERS}&collection_id=1`), false, 'a submit that sets a filter is another list\'s page')
+  })
+
+  test('a collection\'s number beside another owner\'s path is still a filter of that listing', () => {
+    assert.equal(normalizeTrackedUrl(`${AO3}/users/someone/works?collection_id=1`).key, 'works-filter:/users/someone/works?collection_id=1')
   })
 })
 
@@ -268,6 +322,75 @@ describe('trackedKey', () => {
   test('is null for an entry that does not name an archive page', () => {
     assert.equal(trackedKey({ url: '//example.com/series/1' }), null)
     assert.equal(trackedKey({ url: '/users/someone/readings?show=to-read' }), null)
+  })
+})
+
+describe('readUrl', () => {
+  test('is the page as a walk of it reads it: sort, criteria and date bounds kept, the page and the form\'s noise dropped', () => {
+    const url = readUrl(`${AO3}/works?utf8=%E2%9C%93&work_search%5Bsort_column%5D=title&work_search%5Bdate_from%5D=2026-01-01`
+      + '&work_search%5Bdate_to%5D=2026-02-01&work_search%5Brevised_at%5D=&work_search%5Bcomplete%5D=T&tag_id=Bees&commit=Sort+and+Filter&page=3')
+    assert.equal(url, '/works?work_search[sort_column]=title&work_search[complete]=T&tag_id=Bees&work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01')
+  })
+
+  test('is the normalized URL when the page has no date bounds', () => {
+    for (const href of [`${AO3}/tags/Bees/works?work_search[sort_column]=kudos_count`, `${AO3}/works/search?work_search[query]=bees&page=2`, `${AO3}/series/12?page=4`])
+      assert.equal(readUrl(href), normalizeTrackedUrl(href).url, href)
+  })
+
+  test('is null for a page that isn\'t a list on the archive', () => {
+    assert.equal(readUrl(`${AO3}/users/someone/readings?show=to-read`), null)
+    assert.equal(readUrl('https://example.com/tags/Bees/works'), null)
+  })
+})
+
+describe('sameReading', () => {
+  const BEES = `${AO3}/tags/Bees/works`
+
+  test('one read of a listing is the same read however its address is spelt', () => {
+    const spellings = [
+      `${BEES}?work_search[sort_column]=title&work_search[complete]=T`,
+      `${AO3}/works?utf8=%E2%9C%93&work_search%5Bcomplete%5D=T&work_search%5Bsort_column%5D=title&tag_id=Bees&commit=Sort+and+Filter&page=2`,
+      '/tags/Bees/works?work_search[complete]=T&work_search[sort_column]=title&page=1',
+    ]
+    for (const href of spellings)
+      assert.equal(sameReading(spellings[0], href), true, href)
+  })
+
+  test('another sort is another read: a read cut short by the works ceiling reaches other works', () => {
+    assert.equal(sameReading(`${BEES}?work_search[sort_column]=title`, `${BEES}?work_search[sort_column]=kudos_count`), false)
+    assert.equal(sameReading(`${BEES}?work_search[sort_column]=title&work_search[sort_direction]=asc`, `${BEES}?work_search[sort_column]=title&work_search[sort_direction]=desc`), false)
+  })
+
+  test('a sort left to the archive is told apart from the same sort chosen, the archive\'s default not being ours to know', () => {
+    assert.equal(sameReading(BEES, `${BEES}?work_search[sort_column]=revised_at`), false)
+  })
+
+  test('another date range is another read, relative or absolute', () => {
+    assert.equal(sameReading(BEES, `${BEES}?work_search[revised_at]=%3C+2+weeks`), false)
+    assert.equal(sameReading(BEES, `${BEES}?work_search[date_from]=2026-01-01`), false)
+    assert.equal(sameReading(`${BEES}?work_search[date_from]=2026-01-01`, `${BEES}?work_search[date_from]=2026-02-01`), false)
+    assert.equal(sameReading(`${BEES}?work_search[date_to]=2026-01-01`, `${BEES}?work_search[date_from]=2026-01-01`), false)
+    assert.equal(sameReading(`${BEES}?work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01`, `${AO3}/works?work_search[date_to]=2026-02-01&tag_id=Bees&work_search[date_from]=2026-01-01`), true)
+  })
+
+  test('other criteria are another listing', () => {
+    assert.equal(sameReading(BEES, `${BEES}?work_search[complete]=T`), false)
+    assert.equal(sameReading(BEES, `${AO3}/tags/Wasps/works`), false)
+    assert.equal(sameReading(`${AO3}/works/search?work_search[query]=bees`, `${AO3}/works/search?work_search[query]=bees&work_search[sort_column]=kudos_count`), false)
+  })
+
+  test('a tag\'s page and a series take nothing from their query strings', () => {
+    assert.equal(sameReading(`${AO3}/tags/marriage%20problems`, `${AO3}/tags/marriage%20problems?page=3`), true)
+    assert.equal(sameReading(`${AO3}/series/12`, `${AO3}/series/12?page=2`), true)
+    assert.equal(sameReading(`${AO3}/series/12`, `${AO3}/series/13`), false)
+  })
+
+  test('a page that isn\'t a list on the archive is the same read only as the very same address', () => {
+    const toRead = `${AO3}/users/someone/readings?show=to-read`
+    assert.equal(sameReading(toRead, toRead), true)
+    assert.equal(sameReading(toRead, `${AO3}/users/someone/readings`), false)
+    assert.equal(sameReading(toRead, BEES), false)
+    assert.equal(sameReading(BEES, toRead), false)
   })
 })
 

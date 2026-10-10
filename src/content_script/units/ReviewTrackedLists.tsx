@@ -36,7 +36,8 @@ import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_s
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
 import { snapshotWorkIds, writeSnapshot } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
-import { isSearchViewOpen, openSearchView, suspendSearchView, takeReopen } from '#content_script/searchView/host.tsx'
+import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
+import { isSearchViewOpen, openSearchView, resumeSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { createTrackedSession, fetchWindow } from '#content_script/tracked/fetchWindow.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -216,18 +217,18 @@ export class ReviewTrackedLists extends Unit {
     if (this.options.trackedLists.enabled && host && !host.parentElement?.querySelector(`.${BUTTON_CLASS}`))
       this.addEntryPoint(host, pageUser)
 
-    // A global re-run closed an open view: put it back where the reader left
-    // off. After a Mark reviewed the window has moved on, so the reader's
-    // filters come across but the works don't — they are read from the store,
-    // where the new window has just been written.
-    const pending = takeReopen(CACHE_KEY)
-    if (pending) {
+    // A global re-run took the view down: put it back where the reader left
+    // off, or, still loading, as far as it had got. After a Mark reviewed the
+    // window has moved on, so the reader's filters come across but the works
+    // don't — they are read from the store, where the new window has just been
+    // written.
+    const resumed = resumeSearchView(CACHE_KEY, (opts) => {
       const moved = advanced
       advanced = false
-      void this.openView(pageUser, { initialState: pending, refresh: false, reuseWorks: !moved })
-      return
-    }
-    void openLinked('review', CACHE_KEY, opts => this.openView(pageUser, opts))
+      return this.openView(pageUser, { ...opts, reuseWorks: !moved })
+    })
+    if (!resumed)
+      void openLinked('review', CACHE_KEY, opts => this.openView(pageUser, opts))
   }
 
   /** The **Tracked** subnav item, after the read list's own. */
@@ -292,7 +293,7 @@ export class ReviewTrackedLists extends Unit {
       // visits — but only while it still answers to the reader's options. A
       // window computed against a watermark or a list set that has moved is no
       // longer about anything, and is read again at once.
-      refreshInterval: () => (factsStale ? 0 : Math.max(0, this.options.searchProfileListsRefreshHours || 0) * 60 * 60_000),
+      refreshInterval: () => (factsStale ? 0 : refreshIntervalMs(this.options.searchProfileListsRefreshHours)),
       nativeElements: () => [
         ...document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
         ...listChrome(),

@@ -3,6 +3,7 @@ import type { OpenOptions, SearchSource } from '#content_script/searchView/host.
 
 import { ADDON_CLASS, FILTERED_LISTING_SOURCE_ID, filteredListing, getArchiveLink, withPage } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
+import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount, detectResultCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
@@ -121,6 +122,7 @@ export class SearchFilteredListing extends Unit {
       pageUrl: page => withPage(pageAddress(), page),
       pageCount: () => detectPageCount(document),
       resultCount: () => detectResultCount(document),
+      refreshInterval: () => refreshIntervalMs(this.options.searchListingsRefreshHours),
       // The works and their paging, the sidebar that sorts and filters them on
       // the archive, and the button that opened the view: the view has its own
       // filters and "Back to list", and all of them come back with the list.

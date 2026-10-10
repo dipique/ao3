@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { BUILD_CHECK_TIMEOUT_MS } from '../../src/common/constants.ts'
-import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { decode, encode, MANIFEST_KEY, SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
+import { bundleForPage } from '../siteExport/helpers.mjs'
+import { rulesFixture } from '../sync/harness.mjs'
 import { outlast } from './helpers.mjs'
 import { scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
 
@@ -20,6 +23,7 @@ const HELD = {
   w: 'desktop.x',
   at: 0,
   backedUp: true,
+  backupFailed: false,
   loss: { rules: { removed: 348, of: 348 }, markedWorks: { removed: 267, of: 282 }, textReplacements: { removed: 0, of: 26 }, marks: [] },
 }
 
@@ -88,6 +92,43 @@ function glyphImage(selector) {
     return null
   const style = getComputedStyle(glyph)
   return [style.maskImage, style.webkitMaskImage].find(image => image && image !== 'none') ?? null
+}
+
+/**
+ * In the page, before it loads: the background's sync half, bundled as
+ * `SyncBackground` (`syncBackgroundEntry.ts`), listening and answering as the
+ * background does. Its engine and backups work over the page's storage mock,
+ * whose `storage.sync` holds the synced copy.
+ */
+function routeToSyncBackground() {
+  const background = window.SyncBackground
+  window.browser.storage.onChanged.addListener(background.onStorageChanged)
+  const send = window.browser.runtime.sendMessage
+  window.browser.runtime.sendMessage = async (message) => {
+    const [name] = Object.keys(message ?? {})
+    const args = message?.[name] ?? []
+    if (name === 'setSyncEnabled')
+      return background.setSyncEnabled(...args)
+    if (name === 'resolveHeldSync')
+      return { resolved: await background.resolveHeldSync(...args) }
+    return send(message)
+  }
+}
+
+/** In the page: every backup stored, newest first, as its kind and the settings of it a test tells apart. */
+async function readBackups() {
+  const stored = await window.browser.storage.local.get(null)
+  return Object.entries(stored)
+    .filter(([key]) => key.startsWith('backup.'))
+    .map(([, backup]) => backup)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(backup => ({ kind: backup.kind, wordsPerMinute: backup.options.wordsPerMinute, rules: backup.options.rules.filters.length }))
+}
+
+/** In the page: the synced copy's items, its manifest under `manifestKey`, as `storage.sync` holds them. */
+async function readSyncedItems(manifestKey) {
+  const stored = await window.browser.storage.sync.get(null)
+  return Object.fromEntries(Object.entries(stored).filter(([key]) => key === manifestKey || /^o\d+$/.test(key)))
 }
 
 /** In the page: each held answer's button, as `{ name, look, box }`, and its consequence. */
@@ -255,6 +296,30 @@ describe('options UI — the sync panel', { skip }, () => {
       }
     })
 
+    /**
+     * With no backup of this browser's settings to point to, accepting says
+     * why: the hold's backup failed, or an older build held it with daily
+     * backups off. Today's daily-backups switch says neither.
+     */
+    const NO_BACKUP = [
+      ['its backup failed', { ...HELD, backedUp: false, backupFailed: true }, false, 'the backup couldn\'t be saved.'],
+      ['an older build held it with daily backups off', (({ backupFailed, ...older }) => ({ ...older, backedUp: false }))(HELD), true, 'daily backups were off when sync held.'],
+    ]
+    for (const [why, pause, backupsEnabled, reason] of NO_BACKUP) {
+      test(`with no backup because ${why}, accepting says yours aren't backed up, and why`, async () => {
+        const options = await open({ 'sync.enabled': true, 'sync.backupsEnabled': backupsEnabled, 'sync.pause': pause })
+        try {
+          const callout = await options.page.$('[data-sync-pause="held"]')
+          assert.equal((await options.lines(callout)).includes('A backup of this browser\'s settings was saved first.'), false)
+          const accept = (await options.page.evaluate(readAnswers)).find(a => a.answer === 'accept')
+          assert.equal(accept.consequence, `Replaces this browser's settings with the other browser's. Yours aren't backed up: ${reason}`)
+        }
+        finally {
+          await options.close()
+        }
+      })
+    }
+
     test('sends the reader\'s answer', async () => {
       const options = await open({ 'sync.enabled': true, 'sync.pause': HELD }, { resolveHeldSync: { resolved: true } })
       try {
@@ -280,6 +345,142 @@ describe('options UI — the sync panel', { skip }, () => {
         assert.equal(keep.box.right, accept.box.right)
         const { scrollWidth, innerWidth } = await options.page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }))
         assert.ok(scrollWidth <= innerWidth, `the page is ${scrollWidth} px wide in a ${innerWidth} px window`)
+      }
+      finally {
+        await options.close()
+      }
+    })
+  })
+
+  /**
+   * Turning sync on over synced settings that differ from this browser's own
+   * asks which to keep, drawn as a held update is. Here the background's sync
+   * half runs in the page, so what is asserted is what it stores: this
+   * browser's settings, its backups, and the synced copy.
+   */
+  describe('turning sync on over synced settings that differ', () => {
+    /** This browser's settings, and the synced ones: rules and a reading speed apiece. */
+    const OWN = { rules: rulesFixture(3), wordsPerMinute: 320 }
+    const SYNCED = { rules: rulesFixture(2), wordsPerMinute: 250 }
+    const ANSWERS = [
+      ['keep', 'Keep this browser\'s settings', 'Replaces your synced settings with this browser\'s, on every browser that syncs. The synced settings are kept as a backup first.'],
+      ['accept', 'Use the synced settings', 'Replaces this browser\'s settings with your synced settings. Yours were backed up first.'],
+    ]
+
+    let background
+    before(async () => {
+      background = await bundleForPage('test/e2e/syncBackgroundEntry.ts', 'SyncBackground')
+    }, { timeout: 60000 })
+
+    /**
+     * The options page at Sync, with sync off and daily backups off, over this
+     * browser's settings and a synced copy another browser wrote; the copy's
+     * manifest beside it.
+     */
+    async function openOverCopy() {
+      const { chunks, manifest } = await encode({ ...structuredClone(OPTION_DEFAULTS), ...structuredClone(SYNCED) }, OPTION_DEFAULTS, 3, 'laptop.1')
+      const options = await session.open({
+        seed: { 'option.rules': OWN.rules, 'option.wordsPerMinute': OWN.wordsPerMinute, 'sync.backupsEnabled': false, [MANIFEST_KEY]: manifest, ...chunks },
+        hash: '#sync',
+        viewport: WIDE,
+        prepare: async (page) => {
+          await page.evaluateOnNewDocument(background)
+          await page.evaluateOnNewDocument(routeToSyncBackground)
+        },
+      })
+      return { options, manifest }
+    }
+
+    /** Turn sync on, and wait for the question. */
+    async function turnOn(options) {
+      await options.press(await syncSwitch(options))
+      await options.page.waitForSelector('[data-sync-pause="first-sync"]')
+    }
+
+    test('asks which to keep, backed up first, and changes nothing until answered', async () => {
+      const { options, manifest } = await openOverCopy()
+      try {
+        await turnOn(options)
+        assert.equal((await options.stored('sync.pause')).reason, 'first-sync')
+        assert.equal(await options.stored('option.wordsPerMinute'), OWN.wordsPerMinute)
+        assert.deepEqual(await options.stored(MANIFEST_KEY), manifest, 'nothing sent')
+        assert.deepEqual(await options.page.evaluate(readBackups), [{ kind: 'pre-sync', wordsPerMinute: 320, rules: 3 }], 'backed up with daily backups off')
+
+        const status = await options.page.evaluate(readStatus)
+        assert.deepEqual(status.chip, { state: 'first-sync', text: 'On hold' })
+        assert.equal(status.detail, 'Turning on sync is waiting for your answer.')
+        await assertCallout(options, '[data-sync-pause="first-sync"]', 'warning', /^Your synced settings differ from this browser's\. Which do you want to keep\?$/)
+        const callout = await options.page.$('[data-sync-pause="first-sync"]')
+        assert.ok((await options.lines(callout)).includes('A backup of this browser\'s settings was saved first.'))
+        assert.deepEqual(await callout.$$('[data-sync-losses] li'), [])
+
+        const answers = await options.page.evaluate(readAnswers)
+        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), ANSWERS)
+        assert.equal(answers[0].look, answers[1].look, 'neither answer is drawn as the one to pick')
+        assert.equal(answers[0].box.top, answers[1].box.top, 'side by side')
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test('using the synced settings replaces this browser\'s, backing them up again as it does', async () => {
+      const { options, manifest } = await openOverCopy()
+      try {
+        await turnOn(options)
+        await options.press(await options.page.$('[data-sync-accept]'))
+        await until('the answer to be applied', async () => (await options.stored('sync.pause')) === null)
+
+        assert.equal(await options.stored('sync.enabled'), true)
+        assert.equal(await options.stored('option.wordsPerMinute'), SYNCED.wordsPerMinute)
+        assert.deepEqual(await options.stored('option.rules'), SYNCED.rules)
+        assert.deepEqual(await options.stored(MANIFEST_KEY), manifest, 'nothing sent')
+        assert.deepEqual(await options.page.evaluate(readBackups), [
+          { kind: 'pre-sync', wordsPerMinute: 320, rules: 3 },
+          { kind: 'pre-sync', wordsPerMinute: 320, rules: 3 },
+        ])
+        await until('the question to go', async () => !(await options.page.$('[data-sync-pause]')))
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test('keeping this browser\'s replaces the synced settings, kept as a backup first', async () => {
+      const { options, manifest } = await openOverCopy()
+      try {
+        await turnOn(options)
+        await options.press(await options.page.$('[data-sync-keep]'))
+        await until('the answer to be applied', async () => (await options.stored('sync.pause')) === null)
+
+        assert.equal(await options.stored('option.wordsPerMinute'), OWN.wordsPerMinute)
+        assert.notEqual((await options.stored(MANIFEST_KEY)).w, manifest.w, 'this browser\'s settings were sent')
+        const synced = await decode(await options.page.evaluate(readSyncedItems, MANIFEST_KEY))
+        assert.equal(synced.ok, true)
+        assert.equal(synced.options.wordsPerMinute, OWN.wordsPerMinute)
+        assert.deepEqual(synced.options.rules, OWN.rules)
+        assert.deepEqual(await options.page.evaluate(readBackups), [
+          { kind: 'sync-declined', wordsPerMinute: 250, rules: 2 },
+          { kind: 'pre-sync', wordsPerMinute: 320, rules: 3 },
+        ])
+        await until('the question to go', async () => !(await options.page.$('[data-sync-pause]')))
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test('turning sync off before answering changes nothing', async () => {
+      const { options, manifest } = await openOverCopy()
+      try {
+        await turnOn(options)
+        await options.press(await syncSwitch(options))
+        await until('sync to be off with nothing asked', async () => (await options.stored('sync.enabled')) === false && (await options.stored('sync.pause')) === null)
+
+        assert.equal(await options.stored('option.wordsPerMinute'), OWN.wordsPerMinute)
+        assert.deepEqual(await options.stored(MANIFEST_KEY), manifest)
+        assert.deepEqual((await options.page.evaluate(readBackups)).map(backup => backup.kind), ['pre-sync'])
+        await until('the question to go', async () => !(await options.page.$('[data-sync-pause]')))
       }
       finally {
         await options.close()

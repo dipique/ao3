@@ -16,12 +16,12 @@ const LEGACY_KNOWN = Object.keys(OPTION_DEFAULTS).filter(key => !['rules', 'work
 /** An option only the first sync build had, which newer builds drop on read. */
 const LEGACY_ONLY = { hideTags: { enabled: true, filters: [{ name: 'An old tag', matcher: 'exact' }] } }
 
+/** A reader's worth of data. */
+const MAIN = { rules: rulesFixture(40), workMarks: marksFixture(range(1000, 60)), textReplacements: textReplacementsFixture(10), trackedLists: trackedListsFixture(12) }
+
 /** A browser with a reader's worth of data in it. */
 function mainBrowser(cloud, name = 'laptop', settings = {}) {
-  return createDevice(cloud, name, {
-    options: { rules: rulesFixture(40), workMarks: marksFixture(range(1000, 60)), textReplacements: textReplacementsFixture(10), trackedLists: trackedListsFixture(12) },
-    ...settings,
-  })
+  return createDevice(cloud, name, { options: MAIN, ...settings })
 }
 
 describe('sync scenarios', () => {
@@ -55,6 +55,372 @@ describe('sync scenarios', () => {
     assert.equal(markedWorks(fresh.options).size, 60)
     assert.deepEqual(fresh.backups.map(b => b.kind), ['pre-sync'])
     assert.equal(cloud.manifest().g, before.g, 'the adopting browser pushed nothing')
+  })
+
+  /**
+   * Turning sync on over a synced copy replaces this browser's settings with
+   * it, so it backs them up first whatever daily backups say, and asks which
+   * to keep when both hold settings of their own that differ. Where nothing
+   * is lost either way, it doesn't ask.
+   */
+  describe('turning sync on', () => {
+    const V = SYNC_SCHEMA_VERSION
+    /** Settings of this browser's own: the laptop's, with a rule more and a reading speed of its own. */
+    const OWN = { ...MAIN, rules: rulesFixture(41), wordsPerMinute: 320 }
+
+    /** A laptop syncing the reader's data, and a desktop with settings of its own and sync off. */
+    async function withCloud(desktopSettings = {}) {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN, ...desktopSettings })
+      await desktop.settle()
+      return { cloud, laptop, desktop }
+    }
+
+    /** The desktop turns sync on over the laptop's copy, and is asked which settings to keep. */
+    async function asked(desktopSettings) {
+      const setup = await withCloud(desktopSettings)
+      await setup.desktop.enableSync()
+      await setup.cloud.run()
+      assert.equal(setup.desktop.meta.pause?.reason, 'first-sync', 'precondition: asked')
+      return setup
+    }
+
+    test('over an empty cloud, seeds it from this browser, with nothing to back up', async () => {
+      const cloud = createCloud()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assert.match(cloud.manifest().w, /^desktop-/)
+      assert.deepEqual(desktop.backups, [])
+    })
+
+    test('over a copy that matches, agrees silently and pushes nothing', async () => {
+      const { cloud, desktop } = await withCloud({ options: MAIN })
+      const before = cloud.manifest()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assert.deepEqual(cloud.manifest(), before)
+      assert.equal(desktop.meta.meta.g, before.g, 'agreed')
+      assert.equal(desktop.meta.dirty, false)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'])
+    })
+
+    /** Such a copy is a browser that turned sync on with its settings untouched: adopting it would reset every setting here. */
+    test('over a copy holding nothing beyond defaults, sends this browser\'s settings silently', async () => {
+      for (const own of [OWN, { wordsPerMinute: 320 }]) {
+        const cloud = createCloud()
+        const fresh = createDevice(cloud, 'fresh')
+        await fresh.enableSync()
+        await cloud.run()
+        const desktop = createDevice(cloud, 'desktop', { options: own })
+        await desktop.settle()
+        await desktop.enableSync()
+        await cloud.run()
+
+        const what = `${Object.keys(own).length} settings`
+        assert.equal(desktop.meta.pause, null, what)
+        assert.equal(desktop.options.wordsPerMinute, 320, what)
+        assert.equal(desktop.options.rules.filters.length, own.rules?.filters.length ?? 0, what)
+        assert.match(cloud.manifest().w, /^desktop-/, what)
+        assert.equal(desktop.meta.dirty, false, what)
+        assert.equal(fresh.options.wordsPerMinute, 320, `the other browser takes them: ${what}`)
+        assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'], what)
+      }
+    })
+
+    test('a new profile adopts the copy, backed up first with daily backups off', async () => {
+      const { cloud, desktop } = await withCloud({ options: {}, meta: { backupsEnabled: false } })
+      const before = cloud.manifest()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.rules.filters.length, 40)
+      assert.deepEqual(cloud.manifest(), before, 'nothing pushed')
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'])
+    })
+
+    test('over a copy that differs, asks, and applies and pushes nothing until answered', async () => {
+      const { cloud, laptop, desktop } = await withCloud({ meta: { backupsEnabled: false } })
+      const before = cloud.manifest()
+      await desktop.enableSync()
+      await cloud.run()
+
+      const { at, ...pause } = desktop.meta.pause ?? {}
+      assert.deepEqual(pause, { reason: 'first-sync', g: before.g, w: before.w, backedUp: true, backupFailed: false, loss: null })
+      assert.equal(typeof at, 'number')
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.equal(desktop.options.rules.filters.length, 41)
+      assert.deepEqual(cloud.manifest(), before)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'], 'backed up with daily backups off')
+      assert.deepEqual(desktop.backups[0].options, desktop.options, 'this browser\'s own settings')
+
+      // An edit made while it asks stays here, and isn't pushed.
+      await desktop.edit({ wordsPerMinute: 330 })
+      await cloud.run()
+      assert.deepEqual(cloud.manifest(), before, 'nothing pushed while it asks')
+      assert.equal(laptop.options.wordsPerMinute, 200)
+      assert.equal(desktop.meta.pause?.reason, 'first-sync', 'still asking')
+    })
+
+    test('"accept" uses the synced settings, backing up again what it replaces', async () => {
+      const { cloud, laptop, desktop } = await asked()
+      await desktop.edit({ wordsPerMinute: 330 })
+      const before = cloud.manifest()
+      assert.equal(await desktop.resolveHeld('accept'), true)
+      await cloud.run()
+
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.rules.filters.length, 40)
+      assert.equal(desktop.options.wordsPerMinute, 200, 'the edit made while it asked is replaced too')
+      assert.deepEqual(cloud.manifest(), before, 'nothing pushed')
+      assert.equal(desktop.meta.dirty, false)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'pre-sync'])
+      assert.equal(desktop.backups[0].options.wordsPerMinute, 320, 'this browser\'s settings as sync turned on')
+      assert.equal(desktop.backups[1].options.wordsPerMinute, 330, 'and as they were replaced')
+      assert.equal(desktop.backups[1].options.rules.filters.length, 41)
+
+      await laptop.edit({ wordsPerMinute: 400 })
+      await cloud.run()
+      assert.equal(desktop.options.wordsPerMinute, 400, 'syncing as usual from then on')
+    })
+
+    test('"keep" replaces the synced settings on every browser, keeping them as a backup first', async () => {
+      const { cloud, laptop, desktop } = await asked()
+      assert.equal(await desktop.resolveHeld('keep'), true)
+      await cloud.run()
+
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.match(cloud.manifest().w, /^desktop-/)
+      assert.equal(laptop.options.wordsPerMinute, 320)
+      assert.equal(laptop.options.rules.filters.length, 41)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'sync-declined'])
+      assert.equal(desktop.backups[1].options.wordsPerMinute, 200, 'the synced settings are restorable')
+      assert.equal(desktop.backups[1].options.rules.filters.length, 40)
+    })
+
+    test('after "keep", each other browser weighs this browser\'s settings with its own deletion guard', async () => {
+      const { cloud, laptop, desktop } = await asked({ options: { ...OWN, rules: rulesFixture(2) } })
+      assert.equal(await desktop.resolveHeld('keep'), true)
+      await cloud.run()
+      assert.match(cloud.manifest().w, /^desktop-/)
+      assert.equal(laptop.meta.pause?.reason, 'held')
+      assert.deepEqual(laptop.meta.pause.loss.rules, { removed: 38, of: 40 })
+      assert.equal(laptop.options.rules.filters.length, 40)
+    })
+
+    test('turning sync off before answering changes nothing, and turning it on again asks again', async () => {
+      const { cloud, desktop } = await asked()
+      const before = cloud.manifest()
+      await desktop.disableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.enabled, false)
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.deepEqual(cloud.manifest(), before)
+
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'pre-sync'])
+    })
+
+    test('a newer copy arriving while it asks is weighed afresh: asked over it, or settled once it no longer differs', async () => {
+      const { cloud, laptop, desktop } = await asked()
+      await laptop.edit({ wordsPerMinute: 250 })
+      await cloud.run()
+      const newer = cloud.manifest()
+      assert.deepEqual([desktop.meta.pause?.reason, desktop.meta.pause?.g, desktop.meta.pause?.w], ['first-sync', newer.g, newer.w])
+      assert.equal(desktop.meta.pause.backedUp, true)
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'])
+
+      await laptop.edit({ rules: rulesFixture(41), wordsPerMinute: 320 })
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.meta.meta.g, cloud.manifest().g, 'agreed')
+      assert.match(cloud.manifest().w, /^laptop-/, 'nothing pushed')
+    })
+
+    test('an older build\'s copy arriving while it asks is waited on, and the question asked again once a current copy is back', async () => {
+      const { cloud, desktop } = await asked()
+      const legacy = createLegacyDevice(cloud, 'legacy', { knownKeys: LEGACY_KNOWN, legacyOptions: LEGACY_ONLY })
+      await legacy.overwrite()
+      cloud.deliver()
+      await desktop.settle()
+      assert.equal(desktop.meta.pause?.reason, 'older-cloud', 'nothing to ask about that it could adopt')
+      assert.equal(desktop.options.wordsPerMinute, 320)
+
+      // The laptop, which has synced before, replaces the older copy.
+      await cloud.run()
+      assert.equal(cloud.manifest().v, V)
+      assert.match(cloud.manifest().w, /^laptop-/)
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.deepEqual([desktop.meta.pause.g, desktop.meta.pause.w], [cloud.manifest().g, cloud.manifest().w])
+      assert.equal(desktop.options.wordsPerMinute, 320)
+    })
+
+    test('a pull the cloud starts as sync turns on waits behind it, rather than applying on the agreement it forgets', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      // The desktop synced with the laptop before, then turned sync off and set a reading speed of its own.
+      const desktop = createDevice(cloud, 'desktop')
+      await desktop.enableSync()
+      await cloud.run()
+      await desktop.disableSync()
+      await desktop.edit({ wordsPerMinute: 320 })
+      await laptop.edit({ wordsPerMinute: 250 })
+      await cloud.run()
+
+      const turning = desktop.engine.setEnabled(true)
+      desktop.engine.onStorageChanged({ om: { newValue: cloud.manifest() } }, 'sync')
+      await turning
+      await desktop.settle()
+      await cloud.run()
+
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.equal(desktop.options.wordsPerMinute, 320)
+    })
+
+    test('turned on and straight off again, before turning on has had its turn, it stays off', async () => {
+      const { cloud, desktop } = await withCloud()
+      const before = cloud.manifest()
+      const turningOn = desktop.engine.setEnabled(true)
+      const turningOff = desktop.engine.setEnabled(false)
+      await Promise.all([turningOn, turningOff])
+      await desktop.settle()
+      await cloud.run()
+
+      assert.equal(desktop.meta.enabled, false)
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.deepEqual(cloud.manifest(), before)
+    })
+
+    test('the deletion guard: the question takes the hold\'s place, and using the synced settings applies them with no second hold', async () => {
+      const { cloud, desktop } = await withCloud({ options: { ...OWN, rules: rulesFixture(60) } })
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.deepEqual(desktop.meta.pause.loss.rules, { removed: 20, of: 60 })
+
+      assert.equal(await desktop.resolveHeld('accept'), true)
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.rules.filters.length, 40)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'pre-sync'])
+    })
+
+    test('a newer sync version refuses before any backup or question', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud, 'laptop', { version: V + 1 })
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN })
+      await desktop.settle()
+      assert.deepEqual(await desktop.enableSync(), { ok: false, reason: 'newer-version', remoteVersion: V + 1, version: V })
+      assert.equal(desktop.meta.pause, null)
+      assert.deepEqual(desktop.backups, [])
+    })
+
+    test('an older version\'s copy is waited on, backed up, and the question asked once a copy at this version arrives', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud, 'laptop', { version: V - 1 })
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN, meta: { backupsEnabled: false } })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'older-cloud')
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'])
+
+      await laptop.restart({ version: V, init: true })
+      await cloud.run()
+      assert.equal(cloud.manifest().v, V)
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.equal(desktop.meta.pause.backedUp, true)
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.deepEqual(desktop.backups.at(-1).options, desktop.options, 'its settings as it asks are backed up')
+    })
+
+    test('a copy that can\'t be read in full as sync turns on is read again, and the question then backs up what it asks over', async () => {
+      const { desktop } = await withCloud({ meta: { backupsEnabled: false } })
+      const chunk = desktop.peer.view.get('o0')
+      desktop.peer.view.delete('o0')
+      await desktop.enableSync()
+      assert.equal(desktop.meta.pause, null, 'nothing to ask about yet')
+      assert.equal(desktop.options.wordsPerMinute, 320)
+
+      await desktop.edit({ wordsPerMinute: 330 })
+      desktop.peer.view.set('o0', chunk)
+      await desktop.react()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.equal(desktop.meta.pause.backedUp, true)
+      assert.equal(desktop.options.wordsPerMinute, 330)
+      assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320], ['pre-sync', 330]])
+    })
+
+    test('a newer sync version\'s copy arriving while it asks pauses it, and once updated it asks again', async () => {
+      const { cloud, laptop, desktop } = await asked()
+      await laptop.restart({ version: V + 1, init: true })
+      await laptop.edit({ wordsPerMinute: 260 })
+      await cloud.run()
+      assert.equal(cloud.manifest().v, V + 1)
+      assert.equal(desktop.meta.pause?.reason, 'newer-version')
+      assert.equal(desktop.options.wordsPerMinute, 320)
+
+      await desktop.restart({ version: V + 1, init: true })
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.deepEqual([desktop.meta.pause.g, desktop.meta.pause.w], [cloud.manifest().g, cloud.manifest().w])
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'pre-sync'])
+    })
+
+    test('a browser taken back to an older build while it asks pauses for the copy rather than adopt it', async () => {
+      const { cloud, desktop } = await asked()
+      const before = cloud.manifest()
+      await desktop.restart({ version: V - 1, init: true })
+      await desktop.edit({ wordsPerMinute: 330 })
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'newer-version')
+      assert.equal(desktop.options.wordsPerMinute, 330)
+      assert.equal(desktop.options.rules.filters.length, 41)
+      assert.deepEqual(cloud.manifest(), before)
+    })
+
+    test('a backup that can\'t be written doesn\'t stop it asking, daily backups on or off, and records that it failed', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { cloud, desktop } = await withCloud({ failBackups: true, meta: { backupsEnabled } })
+        const before = cloud.manifest()
+        assert.deepEqual(await desktop.enableSync(), { ok: true }, daily)
+        await cloud.run()
+        assert.equal(desktop.meta.enabled, true, daily)
+        assert.equal(desktop.meta.pause?.reason, 'first-sync', daily)
+        assert.equal(desktop.meta.pause.backedUp, false, daily)
+        assert.equal(desktop.meta.pause.backupFailed, true, daily)
+        assert.equal(desktop.options.wordsPerMinute, 320, daily)
+        assert.deepEqual(cloud.manifest(), before, daily)
+      }
+    })
+
+    test('one whose backup failed can still use the synced settings, with daily backups off', async () => {
+      const { desktop } = await asked({ failBackups: true, meta: { backupsEnabled: false } })
+      assert.equal(await desktop.resolveHeld('accept'), true)
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 200)
+    })
   })
 
   test('the incident: a stale build\'s partial copy can\'t cost the main browser its rules or marks', async () => {
@@ -184,10 +550,10 @@ describe('sync scenarios', () => {
   })
 
   describe('an update that would remove most of a list', () => {
-    /** A laptop and desktop in sync, then the desktop deletes 39 of the 40 rules. */
-    async function bulkDelete() {
+    /** A laptop (set up with `laptopSettings`) and desktop in sync, then the desktop deletes 39 of the 40 rules. */
+    async function bulkDelete(laptopSettings = {}) {
       const cloud = createCloud()
-      const laptop = mainBrowser(cloud)
+      const laptop = mainBrowser(cloud, 'laptop', laptopSettings)
       await laptop.enableSync()
       await cloud.run()
       const desktop = createDevice(cloud, 'desktop')
@@ -211,6 +577,36 @@ describe('sync scenarios', () => {
       await cloud.run()
       assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held'])
       assert.equal(cloud.manifest().w, before.w, 'nothing pushed while held')
+    })
+
+    /** Accepting replaces every setting, so this browser's are backed up whatever daily backups say. */
+    test('is backed up with daily backups off', async () => {
+      const { laptop } = await bulkDelete({ meta: { backupsEnabled: false } })
+      assert.equal(laptop.meta.pause?.reason, 'held')
+      assert.equal(laptop.meta.pause.backedUp, true)
+      assert.equal(laptop.meta.pause.backupFailed, false)
+      assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held'])
+      assert.deepEqual(laptop.backups[0].options, laptop.options, 'this browser\'s own settings, as they were held over')
+    })
+
+    test('is held all the same when backups can\'t be written, daily backups on or off, and records that its backup failed', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { laptop } = await bulkDelete({ failBackups: true, meta: { backupsEnabled } })
+        assert.equal(laptop.options.rules.filters.length, 40, `not applied, ${daily}`)
+        assert.equal(laptop.meta.pause?.reason, 'held', daily)
+        assert.equal(laptop.meta.pause.backedUp, false, daily)
+        assert.equal(laptop.meta.pause.backupFailed, true, daily)
+        assert.deepEqual(laptop.backups, [], daily)
+      }
+    })
+
+    test('one whose backup failed can still be accepted', async () => {
+      const { cloud, laptop } = await bulkDelete({ failBackups: true, meta: { backupsEnabled: false } })
+      assert.equal(await laptop.resolveHeld('accept'), true)
+      await cloud.run()
+      assert.equal(laptop.meta.pause, null)
+      assert.equal(laptop.options.rules.filters.length, 1, 'and it can still be accepted')
     })
 
     test('"keep" pushes this browser\'s list back and saves the declined copy', async () => {

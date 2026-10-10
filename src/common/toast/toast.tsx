@@ -11,6 +11,8 @@ export interface ToastOptions {
   type?: 'success' | 'error'
   /** A button under the message; clicking it runs `onClick` and dismisses the toast. */
   action?: { label: string, onClick: () => void }
+  /** A link under the message, to `href`. */
+  link?: { label: string, href: string }
   /** Called once when it goes, however it goes — timed out, closed, its action, or {@link ToastHandle.hide}. */
   onHide?: () => void
 }
@@ -69,7 +71,7 @@ class Toast {
   private held = false
   private readonly onHide: ToastOptions['onHide']
 
-  constructor(message: string, { timeout = 5000, type, action, onHide }: ToastOptions = {}) {
+  constructor(message: string, { timeout = 5000, type, action, link, onHide }: ToastOptions = {}) {
     this.el = (
       <div
         class="toast"
@@ -102,6 +104,7 @@ class Toast {
                 </button>
               )
             }
+            {link && <a class="link" href={link.href}>{link.label}</a>}
           </div>
           {
             // A toast that never times out has to be closable by hand.

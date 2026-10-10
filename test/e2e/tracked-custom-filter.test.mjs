@@ -13,6 +13,7 @@ import {
   pillText,
   refiningMark,
   rerun,
+  settled,
   storedOption,
   tagPage,
   TITLE_INPUT,
@@ -81,13 +82,10 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
   /** Every archive URL the tab asked for. */
   const fetched = []
   /**
-   * While set, the tag page holds its first scrape (`?page=`) unanswered until
-   * the next one is asked for: a view started again by a re-run asks again, so
-   * the re-run is sure to land while the first view is still loading.
+   * While set, the tag page's scrapes (`?page=`) go unanswered until it
+   * settles, so that a re-run is sure to land while the view is still loading.
    */
-  let holdScrape = false
-  /** The answer to the scrape being held, once one is. */
-  let heldScrape = null
+  let holdScrape = null
   let link = null
 
   /** The archive, as far as this tab can see it: the tag's page, and every search and readings page the review asks for. */
@@ -101,15 +99,8 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
       const body = tagPage(TAG, 'Additional Tags', TAG_WORKS.map(work => blurbHtml(work)))
       const respond = () => req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body }).catch(() => {})
       // The scrape is the view's own request; the page load is the reader's.
-      if (url.searchParams.has('page') && holdScrape) {
-        if (!heldScrape) {
-          heldScrape = respond
-          return
-        }
-        holdScrape = false
-        void heldScrape()
-        heldScrape = null
-      }
+      if (url.searchParams.has('page') && holdScrape)
+        return void holdScrape.promise.then(respond)
       void respond()
     }
   }
@@ -227,21 +218,24 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     }, bare)
 
     fetched.length = 0
-    holdScrape = true
+    const scrapes = () => fetched.filter(url => url.startsWith(`${TAG_PATH}?page=`))
+    holdScrape = Promise.withResolvers()
     try {
       await visit(tab, link)
+      await until('the view to start loading', () => scrapes().length > 0)
+      await until('the first visit to fill the category back in', async () => (await lists())[0]?.type === 'freeform')
+      await settled(tab, 1)
+      assert.equal(await viewOpen(), false, 'the re-run it caused landed while the view was still loading')
+      holdScrape.resolve()
       await until('the view to be back with the list’s filter', async () => await excluded('Draco Malfoy')
         && (await refiningMark(tab))?.restore === false)
     }
     finally {
-      holdScrape = false
-      void heldScrape?.()
-      heldScrape = null
+      holdScrape.resolve()
+      holdScrape = null
     }
 
-    const scrapes = fetched.filter(url => url.startsWith(`${TAG_PATH}?page=`))
-    assert.ok(scrapes.length >= 2, `the re-run caught the view loading and started it again (${scrapes.length} scrapes)`)
-    assert.equal((await lists())[0].type, 'freeform', 'the first visit filled the category back in')
+    assert.equal(scrapes().length, 1, 'the re-run carried the loading view on rather than starting it again')
 
     assert.equal(await viewOpen(), true, 'the view is up, without a click')
     assert.equal(await excluded('Draco Malfoy'), true)
