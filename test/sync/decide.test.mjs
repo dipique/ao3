@@ -3,14 +3,14 @@ import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { pruneToSynced, SYNC_SCHEMA_VERSION, syncedKeys } from '../../src/common/syncCodec.ts'
-import { decideFirstPull, decidePull, decidePush, isRemoteNewer } from '../../src/common/syncDecide.ts'
+import { decideFirstPull, decidePull, decidePush, isRemoteNewer, questionGone, uploadId, weighCopy } from '../../src/common/syncDecide.ts'
 import { rulesFixture, textReplacementsFixture } from './harness.mjs'
 
 const V = SYNC_SCHEMA_VERSION
 
-/** Build a manifest with sensible defaults. */
-function m({ g = 1, h = 'H', w = 'wA', v = V, n = 1 } = {}) {
-  return { v, n, g, h, w }
+/** Build a manifest with sensible defaults, and the copy's ID `i` where one is given. */
+function m({ g = 1, h = 'H', w = 'wA', v = V, n = 1, i } = {}) {
+  return { v, n, g, h, w, ...(i ? { i } : {}) }
 }
 
 describe('isRemoteNewer', () => {
@@ -171,6 +171,122 @@ describe('decideFirstPull', () => {
 
     test('a copy holding nothing beyond defaults still takes this browser\'s settings', () => {
       assert.deepEqual(decide({ wordsPerMinute: 350 }, copyOf(), narrower), { kind: 'send' })
+    })
+  })
+})
+
+/**
+ * Each synced copy carries an ID, the same through every upload over it, and
+ * each browser keeps the ID of the copy it last agreed with. A copy under
+ * another ID is one another browser started, which replaces every setting
+ * here if taken as an update.
+ */
+describe('the synced copy\'s ID', () => {
+  /** Agreed with a copy under `i`: this browser's own, unless said otherwise. */
+  const agreed = (i = 'mine') => ({ g: 5, h: 'H', w: 'wA', ...(i ? { i } : {}) })
+  /** Nothing agreed, as sync turns on. */
+  const NOTHING = { g: 0, h: '', w: '' }
+
+  describe('weighCopy', () => {
+    test('nothing agreed, as sync turns on: weighed as turning sync on weighs a copy, whatever the IDs', () => {
+      assert.deepEqual(weighCopy(NOTHING, m({ i: 'theirs' })), { weigh: 'first', id: 'theirs' })
+      assert.deepEqual(weighCopy(NOTHING, m()), { weigh: 'first' })
+      assert.deepEqual(weighCopy({ ...NOTHING, i: 'theirs' }, m({ i: 'theirs' })), { weigh: 'first', id: 'theirs' }, 'an ID on no agreement agrees on nothing')
+    })
+
+    test('nothing agreed, with the ID turning sync off gave this browser: a copy with no ID leaves it in place', () => {
+      assert.deepEqual(weighCopy({ ...NOTHING, i: 'mine' }, m()), { weigh: 'first', id: 'mine' })
+    })
+
+    test('the agreed ID: an ordinary update', () => {
+      assert.deepEqual(weighCopy(agreed(), m({ g: 6, i: 'mine' })), { weigh: 'update', id: 'mine' })
+    })
+
+    test('another ID: a copy another browser started, weighed as turning sync on weighs one, taking its ID', () => {
+      assert.deepEqual(weighCopy(agreed(), m({ g: 6, i: 'theirs' })), { weigh: 'other', id: 'theirs' })
+    })
+
+    test('no agreed ID while synced, as on a browser upgraded from a build before it: the first copy with one is an update, and its ID is taken', () => {
+      assert.deepEqual(weighCopy(agreed(null), m({ g: 6, i: 'theirs' })), { weigh: 'update', id: 'theirs' })
+    })
+
+    test('a copy with no ID, as a build from before it writes: an update, keeping the agreed ID', () => {
+      assert.deepEqual(weighCopy(agreed(), m({ g: 6 })), { weigh: 'update', id: 'mine' })
+      assert.deepEqual(weighCopy(agreed(null), m({ g: 6 })), { weigh: 'update' }, 'with no ID on either side, none')
+    })
+  })
+
+  describe('uploadId', () => {
+    const fresh = () => 'new'
+
+    test('the agreed ID, over whatever the cloud holds', () => {
+      assert.equal(uploadId(agreed(), m({ i: 'mine' }), false, fresh), 'mine')
+      assert.equal(uploadId(agreed(), m(), false, fresh), 'mine', 'over a copy with no ID, it goes back on')
+      assert.equal(uploadId(agreed(), m({ i: 'theirs' }), false, fresh), 'mine', 'over another ID it never pulled, its own')
+    })
+
+    test('keeping this browser\'s settings, or sending them over a copy silently: under the copy\'s ID', () => {
+      assert.equal(uploadId(agreed(), m({ i: 'theirs' }), true, fresh), 'theirs')
+      assert.equal(uploadId(NOTHING, m({ i: 'theirs' }), true, fresh), 'theirs', 'as sync turns on')
+      assert.equal(uploadId(agreed(), m(), true, fresh), 'mine', 'a copy with no ID takes the agreed one')
+      assert.equal(uploadId(NOTHING, m(), true, fresh), undefined, 'with no ID on either side, none')
+    })
+
+    test('seeding an empty store: a new ID', () => {
+      assert.equal(uploadId(NOTHING, null, false, fresh), 'new')
+      assert.equal(uploadId(agreed(null), null, false, fresh), 'new')
+      assert.equal(uploadId(agreed(), null, false, fresh), 'mine', 'a store emptied under an agreement keeps it')
+    })
+
+    test('with no ID of its own: none over a copy without one, and a new one over a copy whose ID it never agreed with', () => {
+      assert.equal(uploadId(agreed(null), m(), false, fresh), undefined)
+      assert.equal(uploadId(agreed(null), m({ i: 'theirs' }), false, fresh), 'new')
+      assert.equal(uploadId(agreed(null), m({ g: 5, w: 'wB', i: 'theirs' }), false, fresh), 'new', 'another browser\'s copy at its generation')
+    })
+
+    test('with no ID of its own, over the very copy it agreed with, which a build from before the ID agreed with unrecorded: that copy\'s ID', () => {
+      assert.equal(uploadId(agreed(null), m({ g: 5, w: 'wA', i: 'theirs' }), false, fresh), 'theirs')
+    })
+
+    test('over a copy at an older sync version, which is never adopted: as over an empty store', () => {
+      assert.equal(uploadId(agreed(null), m({ v: V - 1 }), false, fresh, V), 'new')
+      assert.equal(uploadId(agreed(), m({ v: V - 1 }), false, fresh, V), 'mine')
+    })
+
+    test('makes an ID only when it writes a new one', () => {
+      let made = 0
+      const counted = () => `new-${++made}`
+      uploadId(agreed(), m({ i: 'theirs' }), false, counted)
+      uploadId(agreed(), m({ i: 'theirs' }), true, counted)
+      uploadId(agreed(null), m(), false, counted)
+      assert.equal(made, 0)
+      assert.equal(uploadId(NOTHING, null, false, counted), 'new-1')
+    })
+  })
+
+  describe('questionGone', () => {
+    /** The question a copy under another ID raised. */
+    const ASKED = { reason: 'first-sync', otherCopy: true, g: 6, w: 'wB', at: 0, backedUp: true, backupFailed: false, loss: null }
+
+    test('a question a copy under another ID raised goes once the cloud holds a copy under the agreed ID again', () => {
+      assert.equal(questionGone(ASKED, agreed(), m({ g: 5, w: 'wA', i: 'mine' })), true)
+    })
+
+    test('it stands over the copy asked about, a third ID, a copy with no ID, or none', () => {
+      assert.equal(questionGone(ASKED, agreed(), m({ g: 6, w: 'wB', i: 'theirs' })), false)
+      assert.equal(questionGone(ASKED, agreed(), m({ g: 7, w: 'wC', i: 'third' })), false)
+      assert.equal(questionGone(ASKED, agreed(), m({ g: 5, w: 'wA' })), false)
+      assert.equal(questionGone(ASKED, agreed(), null), false)
+      assert.equal(questionGone(ASKED, agreed(null), m({ g: 5, w: 'wA' })), false)
+    })
+
+    test('turning sync on\'s question, a held update and the version pauses aren\'t its to end', () => {
+      const { otherCopy, ...turningOn } = ASKED
+      assert.equal(questionGone(turningOn, agreed(), m({ g: 5, w: 'wA', i: 'mine' })), false)
+      const held = { reason: 'held', g: 6, w: 'wB', at: 0, backedUp: true, backupFailed: false, loss: { rules: { removed: 9, of: 10 } } }
+      assert.equal(questionGone(held, agreed(), m({ g: 5, w: 'wA', i: 'mine' })), false)
+      assert.equal(questionGone({ reason: 'older-cloud', remoteVersion: V - 1 }, agreed(), m({ i: 'mine' })), false)
+      assert.equal(questionGone(null, agreed(), m({ i: 'mine' })), false)
     })
   })
 })

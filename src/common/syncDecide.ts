@@ -1,6 +1,7 @@
 import type { Options } from './options.ts'
 import type { Manifest } from './syncCodec.ts'
 import type { PullLoss } from './syncGuard.ts'
+import type { SyncPause } from './syncMeta.ts'
 
 import { buildLocalUpdate, diffOptions, pruneToSynced, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
 import { assessPull } from './syncGuard.ts'
@@ -33,6 +34,14 @@ export interface LocalMeta {
   h: string
   /** writer token this device last agreed with */
   w: string
+  /**
+   * ID of the synced copy this device last agreed with ({@link Manifest.i}),
+   * kept over a copy that carries none. Turning sync off replaces it with a
+   * new one, which the browser keeps until it agrees with a copy that has an
+   * ID. Absent on a browser that synced on a build from before the ID and has
+   * met no copy with one since.
+   */
+  i?: string
 }
 
 export type Decision = 'noop' | 'push' | 'pull' | 'blocked' | 'wait'
@@ -123,4 +132,82 @@ export function decideFirstPull(current: Options, copy: Partial<Options>, defaul
   if (!holdsSettings)
     return { kind: 'adopt' }
   return { kind: 'ask', loss: assessPull(current, desired) }
+}
+
+export type CopyWeight
+  /**
+   * Nothing agreed yet, as sync turns on: {@link decideFirstPull} weighs the
+   * copy, whatever its ID. A copy with none leaves this browser the ID turning
+   * sync off gave it.
+   */
+  = | { weigh: 'first', id?: string }
+  /**
+   * A copy under an ID other than the agreed one: another browser started a
+   * synced copy of its own. Taken as an update, it would replace every
+   * setting here, so {@link decideFirstPull} weighs it, as it weighs a copy
+   * when sync turns on.
+   */
+    | { weigh: 'other', id: string }
+  /** An update to the copy agreed with, or one whose ID can't say otherwise: applied past the deletion guard. */
+    | { weigh: 'update', id?: string }
+
+/**
+ * How a copy the pull takes is weighed, from the copy's ID and the agreed
+ * one. `id` is the ID the agreement takes once it agrees with the copy, by any
+ * answer: the copy's, or for a copy without one this browser's own, which its
+ * next upload puts on the copy.
+ *
+ * Where either side has no ID, the copy is an update. A copy with none was
+ * written by a build from before the ID, over whichever copy it had agreed
+ * with, which can't be told. A browser with none synced on such a build, and
+ * can't say which copy it agreed with either: it takes the first copy that
+ * has one as an update, so out-of-date settings without an ID give way to a
+ * copy with one.
+ */
+export function weighCopy(agreed: LocalMeta, copy: Pick<Manifest, 'i'>): CopyWeight {
+  const id = copy.i ?? agreed.i
+  if (agreed.g === 0)
+    return id ? { weigh: 'first', id } : { weigh: 'first' }
+  if (!copy.i)
+    return id ? { weigh: 'update', id } : { weigh: 'update' }
+  if (agreed.i && agreed.i !== copy.i)
+    return { weigh: 'other', id: copy.i }
+  return { weigh: 'update', id: copy.i }
+}
+
+/**
+ * The ID an upload writes on the synced copy, which the agreement takes once
+ * the upload lands. `force` is one the reader chose over the copy, or one
+ * sent over a copy holding nothing beyond defaults: it goes under the copy's
+ * ID, so the browsers that agreed with that copy take it as an update.
+ *
+ * Otherwise it is the agreed ID. A browser with none writes over the copy it
+ * agreed with under that copy's ID, which a build from before the ID agreed
+ * with but didn't record, and writes none over a copy at this sync version
+ * that has none, so it syncs with builds from before the ID as it did. Over
+ * an empty store, or a copy at an older sync version, which is never adopted,
+ * it starts a copy of its own, and over a copy whose ID it never agreed with
+ * (an older generation, which isn't pulled) it writes over one another
+ * browser started: each under a new ID, from `fresh`.
+ */
+export function uploadId(agreed: LocalMeta, remote: Manifest | null, force: boolean, fresh: () => string, version = SYNC_SCHEMA_VERSION): string | undefined {
+  if (force && remote?.i)
+    return remote.i
+  if (agreed.i)
+    return agreed.i
+  if (remote?.i && remote.g === agreed.g && remote.w === agreed.w)
+    return remote.i
+  if (remote && !remote.i && remote.v >= version)
+    return undefined
+  return fresh()
+}
+
+/**
+ * Whether the question a copy under another ID raised has gone: the cloud
+ * holds a copy under this browser's agreed ID again, its own seed landing
+ * after the other browser's, say. The copy it asked about isn't there to
+ * use or keep.
+ */
+export function questionGone(pause: SyncPause | null, agreed: LocalMeta, remote: Manifest | null): boolean {
+  return pause?.reason === 'first-sync' && pause.otherCopy === true && !!agreed.i && remote?.i === agreed.i
 }

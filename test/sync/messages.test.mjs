@@ -9,18 +9,19 @@ describe('sync messages', () => {
     const held = { reason: 'held', g: 5, w: 'x', loss, at: 0, backedUp: true }
     assert.equal(
       syncPauseMessage(held, 2),
-      'Sync is on hold: an update from another browser would remove 348 of your 348 rules and 267 of your 282 marked works. A backup of this browser\'s settings was saved first.',
+      'Sync is on hold: an update from another browser would remove 348 of your 348 rules and 267 of your 282 marked works. This browser\'s settings are backed up.',
     )
-    assert.doesNotMatch(syncPauseMessage({ ...held, backedUp: false }, 2), /backup/)
+    assert.doesNotMatch(syncPauseMessage({ ...held, backedUp: false }, 2), /backed up/)
   })
 
   test('a question as sync turns on says nothing changes until it is answered, and whether a backup exists', () => {
     const first = { reason: 'first-sync', g: 5, w: 'x', at: 0, backedUp: true, backupFailed: false, loss: null }
     assert.equal(
       syncPauseMessage(first, 2),
-      'Sync is on hold: your synced settings differ from this browser\'s. Nothing changes until you choose which to keep. A backup of this browser\'s settings was saved first.',
+      'Sync is on hold: your synced settings differ from this browser\'s. Nothing changes until you choose which to keep. This browser\'s settings are backed up.',
     )
-    assert.doesNotMatch(syncPauseMessage({ ...first, backedUp: false, backupFailed: true }, 2), /backup/)
+    assert.doesNotMatch(syncPauseMessage({ ...first, backedUp: false, backupFailed: true }, 2), /backed up/)
+    assert.equal(syncPauseMessage({ ...first, otherCopy: true }, 2), syncPauseMessage(first, 2), 'asked over a copy another browser started, the same')
   })
 
   test('an out-of-date background says whether sync has stopped', () => {

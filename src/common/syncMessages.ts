@@ -3,8 +3,12 @@ import type { SyncPause } from './syncMeta.ts'
 
 import { describePullLoss } from './syncGuard.ts'
 
-/** Said of what sync asks the reader when this browser's settings were backed up as it asked. */
-export const HELD_BACKUP_NOTE = `A backup of this browser's settings was saved first.`
+/**
+ * Said of what sync asks the reader when this browser's settings were backed
+ * up as it asked. In the present tense: a backup that would repeat the newest
+ * of its kind isn't written, and that one, taken earlier, holds them.
+ */
+export const HELD_BACKUP_NOTE = `This browser's settings are backed up.`
 
 /**
  * What the reader is told when sync stops, in one place: the options page and

@@ -25,11 +25,15 @@ export type SyncPause
    * this browser's own, and the reader is asked which to keep: until they
    * answer, nothing is applied and nothing pushed. `g`/`w` name the copy asked
    * over, as a hold's do. `backedUp` says whether this browser's settings were
-   * backed up as sync turned on, and `backupFailed` that the backup couldn't
-   * be written. `loss` is what using the synced settings would remove where
-   * the deletion guard would hold them, which the question then stands in for.
+   * backed up as it asked, and `backupFailed` that the backup couldn't be
+   * written. `loss` is what using the synced settings would remove where the
+   * deletion guard would hold them, which the question then stands in for.
+   *
+   * `otherCopy`: the same question, asked while sync was on, over a copy
+   * another browser started under an ID of its own. Its backups are
+   * `sync-held`, since sync holds the copy; turning sync on's are `pre-sync`.
    */
-    | { reason: 'first-sync', g: number, w: string, at: number, backedUp: boolean, backupFailed: boolean, loss: PullLoss | null }
+    | { reason: 'first-sync', g: number, w: string, at: number, backedUp: boolean, backupFailed: boolean, loss: PullLoss | null, otherCopy?: true }
   /**
    * The cloud copy was written at a higher sync version than this build speaks.
    * Lifts by itself once the extension is updated.
@@ -68,8 +72,13 @@ export interface SyncMeta {
    */
   backups: BackupSummary[] | null
 
-  /** The sync generation/hash/writer-token this device's working copy agrees with. */
-  meta: { g: number, h: string, w: string }
+  /**
+   * The sync generation/hash/writer-token this device's working copy agrees
+   * with, and the ID of the synced copy they belong to, kept over a copy that
+   * has none. Turning sync off gives a new ID. Absent where this browser
+   * synced on a build from before the ID, until a copy brings one.
+   */
+  meta: { g: number, h: string, w: string, i?: string }
   /** A local option change is pending push. */
   dirty: boolean
   /** Epoch ms the current dirty streak started (for the max-wait push ceiling). */

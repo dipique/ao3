@@ -160,6 +160,17 @@ describe('encode/decode round-trip', () => {
     assert.deepEqual(result.options, pruneToSynced(options, defaults))
   })
 
+  /** The copy's ID is the manifest's alone: the payload, and so its hash, are the same with or without it. */
+  test('the manifest carries the copy\'s ID where it is given one, and no key for it where not', async () => {
+    const withId = await encode(options, defaults, 5, 'tok-1', SYNC_SCHEMA_VERSION, 'copy-1')
+    const without = await encode(options, defaults, 5, 'tok-1')
+    assert.equal(withId.manifest.i, 'copy-1')
+    assert.equal('i' in without.manifest, false)
+    assert.deepEqual(withId.chunks, without.chunks)
+    assert.equal(withId.manifest.h, without.manifest.h)
+    assert.deepEqual((await decode(asItems(withId))).options, pruneToSynced(options, defaults))
+  })
+
   test('large payloads split into multiple chunks, each within the item limit', async () => {
     const rand = mulberry32(42)
     const big = Array.from({ length: 1500 }, () => ({

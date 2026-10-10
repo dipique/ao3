@@ -87,6 +87,16 @@ export interface Manifest {
    * is why adding it doesn't need a schema-version bump).
    */
   k?: string[]
+  /**
+   * The synced copy's ID: the same through every upload over the copy, and
+   * new only where a browser starts a copy of its own, or gives one that has
+   * none the ID turning sync off gave it. A browser keeps the ID
+   * of the copy it agreed with, so it can tell an update to that copy from a
+   * copy another browser started (see `weighCopy` in `syncDecide.ts`).
+   * Optional, and ignored by older readers, as {@link Manifest.k} is: copies
+   * written by a build from before it carry none.
+   */
+  i?: string
 }
 
 export type DecodeResult
@@ -247,12 +257,14 @@ function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
 // Encode / decode / diff
 // ---------------------------------------------------------------------------
 
+/** `id` is the copy's {@link Manifest.i}; without one, the manifest carries none. */
 export async function encode(
   options: Options,
   defaults: Options,
   generation: number,
   token: string,
   version = SYNC_SCHEMA_VERSION,
+  id?: string,
 ): Promise<{ chunks: Record<string, string>, manifest: Manifest }> {
   const pruned = pruneToSynced(options, defaults)
   const canonical = canonicalStringify(pruned)
@@ -264,7 +276,7 @@ export async function encode(
   for (let i = 0; i < n; i++)
     chunks[`${CHUNK_PREFIX}${i}`] = b64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE)
 
-  return { chunks, manifest: { v: version, n, g: generation, h, w: token, k: syncedKeys(defaults) } }
+  return { chunks, manifest: { v: version, n, g: generation, h, w: token, k: syncedKeys(defaults), ...(id ? { i: id } : {}) } }
 }
 
 /**

@@ -111,8 +111,12 @@ export function createCloud() {
  * it has to write fail, as a full or broken `storage.local` would: a daily one
  * too, whenever daily backups are on, since a failed one never counts as the
  * day's. `breakBackups()` does the same from then on.
+ *
+ * `ids: false` is a build at this sync version from before the synced copy
+ * carried an ID: it never sees one on a copy, writes none, and keeps none with
+ * its agreement. `restart({ ids: true })` updates it.
  */
-export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true, savedLists = true, stored = {}, failBackups = false } = {}) {
+export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true, savedLists = true, stored = {}, failBackups = false, ids = true } = {}) {
   let opts = clone({ ...OPTION_DEFAULTS, ...options })
   let searchLists = clone(stored)
   const state = { ...clone(SYNC_META_DEFAULTS), ...clone(meta) }
@@ -123,7 +127,11 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
   let seq = 0
   let engine
   let keepsSavedLists = savedLists
+  let knowsIds = ids
   let planner = Promise.resolve()
+
+  /** `value` as a build that knows no copy's ID has it: a manifest, or an agreement, without one. */
+  const asItKnows = value => (knowsIds || !value || typeof value !== 'object' ? value : (({ i, ...rest }) => rest)(value))
 
   const peer = {
     name,
@@ -139,11 +147,12 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       const out = {}
       for (const key of wanted) {
         if (peer.view.has(key))
-          out[key] = clone(peer.view.get(key))
+          out[key] = clone(key === MANIFEST_KEY ? asItKnows(peer.view.get(key)) : peer.view.get(key))
       }
       return out
     },
-    async set(items) {
+    async set(written) {
+      const items = MANIFEST_KEY in written ? { ...written, [MANIFEST_KEY]: asItKnows(written[MANIFEST_KEY]) } : written
       const changes = {}
       for (const [key, value] of Object.entries(items)) {
         peer.view.set(key, clone(value))
@@ -183,7 +192,7 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     prePull: savedLists ? reconcile : undefined,
     meta: {
       get: async keys => Object.fromEntries(keys.map(key => [key, clone(state[key])])),
-      set: async (update) => { Object.assign(state, clone(update)) },
+      set: async (update) => { Object.assign(state, clone('meta' in update ? { ...update, meta: asItKnows(update.meta) } : update)) },
     },
     sync,
     alarms: {
@@ -255,6 +264,29 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     get engine() { return engine },
     /** Its stored lists, `cache.searchLists`. */
     get stored() { return clone(searchLists) },
+    /** The synced items as it sees them: the copy it last wrote or was sent. */
+    get synced() { return Object.fromEntries([...peer.view].map(([key, value]) => [key, clone(value)])) },
+
+    /**
+     * The sync service hands it `items` as the synced store, as a service can
+     * before it settles on the write that lands last: its view becomes them,
+     * and it hears of each item that changed.
+     */
+    async receive(items) {
+      const changes = {}
+      for (const key of new Set([...peer.view.keys(), ...Object.keys(items)])) {
+        if (same(peer.view.get(key), items[key]))
+          continue
+        if (key in items)
+          peer.view.set(key, clone(items[key]))
+        else
+          peer.view.delete(key)
+        changes[key] = key in items ? { newValue: clone(items[key]) } : {}
+      }
+      if (Object.keys(changes).length)
+        engine.onStorageChanged(changes, 'sync')
+      await device.settle()
+    },
 
     /** Wait for every queued storage event, engine operation and planner run to finish. */
     async settle() {
@@ -328,12 +360,15 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
      * An update can bring saved lists (`savedLists`), and with them `migrate`,
      * the migration's planner run, ahead of the engine's reconciliation with the
      * cloud, as an install runs them. Without `migrate`, the engine gets there
-     * first.
+     * first. It can bring the synced copy's ID (`ids`), finding its agreement
+     * with none.
      */
-    async restart({ version: nextVersion, init = false, savedLists: keeps, migrate = false } = {}) {
+    async restart({ version: nextVersion, init = false, savedLists: keeps, migrate = false, ids: nextIds } = {}) {
       alarms = new Map()
       if (nextVersion !== undefined)
         deps.version = nextVersion
+      if (nextIds !== undefined)
+        knowsIds = nextIds
       if (keeps !== undefined) {
         keepsSavedLists = keeps
         deps.prePull = keeps ? reconcile : undefined

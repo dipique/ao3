@@ -56,7 +56,7 @@ export interface SyncAnswer {
 /** A held update's question: what it would remove, one line each, and the two answers. */
 export interface SyncDecision {
   lines: string[]
-  /** That this browser's settings were backed up as the update was held; null when they weren't. */
+  /** That this browser's settings are backed up, as they were when sync asked; null when they weren't. */
   backup: string | null
   answers: SyncAnswer[]
 }
@@ -155,8 +155,9 @@ function pauseState(pause: SyncPause, version: number): State {
       }
     case 'first-sync': {
       const differ = 'Your synced settings differ from this browser\'s.'
+      const detail = pause.otherCopy ? 'Settings from another browser are waiting for your answer.' : 'Turning on sync is waiting for your answer.'
       return {
-        chip: { state, word: 'On hold', detail: 'Turning on sync is waiting for your answer.', severity: 'warning' },
+        chip: { state, word: 'On hold', detail, severity: 'warning' },
         callout: { state, severity: 'warning', text: pause.loss ? `${differ} Using them would remove:` : `${differ} Which do you want to keep?`, hook, decision: firstSyncDecision(pause) },
       }
     }
@@ -175,33 +176,36 @@ function pauseState(pause: SyncPause, version: number): State {
 
 /**
  * Keeping this browser's settings always backs up the update first. Accepting
- * the update points to the backup of this browser's settings taken as it was
- * held, or says why there is none: its backup failed, or an older build held
- * it with daily backups off.
+ * the update says this browser's settings are backed up, as they were when it
+ * was held, or that its backup failed. A hold an older build recorded with
+ * daily backups off has no backup either, and accepting says nothing of it:
+ * it backs them up as it applies.
+ *
+ * In the present tense, since a backup that would repeat the newest of its
+ * kind isn't written, and that one, taken earlier, holds them.
  */
 function heldDecision(pause: Extract<SyncPause, { reason: 'held' }>): SyncDecision {
   const replaces = 'Replaces this browser\'s settings with the other browser\'s.'
-  const yours = pause.backedUp
-    ? 'Yours were backed up when sync held.'
-    : pause.backupFailed ? 'Yours aren\'t backed up: the backup couldn\'t be saved.' : 'Yours aren\'t backed up: daily backups were off when sync held.'
+  const yours = pause.backedUp ? ' Yours are backed up.' : pause.backupFailed ? ' Yours aren\'t backed up: the backup couldn\'t be saved.' : ''
   return {
     lines: pullLossParts(pause.loss),
     backup: pause.backedUp ? HELD_BACKUP_NOTE : null,
     answers: [
       { choice: 'keep', label: 'Keep this browser\'s settings', consequence: 'Sends this browser\'s settings to your other browsers. What the update had is kept as a backup first.' },
-      { choice: 'accept', label: 'Accept the update', consequence: `${replaces} ${yours}` },
+      { choice: 'accept', label: 'Accept the update', consequence: `${replaces}${yours}` },
     ],
   }
 }
 
 /**
- * Turning sync on over synced settings that differ from this browser's asks
- * which to keep, as a held update does. Keeping this browser's backs the
- * synced settings up first. Using the synced settings points to the backup of
- * this browser's taken as sync turned on, or says it couldn't be saved.
+ * Synced settings that differ from this browser's, as sync turns on or from
+ * a copy another browser started, ask which to keep, as a held update does.
+ * Keeping this browser's backs the synced settings up first. Using the synced
+ * settings says this browser's are backed up, as they were when it asked, or
+ * that the backup couldn't be saved.
  */
 function firstSyncDecision(pause: Extract<SyncPause, { reason: 'first-sync' }>): SyncDecision {
-  const yours = pause.backedUp ? 'Yours were backed up first.' : 'Yours aren\'t backed up: the backup couldn\'t be saved.'
+  const yours = pause.backedUp ? 'Yours are backed up.' : 'Yours aren\'t backed up: the backup couldn\'t be saved.'
   return {
     lines: pause.loss ? pullLossParts(pause.loss) : [],
     backup: pause.backedUp ? HELD_BACKUP_NOTE : null,
