@@ -1,3 +1,5 @@
+import type { ReviewBasis } from './trackedLists.ts'
+
 import { createStorage } from './storage.ts'
 
 /**
@@ -111,33 +113,21 @@ export interface MarkedForLaterIndex {
  *
  * It exists because the works alone don't say what range they are, which lists
  * they came from, or whether the window can still be trusted. A review is
- * recomputed whenever the reader's watermark or their set of tracked lists has
- * moved since it was worked out, and those two facts are recorded here so that
- * question can be answered without fetching anything.
+ * recomputed whenever the reader's watermark, their set of tracked lists or
+ * their target has moved since it was worked out, and those facts are recorded
+ * here ({@link ReviewBasis}) so that question can be answered without fetching
+ * anything.
  *
  * Local, never synced: it's a cache of what the archive said, and every browser
- * works it out for itself from the synced watermark and list set.
+ * works it out for itself from the synced option.
  */
-export interface TrackedReviewCache {
+export interface TrackedReviewCache extends ReviewBasis {
   /** First day of the window (a UTC day number). */
   start: number
   /** Last day of the window, inclusive. */
   end: number
   /** Epoch ms the window was computed, for the refresh interval. */
   computedAt: number
-  /**
-   * The watermark this was computed against. A window whose start no longer
-   * follows the reader's `reviewedThrough` describes a range they have since
-   * dealt with — on this browser or another — and is recomputed rather than shown.
-   */
-  reviewedThrough: number
-  /**
-   * The tracked lists this was computed against — their ids, addresses and
-   * tracking dates, in one string. A list tracked, stopped, removed or
-   * re-addressed changes which works belong in the window, so a mismatch means
-   * the same thing a stale watermark does.
-   */
-  listsSig: string
   /**
    * Short work id → the tracked lists that turned that work up, comma-joined:
    * the List source facet's values before they're turned into the lists' current
@@ -218,7 +208,7 @@ export const cache = createStorage<Cache>({
     appliedChangeOps: [],
     // An empty range nothing was computed for: `computedAt: 0` and a start past
     // its end say "no window yet" without a second flag to keep in step.
-    trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', sources: {}, days: {}, failed: [], retired: '' },
+    trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', target: 0, sources: {}, days: {}, failed: [], retired: '' },
   },
 })
 

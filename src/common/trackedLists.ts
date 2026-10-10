@@ -1891,6 +1891,56 @@ export function reviewStart(option: Pick<TrackedListsOption, 'reviewedThrough' |
 }
 
 /**
+ * What a stored review window was gathered against. A window whose basis no
+ * longer matches the options ({@link sameReviewBasis}) is about nothing at all,
+ * and is gathered again rather than shown.
+ */
+export interface ReviewBasis {
+  /** The watermark: a window that no longer follows it covers a range since dealt with. */
+  reviewedThrough: Day
+  /**
+   * Every tracked list's identity, address, view filter, tracking date and
+   * reading mode, in one string. The alias is deliberately not in it: renaming
+   * a list relabels its facet on the next re-run and is no reason to read the
+   * archive again. A changed filter is, since it changes which works each list wants.
+   */
+  listsSig: string
+  /** The target the window was sized to. */
+  target: number
+}
+
+/** The basis a window gathered under `option` is stored with. */
+export function reviewBasis(option: Pick<TrackedListsOption, 'reviewedThrough' | 'lists' | 'target'>): ReviewBasis {
+  return {
+    reviewedThrough: wholeNumber(option.reviewedThrough) ?? 0,
+    listsSig: listsSig(option.lists),
+    target: option.target,
+  }
+}
+
+/** Whether a window stored with `stored` still answers to `option`. */
+export function sameReviewBasis(stored: Partial<ReviewBasis>, option: Pick<TrackedListsOption, 'reviewedThrough' | 'lists' | 'target'>): boolean {
+  const current = reviewBasis(option)
+  return stored.reviewedThrough === current.reviewedThrough
+    && stored.listsSig === current.listsSig
+    && stored.target === current.target
+}
+
+function listsSig(lists: readonly TrackedList[]): string {
+  // Serialized rather than joined on a separator: a URL can hold very nearly
+  // any character, and two lists must never be able to spell one signature
+  // between them. The filter goes on the end only when there is one, so a list
+  // without one signs as it always has and no stored window goes stale over it.
+  return JSON.stringify(lists
+    .filter(list => list.tracked)
+    .map((list) => {
+      const sig: unknown[] = [list.id, list.kind, list.url, list.since, list.scan ? 1 : 0]
+      const filter = canonicalFilter(list.filter)
+      return filter ? [...sig, filter] : sig
+    }))
+}
+
+/**
  * The day a list's query starts from: the later of its tracking start and the
  * window's start, less one day — the margin that catches a work the archive
  * filed the day before but whose blurb is dated the first day. This is

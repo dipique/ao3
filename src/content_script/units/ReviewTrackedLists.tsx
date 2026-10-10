@@ -3,7 +3,7 @@ import MdiChevronLeft from '~icons/mdi/chevron-left.jsx'
 import MdiChevronRight from '~icons/mdi/chevron-right.jsx'
 import MdiLoading from '~icons/mdi/loading.jsx'
 
-import type { Day, Options, SnapshotDescriptor, TrackedList, TrackedReviewCache } from '#common'
+import type { Day, Options, SnapshotDescriptor, TrackedList, TrackedListsOption, TrackedReviewCache } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { LoadOptions, LoadResult, SearchHeaderControl, SearchSource } from '#content_script/searchView/host.tsx'
 import type { DeferredUpdate, ViewState } from '#content_script/searchView/view.tsx'
@@ -12,7 +12,6 @@ import type { CappedDay, FetchedWindow } from '#content_script/tracked/fetchWind
 import {
   ADDON_CLASS,
   cache,
-  canonicalFilter,
   formatDay,
   fromShortId,
   getArchiveLink,
@@ -22,7 +21,9 @@ import {
   packIds,
   parseUser,
   readWorkIds,
+  reviewBasis,
   reviewStart,
+  sameReviewBasis,
   sourceLabel,
   toast,
   toShortId,
@@ -291,8 +292,8 @@ export class ReviewTrackedLists extends Unit {
       hidesNothing: false,
       // A past day's works barely change, so a window is worth keeping between
       // visits — but only while it still answers to the reader's options. A
-      // window computed against a watermark or a list set that has moved is no
-      // longer about anything, and is read again at once.
+      // window computed against a watermark, list set or target that has moved
+      // is no longer about anything, and is read again at once.
       refreshInterval: () => (factsStale ? 0 : refreshIntervalMs(this.options.searchProfileListsRefreshHours)),
       nativeElements: () => [
         ...document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
@@ -353,7 +354,7 @@ export class ReviewTrackedLists extends Unit {
     // brought nothing back is not news about what the lists hold, and the stored
     // window stays exactly as it was.
     if (!result.blocked || result.works.length)
-      await this.commit(result, userId, { reviewedThrough: option.reviewedThrough, lists: option.lists })
+      await this.commit(result, userId, option)
     // These works are going straight on screen (a first load, or the reader's
     // own Refresh), so the toolbar has to describe the window they came from.
     // A reload that is only being offered leaves it alone — see {@link redrawBar}.
@@ -366,10 +367,11 @@ export class ReviewTrackedLists extends Unit {
   /**
    * Read the stored window, and say whether it still means anything.
    *
-   * A window computed against a watermark or a set of lists the reader has moved
-   * on from is about nothing at all — so it isn't merely refreshed behind them,
-   * it stops belonging (see {@link belongsToWindow}), which leaves the host with
-   * no stored copy to draw and sends it to gather a new one.
+   * A window computed against a watermark, a set of lists or a target the reader
+   * has moved on from ({@link sameReviewBasis}) is about nothing at all — so it
+   * isn't merely refreshed behind them, it stops belonging (see
+   * {@link belongsToWindow}), which leaves the host with no stored copy to draw
+   * and sends it to gather a new one.
    */
   private async readFacts(): Promise<void> {
     const option = this.options.trackedLists
@@ -380,11 +382,9 @@ export class ReviewTrackedLists extends Unit {
       this.logger.error('Could not read the stored review window', err)
       facts = null
     }
-    const watermark = Number.isSafeInteger(option.reviewedThrough) ? option.reviewedThrough : 0
     factsStale = !facts
       || facts.computedAt === 0
-      || facts.reviewedThrough !== watermark
-      || facts.listsSig !== listsSig(option.lists)
+      || !sameReviewBasis(facts, option)
     if (factsStale) {
       // Nothing carried over from a window that no longer describes anything.
       extras = null
@@ -402,7 +402,7 @@ export class ReviewTrackedLists extends Unit {
    * already holding its own. (The host writes the same list again the moment
    * `load` returns; a list already in the store costs nothing to write twice.)
    */
-  private async commit(result: FetchedWindow, userId: string, against: { reviewedThrough: Day, lists: readonly TrackedList[] }): Promise<void> {
+  private async commit(result: FetchedWindow, userId: string, against: TrackedListsOption): Promise<void> {
     const previous = facts
     const sources: { [sid: string]: string } = {}
     for (const [sid, ids] of result.sources)
@@ -419,8 +419,7 @@ export class ReviewTrackedLists extends Unit {
       start: result.window.start,
       end: result.window.end,
       computedAt: Date.now(),
-      reviewedThrough: against.reviewedThrough,
-      listsSig: listsSig(against.lists),
+      ...reviewBasis(against),
       sources,
       days,
       failed: result.failed,
@@ -632,7 +631,7 @@ export class ReviewTrackedLists extends Unit {
           session,
         })
         endOverride = override
-        await this.commit(result, userId, { reviewedThrough: option.reviewedThrough, lists: option.lists })
+        await this.commit(result, userId, option)
         deferred = null
         ctl.show(result.works)
       }
@@ -744,7 +743,7 @@ export class ReviewTrackedLists extends Unit {
         options: this.options,
         session,
       })
-      await this.commit(result, userId, { reviewedThrough: next, lists: option.lists })
+      await this.commit(result, userId, { ...option, reviewedThrough: next })
 
       // Last, and the thing that makes it so: the write re-runs every unit, and
       // the reopen it causes reads the window written just above.
@@ -855,27 +854,6 @@ function belongsToWindow(work: Work): boolean {
   if (!(sid in facts.sources) && !heldIds?.has(sid))
     return false
   return !reviewed?.ids.has(work.workId)
-}
-
-/**
- * What a stored window was computed against: every tracked list's identity,
- * address, view filter, tracking date and reading mode. The alias is
- * deliberately not in it — renaming a list relabels its facet on the next re-run
- * and is no reason to read the archive again. A changed filter is: it changes
- * which of the works read each list wants.
- */
-function listsSig(lists: readonly TrackedList[]): string {
-  // Serialized rather than joined on a separator: a URL can hold very nearly
-  // any character, and two lists must never be able to spell one signature
-  // between them. The filter goes on the end only when there is one, so a list
-  // without one signs as it always has and no stored window goes stale over it.
-  return JSON.stringify(lists
-    .filter(list => list.tracked)
-    .map((list) => {
-      const sig: unknown[] = [list.id, list.kind, list.url, list.since, list.scan ? 1 : 0]
-      const filter = canonicalFilter(list.filter)
-      return filter ? [...sig, filter] : sig
-    }))
 }
 
 /** How many works the new window gained and lost against the old one. */

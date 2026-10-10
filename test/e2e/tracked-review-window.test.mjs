@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core'
 
 import { formatDay } from '../../src/common/trackedLists.ts'
 import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
-import { pressFacet, settled } from './trackedPages.mjs'
+import { pressFacet, rerun, settled } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, search, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
@@ -250,5 +250,18 @@ describe('tracked review: the window', { skip }, () => {
     assert.ok(await tab.$('.AO3E--search-host.AO3E--tracked-review'))
     assert.ok(await tab.$('.AO3E--search-view--back'), 'opened over History, "Back to list" means History')
     assert.equal(await shownCount(), 10)
+  })
+
+  test('a new target sizes the range again, rather than drawing the stored one', async () => {
+    await rerun(tab, () => tab.evaluate(async () => {
+      const { 'option.trackedLists': option } = await browser.storage.local.get('option.trackedLists')
+      await browser.storage.local.set({ 'option.trackedLists': { ...option, target: 6 } })
+    }))
+    await reviewDrawn(tab)
+
+    const bar = await toolbar()
+    assert.equal(bar.meta, '1 day · 3 works (target 6)', 'the next day would take it to seven')
+    assert.equal(bar.range, rangeText(since, since))
+    assert.equal(await shownCount(), 3)
   })
 })
