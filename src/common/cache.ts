@@ -18,8 +18,19 @@ export interface SnapshotDescriptor {
   /**
    * Absolute URL of the listing, page unspecified. Callers set the page with
    * `withPage` ({@link file://./listUrl.ts}) rather than appending to it.
+   * For a filtered listing, the whole listing: a page read between dates keeps
+   * them in {@link dateFilter} instead.
    */
   listUrl: string
+  /**
+   * The date filter the listing was read under, as a query: a filtered
+   * listing's *Date Updated* bounds, which {@link listUrl} leaves out. Only
+   * whether a kept copy is the read an open asks for looks at it
+   * ({@link file://./../content_script/searchView/freshness.ts}). A refresh
+   * reads {@link listUrl} alone, and writes none. Absent for a read with no
+   * date filter.
+   */
+  dateFilter?: string
   /** Where the blurbs sit, when the source needs something other than the default. */
   blurbSelector?: string
 }

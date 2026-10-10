@@ -29,6 +29,8 @@ const BY_TITLE = `${LISTING}?work_search[sort_column]=title`
 /** The same read as {@link BY_TITLE}, in the spelling the listing's sidebar submits. */
 const BY_TITLE_SUBMITTED = `${ARCHIVE}/works?work_search[sort_column]=title&tag_id=Bees`
 const BOUNDED = `${LISTING}?work_search[date_from]=2026-01-01`
+/** The date filter a read of {@link BOUNDED} keeps apart from the listing's address. */
+const DATES = 'work_search[date_from]=2026-01-01'
 
 /** Two pages of two works: a walk of the listing is two requests. */
 const PER_PAGE = 2
@@ -71,9 +73,10 @@ function route(url) {
 /** The requests that read a listing: every one that names a page. */
 const walks = requests => requests.filter(url => new URL(url).searchParams.has('page'))
 
-/** A kept copy of {@link KEPT}'s works, read from `listUrl` `age` ago, under `key`. */
-function keptCopy(key, { sourceId, listUrl, age }) {
-  return storedLists({ [key]: { scrapedAt: Date.now() - age, blurbsHtml: KEPT.map(id => blurb(id)), descriptor: { sourceId, label: 'Kept', listUrl } } })
+/** A kept copy of {@link KEPT}'s works, read from `listUrl` (between the dates of `dateFilter`, if given) `age` ago, under `key`. */
+function keptCopy(key, { sourceId, listUrl, dateFilter, age }) {
+  const descriptor = { sourceId, label: 'Kept', listUrl, ...(dateFilter ? { dateFilter } : {}) }
+  return storedLists({ [key]: { scrapedAt: Date.now() - age, blurbsHtml: KEPT.map(id => blurb(id)), descriptor } })
 }
 
 /**
@@ -119,7 +122,7 @@ describe('search views of listings, and how long they trust their copy', { skip 
   describe('a filtered listing', () => {
     const BUTTON = '.AO3E--search-filtered-listing--button'
     const ON = { 'option.searchFilteredListing': true }
-    const kept = (listUrl, age) => keptCopy(KEY, { sourceId: 'works-filter', listUrl, age })
+    const kept = (listUrl, age, dateFilter) => keptCopy(KEY, { sourceId: 'works-filter', listUrl, dateFilter, age })
     const interval = { 'option.searchListingsRefreshHours': HOURS }
 
     test('left as it starts, the listing is read again on every open, however new its copy', async () => {
@@ -185,7 +188,7 @@ describe('search views of listings, and how long they trust their copy', { skip 
     })
 
     test('a copy read between dates is read again for the listing without them, however new', async () => {
-      const { tab, requests } = await openView(LISTING, BUTTON, { ...ON, ...interval, ...kept(BOUNDED, WITHIN) })
+      const { tab, requests } = await openView(LISTING, BUTTON, { ...ON, ...interval, ...kept(LISTING, WITHIN, DATES) })
       try {
         await until('the listing to be read again', async () => (await shownIds(tab)).join() === LIVE.join())
         assert.equal(walks(requests).length, PAGES)
@@ -195,11 +198,24 @@ describe('search views of listings, and how long they trust their copy', { skip 
       }
     })
 
-    test('a read between dates keeps its dates on the copy, and opens on it the next time', async () => {
+    test('a copy of the whole listing is read again for the listing between dates, however new', async () => {
+      const { tab, requests } = await openView(BOUNDED, BUTTON, { ...ON, ...interval, ...kept(LISTING, WITHIN) })
+      try {
+        await until('the listing to be read again', async () => (await shownIds(tab)).join() === LIVE.join())
+        assert.equal(walks(requests).length, PAGES)
+        assert.ok(walks(requests).every(url => new URL(url).searchParams.get('work_search[date_from]') === '2026-01-01'), 'the page as shown, between its dates')
+      }
+      finally {
+        await tab.close()
+      }
+    })
+
+    test('a read between dates keeps the whole listing\'s address on the copy, its dates apart, and opens on it the next time', async () => {
       const first = await openView(BOUNDED, BUTTON, { ...ON, ...interval })
       try {
         await until('the listing to be read', async () => (await shownIds(first.tab)).join() === LIVE.join())
-        assert.equal((await stored(first.tab, 'cache.searchLists'))[KEY].descriptor.listUrl, BOUNDED)
+        const { descriptor } = (await stored(first.tab, 'cache.searchLists'))[KEY]
+        assert.deepEqual({ listUrl: descriptor.listUrl, dateFilter: descriptor.dateFilter }, { listUrl: LISTING, dateFilter: DATES })
 
         const before = walks(first.requests).length
         await visit(first.tab, BOUNDED)

@@ -65,6 +65,25 @@ describe('isFresh', () => {
     assert.equal(isFresh(copy(HOUR_MS, { listUrl: `${BY_TITLE}&work_search[date_to]=2026-01-01` }), wanted(DAY)), false)
   })
 
+  describe('a filtered listing\'s copy, its date filter kept apart from the whole listing\'s address', () => {
+    const DATES = 'work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01'
+
+    test('is shown as it is for the listing read between the same dates', () => {
+      assert.equal(isFresh({ ...copy(HOUR_MS), dateFilter: DATES }, { ...wanted(DAY), dateFilter: DATES }), true)
+    })
+
+    test('is read again for the listing between other dates, or none, and a copy of the whole listing for the listing between dates', () => {
+      assert.equal(isFresh({ ...copy(HOUR_MS), dateFilter: DATES }, { ...wanted(DAY), dateFilter: 'work_search[date_from]=2026-01-01' }), false)
+      assert.equal(isFresh({ ...copy(HOUR_MS), dateFilter: DATES }, wanted(DAY)), false)
+      assert.equal(isFresh(copy(HOUR_MS), { ...wanted(DAY), dateFilter: DATES }), false)
+    })
+
+    test('kept while its address held its dates, is the same read as the listing between them', () => {
+      assert.equal(isFresh(copy(HOUR_MS, { listUrl: `${BY_TITLE}&${DATES}` }), { ...wanted(DAY), dateFilter: DATES }), true)
+      assert.equal(isFresh(copy(HOUR_MS, { listUrl: `${BY_TITLE}&${DATES}` }), wanted(DAY)), false)
+    })
+  })
+
   test('the same read in the listing\'s other spelling is shown as it is', () => {
     assert.equal(isFresh(copy(HOUR_MS), wanted(DAY, `${AO3}/works?work_search[sort_column]=title&tag_id=Bees&page=2`)), true)
   })

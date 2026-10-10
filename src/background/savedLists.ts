@@ -1,4 +1,4 @@
-import { cache, createLogger, createSavedListsReconciler, moveKeys, options, planListingRefile, savedListsWrite, SITE_EXPORT_JOB_KEY } from '#common'
+import { cache, createLogger, createSavedListsReconciler, moveKeys, options, planDateFilterSplit, planListingRefile, savedListsWrite, SITE_EXPORT_JOB_KEY, splitDateFilter } from '#common'
 
 const logger = createLogger('SavedLists')
 
@@ -50,6 +50,24 @@ export async function refileListings(): Promise<void> {
   const update = savedListsWrite(state, plan.state)
   if (Object.keys(update).length)
     await options.set(update)
+}
+
+/**
+ * Move each filtered listing's date filter out of its copy's stored address,
+ * and out of a stopped site export job's ({@link planDateFilterSplit},
+ * {@link splitDateFilter}), so a refresh, and a resumed job's, reads the whole
+ * listing. Run by `migrate()`; running it again changes nothing.
+ */
+export async function splitDateFilters(): Promise<void> {
+  const searchLists = await cache.get('searchLists')
+  const lists = planDateFilterSplit(searchLists)
+  if (lists !== searchLists)
+    await cache.set({ searchLists: lists })
+
+  const job = (await browser.storage.local.get(SITE_EXPORT_JOB_KEY))[SITE_EXPORT_JOB_KEY]
+  const descriptor = splitDateFilter(job?.descriptor)
+  if (descriptor !== job?.descriptor)
+    await browser.storage.local.set({ [SITE_EXPORT_JOB_KEY]: { ...job, descriptor } })
 }
 
 /**

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { dayOf, describeFilters, normalizeTrackedUrl, onListPage, pageUrl, readUrl, sameReading, sameRoot, sourceLabel, tagSearchUrl, trackedKey, trackedRoot } from '../../src/common/trackedLists.ts'
+import { dateFilterOf, dayOf, describeFilters, normalizeTrackedUrl, onListPage, pageUrl, sameReading, sameRoot, sourceLabel, tagSearchUrl, trackedKey, trackedRoot, withDateFilter } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
 
@@ -325,21 +325,49 @@ describe('trackedKey', () => {
   })
 })
 
-describe('readUrl', () => {
-  test('is the page as a walk of it reads it: sort, criteria and date bounds kept, the page and the form\'s noise dropped', () => {
-    const url = readUrl(`${AO3}/works?utf8=%E2%9C%93&work_search%5Bsort_column%5D=title&work_search%5Bdate_from%5D=2026-01-01`
-      + '&work_search%5Bdate_to%5D=2026-02-01&work_search%5Brevised_at%5D=&work_search%5Bcomplete%5D=T&tag_id=Bees&commit=Sort+and+Filter&page=3')
-    assert.equal(url, '/works?work_search[sort_column]=title&work_search[complete]=T&tag_id=Bees&work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01')
+describe('dateFilterOf', () => {
+  const SUBMIT = `${AO3}/works?utf8=%E2%9C%93&work_search%5Bsort_column%5D=title&work_search%5Bdate_from%5D=2026-01-01`
+    + '&work_search%5Bdate_to%5D=2026-02-01&work_search%5Brevised_at%5D=&work_search%5Bcomplete%5D=T&tag_id=Bees&commit=Sort+and+Filter&page=3'
+
+  test('is the page\'s Date Updated bounds, which a list\'s URL leaves out, in that URL\'s spelling', () => {
+    assert.equal(dateFilterOf(SUBMIT), 'work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01')
+    assert.equal(dateFilterOf(`${AO3}/tags/Bees/works?work_search[date_to]=2026-02-01`), 'work_search[date_to]=2026-02-01')
+    assert.equal(normalizeTrackedUrl(SUBMIT).url, '/works?work_search[sort_column]=title&work_search[complete]=T&tag_id=Bees')
   })
 
-  test('is the normalized URL when the page has no date bounds', () => {
-    for (const href of [`${AO3}/tags/Bees/works?work_search[sort_column]=kudos_count`, `${AO3}/works/search?work_search[query]=bees&page=2`, `${AO3}/series/12?page=4`])
-      assert.equal(readUrl(href), normalizeTrackedUrl(href).url, href)
+  test('is null for a page with none: no bounds, empty ones, or the relative bound alone, which a list\'s URL keeps', () => {
+    for (const href of [
+      `${AO3}/tags/Bees/works?work_search[sort_column]=kudos_count`,
+      `${AO3}/works?work_search[date_from]=&work_search[date_to]=&tag_id=Bees`,
+      `${AO3}/tags/Bees/works?work_search[revised_at]=%3C+2+weeks`,
+      `${AO3}/series/12?work_search[date_from]=2026-01-01`,
+    ])
+      assert.equal(dateFilterOf(href), null, href)
   })
 
   test('is null for a page that isn\'t a list on the archive', () => {
-    assert.equal(readUrl(`${AO3}/users/someone/readings?show=to-read`), null)
-    assert.equal(readUrl('https://example.com/tags/Bees/works'), null)
+    assert.equal(dateFilterOf(`${AO3}/users/someone/readings?show=to-read&work_search[date_from]=2026-01-01`), null)
+    assert.equal(dateFilterOf('https://example.com/tags/Bees/works?work_search[date_from]=2026-01-01'), null)
+  })
+})
+
+describe('withDateFilter', () => {
+  test('puts a date filter back on a list\'s URL: the read the two stand for', () => {
+    const href = `${AO3}/works?work_search[sort_column]=title&work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01&tag_id=Bees&page=2`
+    const whole = `${AO3}${normalizeTrackedUrl(href).url}`
+    const read = withDateFilter(whole, dateFilterOf(href))
+    assert.equal(read, `${whole}&work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01`)
+    assert.equal(sameReading(read, href), true)
+    assert.equal(sameReading(whole, href), false, 'the listing without its dates is another read')
+  })
+
+  test('starts the query on a URL that has none', () => {
+    assert.equal(withDateFilter(`${AO3}/tags/Bees/works`, 'work_search[date_from]=2026-01-01'), `${AO3}/tags/Bees/works?work_search[date_from]=2026-01-01`)
+  })
+
+  test('with no date filter, is the URL as it is', () => {
+    for (const filter of [undefined, null, ''])
+      assert.equal(withDateFilter(`${AO3}/tags/Bees/works`, filter), `${AO3}/tags/Bees/works`, String(filter))
   })
 })
 

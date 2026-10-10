@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { addressOf, aliasOf, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, moveKeys, planLetGo, planListingRefile, planRemoveList, planRetitle, planSaveBack, planSavedLists, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
-import { normalizeTrackedUrl, refineLink, trackedKey } from '../../src/common/trackedLists.ts'
+import { addressOf, aliasOf, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, moveKeys, planDateFilterSplit, planLetGo, planListingRefile, planRemoveList, planRetitle, planSaveBack, planSavedLists, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, splitDateFilter, storedListRefs } from '../../src/common/savedLists.ts'
+import { normalizeTrackedUrl, refineLink, sameReading, trackedKey, withDateFilter } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
 const DAY = 20_000
@@ -111,12 +111,23 @@ describe('filteredListing', () => {
     assert.equal(filteredListing(spellings[3]).url, '/works?work_search[sort_column]=kudos_count&tag_id=Bees')
   })
 
-  test('its own URL keeps the page\'s date bounds too, which its address leaves out, so its copy says which read it is', () => {
-    const bounded = `${AO3}/works?work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01&tag_id=Bees&page=2`
+  test('its own URL is the whole listing\'s, as its saved list\'s is: the page\'s Date Updated bounds are kept apart, so its copy says which read it is', () => {
+    const bounded = `${AO3}/works?work_search[date_from]=2026-01-01&work_search[sort_column]=title&work_search[date_to]=2026-02-01&tag_id=Bees&page=2`
     const listing = filteredListing(bounded)
-    assert.equal(listing.key, 'works-filter:/tags/Bees/works')
-    assert.equal(listing.url, '/works?tag_id=Bees&work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01')
-    assert.equal(addressOf(listing.url), listing.key)
+    assert.deepEqual(listing, {
+      key: 'works-filter:/tags/Bees/works',
+      url: '/works?work_search[sort_column]=title&tag_id=Bees',
+      dateFilter: 'work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01',
+      label: 'Tag: Bees',
+    })
+    assert.equal(listing.url, normalizeTrackedUrl(bounded).url, 'the URL a list made from the page keeps')
+    assert.equal(sameReading(withDateFilter(`${AO3}${listing.url}`, listing.dateFilter), bounded), true, 'the two together are the read')
+  })
+
+  test('the relative date bound stays in its URL, as a saved list\'s URL keeps it, and is no date filter kept apart', () => {
+    const recent = `${AO3}/tags/Bees/works?work_search[revised_at]=%3C+2+weeks`
+    assert.deepEqual(filteredListing(recent), { key: 'works-filter:/tags/Bees/works', url: '/tags/Bees/works?work_search[revised_at]=%3C+2+weeks', label: 'Tag: Bees' })
+    assert.equal(filteredListing(recent).url, normalizeTrackedUrl(recent).url)
   })
 
   test('what a listing is filtered by makes it another listing, with a copy of its own', () => {
@@ -1437,5 +1448,84 @@ describe('moveKeys', () => {
     const store = deepFreeze({ a: 1 })
     assert.equal(moveKeys(store, []), store)
     assert.equal(moveKeys(store, [['gone', 'y']]), store)
+  })
+})
+
+describe('planDateFilterSplit', () => {
+  // A filtered listing's copy kept while its descriptor's address held the
+  // date filter the page was read under, as the search view kept it then.
+  const BETWEEN = `${AO3}/works?work_search[date_from]=2026-01-01&work_search[sort_column]=title&work_search[date_to]=2026-02-01&tag_id=Bees&page=2`
+  const DATES = 'work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01'
+  const WHOLE = `${AO3}/works?work_search[sort_column]=title&tag_id=Bees`
+  const KEY = 'works-filter:/tags/Bees/works'
+
+  const described = (sourceId, listUrl, fields = {}) => ({ sourceId, label: 'Tag: Bees', listUrl, ...fields })
+  /** A copy as `cache.searchLists` holds it, described by `descriptor`. */
+  const kept = descriptor => ({ v: 3, scrapedAt: 1_000, ids: 'a,b', ctx: { a: '<p>ctx</p>' }, ...(descriptor ? { descriptor } : {}) })
+  const legacy = () => kept(described(FILTERED_LISTING_SOURCE_ID, `${WHOLE}&${DATES}`))
+
+  /** The plan, and the plan again over what it made, which must hand that back as it is. */
+  function split(searchLists) {
+    deepFreeze(searchLists)
+    const first = planDateFilterSplit(searchLists)
+    assert.equal(planDateFilterSplit(deepFreeze(first)), first, 'the second run changes nothing')
+    return first
+  }
+
+  test('a filtered listing\'s copy whose address holds its date filter keeps the whole listing\'s address, its dates apart, and all else as it was', () => {
+    const lists = split({ [KEY]: legacy() })
+    assert.deepEqual(lists, { [KEY]: kept(described(FILTERED_LISTING_SOURCE_ID, WHOLE, { dateFilter: DATES })) })
+  })
+
+  test('which is the copy its search view now keeps of that read, at the same address and the same list\'s', () => {
+    const listing = filteredListing(BETWEEN)
+    const { descriptor } = split({ [KEY]: legacy() })[KEY]
+    assert.deepEqual({ listUrl: descriptor.listUrl, dateFilter: descriptor.dateFilter }, { listUrl: new URL(listing.url, AO3).href, dateFilter: listing.dateFilter })
+    assert.equal(addressOf(descriptor.listUrl), addressOf(legacy().descriptor.listUrl))
+    assert.equal(sameReading(withDateFilter(descriptor.listUrl, descriptor.dateFilter), legacy().descriptor.listUrl), true, 'still the read it was')
+  })
+
+  test('every other copy is left as it is: the same object when none needs it', () => {
+    const searchLists = {
+      [KEY]: kept(described(FILTERED_LISTING_SOURCE_ID, WHOLE)),
+      'works-filter:/tags/Wasps/works': kept(described(FILTERED_LISTING_SOURCE_ID, `${AO3}/tags/Wasps/works`, { dateFilter: DATES })),
+      'works-filter:/tags/Moths/works': kept(described(FILTERED_LISTING_SOURCE_ID, `${AO3}/tags/Moths/works?work_search[revised_at]=%3C+2+weeks`)),
+      'text-search:work_search%5Bdate_from%5D=2026-01-01&work_search%5Bquery%5D=tea': kept(described('text-search', `${AO3}/works/search?work_search%5Bquery%5D=tea&work_search%5Bdate_from%5D=2026-01-01&page=1`)),
+      'marked-for-later:me': kept(described('marked-for-later', `${AO3}/users/me/readings?show=to-read`)),
+      'works-filter:elsewhere': kept(described(FILTERED_LISTING_SOURCE_ID, `${BROKEN}?work_search[date_from]=2026-01-01`)),
+      'works-filter:/tags/Old/works': kept(),
+      'not-a-list': 'junk',
+    }
+    assert.equal(split(searchLists), searchLists)
+  })
+
+  test('nothing stored, or nothing that is stored lists, is nothing to do', () => {
+    for (const store of [{}, null, undefined, 'junk'])
+      assert.equal(planDateFilterSplit(store), store, String(store))
+  })
+})
+
+describe('splitDateFilter', () => {
+  const DATES = 'work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01'
+  const WHOLE = `${AO3}/tags/Bees/works`
+
+  test('a stopped job\'s descriptor of a filtered listing read between dates keeps the whole listing\'s address, its dates apart; again, it is as it is', () => {
+    const job = deepFreeze({ sourceId: FILTERED_LISTING_SOURCE_ID, label: 'Tag: Bees', listUrl: `${WHOLE}?${DATES}` })
+    const first = splitDateFilter(job)
+    assert.deepEqual(first, { sourceId: FILTERED_LISTING_SOURCE_ID, label: 'Tag: Bees', listUrl: WHOLE, dateFilter: DATES })
+    assert.equal(splitDateFilter(deepFreeze(first)), first)
+  })
+
+  test('any other is handed back as it is', () => {
+    for (const descriptor of [
+      { sourceId: FILTERED_LISTING_SOURCE_ID, label: 'Tag: Bees', listUrl: WHOLE },
+      { sourceId: 'text-search', label: 'Search: tea', listUrl: `${AO3}/works/search?work_search[query]=tea&${DATES}` },
+      { sourceId: FILTERED_LISTING_SOURCE_ID, label: 'Elsewhere', listUrl: `${BROKEN}?${DATES}` },
+      { sourceId: FILTERED_LISTING_SOURCE_ID, label: 'No address' },
+      undefined,
+      null,
+      'junk',
+    ])
+      assert.equal(splitDateFilter(descriptor), descriptor, JSON.stringify(descriptor))
   })
 })

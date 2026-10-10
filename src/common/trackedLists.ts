@@ -382,7 +382,7 @@ const DROPPED_PARAMS = new Set([
 /**
  * The absolute date bounds a listing's sidebar and the search form set. Out of
  * every stored URL and key ({@link DROPPED_PARAMS}), and still a bound on what
- * a walk of the page reads ({@link readUrl}).
+ * a walk of the page reads ({@link dateFilterOf}).
  */
 const DATE_BOUND_PARAMS = new Set(['work_search[date_from]', 'work_search[date_to]'])
 
@@ -457,13 +457,24 @@ export function normalizeTrackedUrl(href: string): NormalizedTrackedUrl | null {
 }
 
 /**
- * The page at `href` as a walk of it reads it: its {@link normalizeTrackedUrl}
- * URL, sort and all, with the page's date bounds kept on. A path, for the
- * caller to make absolute; null for a page that isn't trackable.
+ * The page's date filter: the absolute date bounds its *Date Updated* sidebar
+ * sets, which its {@link normalizeTrackedUrl} URL leaves out and a walk of the
+ * page still reads, as a query in that URL's spelling. Null for a page with
+ * none, and for one that isn't trackable. The relative bound is no part of it:
+ * the URL keeps that.
  */
-export function readUrl(href: string): string | null {
-  const parsed = parseTracked(href)
-  return parsed && withQuery(parsed.path, [...parsed.params, ...parsed.bounds].map(serializeParam))
+export function dateFilterOf(href: string): string | null {
+  const bounds = parseTracked(href)?.bounds ?? []
+  return bounds.length ? bounds.map(serializeParam).join('&') : null
+}
+
+/**
+ * `url` with a date filter ({@link dateFilterOf}) put back on its query: the
+ * read the two stand for, as {@link sameReading} compares it. `url` as it is
+ * with none.
+ */
+export function withDateFilter(url: string, dateFilter: string | null | undefined): string {
+  return dateFilter ? `${url}${url.includes('?') ? '&' : '?'}${dateFilter}` : url
 }
 
 /**

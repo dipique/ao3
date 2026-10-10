@@ -226,7 +226,10 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
         : undefined
 
   if (!notWritten) {
-    await writeSnapshot(cacheKey, works, descriptor)
+    // Read from `listUrl` alone, so a read of the whole listing, whatever date
+    // filter the copy was last read under.
+    const { dateFilter, ...whole } = descriptor
+    await writeSnapshot(cacheKey, works, whole)
     await onPersist?.(works)
   }
 

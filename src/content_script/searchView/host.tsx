@@ -214,8 +214,8 @@ export interface SearchSource {
    *
    * Measured from the snapshot's `scrapedAt`, which only a real scrape moves,
    * and only for a snapshot read from the listing this source reads now: its
-   * descriptor's `listUrl` ({@link isFresh}). The view's Refresh button ignores
-   * it, as does a view opened with no stored copy at all.
+   * descriptor's `listUrl` and date filter ({@link isFresh}). The view's
+   * Refresh button ignores it, as does a view opened with no stored copy at all.
    */
   refreshInterval?: () => number
   /**
@@ -1347,9 +1347,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         // A copy younger than the source's interval is taken as it is: reloading a
         // long list on every visit is how a reader gets rate-limited, and the
         // Refresh button is right there when they want it sooner.
+        const wanted = source.descriptor()
         const recent = isFresh(
-          { scrapedAt: cached.scrapedAt, missing: cached.missing, listUrl: cached.descriptor?.listUrl },
-          { intervalMs: source.refreshInterval?.() ?? 0, listUrl: source.descriptor().listUrl, now: Date.now() },
+          { scrapedAt: cached.scrapedAt, missing: cached.missing, listUrl: cached.descriptor?.listUrl, dateFilter: cached.descriptor?.dateFilter },
+          { intervalMs: source.refreshInterval?.() ?? 0, listUrl: wanted.listUrl, dateFilter: wanted.dateFilter, now: Date.now() },
         )
         // `undefined` is a full reload, `null` is a top-up with nothing to find.
         const plan = !recent && opts.refresh !== false && source.topUp ? source.topUp(stored) : undefined

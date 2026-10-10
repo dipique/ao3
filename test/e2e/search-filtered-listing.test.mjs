@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { planSavedLists, storedListRefs } from '../../src/common/savedLists.ts'
 import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
-import { startOptions, until } from './optionsPage.mjs'
+import { startOptions, stubArchive, until } from './optionsPage.mjs'
 import { ARCHIVE, blurb, keptStore, launch, listingPage, navigateBy, openTab, pillText, stored, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -31,13 +31,15 @@ function isListing(url) {
   return url.pathname === '/tags/Bees/works' || (url.pathname === '/works' && url.searchParams.get('tag_id') === 'Bees')
 }
 
+/** A work of the listing's blurb. */
+const work = id => blurb(id, { characters: DRACO.has(id) ? ['Draco Malfoy'] : ['Harry Potter'] })
+
 /** The listing's page `url` names: in date order, or, sorted by title, the other way about. */
 function listing(url) {
   const ordered = url.searchParams.get('work_search[sort_column]') === 'title' ? [...IDS].reverse() : IDS
   const page = Number(url.searchParams.get('page') ?? 1)
   const ids = ordered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
-  const blurbs = ids.map(id => blurb(id, { characters: DRACO.has(id) ? ['Draco Malfoy'] : ['Harry Potter'] }))
-  return listingPage(url, { tagId: 'Bees', blurbs, subnav: true, pages: 2, total: IDS.length })
+  return listingPage(url, { tagId: 'Bees', blurbs: ids.map(work), subnav: true, pages: 2, total: IDS.length })
 }
 
 /** The requests that walk the listing: every one that names a page. */
@@ -268,6 +270,113 @@ describe('search a filtered listing\'s works', { skip }, () => {
       assert.deepEqual(await shownIds(tab), IDS.filter(id => !DRACO.has(id)))
       await until('the pill to follow the view', async () => await pillText(tab) === 'Refining “Bees, no Draco”')
       assert.equal(await tab.$(BUTTON), null, 'the listing still offers no view of its own')
+    }
+    finally {
+      await tab.close()
+    }
+  })
+})
+
+/**
+ * A listing between dates, its sidebar's Date Updated bounds, is no other list:
+ * a saved list is the whole listing. The view reads the page as shown, dates
+ * and all, and its copy keeps the whole listing's address, with the dates kept
+ * beside it for the reuse check alone. So the options page's Refresh reads the
+ * whole listing, which the list's links open too; and a copy of one read is
+ * never opened as the other.
+ */
+describe('a listing between dates', { skip }, () => {
+  const BETWEEN = `${ARCHIVE}/works?work_search[sort_column]=title&work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01&tag_id=Bees`
+  /** The listing {@link BETWEEN} is a read of: the same, without its dates. */
+  const WHOLE = `${ARCHIVE}/works?work_search[sort_column]=title&tag_id=Bees`
+  const DATES = 'work_search[date_from]=2026-01-01&work_search[date_to]=2026-02-01'
+  /** The works updated between the dates: one page of the listing by title. */
+  const RECENT = [...IDS].reverse().slice(0, PER_PAGE)
+  const SEED = { ...ON, 'option.searchListingsRefreshHours': 1 }
+
+  /** Whether an address reads between dates. */
+  const between = url => ['work_search[date_from]', 'work_search[date_to]'].some(name => new URL(url).searchParams.has(name))
+  /** The listing, and, between the dates, only the works updated then. */
+  const route = url => (!isListing(url) ? null : between(url) ? listingPage(url, { tagId: 'Bees', blurbs: RECENT.map(work), subnav: true }) : listing(url))
+  const shownIds = tab => tab.$$eval(`${RESULTS}:not(.AO3E--search-view--hidden)`, els => els.map(li => li.id.replace('work_', '')))
+
+  let session
+  /** The store as the AO3 tab left it, then as the options page's Refresh left it. */
+  let kept
+  let refreshed
+
+  before(async () => {
+    session = await startOptions()
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  test('the view reads the page between its dates, and its copy keeps the whole listing\'s address, the dates apart', async () => {
+    const requests = []
+    const tab = await openTab(session.browser, { seed: SEED, route, requests })
+    try {
+      await visit(tab, BETWEEN)
+      await tab.click(BUTTON)
+      await until('the view to show the works updated between the dates', async () => (await shownIds(tab)).join() === RECENT.join())
+      assert.ok(walks(requests).length > 0 && walks(requests).every(between), 'the page as shown')
+      kept = await keptStore(tab)
+      assert.deepEqual(kept['cache.searchLists'][KEY].descriptor, { sourceId: 'works-filter', label: 'Tag: Bees', listUrl: WHOLE, dateFilter: DATES })
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  test('the options page\'s Refresh reads the whole listing, and the copy is then its read; the list\'s links open it whole', async () => {
+    // The record the background files the copy under.
+    const { state } = planSavedLists({ tracked: { lists: [] }, saved: { lists: {} } }, storedListRefs(kept['cache.searchLists']))
+    const [list] = Object.values(state.saved.lists)
+    let archive
+    const options = await session.open({
+      seed: { ...kept, 'option.savedLists': state.saved },
+      hash: '#saved-lists',
+      viewport: { width: 1440, height: 900 },
+      prepare: async (page) => {
+        archive = await stubArchive(page, (url) => {
+          const body = route(new URL(url))
+          return body === null ? { status: 404 } : { body }
+        })
+      },
+    })
+    try {
+      await options.press(await options.control(await options.savedListDetails(list.id), 'button', 'Refresh list'))
+      await until('the refresh to write the copy', async () => (await options.lastWrite('cache.searchLists'))?.[KEY] != null)
+      const read = archive.asked.filter(url => isListing(new URL(url)))
+      assert.ok(read.length > 0)
+      assert.deepEqual(read.filter(between), [], 'never between the dates')
+      const copy = (await options.stored('cache.searchLists'))[KEY]
+      assert.deepEqual(copy.descriptor, { sourceId: 'works-filter', label: 'Tag: Bees', listUrl: WHOLE })
+      assert.deepEqual(storedListIds(copy).sort(), [...IDS].sort(), 'every work of the listing')
+
+      const viewEdit = await (await options.control(await options.savedList(list.id), 'link', `View or edit ${list.title} on AO3`)).evaluate(a => a.href)
+      assert.equal(isListing(new URL(viewEdit)), true, viewEdit)
+      assert.equal(between(viewEdit), false, viewEdit)
+      assert.deepEqual(options.problems(), [])
+      refreshed = await options.page.evaluate(() => window.browser.storage.local.get(null))
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('back on AO3, the whole listing opens on the refreshed copy, and the page between the dates is read again', async () => {
+    const requests = []
+    const tab = await openTab(session.browser, { seed: refreshed, route, requests })
+    try {
+      await visit(tab, WHOLE)
+      await tab.click(BUTTON)
+      await until('the view to show the copy', async () => (await shownIds(tab)).length === IDS.length)
+      assert.deepEqual(walks(requests), [], 'within the interval, nothing is asked of AO3')
+
+      await visit(tab, BETWEEN)
+      await tab.click(BUTTON)
+      await until('the page between the dates to be read again', async () => (await shownIds(tab)).join() === RECENT.join())
+      assert.ok(walks(requests).length > 0 && walks(requests).every(between))
     }
     finally {
       await tab.close()

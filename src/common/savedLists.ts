@@ -22,7 +22,7 @@
 
 import type { Day, NormalizedTrackedUrl, TrackedFilter, TrackedKind, TrackedList, TrackedListsOption, TrackedMeta, TrackedQuery, TrackedType } from './trackedLists.ts'
 
-import { defaultTitle, entrySignature, fillMeta, isListId, newTrackedListId, normalizeTrackedUrl, parseArchiveUrl, queryOf, readUrl, requery, sameTitle, titleAfterUpdate, titleTakenBy, trackedKey, trackedMeta, uniqueTitle, withQueryOf } from './trackedLists.ts'
+import { dateFilterOf, defaultTitle, entrySignature, fillMeta, isListId, newTrackedListId, normalizeTrackedUrl, parseArchiveUrl, queryOf, requery, sameTitle, titleAfterUpdate, titleTakenBy, trackedKey, trackedMeta, uniqueTitle, withQueryOf } from './trackedLists.ts'
 
 /** One saved list: its identity, and what it searches. */
 export interface SavedList {
@@ -104,11 +104,17 @@ export interface FilteredListing {
   /** Where its copy is stored: its address, which starts with its source, as every stored list's key does. */
   key: string
   /**
-   * The listing as the page reads it ({@link readUrl}): a saved list's URL for
-   * it, sort and all, plus the date bounds a saved list leaves out. A path, for
-   * the caller to make absolute.
+   * The whole listing: a saved list's URL for it ({@link normalizeTrackedUrl}),
+   * sort and all. What a refresh of its copy reads, and where the copy opens on
+   * the archive. A path, for the caller to make absolute.
    */
   url: string
+  /**
+   * The date filter the page reads the listing under ({@link dateFilterOf}),
+   * which {@link url} leaves out: kept beside the copy so that it says which
+   * read it is. Absent for none.
+   */
+  dateFilter?: string
   /** What it is a listing of, as a list made from it is titled. */
   label: string
 }
@@ -122,12 +128,63 @@ export interface FilteredListing {
  * query its Sort & Filter sidebar submits — and whatever it is sorted by or
  * whichever page it is on. A sort changes the order of the works, not which
  * they are. It is also the address its saved list joins it by.
+ *
+ * A saved list is the whole listing, so the page's *Date Updated* bounds are
+ * no part of its URL: they are its date filter, kept apart.
  */
 export function filteredListing(href: string): FilteredListing | null {
   const normalized = normalizeTrackedUrl(href)
   if (normalized?.kind !== FILTERED_LISTING_SOURCE_ID)
     return null
-  return { key: normalized.key, url: readUrl(href)!, label: defaultTitle(trackedMeta({ url: normalized.url })!) }
+  const dateFilter = dateFilterOf(href)
+  return {
+    key: normalized.key,
+    url: normalized.url,
+    ...(dateFilter ? { dateFilter } : {}),
+    label: defaultTitle(trackedMeta({ url: normalized.url })!),
+  }
+}
+
+/**
+ * A filtered listing's descriptor as its search view writes one: `listUrl` the
+ * whole listing ({@link filteredListing}), and the date filter it was read
+ * under in `dateFilter`. One whose `listUrl` holds the date filter has it moved
+ * apart, the read it names unchanged; anything else, a copy of any other
+ * source's included, is handed back as it is. For a stopped job's descriptor,
+ * and through {@link planDateFilterSplit} for the stored lists'.
+ */
+export function splitDateFilter<D>(descriptor: D): D {
+  if (!isObject(descriptor) || descriptor.sourceId !== FILTERED_LISTING_SOURCE_ID || typeof descriptor.listUrl !== 'string')
+    return descriptor
+  const dateFilter = dateFilterOf(descriptor.listUrl)
+  const url = parseArchiveUrl(descriptor.listUrl)
+  const whole = normalizeTrackedUrl(descriptor.listUrl)?.url
+  if (!dateFilter || !url || !whole)
+    return descriptor
+  return { ...descriptor, listUrl: new URL(whole, url).href, dateFilter } as D
+}
+
+/**
+ * `cache.searchLists` with every copy's descriptor split as
+ * {@link splitDateFilter} splits it: the migration for filtered listings'
+ * copies whose address holds their date filter. The same object when no copy
+ * needs it, so running it on its own output changes nothing. Keys, works and
+ * read times are untouched.
+ */
+export function planDateFilterSplit<L>(searchLists: { [key: string]: L }): { [key: string]: L } {
+  if (!isObject(searchLists))
+    return searchLists
+  let out: { [key: string]: L } | null = null
+  for (const [key, list] of Object.entries(searchLists)) {
+    if (!isObject(list))
+      continue
+    const descriptor = splitDateFilter(list.descriptor)
+    if (descriptor !== list.descriptor) {
+      out ??= { ...searchLists }
+      out[key] = { ...list, descriptor } as L
+    }
+  }
+  return out ?? searchLists
 }
 
 /**

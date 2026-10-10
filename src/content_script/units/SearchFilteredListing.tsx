@@ -115,6 +115,7 @@ export class SearchFilteredListing extends Unit {
         sourceId: SOURCE_ID,
         label: listing.label,
         listUrl: getArchiveLink(listing.url),
+        ...(listing.dateFilter ? { dateFilter: listing.dateFilter } : {}),
       }),
       // This page's own query, filters and sort as the reader has them, so the
       // walk reads exactly the listing on screen, from page 1 whichever page
