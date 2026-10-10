@@ -15,7 +15,7 @@ import type { FacetDir, FacetKey } from './engine.ts'
  *
  * Unlike the native sidebar the engine also understands `require` (AND within a
  * group), so a bridged decorator can offer all three directions — see
- * {@link file://../filterTarget.ts}, which is what the decorators actually call.
+ * {@link file://../filterTarget.tsx}, which is what the decorators actually call.
  */
 export interface FacetBridge {
   isSelected: (key: FacetKey, dir: FacetDir, value: string) => boolean

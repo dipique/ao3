@@ -39,18 +39,21 @@ const MAX_URL_LENGTH = 10_000
 
 /**
  * Rebuilds the query string a GET form would natively produce, applying three
- * transforms that were verified to preserve results exactly (see
- * ao3/discovery/search-url-compression.md):
+ * transforms that were checked against the live archive to return exactly the
+ * same works as the browser's native URL:
  *
  *  1. Drop `commit` — it's just the submit button's label, not a filter.
  *  2. Drop empty-valued params — a blank value is equivalent to absent.
  *  3. Use literal `[`/`]` in keys and `+` for spaces in values instead of the
  *     percent-encoded `%5B`/`%5D`/`%20`. Rack accepts these raw, saving several
- *     characters per array entry.
+ *     characters per array entry. Values are otherwise left percent-encoded —
+ *     tag names carry `&`, `|`, commas and the like that genuinely need it.
  *
  * Crucially, the repeated `name[]=value` form for each id is preserved — both
- * comma-joining and dropping the `[]` were verified to silently return wrong
- * results, so they are off-limits.
+ * shorter alternatives silently return wrong results, so they are off-limits.
+ * Comma-joining the ids into one value is read as a single bogus id that
+ * matches nothing, and dropping the `[]` makes Rack keep only the last value
+ * per key, collapsing every multi-id filter to a single id.
  */
 export function compressFilterFormUrl(form: HTMLFormElement): string {
   const formData = new FormData(form)

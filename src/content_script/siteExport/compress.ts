@@ -19,7 +19,7 @@
  *
  * Pure — no `#common`, no `browser`, no DOM — so the whole round trip is
  * exercised by a plain `node --test`
- * ({@link file://../../../../test/siteExport/compress.test.mjs}).
+ * ({@link file://../../../test/siteExport/compress.test.mjs}).
  */
 
 /**
