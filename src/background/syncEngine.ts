@@ -36,6 +36,7 @@ export const resumeSync = engine.start
 export const initSyncEngine = engine.init
 export const setSyncEnabled = engine.setEnabled
 export const resolveHeldSync = engine.resolveHeld
+export const replaceSyncedCopy = engine.replaceSyncedCopy
 export const clearSyncedData = engine.clearSyncedData
 export const getSyncUsage = engine.getUsage
 export const getSyncStatus = engine.getStatus

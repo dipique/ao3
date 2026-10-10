@@ -20,6 +20,7 @@ export const SYNC_META_DEFAULTS: SyncMeta = {
   lastBackupDate: '',
 
   pause: null,
+  inconsistent: null,
   staleBuild: null,
   reloadAttemptedFor: '',
 

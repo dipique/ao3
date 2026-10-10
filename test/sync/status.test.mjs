@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { SYNC_CONSISTENCY_WAIT_MS } from '../../src/common/constants.ts'
 import { syncStatusView } from '../../src/options_ui/model/syncStatus.ts'
 
 /** This browser's sync version. */
@@ -235,6 +236,55 @@ describe('syncStatusView', () => {
       const view = syncStatusView({ ...ON, pause: { ...FIRST, otherCopy: true } }, V)
       assert.deepEqual(view.chip, { state: 'first-sync', word: 'On hold', detail: 'Settings from another browser are waiting for your answer.', severity: 'warning' })
       assert.deepEqual(view.callouts, syncStatusView({ ...ON, pause: FIRST }, V).callouts)
+    })
+  })
+
+  /**
+   * A synced copy this browser can't read whole, still so past the wait: no
+   * other browser is taken to be sending the rest any more.
+   */
+  describe('synced settings that can\'t be read whole', () => {
+    const MINUTES = SYNC_CONSISTENCY_WAIT_MS / 60_000
+    const SINCE = AT - SYNC_CONSISTENCY_WAIT_MS
+    const OVERDUE = { since: SINCE, overdue: true, replaceable: true }
+    const TEXT = `Your synced settings are inconsistent: part of them is missing or doesn't match the rest, and nothing has arrived to complete them in ${MINUTES} minutes. Changes you make here won't sync until they're whole again.`
+    const CHIP = { state: 'inconsistent', word: 'Inconsistent', detail: 'Your synced settings can\'t be read whole.', severity: 'destructive' }
+    const REPLACE = { choice: 'replace', label: 'Replace them with this browser\'s settings', consequence: 'Makes this browser\'s settings your synced settings. Your other browsers ask before using them wherever their own settings differ, and back theirs up first.' }
+
+    test('past the wait: says they are inconsistent, and offers to replace them with this browser\'s settings', () => {
+      assert.deepEqual(syncStatusView({ ...ON, inconsistent: OVERDUE, usage: usage(68) }, V), {
+        chip: CHIP,
+        lastSynced: LAST_SYNCED,
+        callouts: [{
+          state: 'inconsistent',
+          severity: 'destructive',
+          text: TEXT,
+          hook: { 'data-sync-inconsistent': '' },
+          decision: { lines: [], backup: null, answers: [REPLACE] },
+        }],
+        usage: HEALTHY_USAGE,
+      })
+    })
+
+    test('where this browser\'s own settings don\'t pass the same check, says so with no offer', () => {
+      const view = syncStatusView({ ...ON, inconsistent: { ...OVERDUE, replaceable: false } }, V)
+      assert.deepEqual(view.chip, CHIP)
+      assert.deepEqual(view.callouts, [{ state: 'inconsistent', severity: 'destructive', text: TEXT, hook: { 'data-sync-inconsistent': '' } }])
+    })
+
+    test('within the wait says nothing: another browser may still be sending them', () => {
+      assert.deepEqual(syncStatusView({ ...ON, inconsistent: { since: AT, overdue: false, replaceable: false } }, V), syncStatusView(ON, V))
+    })
+
+    test('says nothing once sync is off', () => {
+      assert.deepEqual(syncStatusView({ ...OFF, inconsistent: OVERDUE }, V), { callouts: [] })
+    })
+
+    test('stacks after a stale background and before an error and a question, and the chip names it over the error', () => {
+      const view = syncStatusView({ ...ON, inconsistent: OVERDUE, lastError: 'Could not read synced data (incomplete).', pause: HELD }, V)
+      assert.deepEqual(view.chip, CHIP)
+      assert.deepEqual(view.callouts.map(c => c.state), ['inconsistent', 'error', 'held'])
+      assert.deepEqual(syncStatusView({ ...ON, inconsistent: OVERDUE, staleBuild: true }, V).callouts.map(c => c.state), ['stale', 'inconsistent'])
     })
   })
 

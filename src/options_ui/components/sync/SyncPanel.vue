@@ -11,9 +11,11 @@ import type { SyncAnswer, SyncCallout, SyncState } from '../../model/syncStatus.
  * A held update's callout is a question: what the update would remove, and
  * the two answers drawn alike, each with what it does, so that neither reads
  * as the one to pick. Turning sync on over synced settings that differ from
- * this browser's asks which to keep in the same way.
+ * this browser's asks which to keep in the same way. Synced settings that
+ * can't be read whole, past the wait, offer to replace them, drawn as an
+ * answer too.
  */
-const { state, status, setEnabled, resolveHeld } = useSync()
+const { state, status, setEnabled, resolveHeld, replaceSyncedCopy } = useSync()
 
 /**
  * The states with a glyph of their own; the rest take their severity's. A
@@ -50,6 +52,13 @@ function role(callout: SyncCallout): 'alert' | undefined {
 
 function consequenceId(answer: SyncAnswer): string {
   return `sync-answer-${answer.choice}`
+}
+
+function choose(answer: SyncAnswer): void {
+  if (answer.choice === 'replace')
+    void replaceSyncedCopy()
+  else
+    void resolveHeld(answer.choice)
 }
 </script>
 
@@ -109,7 +118,7 @@ function consequenceId(answer: SyncAnswer): string {
                 v-bind="{ [`data-sync-${answer.choice}`]: '' }"
                 :aria-describedby="consequenceId(answer)"
                 :disabled="state.resolving"
-                @click="resolveHeld(answer.choice)"
+                @click="choose(answer)"
               >
                 {{ answer.label }}
               </button>
@@ -281,8 +290,19 @@ function consequenceId(answer: SyncAnswer): string {
   border-radius: 9px;
   background-color: rgb(var(--color-default));
 }
+/* A label longer than its answer is wide, as on a phone, wraps inside the button. */
 .sync-held__answer button {
   justify-content: center;
+  height: auto;
+  min-height: 28px;
+  padding-block: 3px;
+  white-space: normal;
+  text-align: center;
+}
+@media (max-width: 767.98px) {
+  .sync-held__answer button {
+    min-height: 36px;
+  }
 }
 @container (min-width: 520px) {
   .sync-held__losses,

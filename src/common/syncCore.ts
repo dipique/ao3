@@ -1,11 +1,13 @@
 import { isDeepEqual } from '@antfu/utils'
 
-import type { BackupKind, SetSyncResult } from './api.ts'
+import type { BackupKind, HeldAnswer, SetSyncResult } from './api.ts'
 import type { Options } from './options.ts'
 import type { Manifest } from './syncCodec.ts'
+import type { CopyRead, Inconsistency } from './syncConsistency.ts'
 import type { SyncMeta, SyncPause } from './syncMeta.ts'
 
 import { buildLocalUpdate, canonicalStringify, decode, diffChunks, diffOptions, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
+import { checkCopy, keepRefusal, nextInconsistency, ownCopyReplaces, readOf, recheckIn } from './syncConsistency.ts'
 import { decideFirstPull, decidePull, decidePush, questionGone, uploadId, weighCopy } from './syncDecide.ts'
 import { assessPull } from './syncGuard.ts'
 
@@ -25,6 +27,8 @@ import { assessPull } from './syncGuard.ts'
 
 export const ALARM_PUSH = 'ao3e-sync-push'
 export const ALARM_PULL_RETRY = 'ao3e-sync-pull-retry'
+/** Reads the synced copy again once a copy that can't be read whole has been waited on. */
+export const ALARM_CONSISTENCY = 'ao3e-sync-consistency'
 /** Generous debounce so we stay far under sync write-rate limits (≤1 push/min). */
 const DEBOUNCE_MIN = 1
 /** Hard ceiling: a continuous edit stream still flushes within this window. */
@@ -145,19 +149,36 @@ export function createSyncEngine(deps: SyncDeps) {
       void withLock(() => push())
     else if (alarm.name === ALARM_PULL_RETRY)
       void withLock(() => pull())
+    else if (alarm.name === ALARM_CONSISTENCY)
+      void withLock(recheck)
+  }
+
+  /**
+   * As the wait on a copy that couldn't be read whole ends: read the store
+   * itself, then pull. The pull doesn't read again a copy it has already
+   * weighed, whose parts may have changed since.
+   */
+  async function recheck(): Promise<void> {
+    await readStore()
+    await pull()
   }
 
   /**
    * Run every time the worker starts, whatever woke it: re-arm a push that was
-   * pending when the last one stopped. Alarms don't reliably survive an
-   * extension reload (which an import does straight after writing options), and
-   * nothing else notices a browser still marked dirty.
+   * pending when the last one stopped, and the read again of a synced copy
+   * that couldn't be read whole. Alarms don't reliably survive an extension
+   * reload (which an import does straight after writing options), and nothing
+   * else notices a browser still marked dirty, or a copy that never changes.
    */
   async function start(): Promise<void> {
     await withLock(async () => {
-      const { enabled, dirty, staleBuild } = await meta.get(['enabled', 'dirty', 'staleBuild'])
-      if (enabled && !staleBuild && dirty && !(await alarms.get(ALARM_PUSH)))
+      const { enabled, dirty, staleBuild, inconsistent } = await meta.get(['enabled', 'dirty', 'staleBuild', 'inconsistent'])
+      if (!enabled || staleBuild)
+        return
+      if (dirty && !(await alarms.get(ALARM_PUSH)))
         await scheduleAlarm()
+      if (!(await alarms.get(ALARM_CONSISTENCY)))
+        await armRecheck(inconsistent)
     })
   }
 
@@ -193,6 +214,7 @@ export function createSyncEngine(deps: SyncDeps) {
       if (keys.length)
         await sync.remove(keys)
       await meta.set({ meta: { g: 0, h: '', w: '' }, dirty: false, dirtySince: 0, lastError: '', lastSyncAt: 0 })
+      await noteCopy('none')
     })
   }
 
@@ -207,12 +229,15 @@ export function createSyncEngine(deps: SyncDeps) {
    * and no second one is written. `keep` saves the synced copy as a backup, so
    * whatever the other browser had is still restorable, and pushes this
    * browser's settings over it, under the copy's ID.
+   *
+   * `keep` is refused while the synced copy can't be read whole, since it
+   * can't be backed up: nothing is backed up, sent or cleared.
    */
-  async function resolveHeld(choice: 'accept' | 'keep'): Promise<boolean> {
+  async function resolveHeld(choice: 'accept' | 'keep'): Promise<HeldAnswer> {
     return withLock(async () => {
       const { pause } = await meta.get(['pause'])
       if (!isQuestion(pause))
-        return false
+        return { resolved: false }
 
       if (choice === 'accept') {
         await backUp(questionBackupKind(pause))
@@ -220,6 +245,9 @@ export function createSyncEngine(deps: SyncDeps) {
       }
       else {
         const items = await sync.get(null)
+        const partly = await noteCopy((await checkCopy(items, version())).read)
+        if (partly)
+          return { resolved: false, refused: keepRefusal(partly) }
         const result = await decode(items, version())
         if (result.ok) {
           const remote = items[MANIFEST_KEY] as Manifest
@@ -234,7 +262,25 @@ export function createSyncEngine(deps: SyncDeps) {
       // next update will be assessed afresh.
       if (isQuestion((await meta.get(['pause'])).pause))
         await meta.set({ pause: null })
-      return true
+      return { resolved: true }
+    })
+  }
+
+  /**
+   * The reader's answer to synced settings that still can't be read whole
+   * past the wait: replace them with this browser's, under a new ID, so every
+   * browser that agreed with them weighs this browser's settings as a copy
+   * another browser started, asking where its own differ. Only while the copy
+   * still can't be read whole, and this browser's own settings can replace it
+   * (`ownCopyReplaces`). Answers whether they were sent.
+   */
+  async function replaceSyncedCopy(): Promise<boolean> {
+    return withLock(async () => {
+      const record = await readStore()
+      if (!record?.replaceable)
+        return false
+      await push({ fresh: true })
+      return !(await meta.get(['inconsistent'])).inconsistent
     })
   }
 
@@ -302,13 +348,16 @@ export function createSyncEngine(deps: SyncDeps) {
   /**
    * `force` pushes over a newer cloud copy, under its ID: the reader chose
    * this browser's settings, or the copy held nothing beyond defaults.
+   * `fresh` pushes over a copy that can't be read whole, under a new ID: the
+   * reader chose to replace it. Once it lands, a question asked over the copy
+   * it replaced is over.
    */
-  async function push({ force = false }: { force?: boolean } = {}): Promise<void> {
-    const { enabled, meta: agreed, pause, staleBuild } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild'])
+  async function push({ force = false, fresh = false }: { force?: boolean, fresh?: boolean } = {}): Promise<void> {
+    const { enabled, meta: agreed, pause, staleBuild, inconsistent } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild', 'inconsistent'])
     if (!enabled || staleBuild)
       return
     // While the reader is asked whether to take the synced settings, pushing would answer for them.
-    if (isQuestion(pause) && !force) {
+    if (isQuestion(pause) && !force && !fresh) {
       logger.log('push waits: the reader has yet to answer', pause.reason)
       return
     }
@@ -319,7 +368,7 @@ export function createSyncEngine(deps: SyncDeps) {
     const remote = await readManifest()
 
     let decision = decidePush(agreed, remote, localHash, version())
-    if (force && decision === 'pull')
+    if ((force || fresh) && decision === 'pull')
       decision = 'push'
     logger.log('push decision', decision)
     if (decision === 'blocked') {
@@ -343,7 +392,7 @@ export function createSyncEngine(deps: SyncDeps) {
     const device = await getDeviceId()
     const token = `${device}.${randomId()}`
     const newGen = Math.max(agreed.g, remote?.g ?? 0) + 1
-    const id = uploadId(agreed, remote, force, () => newCopyId(device), version())
+    const id = fresh ? newCopyId(device) : uploadId(agreed, remote, force, () => newCopyId(device), version())
     const { chunks, manifest } = await encode(opts, defaults, newGen, token, version(), id)
 
     const currentItems = await sync.get(null)
@@ -365,14 +414,17 @@ export function createSyncEngine(deps: SyncDeps) {
     // Compare-after-write: confirm our write survived a possible same-gen race.
     const after = await readManifest()
     if (after && after.w === token) {
+      // The synced copy is this browser's own now, whole.
       await meta.set({
         meta: { g: newGen, h: localHash, w: token, ...(id ? { i: id } : {}) },
         dirty: false,
         dirtySince: 0,
         lastError: '',
         lastSyncAt: now(),
-        ...(isVersionPause(pause) ? { pause: null } : {}),
+        ...(isVersionPause(pause) || (fresh && isQuestion(pause)) ? { pause: null } : {}),
       })
+      if (inconsistent)
+        await noteCopy('whole')
       logger.log('push ok, gen', newGen)
     }
     else {
@@ -387,13 +439,17 @@ export function createSyncEngine(deps: SyncDeps) {
    * backup turning sync on took, for the question if the first pull asks one.
    */
   async function pull({ acceptLoss = false, firstBackup }: { acceptLoss?: boolean, firstBackup?: BackupRecord } = {}): Promise<void> {
-    const { enabled, meta: agreed, pause, staleBuild } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild'])
+    const { enabled, meta: agreed, pause, staleBuild, inconsistent } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild', 'inconsistent'])
     if (!enabled || staleBuild)
       return
 
     const items = await sync.get(null)
     const remote = (items[MANIFEST_KEY] as Manifest | undefined) ?? null
     const decision = decidePull(agreed, remote, version())
+    // A copy at another sync version isn't read whole: an older one is never
+    // taken, a newer one pauses sync. Nothing at this version is left to wait on.
+    if (decision === 'blocked' || decision === 'wait' || !remote)
+      await noteCopy('none')
     if (decision === 'blocked') {
       await pauseFor({ reason: 'newer-version', remoteVersion: remote!.v })
       return
@@ -421,11 +477,17 @@ export function createSyncEngine(deps: SyncDeps) {
       }
       return
     }
-    // The copy already asked about: nothing new to assess until something newer arrives.
-    if (!acceptLoss && isQuestion(pause) && remote!.g === pause.g && remote!.w === pause.w)
+    // The copy already asked about: nothing new to assess until something newer
+    // arrives. Its parts can still change under it: once it has been read
+    // partial it is read again, and read whole it ends the record.
+    if (!acceptLoss && isQuestion(pause) && remote!.g === pause.g && remote!.w === pause.w) {
+      if (inconsistent)
+        await noteCopy((await checkCopy(items, version())).read)
       return
+    }
 
     const result = await decode(items, version())
+    await noteCopy(readOf(result))
     if (!result.ok) {
       if (result.reason === 'version') {
         await pauseFor({ reason: 'newer-version', remoteVersion: remote!.v })
@@ -433,7 +495,8 @@ export function createSyncEngine(deps: SyncDeps) {
       }
       if (result.reason === 'empty')
         return
-      // incomplete / corrupt: usually a half-propagated chunk set — retry briefly.
+      // incomplete / corrupt: usually a half-propagated chunk set — retry
+      // briefly, and read it again once it has been waited on.
       if (pullRetries < MAX_PULL_RETRIES) {
         pullRetries++
         await alarms.create(ALARM_PULL_RETRY, { delayInMinutes: PULL_RETRY_MIN })
@@ -529,6 +592,7 @@ export function createSyncEngine(deps: SyncDeps) {
     // it joins, and keeps it over a copy that has none.
     const { meta: { i } } = await meta.get(['meta'])
     await meta.set({ enabled: true, meta: { g: 0, h: '', w: '', ...(i ? { i } : {}) }, lastError: '', pause: null })
+    await noteCopy('none')
 
     const remote = await readManifest()
     if (!remote) {
@@ -561,6 +625,7 @@ export function createSyncEngine(deps: SyncDeps) {
   async function disable(): Promise<SetSyncResult> {
     await alarms.clear(ALARM_PUSH)
     await alarms.clear(ALARM_PULL_RETRY)
+    await noteCopy('none')
     const { meta: agreed } = await meta.get(['meta'])
     await meta.set({ enabled: false, dirty: false, dirtySince: 0, pause: null, meta: { ...agreed, i: newCopyId(await getDeviceId()) } })
     // Cloud data is intentionally left intact — clearing would wipe other devices.
@@ -589,6 +654,47 @@ export function createSyncEngine(deps: SyncDeps) {
       logger.error(`going on without a ${kind} backup: it could not be written`, e)
       return { backedUp: false, backupFailed: true }
     }
+  }
+
+  /**
+   * Record what a read of the synced copy found (`sync.inconsistent`): when a
+   * copy that can't be read whole was first read so, and once the wait is up,
+   * whether this browser's own settings can replace it. The first such read
+   * sets an alarm to read it again when the wait is up, since a copy whose
+   * rest never arrives changes nothing that would wake the engine. Answers the
+   * record: null unless the copy was read partial.
+   */
+  async function noteCopy(read: CopyRead): Promise<Inconsistency | null> {
+    const { inconsistent } = await meta.get(['inconsistent'])
+    if (read !== 'partial' && !inconsistent)
+      return null
+    const ownReplaces = read === 'partial' && await ownCopyReplaces(await deps.readOptions(), defaults, version())
+    const next = nextInconsistency(inconsistent, read, now(), ownReplaces)
+    if (!isDeepEqual(next, inconsistent)) {
+      await meta.set({ inconsistent: next })
+      if (next?.overdue)
+        logger.warn('the synced copy still can\'t be read whole past the wait')
+    }
+    if (!next)
+      await alarms.clear(ALARM_CONSISTENCY)
+    else if (!inconsistent)
+      await armRecheck(next)
+    return next
+  }
+
+  /** Read the synced store as it stands, and record what was found, while sync is on. */
+  async function readStore(): Promise<Inconsistency | null> {
+    const { enabled, staleBuild } = await meta.get(['enabled', 'staleBuild'])
+    if (!enabled || staleBuild)
+      return null
+    return noteCopy((await checkCopy(await sync.get(null), version())).read)
+  }
+
+  /** Read the synced copy again once `record`'s wait is up. */
+  async function armRecheck(record: Inconsistency | null): Promise<void> {
+    const wait = recheckIn(record, now())
+    if (wait !== null)
+      await alarms.create(ALARM_CONSISTENCY, { delayInMinutes: wait / 60_000 })
   }
 
   /**
@@ -639,7 +745,7 @@ export function createSyncEngine(deps: SyncDeps) {
     return id
   }
 
-  return { onStorageChanged, onAlarm, start, init, setEnabled, resolveHeld, clearSyncedData, getUsage, getStatus, idle }
+  return { onStorageChanged, onAlarm, start, init, setEnabled, resolveHeld, replaceSyncedCopy, clearSyncedData, getUsage, getStatus, idle }
 }
 
 export type SyncEngine = ReturnType<typeof createSyncEngine>

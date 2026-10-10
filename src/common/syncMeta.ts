@@ -1,4 +1,5 @@
 import type { BackupSummary } from './api.ts'
+import type { Inconsistency } from './syncConsistency.ts'
 import type { PullLoss } from './syncGuard.ts'
 
 import { createStorage } from './storage.ts'
@@ -91,6 +92,13 @@ export interface SyncMeta {
 
   /** Why sync is paused on this browser, or `null` when it isn't. */
   pause: SyncPause | null
+  /**
+   * The synced copy, as this browser last read it, can't be read whole: when
+   * it first read it so, and whether that is past the wait. `null` once a
+   * whole copy, or none at this sync version, is read, and as sync turns on
+   * or off.
+   */
+  inconsistent: Inconsistency | null
   /**
    * Set when the background found itself running a different build than the one
    * on disk (`build.json`), which Chrome can do for an unpacked extension for as

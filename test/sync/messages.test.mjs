@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { staleBackgroundMessage, syncPauseMessage, syncRefusalMessage } from '../../src/common/syncMessages.ts'
+import { keepRefusedMessage, staleBackgroundMessage, syncPauseMessage, syncRefusalMessage } from '../../src/common/syncMessages.ts'
 
 describe('sync messages', () => {
   test('a held update says what it would remove, and whether a backup exists', () => {
@@ -22,6 +22,12 @@ describe('sync messages', () => {
     )
     assert.doesNotMatch(syncPauseMessage({ ...first, backedUp: false, backupFailed: true }, 2), /backed up/)
     assert.equal(syncPauseMessage({ ...first, otherCopy: true }, 2), syncPauseMessage(first, 2), 'asked over a copy another browser started, the same')
+  })
+
+  /** Keeping this browser's settings backs the synced ones up first, which a copy that can't be read whole doesn't allow. */
+  test('keeping this browser\'s settings over synced settings that can\'t be read whole is refused, saying why', () => {
+    assert.equal(keepRefusedMessage('sending'), 'Another browser is still sending its settings. Try again in a moment.')
+    assert.equal(keepRefusedMessage('inconsistent'), 'Your synced settings are inconsistent, so they can\'t be backed up before they\'re replaced.')
   })
 
   test('an out-of-date background says whether sync has stopped', () => {

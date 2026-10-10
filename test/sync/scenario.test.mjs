@@ -6,9 +6,10 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { SYNC_CONSISTENCY_WAIT_MS } from '../../src/common/constants.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { addressOf, planRetitle, planStopTracking, planTrack, planTrackSearch } from '../../src/common/savedLists.ts'
-import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
+import { decode, MANIFEST_KEY, SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { HELD_BACKUP_NOTE } from '../../src/common/syncMessages.ts'
 import { syncStatusView } from '../../src/options_ui/model/syncStatus.ts'
 import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixture, range, rulesFixture, textReplacementsFixture, trackedListsFixture } from './harness.mjs'
@@ -855,6 +856,341 @@ describe('sync scenarios', () => {
       assert.equal(typeof cloud.manifest().i, 'string')
       assert.notEqual(cloud.manifest().i, first)
       assert.equal(laptop.meta.meta.i, cloud.manifest().i)
+    })
+  })
+
+  /**
+   * The sync service doesn't promise that the parts of one upload arrive
+   * together, so a browser can read a synced copy whose manifest names parts
+   * that aren't there, or don't match it. While it can't be read whole,
+   * another browser is taken to be still sending it: the read is retried, and
+   * keeping this browser's settings, which backs the synced ones up first, is
+   * refused. Still so past the wait, the options page says the synced settings
+   * are inconsistent and offers to replace them with this browser's.
+   */
+  describe('a synced copy that can\'t be read whole', () => {
+    const WAIT = SYNC_CONSISTENCY_WAIT_MS
+    /** Settings of the desktop's own: the reader's, with a rule more and a reading speed of its own. */
+    const OWN = { ...MAIN, rules: rulesFixture(41), wordsPerMinute: 320 }
+
+    /** The manifest of `sender`'s newest upload reaches `receiver` ahead of its parts. */
+    async function manifestFirst(sender, receiver) {
+      await receiver.receive({ ...receiver.synced, [MANIFEST_KEY]: sender.synced[MANIFEST_KEY] })
+    }
+
+    /** `sender` uploads `update`, and its parts never reach the sync service: only its manifest does, which every browser then reads. */
+    async function partsLost(cloud, sender, update) {
+      await sender.edit(update)
+      await sender.react()
+      sender.peer.outbox = sender.peer.outbox.filter(([key]) => key === MANIFEST_KEY)
+      await cloud.run()
+    }
+
+    /** The synced copy as the sync service holds it, decoded. */
+    const served = cloud => decode(Object.fromEntries(cloud.server))
+
+    /** Browsers syncing the reader's data, one after another. */
+    async function inSync(...names) {
+      const cloud = createCloud()
+      const browsers = []
+      for (const name of names) {
+        const browser = browsers.length ? createDevice(cloud, name) : mainBrowser(cloud, name)
+        await browser.enableSync()
+        await cloud.run()
+        browsers.push(browser)
+      }
+      return { cloud, browsers }
+    }
+
+    /** What the options page says of `browser`'s sync. */
+    const panelOf = browser => syncStatusView({ ...browser.meta, staleBuild: false, backgroundOutdated: false }, SYNC_SCHEMA_VERSION)
+    const inconsistentCallout = browser => panelOf(browser).callouts.find(callout => callout.state === 'inconsistent')
+
+    test('turning sync on: a copy caught partway is waited on, and keeping this browser\'s settings refused, until the rest arrives', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN, meta: { backupsEnabled: false } })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      const question = desktop.meta.pause
+      assert.equal(question?.reason, 'first-sync', 'precondition: asked')
+
+      await laptop.edit({ wordsPerMinute: 250 })
+      await laptop.react()
+      await manifestFirst(laptop, desktop)
+      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent?.since, overdue: false, replaceable: false })
+      assert.equal(typeof desktop.meta.inconsistent.since, 'number')
+      assert.deepEqual(desktop.meta.pause, question, 'the question stands')
+
+      assert.deepEqual(await desktop.answer('keep'), { resolved: false, refused: 'sending' })
+      assert.deepEqual(desktop.meta.pause, question, 'nothing cleared')
+      assert.deepEqual(desktop.peer.outbox, [], 'nothing sent')
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'], 'nothing backed up')
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.equal(inconsistentCallout(desktop), undefined, 'nothing said within the wait')
+
+      // The rest arrives: the question is asked again, over the whole copy.
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent, null)
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.deepEqual([desktop.meta.pause.g, desktop.meta.pause.w], [cloud.manifest().g, cloud.manifest().w])
+      assert.equal(desktop.options.wordsPerMinute, 320)
+
+      assert.deepEqual(await desktop.answer('keep'), { resolved: true })
+      await cloud.run()
+      assert.equal(laptop.options.wordsPerMinute, 320)
+      assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320], ['sync-declined', 250]], 'the copy kept over, once whole, backed up first')
+    })
+
+    test('a held update: keeping this browser\'s settings is refused while a newer copy is caught partway', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await desktop.edit({ rules: rulesFixture(1) })
+      await cloud.run()
+      const hold = laptop.meta.pause
+      assert.equal(hold?.reason, 'held', 'precondition: held')
+
+      await desktop.edit({ wordsPerMinute: 250 })
+      await desktop.react()
+      await manifestFirst(desktop, laptop)
+      assert.deepEqual(await laptop.answer('keep'), { resolved: false, refused: 'sending' })
+      assert.deepEqual(laptop.meta.pause, hold, 'nothing cleared')
+      assert.deepEqual(laptop.peer.outbox, [], 'nothing sent')
+      assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held'], 'nothing backed up')
+      assert.equal(laptop.options.rules.filters.length, 40)
+
+      await cloud.run()
+      assert.equal(laptop.meta.inconsistent, null)
+      assert.equal(laptop.meta.pause?.reason, 'held', 'held again, over the whole copy')
+      assert.deepEqual([laptop.meta.pause.g, laptop.meta.pause.w], [cloud.manifest().g, cloud.manifest().w])
+    })
+
+    test('still partial past the wait: inconsistent, with the offer to replace it with this browser\'s settings', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      assert.equal((await served(cloud)).ok, false, 'precondition: the synced copy can\'t be read whole')
+      assert.equal(desktop.meta.inconsistent?.overdue, false)
+      assert.equal(desktop.options.wordsPerMinute, 200)
+      assert.equal(laptop.meta.inconsistent, null, 'the laptop agreed on its own upload, and reads nothing')
+
+      assert.equal(await desktop.replace(), false, 'no offer within the wait')
+      assert.deepEqual(desktop.peer.outbox, [])
+
+      desktop.advance(WAIT - 1)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent.overdue, false, 'not before the wait is up')
+      assert.equal(inconsistentCallout(desktop), undefined)
+
+      desktop.advance(1)
+      await cloud.run()
+      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent.since, overdue: true, replaceable: true })
+      const callout = inconsistentCallout(desktop)
+      assert.equal(panelOf(desktop).chip.state, 'inconsistent')
+      assert.deepEqual(callout.decision.answers.map(answer => answer.choice), ['replace'])
+      assert.deepEqual(await desktop.answer('keep'), { resolved: false }, 'nothing asked, so nothing to keep')
+    })
+
+    /**
+     * The replacement goes up under a new ID, so every other browser weighs it
+     * as a copy another browser started: where its own settings differ, it
+     * asks, backed up first, and where they don't, it takes the copy's ID with
+     * no question.
+     */
+    test('the offer replaces the synced copy with this browser\'s settings under a new ID, which each other browser weighs', async () => {
+      const { cloud, browsers: [laptop, desktop, tablet] } = await inSync('laptop', 'desktop', 'tablet')
+      const id = cloud.manifest().i
+      const tabletBackups = tablet.backups
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent?.replaceable, true, 'precondition: offered')
+
+      assert.equal(await desktop.replace(), true)
+      await cloud.run()
+      const replaced = await served(cloud)
+      assert.equal(replaced.ok, true, 'whole again')
+      assert.equal(replaced.options.wordsPerMinute, undefined, 'this browser\'s settings: the reading speed at its default')
+      assert.equal(replaced.options.rules.filters.length, 40)
+      assert.match(cloud.manifest().w, /^desktop-/)
+      assert.equal(typeof cloud.manifest().i, 'string')
+      assert.notEqual(cloud.manifest().i, id, 'under a new ID')
+      assert.equal(desktop.meta.meta.i, cloud.manifest().i)
+      assert.equal(desktop.meta.inconsistent, null)
+      assert.equal(desktop.meta.lastError, '')
+      assert.equal(desktop.options.wordsPerMinute, 200, 'this browser\'s own settings untouched')
+
+      assert.equal(laptop.meta.pause?.reason, 'first-sync', 'the laptop\'s own settings differ: asked')
+      assert.equal(laptop.meta.pause.otherCopy, true)
+      assert.equal(laptop.options.wordsPerMinute, 250, 'nothing replaced')
+      assert.deepEqual(laptop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['sync-held', 250]], 'backed up first')
+
+      assert.equal(tablet.meta.pause, null, 'the tablet\'s settings are the same: no question')
+      assert.equal(tablet.meta.inconsistent, null)
+      assert.equal(tablet.meta.meta.i, cloud.manifest().i)
+      assert.deepEqual(tablet.backups, tabletBackups, 'nothing to back up')
+    })
+
+    /**
+     * A replacement holding nothing beyond defaults would ask no other browser
+     * anything: each one holding settings of its own would send them over it
+     * at about once, and the one landing last would reach the rest as an
+     * ordinary update, with no backup: the laptop's own edits among them.
+     */
+    test('a browser holding nothing beyond defaults is offered no replacement', async () => {
+      const cloud = createCloud()
+      const browsers = []
+      for (const [name, options] of [['laptop', MAIN], ['desktop', {}], ['tablet', {}]]) {
+        const browser = createDevice(cloud, name, { options, meta: { backupsEnabled: false } })
+        await browser.enableSync()
+        await cloud.run()
+        browsers.push(browser)
+      }
+      const [laptop] = browsers
+      await partsLost(cloud, laptop, { wordsPerMinute: 250, rules: rulesFixture(42) })
+      const fresh = createDevice(cloud, 'fresh', { meta: { backupsEnabled: false } })
+      await fresh.enableSync()
+      await cloud.run()
+      fresh.advance(WAIT)
+      await cloud.run()
+      assert.equal(fresh.meta.inconsistent?.overdue, true, 'precondition: past the wait')
+
+      assert.equal(fresh.meta.inconsistent.replaceable, false)
+      assert.equal(inconsistentCallout(fresh).decision, undefined, 'said, with no offer')
+      assert.equal(await fresh.replace(), false)
+      await cloud.run()
+      assert.equal((await served(cloud)).ok, false, 'nothing sent')
+      assert.deepEqual([laptop.options.wordsPerMinute, laptop.options.rules.filters.length], [250, 42], 'the laptop\'s own edits stand')
+    })
+
+    test('a question standing over a copy that has since gone partial is ended by the replacement', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync', 'precondition: asked')
+
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent?.replaceable, true, 'precondition: offered')
+      assert.equal(await desktop.replace(), true)
+      await cloud.run()
+
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 320)
+      assert.equal((await served(cloud)).options.wordsPerMinute, 320)
+      await desktop.edit({ wordsPerMinute: 330 })
+      await cloud.run()
+      assert.equal((await served(cloud)).options.wordsPerMinute, 330, 'syncing again')
+    })
+
+    test('a part changing under the copy a question was asked over is read again as the wait ends', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync', 'precondition: asked')
+
+      // Another upload's part lands under the same manifest, which the pull has already weighed.
+      const writer = createDevice(createCloud(), 'writer', { options: { wordsPerMinute: 250 } })
+      await writer.enableSync()
+      cloud.server.set('o0', writer.synced.o0)
+      cloud.deliver()
+      await desktop.settle()
+      assert.equal((await served(cloud)).ok, false, 'precondition: the synced copy can\'t be read whole')
+      assert.equal(desktop.meta.inconsistent, null, 'precondition: the pull doesn\'t read the copy it asked over again')
+
+      assert.deepEqual(await desktop.answer('keep'), { resolved: false, refused: 'sending' })
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent?.since, overdue: true, replaceable: true })
+    })
+
+    test('past the wait, the copy a question was asked over read whole again ends the record', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      const question = desktop.meta.pause
+      assert.equal(question?.reason, 'first-sync', 'precondition: asked')
+
+      const part = cloud.server.get('o0')
+      const writer = createDevice(createCloud(), 'writer', { options: { wordsPerMinute: 250 } })
+      await writer.enableSync()
+      cloud.server.set('o0', writer.synced.o0)
+      cloud.deliver()
+      await desktop.settle()
+      await desktop.answer('keep')
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent?.overdue, true, 'precondition: past the wait')
+
+      cloud.server.set('o0', part)
+      cloud.deliver()
+      await desktop.settle()
+      await cloud.run()
+      assert.equal((await served(cloud)).ok, true, 'precondition: whole again')
+      assert.equal(desktop.meta.inconsistent, null)
+      assert.equal(inconsistentCallout(desktop), undefined)
+      assert.deepEqual(desktop.meta.pause, question, 'the question stands')
+    })
+
+    test('the wait outlasts the worker restarting', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      assert.equal(desktop.meta.inconsistent?.overdue, false, 'precondition: waiting')
+      await desktop.restart()
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent?.overdue, true)
+    })
+
+    test('a newer sync version\'s copy, whole or not, gets no offer: the version pause applies', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      assert.equal(desktop.meta.inconsistent?.overdue, false, 'precondition: waiting on a copy at this version')
+
+      await laptop.restart({ version: SYNC_SCHEMA_VERSION + 1, init: true })
+      await cloud.run()
+      assert.equal(cloud.manifest().v, SYNC_SCHEMA_VERSION + 1)
+      assert.equal(desktop.meta.pause?.reason, 'newer-version')
+      assert.equal(desktop.meta.inconsistent, null)
+
+      await partsLost(cloud, laptop, { wordsPerMinute: 260 })
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'newer-version')
+      assert.equal(desktop.meta.inconsistent, null)
+      assert.equal(inconsistentCallout(desktop), undefined)
+      assert.equal(await desktop.replace(), false)
+    })
+
+    test('turning sync off forgets it, and turning it on again waits afresh', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent?.overdue, true, 'precondition: past the wait')
+
+      await desktop.disableSync()
+      assert.equal(desktop.meta.inconsistent, null)
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent?.overdue, false)
     })
   })
 

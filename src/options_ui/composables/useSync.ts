@@ -1,8 +1,8 @@
 import { clamp } from '@antfu/utils'
 
-import type { SyncMeta, SyncPause, SyncUsage } from '#common'
+import type { Inconsistency, SyncMeta, SyncPause, SyncUsage } from '#common'
 
-import { api, BUILD_CHECK_TIMEOUT_MS, SYNC_SCHEMA_VERSION, syncMeta, syncRefusalMessage, toast } from '#common'
+import { api, BUILD_CHECK_TIMEOUT_MS, keepRefusedMessage, SYNC_SCHEMA_VERSION, syncMeta, syncRefusalMessage, toast } from '#common'
 
 import { syncStatusView } from '../model/syncStatus.ts'
 
@@ -24,7 +24,9 @@ const state = reactive({
   lastError: '',
   lastSyncAt: 0,
   pause: null as SyncPause | null,
-  /** An answer to what sync asks (a held update, or which settings to keep) is on its way to the background. */
+  /** The synced copy, as the background last read it, couldn't be read whole. */
+  inconsistent: null as Inconsistency | null,
+  /** An answer to what sync asks (a held update, which settings to keep, or replacing inconsistent synced settings) is on its way to the background. */
   resolving: false,
   /** Why turning sync on was just refused, until the switch is next touched. */
   refusal: '',
@@ -36,7 +38,7 @@ const state = reactive({
   usage: null as SyncUsage | null,
 })
 
-void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause', 'staleBuild']).then((m) => {
+void syncMeta.get(['enabled', 'backupsEnabled', 'backupCount', 'lastError', 'lastSyncAt', 'pause', 'inconsistent', 'staleBuild']).then((m) => {
   Object.assign(state, m, { loaded: true })
 })
 
@@ -81,6 +83,21 @@ watch([() => state.enabled, () => state.lastSyncAt], ([enabled]) => {
 
 const status = computed(() => syncStatusView({ ...state, staleBuild: !!state.staleBuild }, SYNC_SCHEMA_VERSION))
 
+/** Send the reader's answer to what sync asks, one at a time. */
+async function answer(send: () => Promise<unknown>): Promise<void> {
+  state.resolving = true
+  try {
+    await send()
+  }
+  catch (error) {
+    toast('Could not send your answer to sync; see console for details', { type: 'error' })
+    console.error(error)
+  }
+  finally {
+    state.resolving = false
+  }
+}
+
 export function useSync() {
   return {
     state,
@@ -103,17 +120,20 @@ export function useSync() {
     },
 
     async resolveHeld(choice: 'accept' | 'keep') {
-      state.resolving = true
-      try {
-        await api.resolveHeldSync.sendToBackground(choice)
-      }
-      catch (error) {
-        toast('Could not send your answer to sync; see console for details', { type: 'error' })
-        console.error(error)
-      }
-      finally {
-        state.resolving = false
-      }
+      await answer(async () => {
+        const answered = await api.resolveHeldSync.sendToBackground(choice)
+        if (answered?.refused)
+          toast(keepRefusedMessage(answered.refused))
+      })
+    },
+
+    /**
+     * Nothing is said where nothing was sent: the background records what it
+     * found instead (a copy whole again, or this browser's settings unable to
+     * replace it), and the panel follows the record.
+     */
+    async replaceSyncedCopy() {
+      await answer(() => api.replaceSyncedCopy.sendToBackground())
     },
 
     setBackupsEnabled(value: boolean) {

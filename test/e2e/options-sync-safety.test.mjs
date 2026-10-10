@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { BUILD_CHECK_TIMEOUT_MS } from '../../src/common/constants.ts'
+import { BUILD_CHECK_TIMEOUT_MS, SYNC_CONSISTENCY_WAIT_MS } from '../../src/common/constants.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { decode, encode, MANIFEST_KEY, SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { bundleForPage } from '../siteExport/helpers.mjs'
@@ -113,7 +113,9 @@ function routeToSyncBackground() {
     if (name === 'setSyncEnabled')
       return background.setSyncEnabled(...args)
     if (name === 'resolveHeldSync')
-      return { resolved: await background.resolveHeldSync(...args) }
+      return background.resolveHeldSync(...args)
+    if (name === 'replaceSyncedCopy')
+      return { replaced: await background.replaceSyncedCopy(...args) }
     return send(message)
   }
 }
@@ -559,6 +561,164 @@ describe('options UI — the sync panel', { skip }, () => {
           { kind: 'sync-declined', wordsPerMinute: 250, rules: 2 },
           { kind: 'sync-held', wordsPerMinute: 320, rules: 3 },
         ])
+      }
+      finally {
+        await options.close()
+      }
+    })
+  })
+
+  /**
+   * A synced copy that can't be read whole: within the wait another browser
+   * is taken to be still sending it, and keeping this browser's settings, which
+   * backs the synced ones up first, is refused; past the wait the panel says
+   * the synced settings are inconsistent and offers to replace them.
+   */
+  describe('synced settings that can\'t be read whole', () => {
+    const OWN = { rules: rulesFixture(3), wordsPerMinute: 320 }
+    const THEIRS = { rules: rulesFixture(2), wordsPerMinute: 250 }
+    const withSettings = update => ({ ...structuredClone(OPTION_DEFAULTS), ...structuredClone(update) })
+    /** Past the wait, with this browser's own settings able to stand in. */
+    const overdue = () => ({ since: Date.now() - SYNC_CONSISTENCY_WAIT_MS, overdue: true, replaceable: true })
+
+    /**
+     * The options page at Sync, sync on over `seed`, with the background's sync
+     * half in the page. The synced store holds the manifest of another
+     * browser's upload, with the part of this browser's own copy it was
+     * written over: it can't be read whole.
+     */
+    async function openOverPartial(seed) {
+      const own = await encode(withSettings(OWN), OPTION_DEFAULTS, 3, 'desktop.1', V, 'desktop-copy')
+      const theirs = await encode(withSettings(THEIRS), OPTION_DEFAULTS, 4, 'laptop.1', V, 'laptop-copy')
+      const background = await syncBackground()
+      const options = await session.open({
+        seed: {
+          'option.rules': OWN.rules,
+          'option.wordsPerMinute': OWN.wordsPerMinute,
+          'option.savedLists': { v: 1, lists: {} },
+          'sync.enabled': true,
+          'sync.backupsEnabled': false,
+          'sync.meta': { g: 3, h: own.manifest.h, w: own.manifest.w, i: 'desktop-copy' },
+          [MANIFEST_KEY]: theirs.manifest,
+          ...own.chunks,
+          ...seed,
+        },
+        hash: '#sync',
+        viewport: WIDE,
+        prepare: async (page) => {
+          await page.evaluateOnNewDocument(background)
+          await page.evaluateOnNewDocument(routeToSyncBackground)
+        },
+      })
+      return { options, partial: theirs.manifest }
+    }
+
+    test('past the wait: says they are inconsistent, and offers to replace them with this browser\'s settings', async () => {
+      const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now(), 'sync.inconsistent': overdue() }, { replaceSyncedCopy: { replaced: true } })
+      try {
+        const status = await options.page.evaluate(readStatus)
+        assert.deepEqual(status.chip, { state: 'inconsistent', text: 'Inconsistent' })
+        assert.equal(status.detail, 'Your synced settings can\'t be read whole.')
+        await assertCallout(options, '[data-sync-inconsistent]', 'destructive', /^Your synced settings are inconsistent: part of them is missing or doesn't match the rest/)
+
+        const answers = await options.page.evaluate(readAnswers)
+        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), [
+          ['replace', 'Replace them with this browser\'s settings', 'Makes this browser\'s settings your synced settings. Your other browsers ask before using them wherever their own settings differ, and back theirs up first.'],
+        ])
+        await options.press(await options.page.$('[data-sync-replace]'))
+        await until('the offer to be taken', async () => (await options.sent('replaceSyncedCopy')).length === 1)
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    for (const theme of ['light', 'dark']) {
+      test(`its callout and offer read at AA, ${theme}`, async () => {
+        const options = await open({ 'option.theme': { chosen: theme, current: theme }, 'sync.enabled': true, 'sync.inconsistent': overdue() })
+        try {
+          await options.page.waitForSelector('[data-sync-replace]')
+          await options.calm()
+          assert.deepEqual(await options.illegibleText('[data-sync-panel]'), [])
+        }
+        finally {
+          await options.close()
+        }
+      })
+    }
+
+    test('on a phone, the offer\'s label stays inside its button', async () => {
+      const options = await open({ 'sync.enabled': true, 'sync.inconsistent': overdue() }, {}, NARROW)
+      try {
+        await options.page.waitForSelector('[data-sync-replace]')
+        const { label, inside } = await options.page.evaluate(() => {
+          const button = document.querySelector('[data-sync-replace]')
+          const style = getComputedStyle(button)
+          const box = button.getBoundingClientRect()
+          const range = document.createRange()
+          range.selectNodeContents(button)
+          const text = range.getBoundingClientRect()
+          const inset = side => Number.parseFloat(style[`border${side}Width`]) + Number.parseFloat(style[`padding${side}`])
+          const inside = { left: Math.round(box.left + inset('Left')), right: Math.round(box.right - inset('Right')), top: Math.round(box.top), bottom: Math.round(box.bottom) }
+          return { label: { left: Math.round(text.left), right: Math.round(text.right), top: Math.round(text.top), bottom: Math.round(text.bottom) }, inside }
+        })
+        const layout = JSON.stringify({ label, inside })
+        assert.ok(label.left >= inside.left && label.right <= inside.right, `the label within the button's padding: ${layout}`)
+        assert.ok(label.top >= inside.top && label.bottom <= inside.bottom, `and within its height: ${layout}`)
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test('within the wait, says nothing of it', async () => {
+      const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now(), 'sync.inconsistent': { since: Date.now(), overdue: false, replaceable: false } })
+      try {
+        assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'syncing', text: 'Syncing' })
+        assert.equal(await options.page.$('[data-sync-inconsistent]'), null)
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test('the offer sends this browser\'s settings as the synced copy, under a new ID', async () => {
+      const { options, partial } = await openOverPartial({ 'sync.inconsistent': overdue() })
+      try {
+        await options.press(await options.page.$('[data-sync-replace]'))
+        await until('the synced copy to be replaced', async () => (await options.stored(MANIFEST_KEY)).w !== partial.w)
+
+        const sent = await options.stored(MANIFEST_KEY)
+        assert.equal(typeof sent.i, 'string')
+        assert.ok(!['laptop-copy', 'desktop-copy'].includes(sent.i), `a new ID, not ${sent.i}`)
+        assert.ok(sent.g > partial.g, 'past the copy it replaces')
+        const synced = await decode(await options.page.evaluate(readSyncedItems, MANIFEST_KEY))
+        assert.equal(synced.ok, true, 'whole again')
+        assert.equal(synced.options.wordsPerMinute, OWN.wordsPerMinute)
+        assert.deepEqual(synced.options.rules, OWN.rules)
+        assert.equal((await options.stored('sync.meta')).i, sent.i, 'agreed on')
+        assert.equal(await options.stored('sync.inconsistent'), null)
+        assert.equal(await options.stored('option.wordsPerMinute'), OWN.wordsPerMinute, 'this browser\'s settings untouched')
+        await until('the callout to go', async () => !(await options.page.$('[data-sync-inconsistent]')))
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test('keeping this browser\'s settings over it is refused, saying another browser is still sending its settings', async () => {
+      const question = { reason: 'first-sync', g: 3, w: 'laptop.0', at: Date.now(), backedUp: true, backupFailed: false, loss: null }
+      const { options, partial } = await openOverPartial({ 'sync.meta': { g: 0, h: '', w: '', i: 'desktop-copy' }, 'sync.pause': question })
+      try {
+        await options.press(await options.page.$('[data-sync-keep]'))
+        await until('the refusal', async () => (await options.toasts()).includes('Another browser is still sending its settings. Try again in a moment.'))
+
+        assert.deepEqual(await options.stored('sync.pause'), question, 'nothing cleared')
+        assert.deepEqual(await options.stored(MANIFEST_KEY), partial, 'nothing sent')
+        assert.deepEqual(await options.page.evaluate(readBackups), [], 'nothing backed up')
+        const record = await options.stored('sync.inconsistent')
+        assert.deepEqual([record?.overdue, typeof record?.since], [false, 'number'], 'waited on from now')
+        assert.equal(await options.page.$('[data-sync-inconsistent]'), null)
       }
       finally {
         await options.close()

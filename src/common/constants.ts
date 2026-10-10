@@ -33,6 +33,16 @@ export const OPTIONS_SAVE_DELAY_MS = 200
 export const SITE_EXPORT_JOB_KEY = 'siteExportJob'
 
 /**
+ * How long a synced copy that can't be read whole is waited on, in
+ * milliseconds, from when this browser first read it so: until then another
+ * browser is taken to be still sending it. Firefox syncs extension storage
+ * every ten minutes, so this is two of its rounds: the sender's next, which
+ * carries the rest, and the reader's after it. Chrome names no delay, and
+ * sends an offline browser's changes once it is back.
+ */
+export const SYNC_CONSISTENCY_WAIT_MS = 20 * 60_000
+
+/**
  * How long the rule editor lets a regex pattern run over the names it tests
  * before stopping it, in milliseconds. A pattern stopped for running longer
  * can't be saved: on AO3's pages nothing stops it.

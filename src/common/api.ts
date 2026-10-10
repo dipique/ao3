@@ -1,4 +1,5 @@
 import type { Tag } from './data.ts'
+import type { KeepRefusal } from './syncConsistency.ts'
 import type { toast } from './toast/toast.tsx'
 
 import { isContextInvalidatedError, isExtensionContextValid } from './extensionContext.ts'
@@ -127,6 +128,13 @@ export type SetSyncResult
   = | { ok: true }
     | { ok: false, reason: 'newer-version', remoteVersion: number, version: number }
 
+/**
+ * What answering sync's question did. `refused`: keeping this browser's
+ * settings, over synced settings that can't be read whole, so can't be
+ * backed up first; nothing was backed up, sent or cleared.
+ */
+export interface HeldAnswer { resolved: boolean, refused?: KeepRefusal }
+
 export interface SyncStatus {
   enabled: boolean
   lastError: string
@@ -154,9 +162,15 @@ export const api = /* @__PURE__ */ createAPI<{
    * Answer what sync asks: a sync update held back by the deletion guard, or
    * which settings to keep as sync turned on over synced settings that differ
    * (`accept` uses the synced ones). Always answers (`resolved: false` when
-   * nothing was asked).
+   * nothing was asked, or the answer was refused).
    */
-  resolveHeldSync: (choice: 'accept' | 'keep') => Promise<{ resolved: boolean }>
+  resolveHeldSync: (choice: 'accept' | 'keep') => Promise<HeldAnswer>
+  /**
+   * Replace synced settings that still can't be read whole past the wait with
+   * this browser's, under a new ID. `replaced: false` where there is nothing
+   * to replace, or this browser's own settings can't stand in.
+   */
+  replaceSyncedCopy: () => Promise<{ replaced: boolean }>
   /** Which build the background is running, for the options page to compare with its own. */
   getBuildInfo: () => Promise<{ buildId: string, syncVersion: number }>
   clearSyncedData: () => Promise<boolean>

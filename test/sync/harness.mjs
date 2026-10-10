@@ -6,7 +6,7 @@ import { createBackupStore } from '../../src/common/backupStore.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { createSavedListsReconciler } from '../../src/common/savedLists.ts'
 import { decode, encode, MANIFEST_KEY } from '../../src/common/syncCodec.ts'
-import { createSyncEngine } from '../../src/common/syncCore.ts'
+import { ALARM_CONSISTENCY, createSyncEngine } from '../../src/common/syncCore.ts'
 import { SYNC_META_DEFAULTS } from '../../src/common/syncMetaDefaults.ts'
 import { createDefaultMarks, localMarkIds, markItems, packIds } from '../../src/common/workMarks.ts'
 
@@ -115,6 +115,11 @@ export function createCloud() {
  * `ids: false` is a build at this sync version from before the synced copy
  * carried an ID: it never sees one on a copy, writes none, and keeps none with
  * its agreement. `restart({ ids: true })` updates it.
+ *
+ * The engine and the backups read one clock, which stands still until
+ * `advance` moves it; each backup is taken a millisecond after the last. The push's and the read retry's alarms fire at the next
+ * round, as if their minute had passed; the consistency check's fires once
+ * the clock reaches it.
  */
 export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true, savedLists = true, stored = {}, failBackups = false, ids = true } = {}) {
   let opts = clone({ ...OPTION_DEFAULTS, ...options })
@@ -124,6 +129,8 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
   const local = new Map()
   let backupsFail = failBackups
   let clock = new Date(2026, 9, 9, 12).getTime()
+  /** Each backup a millisecond apart, without moving the clock the engine reads. */
+  let backupTick = 0
   let seq = 0
   let engine
   let keepsSavedLists = savedLists
@@ -179,6 +186,7 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
   const deps = {
     defaults: OPTION_DEFAULTS,
     version,
+    now: () => clock,
     readOptions: async () => clone(opts),
     async writeOptions(update) {
       opts = { ...opts, ...clone(update) }
@@ -196,7 +204,7 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     },
     sync,
     alarms: {
-      create: (alarm, info) => { alarms.set(alarm, info) },
+      create: (alarm, info) => { alarms.set(alarm, { ...info, due: clock + info.delayInMinutes * 60_000 }) },
       get: async alarm => alarms.get(alarm),
       clear: async alarm => alarms.delete(alarm),
     },
@@ -223,7 +231,7 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     meta: deps.meta,
     readOptions: deps.readOptions,
     writeOptions: deps.writeOptions,
-    now: () => clock++,
+    now: () => clock + backupTick++,
   })
 
   /** The background's reconciler, over this browser's storage. */
@@ -305,16 +313,22 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       await device.settle()
     },
 
-    /** Fire whatever alarms are pending, as if their delay had passed. */
+    /** Fire the alarms that are due: the push's and the read retry's as if their delay had passed, the consistency check's once the clock has reached it. */
     async react() {
-      if (!peer.online || !alarms.size)
+      const due = [...alarms].filter(([name, info]) => name !== ALARM_CONSISTENCY || info.due <= clock).map(([name]) => name)
+      if (!peer.online || !due.length)
         return false
-      const names = [...alarms.keys()]
-      alarms = new Map()
-      for (const alarm of names)
+      for (const alarm of due)
+        alarms.delete(alarm)
+      for (const alarm of due)
         engine.onAlarm({ name: alarm })
       await device.settle()
       return true
+    },
+
+    /** Move its clock on by `ms`. */
+    advance(ms) {
+      clock += ms
     },
 
     async enableSync() {
@@ -339,11 +353,23 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       backupsFail = true
     },
 
-    /** The reader answers a held update, or which settings to keep as sync turns on. */
+    /** The reader answers a held update, or which settings to keep as sync turns on: whether it was answered. */
     async resolveHeld(choice) {
-      const resolved = await engine.resolveHeld(choice)
+      return (await device.answer(choice)).resolved
+    },
+
+    /** As `resolveHeld`, with the whole answer: `refused` says why an answer wasn't taken. */
+    async answer(choice) {
+      const answer = await engine.resolveHeld(choice)
       await device.settle()
-      return resolved
+      return answer
+    },
+
+    /** The reader replaces synced settings that can't be read whole with this browser's: whether they were sent. */
+    async replace() {
+      const replaced = await engine.replaceSyncedCopy()
+      await device.settle()
+      return replaced
     },
 
     /** A change the reader makes in this browser's options. */

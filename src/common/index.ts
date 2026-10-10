@@ -1,5 +1,5 @@
 export { api } from './api.ts'
-export type { BackupKind, BackupSummary, MarkDelegation, SetSyncResult, SyncStatus, SyncUsage } from './api.ts'
+export type { BackupKind, BackupSummary, HeldAnswer, MarkDelegation, SetSyncResult, SyncStatus, SyncUsage } from './api.ts'
 
 export * from './backupIndex.ts'
 
@@ -29,6 +29,8 @@ export type { Options, ThemeOption } from './options.ts'
 export * from './savedLists.ts'
 
 export * from './syncCodec.ts'
+
+export * from './syncConsistency.ts'
 
 export { createSyncEngine } from './syncCore.ts'
 export type { SyncDeps, SyncEngine } from './syncCore.ts'

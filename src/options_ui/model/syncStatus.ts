@@ -1,7 +1,9 @@
 import type { SyncUsage } from '../../common/api.ts'
+import type { Inconsistency } from '../../common/syncConsistency.ts'
 import type { SyncPause } from '../../common/syncMeta.ts'
 import type { Severity } from './severity.ts'
 
+import { SYNC_CONSISTENCY_WAIT_MS } from '../../common/constants.ts'
 import { pullLossParts } from '../../common/syncGuard.ts'
 import { HELD_BACKUP_NOTE, staleBackgroundMessage, versionPauseReason } from '../../common/syncMessages.ts'
 import { formatMoment } from './moments.ts'
@@ -33,10 +35,12 @@ export interface SyncStatusInput {
   /** Why turning sync on was just refused. */
   refusal?: string
   usage?: SyncUsage | null
+  /** The synced copy as the background last read it, where it couldn't be read whole. */
+  inconsistent?: Inconsistency | null
 }
 
 /** What a chip or a callout is about, which also picks its glyph. A refusal's chip is `off`. */
-export type SyncState = 'off' | 'syncing' | 'stale' | 'error' | 'refusal' | SyncPause['reason']
+export type SyncState = 'off' | 'syncing' | 'stale' | 'error' | 'refusal' | 'inconsistent' | SyncPause['reason']
 
 export interface SyncChip {
   state: SyncState
@@ -47,13 +51,14 @@ export interface SyncChip {
 }
 
 export interface SyncAnswer {
-  choice: 'keep' | 'accept'
+  /** `replace`: the offer to replace synced settings that can't be read whole. */
+  choice: 'keep' | 'accept' | 'replace'
   label: string
   /** What the answer does, shown beside it: the two weigh the same. */
   consequence: string
 }
 
-/** A held update's question: what it would remove, one line each, and the two answers. */
+/** A held update's question: what it would remove, one line each, and the two answers; or the offer to replace synced settings that can't be read whole. */
 export interface SyncDecision {
   lines: string[]
   /** That this browser's settings are backed up, as they were when sync asked; null when they weren't. */
@@ -133,6 +138,8 @@ function statesOf(input: SyncStatusInput, version: number): State[] {
       states.push({ chip: OFF, callout: { state: 'refusal', severity: 'destructive', text: input.refusal, hook: { 'data-sync-refusal': '' } } })
     return states
   }
+  if (input.inconsistent?.overdue)
+    states.push(inconsistentState(input.inconsistent))
   if (input.lastError) {
     states.push({
       chip: { state: 'error', word: 'Couldn\'t sync', detail: 'It will be tried again.', severity: 'destructive' },
@@ -172,6 +179,31 @@ function pauseState(pause: SyncPause, version: number): State {
         callout: { state, severity: 'warning', text: sentence(versionPauseReason(pause, version)), hook },
       }
   }
+}
+
+/**
+ * Synced settings that still can't be read whole past the wait: no other
+ * browser is taken to be sending the rest. Where this browser's own settings
+ * can replace them (`replaceable`), it offers to, under a new ID, which every
+ * other browser weighs as a copy another browser started.
+ */
+function inconsistentState(record: Inconsistency): State {
+  const state = 'inconsistent'
+  const minutes = Math.round(SYNC_CONSISTENCY_WAIT_MS / 60_000)
+  const callout: SyncCallout = {
+    state,
+    severity: 'destructive',
+    text: `Your synced settings are inconsistent: part of them is missing or doesn't match the rest, and nothing has arrived to complete them in ${minutes} minutes. Changes you make here won't sync until they're whole again.`,
+    hook: { 'data-sync-inconsistent': '' },
+  }
+  if (record.replaceable) {
+    callout.decision = {
+      lines: [],
+      backup: null,
+      answers: [{ choice: 'replace', label: 'Replace them with this browser\'s settings', consequence: 'Makes this browser\'s settings your synced settings. Your other browsers ask before using them wherever their own settings differ, and back theirs up first.' }],
+    }
+  }
+  return { chip: { state, word: 'Inconsistent', detail: 'Your synced settings can\'t be read whole.', severity: 'destructive' }, callout }
 }
 
 /**

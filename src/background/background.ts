@@ -10,6 +10,7 @@ import {
   initSyncEngine,
   onAlarm,
   onStorageChanged,
+  replaceSyncedCopy,
   resolveHeldSync,
   resumeSync,
   setSyncEnabled,
@@ -66,7 +67,8 @@ api.getBuildInfo.addListener(async () => ({ buildId: process.env.BUILD_ID, syncV
 
 // --- Sync + backups API ---
 api.setSyncEnabled.addListener(async enabled => setSyncEnabled(enabled))
-api.resolveHeldSync.addListener(async choice => ({ resolved: await resolveHeldSync(choice) }))
+api.resolveHeldSync.addListener(async choice => resolveHeldSync(choice))
+api.replaceSyncedCopy.addListener(async () => ({ replaced: await replaceSyncedCopy() }))
 api.clearSyncedData.addListener(async () => {
   await clearSyncedData()
   return true

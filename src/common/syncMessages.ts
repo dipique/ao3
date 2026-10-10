@@ -1,4 +1,5 @@
 import type { SetSyncResult } from './api.ts'
+import type { KeepRefusal } from './syncConsistency.ts'
 import type { SyncPause } from './syncMeta.ts'
 
 import { describePullLoss } from './syncGuard.ts'
@@ -9,6 +10,18 @@ import { describePullLoss } from './syncGuard.ts'
  * of its kind isn't written, and that one, taken earlier, holds them.
  */
 export const HELD_BACKUP_NOTE = `This browser's settings are backed up.`
+
+/**
+ * Why keeping this browser's settings was refused: it backs the synced
+ * settings up first, and they can't be read whole. Within the wait another
+ * browser is taken to be still sending them; past it, they are inconsistent,
+ * and the sync panel offers to replace them.
+ */
+export function keepRefusedMessage(refused: KeepRefusal): string {
+  return refused === 'sending'
+    ? 'Another browser is still sending its settings. Try again in a moment.'
+    : 'Your synced settings are inconsistent, so they can\'t be backed up before they\'re replaced.'
+}
 
 /**
  * What the reader is told when sync stops, in one place: the options page and
