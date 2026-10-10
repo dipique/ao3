@@ -2,6 +2,7 @@
 // real sync engines (src/common/syncCore.ts) each over its own fake storage, and
 // a scripted stand-in for an outdated build. Not a test file itself.
 
+import { createBackupStore } from '../../src/common/backupStore.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { createSavedListsReconciler } from '../../src/common/savedLists.ts'
 import { decode, encode, MANIFEST_KEY } from '../../src/common/syncCodec.ts'
@@ -105,16 +106,20 @@ export function createCloud() {
  * once as it is installed (the migration), whenever its tracked lists or stored
  * lists change, and inside the engine before a pull is applied.
  *
- * Its daily backups aren't kept. `failBackups` makes every backup it takes fail
- * to be written, as a full or broken `storage.local` would: a daily one too,
- * whenever daily backups are on, since a failed one never counts as the day's.
+ * Its backups are the background's own store, over a `storage.local` of its
+ * own, on a clock that stays within one day. `failBackups` makes every backup
+ * it has to write fail, as a full or broken `storage.local` would: a daily one
+ * too, whenever daily backups are on, since a failed one never counts as the
+ * day's. `breakBackups()` does the same from then on.
  */
 export function createDevice(cloud, name, { options = {}, meta = {}, version, online = true, savedLists = true, stored = {}, failBackups = false } = {}) {
   let opts = clone({ ...OPTION_DEFAULTS, ...options })
   let searchLists = clone(stored)
   const state = { ...clone(SYNC_META_DEFAULTS), ...clone(meta) }
   let alarms = new Map()
-  const backups = []
+  const local = new Map()
+  let backupsFail = failBackups
+  let clock = new Date(2026, 9, 9, 12).getTime()
   let seq = 0
   let engine
   let keepsSavedLists = savedLists
@@ -186,19 +191,31 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
       get: async alarm => alarms.get(alarm),
       clear: async alarm => alarms.delete(alarm),
     },
-    backups: {
-      async maybeDaily() {
-        if (failBackups && state.backupsEnabled)
-          throw new Error(`${name}: the daily backup could not be written`)
-      },
-      async create(kind, snapshot) {
-        if (failBackups)
-          throw new Error(`${name}: the ${kind} backup could not be written`)
-        backups.push({ kind, options: clone(snapshot ?? opts) })
-      },
-    },
     randomId: () => `${name}-${++seq}`,
   }
+
+  deps.backups = createBackupStore({
+    local: {
+      async get(keys) {
+        const wanted = keys ?? [...local.keys()]
+        return Object.fromEntries(wanted.filter(key => local.has(key)).map(key => [key, clone(local.get(key))]))
+      },
+      async set(items) {
+        if (backupsFail)
+          throw new Error(`${name}: storage.local could not be written`)
+        for (const [key, value] of Object.entries(items))
+          local.set(key, clone(value))
+      },
+      async remove(keys) {
+        for (const key of keys)
+          local.delete(key)
+      },
+    },
+    meta: deps.meta,
+    readOptions: deps.readOptions,
+    writeOptions: deps.writeOptions,
+    now: () => clock++,
+  })
 
   /** The background's reconciler, over this browser's storage. */
   const reconciler = createSavedListsReconciler({
@@ -218,10 +235,20 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
   if (keepsSavedLists)
     void reconcile()
 
+  /** Its backups in storage, oldest first. */
+  const storedBackups = () => [...local.values()].sort((a, b) => a.createdAt - b.createdAt)
+
   const device = {
     name,
     peer,
-    backups,
+    /** Its event backups, oldest first: each one's kind and the settings it holds. */
+    get backups() {
+      return storedBackups().filter(backup => backup.kind !== 'daily').map(backup => ({ kind: backup.kind, options: clone(backup.options) }))
+    },
+    /** Its daily backups, oldest first, as `backups` has the others. */
+    get dailyBackups() {
+      return storedBackups().filter(backup => backup.kind === 'daily').map(backup => ({ kind: backup.kind, options: clone(backup.options) }))
+    },
     get options() { return clone(opts) },
     get meta() { return clone(state) },
     get alarms() { return [...alarms.keys()] },
@@ -273,6 +300,11 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     /** Write device-local sync state directly, as the background does outside the engine. */
     async setMeta(update) {
       Object.assign(state, clone(update))
+    },
+
+    /** From now on, every backup it has to write fails, as `failBackups` has them fail from the start. */
+    breakBackups() {
+      backupsFail = true
     },
 
     /** The reader answers a held update, or which settings to keep as sync turns on. */

@@ -182,10 +182,9 @@ function sortValue(value: unknown): unknown {
   if (Array.isArray(value))
     return value.map(sortValue)
   if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {}
-    for (const key of Object.keys(value).sort())
-      out[key] = sortValue((value as Record<string, unknown>)[key])
-    return out
+    // Built from entries, so a key spelled `__proto__` stays a key rather than
+    // setting the prototype, and what it holds is part of the string.
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortValue((value as Record<string, unknown>)[key])]))
   }
   return value
 }

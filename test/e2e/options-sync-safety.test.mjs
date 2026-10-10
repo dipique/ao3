@@ -375,12 +375,13 @@ describe('options UI — the sync panel', { skip }, () => {
     /**
      * The options page at Sync, with sync off and daily backups off, over this
      * browser's settings and a synced copy another browser wrote; the copy's
-     * manifest beside it.
+     * manifest beside it. This browser's saved lists are past their migration,
+     * as an installed build's are, so nothing changes its settings unasked.
      */
     async function openOverCopy() {
       const { chunks, manifest } = await encode({ ...structuredClone(OPTION_DEFAULTS), ...structuredClone(SYNCED) }, OPTION_DEFAULTS, 3, 'laptop.1')
       const options = await session.open({
-        seed: { 'option.rules': OWN.rules, 'option.wordsPerMinute': OWN.wordsPerMinute, 'sync.backupsEnabled': false, [MANIFEST_KEY]: manifest, ...chunks },
+        seed: { 'option.rules': OWN.rules, 'option.wordsPerMinute': OWN.wordsPerMinute, 'option.savedLists': { v: 1, lists: {} }, 'sync.backupsEnabled': false, [MANIFEST_KEY]: manifest, ...chunks },
         hash: '#sync',
         viewport: WIDE,
         prepare: async (page) => {
@@ -424,7 +425,7 @@ describe('options UI — the sync panel', { skip }, () => {
       }
     })
 
-    test('using the synced settings replaces this browser\'s, backing them up again as it does', async () => {
+    test('using the synced settings replaces this browser\'s, held by the backup taken as it asked: nothing changed since, so none is taken again', async () => {
       const { options, manifest } = await openOverCopy()
       try {
         await turnOn(options)
@@ -436,7 +437,6 @@ describe('options UI — the sync panel', { skip }, () => {
         assert.deepEqual(await options.stored('option.rules'), SYNCED.rules)
         assert.deepEqual(await options.stored(MANIFEST_KEY), manifest, 'nothing sent')
         assert.deepEqual(await options.page.evaluate(readBackups), [
-          { kind: 'pre-sync', wordsPerMinute: 320, rules: 3 },
           { kind: 'pre-sync', wordsPerMinute: 320, rules: 3 },
         ])
         await until('the question to go', async () => !(await options.page.$('[data-sync-pause]')))

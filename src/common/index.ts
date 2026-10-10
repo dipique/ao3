@@ -3,6 +3,8 @@ export type { BackupKind, BackupSummary, MarkDelegation, SetSyncResult, SyncStat
 
 export * from './backupIndex.ts'
 
+export { createBackupStore } from './backupStore.ts'
+
 export * from './blurbRecord.ts'
 
 export { cache } from './cache.ts'

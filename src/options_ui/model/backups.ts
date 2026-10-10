@@ -55,7 +55,7 @@ export function backupList(backups: readonly BackupSummary[] | null, daily: Dail
       key: backup.key,
       kind: backup.kind,
       label,
-      retention: backup.kind === 'daily' ? dailyRetention(daily.count) : 'kept apart · newest five of its kind',
+      retention: backup.kind === 'daily' ? dailyRetention(daily.count) : 'kept apart · newest ten of its kind',
       when,
       restore: `Restore “${label}” from ${when}`,
     }

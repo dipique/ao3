@@ -25,7 +25,7 @@ const KINDS = [
   backup('pre-restore', sep30),
 ]
 
-const KEPT_APART = 'kept apart · newest five of its kind'
+const KEPT_APART = 'kept apart · newest ten of its kind'
 
 describe('backupList', () => {
   test('lists the backups newest first', () => {

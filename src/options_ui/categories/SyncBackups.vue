@@ -38,7 +38,7 @@ const phone = useMediaQuery('(max-width: 767.98px)')
       <OptionDependents v-if="state.backupsEnabled">
         <OptionRow
           title="Number of daily backups to keep"
-          subtitle="Older daily backups beyond this count are deleted automatically. Backups taken around turning on sync, a restore, or a sync update you held back are kept separately: the newest five of each."
+          subtitle="Older daily backups beyond this count are deleted automatically. Backups taken around turning on sync, a restore, or a sync update you held back are kept separately: the newest ten of each."
         >
           <template #default="{ id }">
             <Stepper

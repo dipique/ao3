@@ -29,7 +29,7 @@ function everyKind() {
 
 const newestFirst = backups => [...backups].sort((a, b) => b.createdAt - a.createdAt)
 
-const KEPT_APART = 'kept apart · newest five of its kind'
+const KEPT_APART = 'kept apart · newest ten of its kind'
 
 /**
  * Sync & Backups → Backups: the switch, the count to keep while it is on, and

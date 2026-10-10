@@ -10,7 +10,7 @@ export const BACKUP_PREFIX = 'backup.'
  * copy of what that event replaced, so a run of them mustn't push out the daily
  * history (or each other's kinds).
  */
-export const EVENT_BACKUPS_PER_KIND = 5
+export const EVENT_BACKUPS_PER_KIND = 10
 
 export const BACKUP_KIND_LABELS: Record<BackupKind, string> = {
   'daily': 'Daily backup',
@@ -46,6 +46,10 @@ export function planBackupPrune(
       remove.push(backup.key)
   }
   return { keep, remove }
+}
+
+export function newestOfKind(index: readonly BackupSummary[], kind: BackupKind): BackupSummary | undefined {
+  return sortBackups(index).find(backup => backup.kind === kind)
 }
 
 /** A creation time no backup in `index` has, starting from `now`: it's the key. */

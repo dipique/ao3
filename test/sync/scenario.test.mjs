@@ -9,6 +9,8 @@ import { describe, test } from 'node:test'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { addressOf, planRetitle, planStopTracking, planTrack, planTrackSearch } from '../../src/common/savedLists.ts'
 import { SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
+import { HELD_BACKUP_NOTE } from '../../src/common/syncMessages.ts'
+import { syncStatusView } from '../../src/options_ui/model/syncStatus.ts'
 import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixture, range, rulesFixture, textReplacementsFixture, trackedListsFixture } from './harness.mjs'
 
 /** The options the first sync build knew: everything but what came later. */
@@ -23,6 +25,14 @@ const MAIN = { rules: rulesFixture(40), workMarks: marksFixture(range(1000, 60))
 function mainBrowser(cloud, name = 'laptop', settings = {}) {
   return createDevice(cloud, name, { options: MAIN, ...settings })
 }
+
+/** The question a pause asks, as the options page words it: its backup note and its answers. */
+function decisionOn(pause) {
+  return syncStatusView({ enabled: true, pause, staleBuild: false, backgroundOutdated: false }, SYNC_SCHEMA_VERSION).callouts[0].decision
+}
+
+/** What the answer `choice` says it does. */
+const consequence = (decision, choice) => decision.answers.find(answer => answer.choice === choice).consequence
 
 describe('sync scenarios', () => {
   test('a change in one browser reaches the other', async () => {
@@ -190,6 +200,35 @@ describe('sync scenarios', () => {
       assert.equal(desktop.options.wordsPerMinute, 400, 'syncing as usual from then on')
     })
 
+    test('"accept" with nothing changed since it asked backs up nothing more: the backup taken as it asked holds what it replaces', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { desktop } = await asked({ meta: { backupsEnabled } })
+        assert.equal(await desktop.resolveHeld('accept'), true)
+        assert.equal(desktop.options.wordsPerMinute, 200, daily)
+        assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320]], daily)
+      }
+    })
+
+    /**
+     * Answering backs up again only for what changed while it asked. A backup
+     * that can't be written then doesn't stop the answer, as one that can't be
+     * written as it asks doesn't stop the question: what was there as it asked
+     * is in the backup it points to, and only the change made since is in none.
+     */
+    test('a backup that can\'t be written as "accept" applies doesn\'t stop it, daily backups on or off', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { desktop } = await asked({ meta: { backupsEnabled } })
+        await desktop.edit({ wordsPerMinute: 330 })
+        desktop.breakBackups()
+        assert.equal(await desktop.resolveHeld('accept'), true, daily)
+        assert.equal(desktop.meta.pause, null, daily)
+        assert.equal(desktop.options.wordsPerMinute, 200, daily)
+        assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320]], daily)
+      }
+    })
+
     test('"keep" replaces the synced settings on every browser, keeping them as a backup first', async () => {
       const { cloud, laptop, desktop } = await asked()
       assert.equal(await desktop.resolveHeld('keep'), true)
@@ -229,7 +268,22 @@ describe('sync scenarios', () => {
       await cloud.run()
       assert.equal(desktop.meta.pause?.reason, 'first-sync')
       assert.equal(desktop.options.wordsPerMinute, 320)
-      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'pre-sync'])
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'], 'nothing changed, so the backup it took the first time holds them')
+    })
+
+    test('turned on again with nothing changed, its backup is the one already taken, and the question says they are backed up', async () => {
+      const { cloud, desktop } = await asked({ meta: { backupsEnabled: false } })
+      await desktop.disableSync()
+      await desktop.enableSync()
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync')
+      assert.deepEqual([desktop.meta.pause.backedUp, desktop.meta.pause.backupFailed], [true, false])
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'])
+      assert.deepEqual(desktop.backups[0].options, desktop.options)
+
+      const decision = decisionOn(desktop.meta.pause)
+      assert.equal(decision.backup, HELD_BACKUP_NOTE)
+      assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with your synced settings. Yours were backed up first.')
     })
 
     test('a newer copy arriving while it asks is weighed afresh: asked over it, or settled once it no longer differs', async () => {
@@ -317,7 +371,8 @@ describe('sync scenarios', () => {
       await cloud.run()
       assert.equal(desktop.meta.pause, null)
       assert.equal(desktop.options.rules.filters.length, 40)
-      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'pre-sync'])
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'])
+      assert.equal(desktop.backups[0].options.rules.filters.length, 60, 'the backup taken as it asked holds what it replaced')
     })
 
     test('a newer sync version refuses before any backup or question', async () => {
@@ -383,8 +438,9 @@ describe('sync scenarios', () => {
       await cloud.run()
       assert.equal(desktop.meta.pause?.reason, 'first-sync')
       assert.deepEqual([desktop.meta.pause.g, desktop.meta.pause.w], [cloud.manifest().g, cloud.manifest().w])
+      assert.equal(desktop.meta.pause.backedUp, true)
       assert.equal(desktop.options.wordsPerMinute, 320)
-      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync', 'pre-sync'])
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'], 'asked again over the same settings: the backup it has holds them')
     })
 
     test('a browser taken back to an older build while it asks pauses for the copy rather than adopt it', async () => {
@@ -628,6 +684,73 @@ describe('sync scenarios', () => {
       assert.equal(laptop.meta.pause, null)
       assert.equal(laptop.options.rules.filters.length, 1)
       assert.equal(laptop.meta.dirty, false)
+    })
+
+    /** Accepting replaces the edits made while it was held too, which the hold's backup doesn't hold. */
+    test('"accept" backs this browser\'s settings up again as it applies, with what changed while it was held, daily backups on or off', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { cloud, laptop } = await bulkDelete({ meta: { backupsEnabled } })
+        await laptop.edit({ wordsPerMinute: 999, textReplacements: textReplacementsFixture(12) })
+        assert.equal(await laptop.resolveHeld('accept'), true, daily)
+        await cloud.run()
+
+        assert.equal(laptop.meta.pause, null, daily)
+        assert.equal(laptop.options.rules.filters.length, 1, daily)
+        assert.equal(laptop.options.wordsPerMinute, OPTION_DEFAULTS.wordsPerMinute, `the edit made while held is replaced too, ${daily}`)
+        assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held', 'sync-held'], daily)
+        const [held, accepted] = laptop.backups
+        assert.equal(held.options.wordsPerMinute, OPTION_DEFAULTS.wordsPerMinute, `the hold's backup: the settings as it held, ${daily}`)
+        assert.equal(accepted.options.wordsPerMinute, 999, `and as they were replaced, ${daily}`)
+        assert.equal(accepted.options.textReplacements.rules.length, 12, daily)
+        assert.equal(accepted.options.rules.filters.length, 40, daily)
+        assert.equal(laptop.dailyBackups.length, backupsEnabled ? 1 : 0, `the day's backup is its own, ${daily}`)
+      }
+    })
+
+    test('"accept" with nothing changed since it was held backs up nothing more: the hold\'s backup holds what it replaces', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { cloud, laptop } = await bulkDelete({ meta: { backupsEnabled } })
+        assert.equal(await laptop.resolveHeld('accept'), true, daily)
+        await cloud.run()
+        assert.equal(laptop.options.rules.filters.length, 1, daily)
+        assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held'], daily)
+        assert.equal(laptop.backups[0].options.rules.filters.length, 40, daily)
+      }
+    })
+
+    /** As "use" does, when its own backup fails: see the same test under turning sync on. */
+    test('a backup that can\'t be written as "accept" applies doesn\'t stop it, daily backups on or off', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { cloud, laptop } = await bulkDelete({ meta: { backupsEnabled } })
+        await laptop.edit({ wordsPerMinute: 999 })
+        laptop.breakBackups()
+        assert.equal(await laptop.resolveHeld('accept'), true, daily)
+        await cloud.run()
+        assert.equal(laptop.meta.pause, null, daily)
+        assert.equal(laptop.options.rules.filters.length, 1, daily)
+        assert.deepEqual(laptop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['sync-held', OPTION_DEFAULTS.wordsPerMinute]], daily)
+      }
+    })
+
+    test('held again over settings an earlier hold backed up, it points to that backup, and says they are backed up', async () => {
+      const { cloud, laptop, desktop } = await bulkDelete({ meta: { backupsEnabled: false } })
+      assert.equal(await laptop.resolveHeld('keep'), true)
+      await cloud.run()
+      assert.equal(desktop.options.rules.filters.length, 40, 'precondition: the laptop\'s rules went back')
+
+      await desktop.edit({ rules: rulesFixture(1) })
+      await cloud.run()
+      assert.equal(laptop.meta.pause?.reason, 'held')
+      assert.deepEqual([laptop.meta.pause.backedUp, laptop.meta.pause.backupFailed], [true, false])
+      assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held', 'sync-declined'], 'the first hold\'s backup holds the same settings')
+      assert.deepEqual(laptop.backups[0].options, laptop.options)
+
+      const decision = decisionOn(laptop.meta.pause)
+      assert.equal(decision.backup, HELD_BACKUP_NOTE)
+      assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with the other browser\'s. Yours were backed up when sync held.')
     })
 
     test('a newer update within bounds applies and clears the hold', async () => {

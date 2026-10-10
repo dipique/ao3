@@ -69,7 +69,11 @@ export interface SyncDeps {
   backups: {
     /** Snapshot the current options if today has no backup yet. */
     maybeDaily: () => Promise<void>
-    /** Snapshot `snapshot`, or the current options when it's absent. Rejects when the backup isn't written. */
+    /**
+     * Snapshot `snapshot`, or the current options when it's absent. Resolves
+     * once a backup holds them: a new one, or the newest of its kind where that
+     * holds the same already. Rejects when one has to be written and isn't.
+     */
     create: (kind: BackupKind, snapshot?: Partial<Options>) => Promise<void>
   }
   /**
@@ -196,11 +200,12 @@ export function createSyncEngine(deps: SyncDeps) {
    * The reader's answer to the question sync holds for: an update the deletion
    * guard held, or which settings to keep as sync turned on over a copy that
    * differs. `accept` applies the synced copy. This browser's settings were
-   * backed up as the question was asked, if `pause.backedUp` says so. Turning
-   * sync on's question backs them up again first, since edits made while it
-   * asked are in no backup yet. `keep` saves the synced copy as a backup, so
-   * whatever the other browser had is still restorable, and pushes this
-   * browser's settings over it.
+   * backed up as the question was asked, if `pause.backedUp` says so, and are
+   * backed up again first, under the same kind, since edits made while it
+   * asked are in no backup yet. With none made, the backup it points to
+   * already holds them, and no second one is written. `keep` saves the synced
+   * copy as a backup, so whatever the other browser had is still restorable,
+   * and pushes this browser's settings over it.
    */
   async function resolveHeld(choice: 'accept' | 'keep'): Promise<boolean> {
     return withLock(async () => {
@@ -209,8 +214,7 @@ export function createSyncEngine(deps: SyncDeps) {
         return false
 
       if (choice === 'accept') {
-        if (pause.reason === 'first-sync')
-          await backUp('pre-sync')
+        await backUp(pause.reason === 'first-sync' ? 'pre-sync' : 'sync-held')
         await pull({ acceptLoss: true })
       }
       else {
@@ -539,9 +543,11 @@ export function createSyncEngine(deps: SyncDeps) {
   /**
    * Back up this browser's settings where sync may replace every one of them,
    * whatever daily backups say: as an update is held, as sync turns on over a
-   * synced copy, and as the synced settings are taken over this browser's.
-   * Answers what to record of it: one that can't be written doesn't stop what
-   * it guards, which then records that it failed.
+   * synced copy, and as either question is answered by taking the synced
+   * settings. Answers what to record of it: one that can't be written doesn't
+   * stop what it guards, which then records that it failed. Settings the
+   * newest backup of the kind already holds count as backed up: that backup
+   * is the one kept for them.
    */
   async function backUp(kind: BackupKind): Promise<BackupRecord> {
     try {

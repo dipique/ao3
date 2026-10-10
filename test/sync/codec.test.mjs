@@ -138,6 +138,13 @@ describe('canonicalStringify + hash', () => {
   test('array order DOES matter (ordered data)', () => {
     assert.notEqual(canonicalStringify([1, 2]), canonicalStringify([2, 1]))
   })
+
+  test('a key spelled __proto__ is kept as a key, with what it holds', () => {
+    const a = JSON.parse('{"x":{"b":1,"__proto__":{"in":["a"]}}}')
+    const b = JSON.parse('{"x":{"b":1,"__proto__":{"in":["b"]}}}')
+    assert.equal(canonicalStringify(a), '{"x":{"__proto__":{"in":["a"]},"b":1}}')
+    assert.notEqual(canonicalStringify(a), canonicalStringify(b))
+  })
 })
 
 describe('encode/decode round-trip', () => {
