@@ -128,6 +128,8 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
   let alarms = new Map()
   const local = new Map()
   let backupsFail = failBackups
+  /** Run once, as the next backup is written. */
+  let onBackup = null
   let clock = new Date(2026, 9, 9, 12).getTime()
   /** Each backup a millisecond apart, without moving the clock the engine reads. */
   let backupTick = 0
@@ -218,6 +220,9 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
         return Object.fromEntries(wanted.filter(key => local.has(key)).map(key => [key, clone(local.get(key))]))
       },
       async set(items) {
+        const during = onBackup
+        onBackup = null
+        during?.()
         if (backupsFail)
           throw new Error(`${name}: storage.local could not be written`)
         for (const [key, value] of Object.entries(items))
@@ -351,6 +356,11 @@ export function createDevice(cloud, name, { options = {}, meta = {}, version, on
     /** From now on, every backup it has to write fails, as `failBackups` has them fail from the start. */
     breakBackups() {
       backupsFail = true
+    },
+
+    /** Runs `fn` as its next backup is written: something that happens while the engine is partway through what took it. */
+    whileBackingUp(fn) {
+      onBackup = fn
     },
 
     /** The reader answers a held update, or which settings to keep as sync turns on: whether it was answered. */

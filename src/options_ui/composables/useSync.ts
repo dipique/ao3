@@ -2,7 +2,7 @@ import { clamp } from '@antfu/utils'
 
 import type { Inconsistency, SyncMeta, SyncPause, SyncUsage } from '#common'
 
-import { api, BUILD_CHECK_TIMEOUT_MS, keepRefusedMessage, SYNC_SCHEMA_VERSION, syncMeta, syncRefusalMessage, toast } from '#common'
+import { answerRefusedMessage, api, BUILD_CHECK_TIMEOUT_MS, SYNC_SCHEMA_VERSION, syncMeta, syncRefusalMessage, toast } from '#common'
 
 import { syncStatusView } from '../model/syncStatus.ts'
 
@@ -123,7 +123,7 @@ export function useSync() {
       await answer(async () => {
         const answered = await api.resolveHeldSync.sendToBackground(choice)
         if (answered?.refused)
-          toast(keepRefusedMessage(answered.refused))
+          toast(answerRefusedMessage(answered.refused, choice))
       })
     },
 

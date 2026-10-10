@@ -281,7 +281,7 @@ describe('syncStatusView', () => {
     })
 
     test('stacks after a stale background and before an error and a question, and the chip names it over the error', () => {
-      const view = syncStatusView({ ...ON, inconsistent: OVERDUE, lastError: 'Could not read synced data (incomplete).', pause: HELD }, V)
+      const view = syncStatusView({ ...ON, inconsistent: OVERDUE, lastError: 'QUOTA_BYTES quota exceeded', pause: HELD }, V)
       assert.deepEqual(view.chip, CHIP)
       assert.deepEqual(view.callouts.map(c => c.state), ['inconsistent', 'error', 'held'])
       assert.deepEqual(syncStatusView({ ...ON, inconsistent: OVERDUE, staleBuild: true }, V).callouts.map(c => c.state), ['stale', 'inconsistent'])
@@ -354,7 +354,7 @@ describe('syncStatusView', () => {
     })
 
     test('a stale background comes before an error, and both before a hold', () => {
-      const view = syncStatusView({ ...ON, pause: HELD, lastError: 'Could not read synced data (incomplete).', staleBuild: true }, V)
+      const view = syncStatusView({ ...ON, pause: HELD, lastError: 'QUOTA_BYTES quota exceeded', staleBuild: true }, V)
       assert.deepEqual(view.chip, RELOAD)
       assert.deepEqual(view.callouts.map(c => c.state), ['stale', 'error', 'held'])
       assert.deepEqual(view.callouts.map(c => c.hook), [{ 'data-sync-stale': '' }, { 'data-sync-error': '' }, { 'data-sync-pause': 'held' }])

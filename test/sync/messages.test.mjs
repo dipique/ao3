@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { keepRefusedMessage, staleBackgroundMessage, syncPauseMessage, syncRefusalMessage } from '../../src/common/syncMessages.ts'
+import { answerRefusedMessage, staleBackgroundMessage, syncPauseMessage, syncRefusalMessage } from '../../src/common/syncMessages.ts'
 
 describe('sync messages', () => {
   test('a held update says what it would remove, and whether a backup exists', () => {
@@ -24,10 +24,16 @@ describe('sync messages', () => {
     assert.equal(syncPauseMessage({ ...first, otherCopy: true }, 2), syncPauseMessage(first, 2), 'asked over a copy another browser started, the same')
   })
 
-  /** Keeping this browser's settings backs the synced ones up first, which a copy that can't be read whole doesn't allow. */
-  test('keeping this browser\'s settings over synced settings that can\'t be read whole is refused, saying why', () => {
-    assert.equal(keepRefusedMessage('sending'), 'Another browser is still sending its settings. Try again in a moment.')
-    assert.equal(keepRefusedMessage('inconsistent'), 'Your synced settings are inconsistent, so they can\'t be backed up before they\'re replaced.')
+  /**
+   * Keeping this browser's settings backs the synced ones up first, and using
+   * the synced settings applies them, which a copy that can't be read whole
+   * allows neither.
+   */
+  test('either answer over synced settings that can\'t be read whole is refused, saying why', () => {
+    for (const choice of ['keep', 'accept'])
+      assert.equal(answerRefusedMessage('sending', choice), 'Another browser is still sending its settings. Try again in a moment.', choice)
+    assert.equal(answerRefusedMessage('inconsistent', 'keep'), 'Your synced settings are inconsistent, so they can\'t be backed up before they\'re replaced.')
+    assert.equal(answerRefusedMessage('inconsistent', 'accept'), 'Your synced settings are inconsistent, so they can\'t be used.')
   })
 
   test('an out-of-date background says whether sync has stopped', () => {

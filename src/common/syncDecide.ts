@@ -211,3 +211,23 @@ export function uploadId(agreed: LocalMeta, remote: Manifest | null, force: bool
 export function questionGone(pause: SyncPause | null, agreed: LocalMeta, remote: Manifest | null): boolean {
   return pause?.reason === 'first-sync' && pause.otherCopy === true && !!agreed.i && remote?.i === agreed.i
 }
+
+/** A pause that waits on the reader's answer: nothing is applied or pushed until they give it. */
+export type Question = Extract<SyncPause, { reason: 'held' | 'first-sync' }>
+
+/**
+ * Whether taking the synced settings is refused, where the backups it takes
+ * of this browser's settings as it applies them were `written` or not: the
+ * question to record if it is, else null. A backup that would repeat the
+ * newest of its kind counts as written, since that one holds them.
+ *
+ * Where one was due and couldn't be written, the first press applies nothing,
+ * and the question records that this browser's settings aren't backed up, so
+ * it says so. Once it says so, the reader answers knowing it, and a press goes
+ * ahead whatever its backups do.
+ */
+export function refuseUnbacked(pause: Question, written: boolean): Question | null {
+  if (written || pause.backupFailed)
+    return null
+  return { ...pause, backedUp: false, backupFailed: true }
+}

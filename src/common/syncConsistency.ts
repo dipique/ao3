@@ -12,25 +12,41 @@ import { decode, encode, MANIFEST_KEY, pruneToSynced, SYNC_SCHEMA_VERSION } from
  * together, so a browser can read a manifest whose parts aren't all there
  * yet, or a part another upload left behind. While it can't be read whole,
  * another browser is taken to be still sending it, and nothing is written over
- * it: there is nothing whole to back up first. Past {@link SYNC_CONSISTENCY_WAIT_MS}
- * no browser is taken to be sending the rest any more, and the copy can be
- * replaced with this browser's settings.
+ * it or taken from it: there is nothing whole to back up first, or to apply.
+ * Past {@link SYNC_CONSISTENCY_WAIT_MS} from when this browser first read that
+ * upload so, no browser is taken to be sending the rest any more, and the
+ * copy can be replaced with this browser's settings.
  */
 
 /**
- * What a read of the synced store found: a copy at this sync version, `whole`
- * or `partial`, or `none`: no copy, or one at another version, which isn't
- * read whole at all (an older one is never taken, a newer one pauses sync).
+ * One upload of the synced copy, told apart by its manifest's generation and
+ * writer token: every upload writes a token of its own.
  */
-export type CopyRead = 'whole' | 'partial' | 'none'
+export interface Upload { g: number, w: string }
 
-export function readOf(result: DecodeResult): CopyRead {
-  if (result.ok)
-    return 'whole'
-  return result.reason === 'incomplete' || result.reason === 'corrupt' ? 'partial' : 'none'
+/**
+ * What a read of the synced store found: a copy at this sync version, `whole`
+ * or `partial`, the latter with the upload its manifest names, or `none`: no
+ * copy, or one at another version, which isn't read whole at all (an older one
+ * is never taken, a newer one pauses sync).
+ */
+export type CopyFound = { read: 'whole' | 'none' } | { read: 'partial', upload: Upload }
+
+/** A read that found no whole copy. */
+type Unread = Exclude<CopyFound, { read: 'whole' }>
+
+/** What a read that decoded to `result` found, `manifest` being the manifest it read. */
+export function foundOf(result: DecodeResult, manifest: Pick<Manifest, 'g' | 'w'> | undefined): CopyFound {
+  return result.ok ? { read: 'whole' } : unreadOf(result.reason, manifest)
 }
 
-export type CopyCheck = { read: 'whole', options: Partial<Options> } | { read: 'partial' | 'none' }
+function unreadOf(reason: Extract<DecodeResult, { ok: false }>['reason'], manifest: Pick<Manifest, 'g' | 'w'> | undefined): Unread {
+  if ((reason === 'incomplete' || reason === 'corrupt') && manifest)
+    return { read: 'partial', upload: { g: manifest.g, w: manifest.w } }
+  return { read: 'none' }
+}
+
+export type CopyCheck = { read: 'whole', options: Partial<Options> } | Unread
 
 /** Reads the synced store's `items` as a build at sync version `version` does. */
 export async function checkCopy(items: Record<string, unknown>, version = SYNC_SCHEMA_VERSION): Promise<CopyCheck> {
@@ -38,7 +54,7 @@ export async function checkCopy(items: Record<string, unknown>, version = SYNC_S
   if (manifest && typeof manifest === 'object' && manifest.v !== version)
     return { read: 'none' }
   const result = await decode(items, version)
-  return result.ok ? { read: 'whole', options: result.options } : { read: readOf(result) as 'partial' | 'none' }
+  return result.ok ? { read: 'whole', options: result.options } : unreadOf(result.reason, manifest)
 }
 
 /** Whether this browser's settings, written as an upload would write them, pass the same check. */
@@ -66,26 +82,31 @@ export async function ownCopyReplaces(options: Options, defaults: Options, versi
 
 /** A synced copy this browser has read and couldn't read whole, kept device-local as `sync.inconsistent`. */
 export interface Inconsistency {
-  /** When this browser first read it so. */
+  /** When this browser first read {@link upload} so. */
   since: number
   /** Still so past the wait: no other browser is taken to be sending the rest. */
   overdue: boolean
   /** Past the wait, and this browser's own settings can replace it ({@link ownCopyReplaces}). */
   replaceable: boolean
+  /** The upload whose manifest it was read under. A record a build from before it kept has none. */
+  upload?: Upload
 }
 
 /**
- * The record after a read that found `read`, at `now`. `ownReplaces` is
+ * The record after a read that found `found`, at `now`. `ownReplaces` is
  * whether this browser's own settings can replace the copy. A whole copy, or
- * none at this version, ends it; a partial one keeps when it was first read,
- * so the wait runs from then however often it is read again.
+ * none at this version, ends it. A partial one keeps when its upload was first
+ * read so, however often it is read again, and another upload's starts a wait
+ * of its own: its sender may still be sending it.
  */
-export function nextInconsistency(record: Inconsistency | null, read: CopyRead, now: number, ownReplaces: boolean): Inconsistency | null {
-  if (read !== 'partial')
+export function nextInconsistency(record: Inconsistency | null, found: CopyFound, now: number, ownReplaces: boolean): Inconsistency | null {
+  if (found.read !== 'partial')
     return null
-  const since = record?.since ?? now
+  const { upload } = found
+  const same = !!record?.upload && record.upload.g === upload.g && record.upload.w === upload.w
+  const since = same ? record.since : now
   const overdue = now - since >= SYNC_CONSISTENCY_WAIT_MS
-  return { since, overdue, replaceable: overdue && ownReplaces }
+  return { since, overdue, replaceable: overdue && ownReplaces, upload }
 }
 
 /** Milliseconds from `now` until the wait is up, when the copy is read again; null with nothing to wait for. */
@@ -96,12 +117,12 @@ export function recheckIn(record: Inconsistency | null, now: number): number | n
 }
 
 /**
- * Why keeping this browser's settings is refused over a copy that can't be
- * read whole: within the wait another browser is still `sending` it; past it,
- * it is `inconsistent`.
+ * Why an answer to what sync asks is refused over a copy that can't be read
+ * whole: within the wait another browser is still `sending` it; past it, it is
+ * `inconsistent`.
  */
-export type KeepRefusal = 'sending' | 'inconsistent'
+export type AnswerRefusal = 'sending' | 'inconsistent'
 
-export function keepRefusal(record: Inconsistency): KeepRefusal {
+export function answerRefusal(record: Inconsistency): AnswerRefusal {
   return record.overdue ? 'inconsistent' : 'sending'
 }

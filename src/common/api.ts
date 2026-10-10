@@ -1,5 +1,5 @@
 import type { Tag } from './data.ts'
-import type { KeepRefusal } from './syncConsistency.ts'
+import type { AnswerRefusal } from './syncConsistency.ts'
 import type { toast } from './toast/toast.tsx'
 
 import { isContextInvalidatedError, isExtensionContextValid } from './extensionContext.ts'
@@ -129,11 +129,13 @@ export type SetSyncResult
     | { ok: false, reason: 'newer-version', remoteVersion: number, version: number }
 
 /**
- * What answering sync's question did. `refused`: keeping this browser's
- * settings, over synced settings that can't be read whole, so can't be
- * backed up first; nothing was backed up, sent or cleared.
+ * What answering sync's question did. `refused`: the synced settings can't be
+ * read whole, so they can be neither backed up before this browser's replace
+ * them nor used; nothing was backed up, sent, applied or cleared. Not
+ * `resolved`, with nothing refused: nothing was asked, or the backup the
+ * answer takes couldn't be written, which the question now records.
  */
-export interface HeldAnswer { resolved: boolean, refused?: KeepRefusal }
+export interface HeldAnswer { resolved: boolean, refused?: AnswerRefusal }
 
 export interface SyncStatus {
   enabled: boolean

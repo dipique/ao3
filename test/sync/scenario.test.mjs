@@ -214,22 +214,58 @@ describe('sync scenarios', () => {
     })
 
     /**
-     * Answering backs up again only for what changed while it asked. A backup
-     * that can't be written then doesn't stop the answer, as one that can't be
-     * written as it asks doesn't stop the question: what was there as it asked
-     * is in the backup it points to, and only the change made since is in none.
+     * Answering backs up again what changed while it asked. A backup that
+     * can't be written then refuses the first press: nothing is applied, and
+     * the question records that this browser's settings aren't backed up, so
+     * it says so before a second press uses the synced settings anyway.
      */
-    test('a backup that can\'t be written as "accept" applies doesn\'t stop it, daily backups on or off', async () => {
+    test('a backup that can\'t be written as "accept" applies refuses the first press, which then says yours aren\'t backed up; a second press applies, daily backups on or off', async () => {
       for (const backupsEnabled of [true, false]) {
         const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
-        const { desktop } = await asked({ meta: { backupsEnabled } })
+        const { cloud, desktop } = await asked({ meta: { backupsEnabled } })
         await desktop.edit({ wordsPerMinute: 330 })
         desktop.breakBackups()
+        const question = desktop.meta.pause
+        const before = cloud.manifest()
+
+        assert.deepEqual(await desktop.answer('accept'), { resolved: false }, daily)
+        assert.deepEqual(desktop.meta.pause, { ...question, backedUp: false, backupFailed: true }, daily)
+        assert.equal(desktop.options.wordsPerMinute, 330, `nothing applied, ${daily}`)
+        assert.equal(desktop.options.rules.filters.length, 41, daily)
+        const decision = decisionOn(desktop.meta.pause)
+        assert.equal(decision.backup, null, daily)
+        assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with your synced settings. Yours aren\'t backed up: the backup couldn\'t be saved.', daily)
+
         assert.equal(await desktop.resolveHeld('accept'), true, daily)
+        await cloud.run()
         assert.equal(desktop.meta.pause, null, daily)
         assert.equal(desktop.options.wordsPerMinute, 200, daily)
+        assert.deepEqual(cloud.manifest(), before, `nothing pushed, ${daily}`)
         assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320]], daily)
       }
+    })
+
+    /** The day's backup, due as the answer applies, is a backup the answer takes too. */
+    test('the day\'s backup that can\'t be written as "accept" applies refuses the first press the same way', async () => {
+      const { desktop } = await asked({ meta: { backupsEnabled: true } })
+      await desktop.setMeta({ lastBackupDate: '' })
+      desktop.breakBackups()
+      assert.deepEqual(await desktop.answer('accept'), { resolved: false })
+      assert.deepEqual([desktop.meta.pause?.reason, desktop.meta.pause?.backedUp, desktop.meta.pause?.backupFailed], ['first-sync', false, true])
+      assert.equal(desktop.options.wordsPerMinute, 320, 'nothing applied')
+
+      assert.equal(await desktop.resolveHeld('accept'), true)
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 200)
+    })
+
+    /** A backup that would repeat the newest of its kind isn't written, and counts as backed up: nothing was due. */
+    test('with nothing changed since it asked, "accept" goes ahead at the first press though backups can\'t be written', async () => {
+      const { desktop } = await asked({ meta: { backupsEnabled: false } })
+      desktop.breakBackups()
+      assert.equal(await desktop.resolveHeld('accept'), true)
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 200)
     })
 
     test('"keep" replaces the synced settings on every browser, keeping them as a backup first', async () => {
@@ -474,11 +510,15 @@ describe('sync scenarios', () => {
       }
     })
 
-    test('one whose backup failed can still use the synced settings, with daily backups off', async () => {
-      const { desktop } = await asked({ failBackups: true, meta: { backupsEnabled: false } })
-      assert.equal(await desktop.resolveHeld('accept'), true)
-      assert.equal(desktop.meta.pause, null)
-      assert.equal(desktop.options.wordsPerMinute, 200)
+    /** The question already says this browser's settings aren't backed up, so the first press is the reader's second word on it. */
+    test('one whose backup failed uses the synced settings at the first press, daily backups on or off', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { desktop } = await asked({ failBackups: true, meta: { backupsEnabled } })
+        assert.equal(await desktop.resolveHeld('accept'), true, daily)
+        assert.equal(desktop.meta.pause, null, daily)
+        assert.equal(desktop.options.wordsPerMinute, 200, daily)
+      }
     })
   })
 
@@ -906,6 +946,9 @@ describe('sync scenarios', () => {
     const panelOf = browser => syncStatusView({ ...browser.meta, staleBuild: false, backgroundOutdated: false }, SYNC_SCHEMA_VERSION)
     const inconsistentCallout = browser => panelOf(browser).callouts.find(callout => callout.state === 'inconsistent')
 
+    /** The upload `manifest` names: its generation and writer token. */
+    const uploadOf = manifest => ({ g: manifest.g, w: manifest.w })
+
     test('turning sync on: a copy caught partway is waited on, and keeping this browser\'s settings refused, until the rest arrives', async () => {
       const cloud = createCloud()
       const laptop = mainBrowser(cloud)
@@ -921,7 +964,7 @@ describe('sync scenarios', () => {
       await laptop.edit({ wordsPerMinute: 250 })
       await laptop.react()
       await manifestFirst(laptop, desktop)
-      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent?.since, overdue: false, replaceable: false })
+      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent?.since, overdue: false, replaceable: false, upload: uploadOf(laptop.synced[MANIFEST_KEY]) })
       assert.equal(typeof desktop.meta.inconsistent.since, 'number')
       assert.deepEqual(desktop.meta.pause, question, 'the question stands')
 
@@ -967,6 +1010,202 @@ describe('sync scenarios', () => {
       assert.deepEqual([laptop.meta.pause.g, laptop.meta.pause.w], [cloud.manifest().g, cloud.manifest().w])
     })
 
+    /**
+     * Using the synced settings applies nothing of a copy that can't be read,
+     * so it is refused as keeping is: the question stands, and nothing is
+     * backed up, applied or cleared.
+     */
+    test('turning sync on: using the synced settings over a copy caught partway is refused as keeping them is, until the rest arrives', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN, meta: { backupsEnabled: false } })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      await desktop.edit({ wordsPerMinute: 330 })
+      const question = desktop.meta.pause
+      assert.equal(question?.reason, 'first-sync', 'precondition: asked')
+
+      await laptop.edit({ wordsPerMinute: 250 })
+      await laptop.react()
+      await manifestFirst(laptop, desktop)
+      assert.deepEqual(await desktop.answer('accept'), { resolved: false, refused: 'sending' })
+      assert.deepEqual(desktop.meta.pause, question, 'nothing cleared')
+      assert.deepEqual(desktop.backups.map(b => b.kind), ['pre-sync'], 'nothing backed up')
+      assert.equal(desktop.options.wordsPerMinute, 330, 'nothing applied')
+      assert.deepEqual(desktop.peer.outbox, [], 'nothing sent')
+
+      await cloud.run()
+      assert.equal(desktop.meta.pause?.reason, 'first-sync', 'asked again, over the whole copy')
+      assert.deepEqual(await desktop.answer('accept'), { resolved: true })
+      assert.equal(desktop.options.wordsPerMinute, 250)
+      assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320], ['pre-sync', 330]], 'backed up as it applied, once whole')
+    })
+
+    /**
+     * The answer reads the synced copy once: what it applies is the copy it
+     * found whole, though a newer upload starts arriving as it backs up. The
+     * newer one is weighed in its turn, as any update is.
+     */
+    test('turning sync on: using the synced settings applies the copy it found whole, though a newer upload starts arriving as it backs up', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN, meta: { backupsEnabled: false } })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      await desktop.edit({ wordsPerMinute: 330 })
+      assert.equal(desktop.meta.pause?.reason, 'first-sync', 'precondition: asked')
+      const found = cloud.manifest()
+
+      await laptop.edit({ wordsPerMinute: 250 })
+      await laptop.react()
+      const newer = laptop.synced[MANIFEST_KEY]
+      desktop.whileBackingUp(() => {
+        desktop.peer.view.set(MANIFEST_KEY, newer)
+        desktop.peer.notify({ [MANIFEST_KEY]: { newValue: newer } })
+      })
+      assert.deepEqual(await desktop.answer('accept'), { resolved: true })
+      assert.equal(desktop.options.wordsPerMinute, 200, 'the copy it found whole, applied')
+      assert.deepEqual([desktop.meta.meta.g, desktop.meta.meta.w], [found.g, found.w])
+      assert.deepEqual(desktop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['pre-sync', 320], ['pre-sync', 330]])
+      assert.deepEqual(desktop.meta.inconsistent?.upload, uploadOf(newer), 'the newer one waited on')
+
+      await cloud.run()
+      assert.equal(desktop.meta.pause, null)
+      assert.equal(desktop.options.wordsPerMinute, 250, 'the newer one, whole, taken as an update')
+    })
+
+    test('a held update: accepting it is refused too while a newer copy is caught partway', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await desktop.edit({ rules: rulesFixture(1) })
+      await cloud.run()
+      const hold = laptop.meta.pause
+      assert.equal(hold?.reason, 'held', 'precondition: held')
+
+      await desktop.edit({ wordsPerMinute: 250 })
+      await desktop.react()
+      await manifestFirst(desktop, laptop)
+      assert.deepEqual(await laptop.answer('accept'), { resolved: false, refused: 'sending' })
+      assert.deepEqual(laptop.meta.pause, hold, 'nothing cleared')
+      assert.deepEqual(laptop.backups.map(b => b.kind), ['sync-held'], 'nothing backed up')
+      assert.equal(laptop.options.rules.filters.length, 40, 'nothing applied')
+    })
+
+    test('past the wait, either answer to a question over the copy is refused, saying it is inconsistent', async () => {
+      const cloud = createCloud()
+      const laptop = mainBrowser(cloud)
+      await laptop.enableSync()
+      await cloud.run()
+      const desktop = createDevice(cloud, 'desktop', { options: OWN })
+      await desktop.settle()
+      await desktop.enableSync()
+      await cloud.run()
+      const question = desktop.meta.pause
+      assert.equal(question?.reason, 'first-sync', 'precondition: asked')
+
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent?.overdue, true, 'precondition: past the wait')
+      for (const choice of ['accept', 'keep'])
+        assert.deepEqual(await desktop.answer(choice), { resolved: false, refused: 'inconsistent' }, choice)
+      assert.deepEqual(desktop.meta.pause, question)
+      assert.equal(desktop.options.wordsPerMinute, 320)
+    })
+
+    /** Within the wait another browser is taken to be still sending it, and past it the record says so: a read error would say the same less helpfully. */
+    test('caught partway, it records no read error, through the read\'s retries and past the wait', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      assert.equal(desktop.meta.inconsistent?.overdue, false, 'precondition: waiting')
+      assert.equal(desktop.meta.lastError, '')
+      assert.equal(panelOf(desktop).chip.state, 'syncing')
+
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.lastError, '')
+      assert.deepEqual(panelOf(desktop).callouts.map(callout => callout.state), ['inconsistent'])
+    })
+
+    test('a read error an earlier build recorded goes once the copy reads whole and raises a question', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await laptop.setMeta({ lastError: 'Could not read synced data (incomplete).' })
+      await desktop.edit({ rules: rulesFixture(1) })
+      await cloud.run()
+      assert.equal(laptop.meta.pause?.reason, 'held', 'precondition: held')
+      assert.equal(laptop.meta.lastError, '')
+      assert.deepEqual(panelOf(laptop).callouts.map(callout => callout.state), ['held'])
+    })
+
+    /** A question sends and applies nothing, so an upload that failed, as one over the quota does, has still failed. */
+    test('an upload\'s error stays as the copy raises a question', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      const failed = 'Settings are too large to sync — reduce filter lists or text replacements.'
+      await laptop.setMeta({ lastError: failed })
+      await desktop.edit({ rules: rulesFixture(1) })
+      await cloud.run()
+      assert.equal(laptop.meta.pause?.reason, 'held', 'precondition: held')
+      assert.equal(laptop.meta.lastError, failed)
+      assert.deepEqual(panelOf(laptop).callouts.map(callout => callout.state), ['error', 'held'])
+    })
+
+    /**
+     * The wait runs from when this browser first read an upload partial. A
+     * newer upload, caught partway in its turn, may still be on its way, so it
+     * is waited on afresh, however long the one before had been.
+     */
+    test('a newer upload caught partway is waited on afresh', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      const first = desktop.meta.inconsistent
+      assert.equal(first?.overdue, false, 'precondition: waiting')
+
+      desktop.advance(WAIT / 2)
+      await partsLost(cloud, laptop, { wordsPerMinute: 260 })
+      const second = desktop.meta.inconsistent
+      assert.deepEqual(second.upload, uploadOf(cloud.manifest()))
+      assert.notDeepEqual(second.upload, first.upload)
+      assert.equal(second.since, first.since + WAIT / 2, 'from when the newer upload was read')
+
+      desktop.advance(WAIT / 2)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent.overdue, false, 'not past at the first upload\'s wait')
+      assert.equal(inconsistentCallout(desktop), undefined)
+      assert.equal(await desktop.replace(), false)
+
+      desktop.advance(WAIT / 2)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent.overdue, true, 'past at its own, read again as it ends')
+      assert.equal(inconsistentCallout(desktop).decision.answers[0].choice, 'replace')
+    })
+
+    /** A record kept by a build that didn't say which upload it was read under can't tell whether a newer one is arriving. */
+    test('a record with no upload, past the wait, is waited on afresh as the copy is next read, then offers again', async () => {
+      const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
+      await partsLost(cloud, laptop, { wordsPerMinute: 250 })
+      const { upload, ...kept } = desktop.meta.inconsistent
+      await desktop.setMeta({ inconsistent: { ...kept, since: kept.since - WAIT, overdue: true, replaceable: true } })
+      await desktop.restart()
+      assert.equal(inconsistentCallout(desktop).decision.answers[0].choice, 'replace', 'precondition: offered, as it was kept')
+
+      assert.equal(await desktop.replace(), false, 'read again, waited on afresh')
+      assert.deepEqual(desktop.meta.inconsistent, { since: kept.since, overdue: false, replaceable: false, upload })
+      assert.equal(inconsistentCallout(desktop), undefined)
+
+      desktop.advance(WAIT)
+      await cloud.run()
+      assert.equal(desktop.meta.inconsistent.overdue, true, 'read again as its wait ends')
+      assert.equal(await desktop.replace(), true)
+      await cloud.run()
+      assert.equal((await served(cloud)).ok, true, 'replaced')
+      assert.equal(desktop.meta.inconsistent, null)
+    })
+
     test('still partial past the wait: inconsistent, with the offer to replace it with this browser\'s settings', async () => {
       const { cloud, browsers: [laptop, desktop] } = await inSync('laptop', 'desktop')
       await partsLost(cloud, laptop, { wordsPerMinute: 250 })
@@ -985,7 +1224,7 @@ describe('sync scenarios', () => {
 
       desktop.advance(1)
       await cloud.run()
-      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent.since, overdue: true, replaceable: true })
+      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent.since, overdue: true, replaceable: true, upload: uploadOf(cloud.manifest()) })
       const callout = inconsistentCallout(desktop)
       assert.equal(panelOf(desktop).chip.state, 'inconsistent')
       assert.deepEqual(callout.decision.answers.map(answer => answer.choice), ['replace'])
@@ -1113,7 +1352,7 @@ describe('sync scenarios', () => {
       assert.deepEqual(await desktop.answer('keep'), { resolved: false, refused: 'sending' })
       desktop.advance(WAIT)
       await cloud.run()
-      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent?.since, overdue: true, replaceable: true })
+      assert.deepEqual(desktop.meta.inconsistent, { since: desktop.meta.inconsistent?.since, overdue: true, replaceable: true, upload: uploadOf(cloud.manifest()) })
     })
 
     test('past the wait, the copy a question was asked over read whole again ends the record', async () => {
@@ -1372,12 +1611,15 @@ describe('sync scenarios', () => {
       }
     })
 
-    test('one whose backup failed can still be accepted', async () => {
-      const { cloud, laptop } = await bulkDelete({ failBackups: true, meta: { backupsEnabled: false } })
-      assert.equal(await laptop.resolveHeld('accept'), true)
-      await cloud.run()
-      assert.equal(laptop.meta.pause, null)
-      assert.equal(laptop.options.rules.filters.length, 1, 'and it can still be accepted')
+    test('one whose backup failed is accepted at the first press, daily backups on or off: it already says yours aren\'t backed up', async () => {
+      for (const backupsEnabled of [true, false]) {
+        const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
+        const { cloud, laptop } = await bulkDelete({ failBackups: true, meta: { backupsEnabled } })
+        assert.equal(await laptop.resolveHeld('accept'), true, daily)
+        await cloud.run()
+        assert.equal(laptop.meta.pause, null, daily)
+        assert.equal(laptop.options.rules.filters.length, 1, daily)
+      }
     })
 
     test('"keep" pushes this browser\'s list back and saves the declined copy', async () => {
@@ -1436,18 +1678,57 @@ describe('sync scenarios', () => {
     })
 
     /** As "use" does, when its own backup fails: see the same test under turning sync on. */
-    test('a backup that can\'t be written as "accept" applies doesn\'t stop it, daily backups on or off', async () => {
+    test('a backup that can\'t be written as "accept" applies refuses the first press, which then says yours aren\'t backed up; a second press applies, daily backups on or off', async () => {
       for (const backupsEnabled of [true, false]) {
         const daily = `daily backups ${backupsEnabled ? 'on' : 'off'}`
         const { cloud, laptop } = await bulkDelete({ meta: { backupsEnabled } })
         await laptop.edit({ wordsPerMinute: 999 })
         laptop.breakBackups()
+        const hold = laptop.meta.pause
+
+        assert.deepEqual(await laptop.answer('accept'), { resolved: false }, daily)
+        assert.deepEqual(laptop.meta.pause, { ...hold, backedUp: false, backupFailed: true }, daily)
+        assert.equal(laptop.options.rules.filters.length, 40, `nothing applied, ${daily}`)
+        const decision = decisionOn(laptop.meta.pause)
+        assert.equal(decision.backup, null, daily)
+        assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with the other browser\'s. Yours aren\'t backed up: the backup couldn\'t be saved.', daily)
+
         assert.equal(await laptop.resolveHeld('accept'), true, daily)
         await cloud.run()
         assert.equal(laptop.meta.pause, null, daily)
         assert.equal(laptop.options.rules.filters.length, 1, daily)
         assert.deepEqual(laptop.backups.map(b => [b.kind, b.options.wordsPerMinute]), [['sync-held', OPTION_DEFAULTS.wordsPerMinute]], daily)
       }
+    })
+
+    test('the day\'s backup that can\'t be written as "accept" applies refuses the first press the same way', async () => {
+      const { laptop } = await bulkDelete({ meta: { backupsEnabled: true } })
+      await laptop.setMeta({ lastBackupDate: '' })
+      laptop.breakBackups()
+      assert.deepEqual(await laptop.answer('accept'), { resolved: false })
+      assert.deepEqual([laptop.meta.pause?.reason, laptop.meta.pause?.backedUp, laptop.meta.pause?.backupFailed], ['held', false, true])
+      assert.equal(laptop.options.rules.filters.length, 40, 'nothing applied')
+
+      assert.equal(await laptop.resolveHeld('accept'), true)
+      assert.equal(laptop.meta.pause, null)
+      assert.equal(laptop.options.rules.filters.length, 1)
+    })
+
+    /** Such a hold says nothing of a backup, since accepting takes one: the first press refused, it then says why there is none. */
+    test('a hold an older build recorded with daily backups off, whose backup as "accept" applies can\'t be written, is refused the same way', async () => {
+      const { cloud, laptop } = await bulkDelete({ meta: { backupsEnabled: false } })
+      const { backupFailed, ...older } = { ...laptop.meta.pause, backedUp: false }
+      await laptop.setMeta({ pause: older })
+      await laptop.edit({ wordsPerMinute: 999 })
+      laptop.breakBackups()
+      assert.equal(consequence(decisionOn(older), 'accept'), 'Replaces this browser\'s settings with the other browser\'s.', 'precondition: it says nothing of a backup')
+
+      assert.deepEqual(await laptop.answer('accept'), { resolved: false })
+      assert.deepEqual(laptop.meta.pause, { ...older, backupFailed: true })
+      assert.equal(consequence(decisionOn(laptop.meta.pause), 'accept'), 'Replaces this browser\'s settings with the other browser\'s. Yours aren\'t backed up: the backup couldn\'t be saved.')
+      assert.equal(await laptop.resolveHeld('accept'), true)
+      await cloud.run()
+      assert.equal(laptop.options.rules.filters.length, 1)
     })
 
     test('held again over settings an earlier hold backed up, it points to that backup, and says they are backed up', async () => {

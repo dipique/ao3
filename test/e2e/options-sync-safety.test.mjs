@@ -460,6 +460,46 @@ describe('options UI — the sync panel', { skip }, () => {
       }
     })
 
+    /**
+     * A backup due as the synced settings are used, here for an edit made
+     * while it asked, that can't be saved: the first press applies nothing,
+     * and the question then says this browser's settings aren't backed up.
+     * A second press uses them anyway.
+     */
+    test('using the synced settings when their backup can\'t be saved: the first press says yours aren\'t backed up and changes nothing, a second uses them', async () => {
+      const { options, manifest } = await openOverCopy()
+      try {
+        await turnOn(options)
+        await options.page.evaluate(() => window.browser.storage.local.set({ 'option.wordsPerMinute': 330 }))
+        await until('the edit to be in', async () => (await options.stored('option.wordsPerMinute')) === 330)
+        await options.page.evaluate(() => {
+          const local = window.browser.storage.local
+          const set = local.set
+          local.set = items => Object.keys(items).some(key => key.startsWith('backup.'))
+            ? Promise.reject(new Error('storage.local could not be written'))
+            : set(items)
+        })
+
+        await options.press(await options.page.$('[data-sync-accept]'))
+        await until('the failure to be recorded', async () => (await options.stored('sync.pause'))?.backupFailed === true)
+        assert.equal((await options.stored('sync.pause')).backedUp, false)
+        assert.equal(await options.stored('option.wordsPerMinute'), 330, 'nothing applied')
+        await until('the answer to say so', async () => (await options.page.evaluate(readAnswers)).find(a => a.answer === 'accept')?.consequence
+          === 'Replaces this browser\'s settings with your synced settings. Yours aren\'t backed up: the backup couldn\'t be saved.')
+        assert.ok(!(await options.lines(await options.page.$('[data-sync-pause="first-sync"]'))).includes(BACKED_UP))
+
+        await options.press(await options.page.$('[data-sync-accept]'))
+        await until('the answer to be applied', async () => (await options.stored('sync.pause')) === null)
+        assert.equal(await options.stored('option.wordsPerMinute'), SYNCED.wordsPerMinute)
+        assert.deepEqual(await options.stored('option.rules'), SYNCED.rules)
+        assert.deepEqual(await options.stored(MANIFEST_KEY), manifest, 'nothing sent')
+        assert.deepEqual(await options.page.evaluate(readBackups), [{ kind: 'pre-sync', wordsPerMinute: 320, rules: 3 }])
+      }
+      finally {
+        await options.close()
+      }
+    })
+
     test('keeping this browser\'s replaces the synced settings, kept as a backup first', async () => {
       const { options, manifest } = await openOverCopy()
       try {
@@ -578,8 +618,10 @@ describe('options UI — the sync panel', { skip }, () => {
     const OWN = { rules: rulesFixture(3), wordsPerMinute: 320 }
     const THEIRS = { rules: rulesFixture(2), wordsPerMinute: 250 }
     const withSettings = update => ({ ...structuredClone(OPTION_DEFAULTS), ...structuredClone(update) })
-    /** Past the wait, with this browser's own settings able to stand in. */
-    const overdue = () => ({ since: Date.now() - SYNC_CONSISTENCY_WAIT_MS, overdue: true, replaceable: true })
+    /** The upload `openOverPartial` leaves partial: its manifest's generation and writer token. */
+    const PARTIAL_UPLOAD = { g: 4, w: 'laptop.1' }
+    /** Past the wait on that upload, with this browser's own settings able to stand in. */
+    const overdue = () => ({ since: Date.now() - SYNC_CONSISTENCY_WAIT_MS, overdue: true, replaceable: true, upload: PARTIAL_UPLOAD })
 
     /**
      * The options page at Sync, sync on over `seed`, with the background's sync
@@ -589,7 +631,7 @@ describe('options UI — the sync panel', { skip }, () => {
      */
     async function openOverPartial(seed) {
       const own = await encode(withSettings(OWN), OPTION_DEFAULTS, 3, 'desktop.1', V, 'desktop-copy')
-      const theirs = await encode(withSettings(THEIRS), OPTION_DEFAULTS, 4, 'laptop.1', V, 'laptop-copy')
+      const theirs = await encode(withSettings(THEIRS), OPTION_DEFAULTS, PARTIAL_UPLOAD.g, PARTIAL_UPLOAD.w, V, 'laptop-copy')
       const background = await syncBackground()
       const options = await session.open({
         seed: {
@@ -719,6 +761,24 @@ describe('options UI — the sync panel', { skip }, () => {
         const record = await options.stored('sync.inconsistent')
         assert.deepEqual([record?.overdue, typeof record?.since], [false, 'number'], 'waited on from now')
         assert.equal(await options.page.$('[data-sync-inconsistent]'), null)
+      }
+      finally {
+        await options.close()
+      }
+    })
+
+    test('using the synced settings over it is refused too, saying another browser is still sending its settings', async () => {
+      const question = { reason: 'first-sync', g: 3, w: 'laptop.0', at: Date.now(), backedUp: true, backupFailed: false, loss: null }
+      const { options, partial } = await openOverPartial({ 'sync.meta': { g: 0, h: '', w: '', i: 'desktop-copy' }, 'sync.pause': question })
+      try {
+        await options.press(await options.page.$('[data-sync-accept]'))
+        await until('the refusal', async () => (await options.toasts()).includes('Another browser is still sending its settings. Try again in a moment.'))
+
+        assert.deepEqual(await options.stored('sync.pause'), question, 'nothing cleared')
+        assert.equal(await options.stored('option.wordsPerMinute'), OWN.wordsPerMinute, 'nothing applied')
+        assert.deepEqual(await options.stored(MANIFEST_KEY), partial, 'nothing sent')
+        assert.deepEqual(await options.page.evaluate(readBackups), [], 'nothing backed up')
+        assert.ok(await options.page.$('[data-sync-pause="first-sync"]'), 'still asked')
       }
       finally {
         await options.close()

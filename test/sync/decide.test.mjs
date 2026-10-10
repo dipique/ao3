@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { pruneToSynced, SYNC_SCHEMA_VERSION, syncedKeys } from '../../src/common/syncCodec.ts'
-import { decideFirstPull, decidePull, decidePush, isRemoteNewer, questionGone, uploadId, weighCopy } from '../../src/common/syncDecide.ts'
+import { decideFirstPull, decidePull, decidePush, isRemoteNewer, questionGone, refuseUnbacked, uploadId, weighCopy } from '../../src/common/syncDecide.ts'
 import { rulesFixture, textReplacementsFixture } from './harness.mjs'
 
 const V = SYNC_SCHEMA_VERSION
@@ -288,5 +288,37 @@ describe('the synced copy\'s ID', () => {
       assert.equal(questionGone({ reason: 'older-cloud', remoteVersion: V - 1 }, agreed(), m({ i: 'mine' })), false)
       assert.equal(questionGone(null, agreed(), m({ i: 'mine' })), false)
     })
+  })
+})
+
+/**
+ * Taking the synced settings backs this browser's up first. Where that
+ * backup was due and couldn't be written, the first press is refused, and
+ * the question records it, so it says this browser's settings aren't backed
+ * up before a second press applies them anyway.
+ */
+describe('refuseUnbacked', () => {
+  const HELD = { reason: 'held', g: 6, w: 'wB', at: 0, backedUp: true, backupFailed: false, loss: { rules: { removed: 9, of: 10 } } }
+  const FIRST = { reason: 'first-sync', g: 6, w: 'wB', at: 0, backedUp: true, backupFailed: false, loss: null }
+  const QUESTIONS = [HELD, FIRST, { ...FIRST, otherCopy: true }]
+
+  test('backed up, or held already by the newest backup of its kind, it goes ahead', () => {
+    for (const question of QUESTIONS)
+      assert.equal(refuseUnbacked(question, true), null, question.reason)
+  })
+
+  test('not backed up where the question says this browser\'s settings are, it is refused, and the question records that they aren\'t', () => {
+    for (const question of QUESTIONS)
+      assert.deepEqual(refuseUnbacked(question, false), { ...question, backedUp: false, backupFailed: true }, question.reason)
+  })
+
+  test('a hold an older build recorded with daily backups off says nothing of a backup: refused the same way', () => {
+    const { backupFailed, ...older } = { ...HELD, backedUp: false }
+    assert.deepEqual(refuseUnbacked(older, false), { ...older, backupFailed: true })
+  })
+
+  test('where the question already says they aren\'t backed up, it goes ahead: the reader answered knowing it', () => {
+    for (const question of QUESTIONS)
+      assert.equal(refuseUnbacked({ ...question, backedUp: false, backupFailed: true }, false), null, question.reason)
   })
 })

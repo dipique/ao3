@@ -3,12 +3,13 @@ import { isDeepEqual } from '@antfu/utils'
 import type { BackupKind, HeldAnswer, SetSyncResult } from './api.ts'
 import type { Options } from './options.ts'
 import type { Manifest } from './syncCodec.ts'
-import type { CopyRead, Inconsistency } from './syncConsistency.ts'
+import type { CopyFound, Inconsistency } from './syncConsistency.ts'
+import type { Question } from './syncDecide.ts'
 import type { SyncMeta, SyncPause } from './syncMeta.ts'
 
 import { buildLocalUpdate, canonicalStringify, decode, diffChunks, diffOptions, encode, hash, MANIFEST_KEY, pruneToSynced, QUOTA_BYTES, SYNC_SCHEMA_VERSION } from './syncCodec.ts'
-import { checkCopy, keepRefusal, nextInconsistency, ownCopyReplaces, readOf, recheckIn } from './syncConsistency.ts'
-import { decideFirstPull, decidePull, decidePush, questionGone, uploadId, weighCopy } from './syncDecide.ts'
+import { answerRefusal, checkCopy, foundOf, nextInconsistency, ownCopyReplaces, recheckIn } from './syncConsistency.ts'
+import { decideFirstPull, decidePull, decidePush, questionGone, refuseUnbacked, uploadId, weighCopy } from './syncDecide.ts'
 import { assessPull } from './syncGuard.ts'
 
 /**
@@ -37,6 +38,10 @@ const PULL_RETRY_MIN = 0.25
 const MAX_PULL_RETRIES = 3
 
 const isChunkKey = (k: string) => /^o\d+$/.test(k)
+
+/** A read of the synced store that found a whole copy, or none at this sync version. */
+const WHOLE: CopyFound = { read: 'whole' }
+const NONE: CopyFound = { read: 'none' }
 
 /** The subset of a `storage.sync` area the engine uses. */
 export interface SyncStorageArea {
@@ -214,7 +219,7 @@ export function createSyncEngine(deps: SyncDeps) {
       if (keys.length)
         await sync.remove(keys)
       await meta.set({ meta: { g: 0, h: '', w: '' }, dirty: false, dirtySince: 0, lastError: '', lastSyncAt: 0 })
-      await noteCopy('none')
+      await noteCopy(NONE)
     })
   }
 
@@ -230,8 +235,10 @@ export function createSyncEngine(deps: SyncDeps) {
    * whatever the other browser had is still restorable, and pushes this
    * browser's settings over it, under the copy's ID.
    *
-   * `keep` is refused while the synced copy can't be read whole, since it
-   * can't be backed up: nothing is backed up, sent or cleared.
+   * Either is refused while the synced copy can't be read whole: `keep` can't
+   * back it up, and `accept` can't apply it. Nothing is backed up, sent,
+   * applied or cleared. `accept` whose backups can't be written is refused
+   * too, once ({@link refuseUnbacked}).
    */
   async function resolveHeld(choice: 'accept' | 'keep'): Promise<HeldAnswer> {
     return withLock(async () => {
@@ -239,15 +246,21 @@ export function createSyncEngine(deps: SyncDeps) {
       if (!isQuestion(pause))
         return { resolved: false }
 
+      const items = await sync.get(null)
+      const partly = await noteCopy(await checkCopy(items, version()))
+      if (partly)
+        return { resolved: false, refused: answerRefusal(partly) }
+
       if (choice === 'accept') {
-        await backUp(questionBackupKind(pause))
-        await pull({ acceptLoss: true })
+        const refused = refuseUnbacked(pause, await backUpAnswer(questionBackupKind(pause)))
+        if (refused) {
+          await meta.set({ pause: refused })
+          logger.warn('not taking the synced settings: this browser\'s settings couldn\'t be backed up first, which the question now says')
+          return { resolved: false }
+        }
+        await pull({ acceptLoss: true, daily: false, items })
       }
       else {
-        const items = await sync.get(null)
-        const partly = await noteCopy((await checkCopy(items, version())).read)
-        if (partly)
-          return { resolved: false, refused: keepRefusal(partly) }
         const result = await decode(items, version())
         if (result.ok) {
           const remote = items[MANIFEST_KEY] as Manifest
@@ -424,7 +437,7 @@ export function createSyncEngine(deps: SyncDeps) {
         ...(isVersionPause(pause) || (fresh && isQuestion(pause)) ? { pause: null } : {}),
       })
       if (inconsistent)
-        await noteCopy('whole')
+        await noteCopy(WHOLE)
       logger.log('push ok, gen', newGen)
     }
     else {
@@ -437,19 +450,23 @@ export function createSyncEngine(deps: SyncDeps) {
    * `acceptLoss` applies the copy whatever the deletion guard says, or whatever
    * the first pull would ask: the reader accepted it. `firstBackup` is the
    * backup turning sync on took, for the question if the first pull asks one.
+   * `daily: false` leaves out the day's backup, which the answer took already.
+   * `items` is the synced store as the answer read it, so the copy it applies
+   * is the one it found whole; a newer one arriving meanwhile is pulled in
+   * its turn.
    */
-  async function pull({ acceptLoss = false, firstBackup }: { acceptLoss?: boolean, firstBackup?: BackupRecord } = {}): Promise<void> {
-    const { enabled, meta: agreed, pause, staleBuild, inconsistent } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild', 'inconsistent'])
+  async function pull({ acceptLoss = false, firstBackup, daily = true, items: read }: { acceptLoss?: boolean, firstBackup?: BackupRecord, daily?: boolean, items?: Record<string, unknown> } = {}): Promise<void> {
+    const { enabled, meta: agreed, pause, staleBuild, inconsistent, lastError } = await meta.get(['enabled', 'meta', 'pause', 'staleBuild', 'inconsistent', 'lastError'])
     if (!enabled || staleBuild)
       return
 
-    const items = await sync.get(null)
+    const items = read ?? await sync.get(null)
     const remote = (items[MANIFEST_KEY] as Manifest | undefined) ?? null
     const decision = decidePull(agreed, remote, version())
     // A copy at another sync version isn't read whole: an older one is never
     // taken, a newer one pauses sync. Nothing at this version is left to wait on.
     if (decision === 'blocked' || decision === 'wait' || !remote)
-      await noteCopy('none')
+      await noteCopy(NONE)
     if (decision === 'blocked') {
       await pauseFor({ reason: 'newer-version', remoteVersion: remote!.v })
       return
@@ -482,12 +499,12 @@ export function createSyncEngine(deps: SyncDeps) {
     // partial it is read again, and read whole it ends the record.
     if (!acceptLoss && isQuestion(pause) && remote!.g === pause.g && remote!.w === pause.w) {
       if (inconsistent)
-        await noteCopy((await checkCopy(items, version())).read)
+        await noteCopy(await checkCopy(items, version()))
       return
     }
 
     const result = await decode(items, version())
-    await noteCopy(readOf(result))
+    await noteCopy(foundOf(result, remote!))
     if (!result.ok) {
       if (result.reason === 'version') {
         await pauseFor({ reason: 'newer-version', remoteVersion: remote!.v })
@@ -496,7 +513,8 @@ export function createSyncEngine(deps: SyncDeps) {
       if (result.reason === 'empty')
         return
       // incomplete / corrupt: usually a half-propagated chunk set — retry
-      // briefly, and read it again once it has been waited on.
+      // briefly, and read it again once it has been waited on. The record
+      // says so past the wait; there is no error to report before then.
       if (pullRetries < MAX_PULL_RETRIES) {
         pullRetries++
         await alarms.create(ALARM_PULL_RETRY, { delayInMinutes: PULL_RETRY_MIN })
@@ -504,7 +522,7 @@ export function createSyncEngine(deps: SyncDeps) {
       }
       else {
         pullRetries = 0
-        await meta.set({ lastError: 'Could not read synced data (incomplete).' })
+        logger.log('pull incomplete, waiting on the rest')
       }
       return
     }
@@ -538,7 +556,7 @@ export function createSyncEngine(deps: SyncDeps) {
           ?? (pause?.reason === 'first-sync' && !!pause.otherCopy === otherCopy
             ? { backedUp: pause.backedUp, backupFailed: pause.backupFailed }
             : await backUp(otherCopy ? 'sync-held' : 'pre-sync'))
-        await meta.set({ pause: { reason: 'first-sync', g: remote!.g, w: remote!.w, at: now(), ...backup, loss: first.loss, ...(otherCopy ? { otherCopy } : {}) } })
+        await meta.set({ pause: { reason: 'first-sync', g: remote!.g, w: remote!.w, at: now(), ...backup, loss: first.loss, ...(otherCopy ? { otherCopy } : {}) }, ...readErrorGone(lastError) })
         logger.warn(otherCopy
           ? 'asking which settings to keep: another browser started a synced copy that differs from this browser\'s own'
           : 'asking which settings to keep: the synced copy differs from this browser\'s own')
@@ -554,7 +572,7 @@ export function createSyncEngine(deps: SyncDeps) {
     const loss = acceptLoss ? null : assessPull(current, desired)
     if (loss) {
       const backup = await backUp('sync-held')
-      await meta.set({ pause: { reason: 'held', g: remote!.g, w: remote!.w, loss, at: now(), ...backup } })
+      await meta.set({ pause: { reason: 'held', g: remote!.g, w: remote!.w, loss, at: now(), ...backup }, ...readErrorGone(lastError) })
       logger.warn('holding back a sync update that would remove', loss)
       return
     }
@@ -562,7 +580,8 @@ export function createSyncEngine(deps: SyncDeps) {
     // Back up the day's first state, then apply only the keys that actually
     // change. Only past the guard: a held update changes nothing, so a daily
     // backup that can't be written mustn't keep it from being held.
-    await backups.maybeDaily()
+    if (daily)
+      await backups.maybeDaily()
     const update = diffOptions(current, desired)
     if (Object.keys(update).length)
       await deps.writeOptions(update)
@@ -592,7 +611,7 @@ export function createSyncEngine(deps: SyncDeps) {
     // it joins, and keeps it over a copy that has none.
     const { meta: { i } } = await meta.get(['meta'])
     await meta.set({ enabled: true, meta: { g: 0, h: '', w: '', ...(i ? { i } : {}) }, lastError: '', pause: null })
-    await noteCopy('none')
+    await noteCopy(NONE)
 
     const remote = await readManifest()
     if (!remote) {
@@ -625,7 +644,7 @@ export function createSyncEngine(deps: SyncDeps) {
   async function disable(): Promise<SetSyncResult> {
     await alarms.clear(ALARM_PUSH)
     await alarms.clear(ALARM_PULL_RETRY)
-    await noteCopy('none')
+    await noteCopy(NONE)
     const { meta: agreed } = await meta.get(['meta'])
     await meta.set({ enabled: false, dirty: false, dirtySince: 0, pause: null, meta: { ...agreed, i: newCopyId(await getDeviceId()) } })
     // Cloud data is intentionally left intact — clearing would wipe other devices.
@@ -651,25 +670,44 @@ export function createSyncEngine(deps: SyncDeps) {
       return { backedUp: true, backupFailed: false }
     }
     catch (e) {
-      logger.error(`going on without a ${kind} backup: it could not be written`, e)
+      logger.error(`the ${kind} backup could not be written`, e)
       return { backedUp: false, backupFailed: true }
     }
   }
 
   /**
-   * Record what a read of the synced copy found (`sync.inconsistent`): when a
-   * copy that can't be read whole was first read so, and once the wait is up,
-   * whether this browser's own settings can replace it. The first such read
-   * sets an alarm to read it again when the wait is up, since a copy whose
-   * rest never arrives changes nothing that would wake the engine. Answers the
-   * record: null unless the copy was read partial.
+   * The backups an answer takes as it applies the synced settings: this
+   * browser's settings under `kind`, then the day's backup if it is due.
+   * Whether they hold this browser's settings now, written or held already.
    */
-  async function noteCopy(read: CopyRead): Promise<Inconsistency | null> {
+  async function backUpAnswer(kind: BackupKind): Promise<boolean> {
+    if (!(await backUp(kind)).backedUp)
+      return false
+    try {
+      await backups.maybeDaily()
+      return true
+    }
+    catch (e) {
+      logger.error('the day\'s backup could not be written', e)
+      return false
+    }
+  }
+
+  /**
+   * Record what a read of the synced copy found (`sync.inconsistent`): which
+   * upload of it can't be read whole, when that upload was first read so, and
+   * once the wait is up, whether this browser's own settings can replace it.
+   * Each such upload's first read sets an alarm to read it again when its
+   * wait is up, since a copy whose rest never arrives changes nothing that
+   * would wake the engine. Answers the record: null unless the copy was read
+   * partial.
+   */
+  async function noteCopy(found: CopyFound): Promise<Inconsistency | null> {
     const { inconsistent } = await meta.get(['inconsistent'])
-    if (read !== 'partial' && !inconsistent)
+    if (found.read !== 'partial' && !inconsistent)
       return null
-    const ownReplaces = read === 'partial' && await ownCopyReplaces(await deps.readOptions(), defaults, version())
-    const next = nextInconsistency(inconsistent, read, now(), ownReplaces)
+    const ownReplaces = found.read === 'partial' && await ownCopyReplaces(await deps.readOptions(), defaults, version())
+    const next = nextInconsistency(inconsistent, found, now(), ownReplaces)
     if (!isDeepEqual(next, inconsistent)) {
       await meta.set({ inconsistent: next })
       if (next?.overdue)
@@ -677,7 +715,7 @@ export function createSyncEngine(deps: SyncDeps) {
     }
     if (!next)
       await alarms.clear(ALARM_CONSISTENCY)
-    else if (!inconsistent)
+    else if (next.since !== inconsistent?.since)
       await armRecheck(next)
     return next
   }
@@ -687,7 +725,7 @@ export function createSyncEngine(deps: SyncDeps) {
     const { enabled, staleBuild } = await meta.get(['enabled', 'staleBuild'])
     if (!enabled || staleBuild)
       return null
-    return noteCopy((await checkCopy(await sync.get(null), version())).read)
+    return noteCopy(await checkCopy(await sync.get(null), version()))
   }
 
   /** Read the synced copy again once `record`'s wait is up. */
@@ -750,8 +788,17 @@ export function createSyncEngine(deps: SyncDeps) {
 
 export type SyncEngine = ReturnType<typeof createSyncEngine>
 
-/** A pause that waits on the reader's answer: nothing is applied or pushed until they give it. */
-type Question = Extract<SyncPause, { reason: 'held' | 'first-sync' }>
+/**
+ * The error an earlier build kept once its retries of a copy it couldn't read
+ * whole ran out. A whole read that raises a question ends it. Any other error
+ * stays: a question sends and applies nothing, so an upload that failed, as
+ * one over the quota does, has still failed.
+ */
+const UNREAD_COPY_ERROR = 'Could not read synced data (incomplete).'
+
+function readErrorGone(lastError: string): Partial<Pick<SyncMeta, 'lastError'>> {
+  return lastError === UNREAD_COPY_ERROR ? { lastError: '' } : {}
+}
 
 /** What a question records of the backup taken for it. */
 type BackupRecord = Pick<Extract<SyncPause, { reason: 'first-sync' }>, 'backedUp' | 'backupFailed'>

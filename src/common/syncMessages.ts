@@ -1,5 +1,5 @@
 import type { SetSyncResult } from './api.ts'
-import type { KeepRefusal } from './syncConsistency.ts'
+import type { AnswerRefusal } from './syncConsistency.ts'
 import type { SyncPause } from './syncMeta.ts'
 
 import { describePullLoss } from './syncGuard.ts'
@@ -12,15 +12,18 @@ import { describePullLoss } from './syncGuard.ts'
 export const HELD_BACKUP_NOTE = `This browser's settings are backed up.`
 
 /**
- * Why keeping this browser's settings was refused: it backs the synced
- * settings up first, and they can't be read whole. Within the wait another
- * browser is taken to be still sending them; past it, they are inconsistent,
- * and the sync panel offers to replace them.
+ * Why an answer to what sync asks was refused: the synced settings can't be
+ * read whole, and keeping this browser's settings backs them up first, while
+ * using them applies them. Within the wait another browser is taken to be
+ * still sending them; past it, they are inconsistent, and the sync panel
+ * offers to replace them.
  */
-export function keepRefusedMessage(refused: KeepRefusal): string {
-  return refused === 'sending'
-    ? 'Another browser is still sending its settings. Try again in a moment.'
-    : 'Your synced settings are inconsistent, so they can\'t be backed up before they\'re replaced.'
+export function answerRefusedMessage(refused: AnswerRefusal, choice: 'keep' | 'accept'): string {
+  if (refused === 'sending')
+    return 'Another browser is still sending its settings. Try again in a moment.'
+  return choice === 'keep'
+    ? 'Your synced settings are inconsistent, so they can\'t be backed up before they\'re replaced.'
+    : 'Your synced settings are inconsistent, so they can\'t be used.'
 }
 
 /**
