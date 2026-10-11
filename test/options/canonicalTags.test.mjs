@@ -413,9 +413,9 @@ describe('canonicalPreview', () => {
     assert.deepEqual(preview({ answers: { kind: 'slow', job: { pattern: '(a+)+$', subjects: [] } } }), TOO_SLOW)
   })
 
-  test('shows nothing found while either runs: the editor keeps what it showed before', () => {
-    const loading = { head: 'Loading the known tags…', sources: null, rows: [], more: null, empty: null, note: null }
-    assert.deepEqual(preview({ check: { kind: 'running', last: null } }), loading)
-    assert.deepEqual(preview({ answers: { kind: 'running', last: null } }), loading)
+  test('says it is checking while either runs, as the tester does, and nothing found: the editor keeps what it showed before', () => {
+    const checking = { head: 'Checking…', sources: null, rows: [], more: null, empty: null, note: null }
+    assert.deepEqual(preview({ check: { kind: 'running', last: null } }), checking)
+    assert.deepEqual(preview({ answers: { kind: 'running', last: null } }), checking)
   })
 })

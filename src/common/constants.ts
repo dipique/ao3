@@ -49,3 +49,11 @@ export const SYNC_CONSISTENCY_WAIT_MS = 30 * 60_000
  * can't be saved: on AO3's pages nothing stops it.
  */
 export const REGEX_TIME_BUDGET_MS = 1000
+
+/**
+ * How long the rule editor's regex tester keeps its last verdict once a new
+ * check begins, in milliseconds, before saying it is checking. A quick check
+ * answers within it, so the verdict changes once, with no *Checking…* flashed
+ * between, and alike on every display, whatever its frame rate.
+ */
+export const REGEX_CHECKING_HOLD_MS = 50

@@ -7,7 +7,7 @@ import type { SuggestRequest, SuggestState } from './tagSuggestions.ts'
 
 import { isTagTarget, TagType } from '../../common/data.ts'
 import { compilePattern } from './regexCheck.ts'
-import { suggestSource } from './ruleEditor.ts'
+import { CHECKING, suggestSource } from './ruleEditor.ts'
 import { markSpans } from './settingsSearch.ts'
 import { MIN_TERM, suggestRequest, whenDue } from './tagSuggestions.ts'
 
@@ -421,6 +421,8 @@ export function answeredNames(local: readonly PoolTag[], asks: readonly Canonica
 
 const LOADING: CanonicalPreview = { ...BLANK, head: 'Loading the known tags…' }
 
+const UNDER_WAY: CanonicalPreview = { ...BLANK, head: CHECKING }
+
 /**
  * The preview of the canonical tags `pattern` matches, from the names known
  * here for the target (`local`, null while they load) and AO3's answers to the
@@ -430,7 +432,8 @@ const LOADING: CanonicalPreview = { ...BLANK, head: 'Loading the known tags…' 
  * names known here show with a note; a target with none shows only the note.
  * Past the time budget, either run stops the preview, with a note. While
  * either is under way there is nothing new to show, and the editor keeps
- * showing what it showed.
+ * showing what it showed; opened then, it says it is checking, as the tester
+ * does.
  */
 export function canonicalPreview(input: { target: RuleTarget, pattern: string, local: readonly PoolTag[] | null, asks: readonly CanonicalAsk[], state: SuggestState, check: RegexRun, answers: RegexRun }): CanonicalPreview {
   const { target, pattern, local, asks, state, check, answers } = input
@@ -443,7 +446,7 @@ export function canonicalPreview(input: { target: RuleTarget, pattern: string, l
   if (check.kind === 'slow' || answers.kind === 'slow')
     return { ...BLANK, note: TOO_SLOW }
   if (check.kind === 'running' || answers.kind === 'running')
-    return LOADING
+    return UNDER_WAY
 
   const { answered, tags: ao3 } = answeredAsks(asks, state)
   const spanOf = (name: string) => {

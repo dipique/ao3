@@ -310,7 +310,10 @@ export interface RegexTester {
   help: string
 }
 
-const VERDICT_LABELS = { match: 'Matches', miss: 'No match', invalid: 'Invalid pattern', slow: 'Too slow', checking: 'Checking…' } as const
+/** What the tester, and the canonical tags' preview, say while a check of the pattern runs. */
+export const CHECKING = 'Checking…'
+
+const VERDICT_LABELS = { match: 'Matches', miss: 'No match', invalid: 'Invalid pattern', slow: 'Too slow', checking: CHECKING } as const
 
 const TESTER_HELP = 'Checks the pattern as you type. Nothing is saved from here.'
 

@@ -11,6 +11,7 @@ import type { CappedDay, FetchedWindow } from '#content_script/tracked/fetchWind
 
 import {
   ADDON_CLASS,
+  builtinOpens,
   cache,
   formatDay,
   fromShortId,
@@ -187,8 +188,7 @@ export class ReviewTrackedLists extends Unit {
   // honestly offer. Its open URL opens it whatever *Tracked lists* says
   // ({@link file://./../lists/openLink.ts}).
   override get enabled() {
-    const tracked = this.options.trackedLists
-    return (tracked.enabled || linkedTo('review')) && tracked.lists.some(list => list.tracked)
+    return (this.options.trackedLists.enabled || linkedTo('review')) && builtinOpens('review', this.options)
   }
 
   static override async clean(): Promise<void> {

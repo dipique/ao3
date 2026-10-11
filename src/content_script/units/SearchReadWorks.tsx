@@ -1,7 +1,7 @@
 import type { SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
 
-import { ADDON_CLASS, getArchiveLink, parseUser, readWorkIds, toast } from '#common'
+import { ADDON_CLASS, builtinOpens, getArchiveLink, parseUser, readWorkIds, toast } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
@@ -81,7 +81,7 @@ function onHistoryPage(): boolean {
 export class SearchReadWorks extends Unit {
   static override get name() { return 'SearchReadWorks' }
   // Marks are the list; with them off there is nothing this could show.
-  override get enabled() { return (this.options.searchReadWorks || linkedTo('read-works')) && this.options.workMarks.enabled }
+  override get enabled() { return (this.options.searchReadWorks || linkedTo('read-works')) && builtinOpens('read-works', this.options) }
 
   static override async clean(): Promise<void> {
     // A global re-run (options change, navigation) tears the view down. If it was

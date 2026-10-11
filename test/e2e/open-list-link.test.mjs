@@ -263,27 +263,57 @@ describe('a list opened by its URL', { skip }, () => {
       }
     })
 
-    test('a list without a record, off its page, links the reader\'s readings, their account known', async () => {
-      const readings = `${ARCHIVE}/users/someone/readings`
-      const cases = [
-        { at: '/tags/Bees/works#ao3e-open=marked-for-later', link: { label: 'Open Marked for Later', href: `${readings}?show=to-read#ao3e-open=marked-for-later` } },
-        { at: '/series/9991#ao3e-open=read-works', link: { label: 'Open Read works', href: `${readings}#ao3e-open=read-works` } },
-        { at: '/works/search?work_search[query]=tea#ao3e-tracked', link: { label: 'Open the review', href: `${readings}#ao3e-open=tracked-review` } },
-      ]
-      // The account the stand-in's pages are signed in as, which they also write.
-      const tab = await openTab(browser, { seed: { ...SEED, 'option.user': { userId: 'someone' } }, route })
+    /**
+     * The account the stand-in's pages are signed in as, which they also write;
+     * a list tracked elsewhere, for the review to gather; and work marks on,
+     * which say which works are read.
+     */
+    const READER = {
+      'option.user': { userId: 'someone' },
+      'option.trackedLists': trackedOption([{ entry: { id: 'w4sp', kind: 'series-works', url: '/series/1234', alias: 'Series: Wasps', tracked: true, since: TODAY } }]),
+      'option.workMarks': { enabled: true, marks: { read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '', order: 0 } } },
+    }
+    const READINGS = `${ARCHIVE}/users/someone/readings`
+    const BUILTIN_LINKS = {
+      'marked-for-later': { at: '/tags/Bees/works#ao3e-open=marked-for-later', link: { label: 'Open Marked for Later', href: `${READINGS}?show=to-read#ao3e-open=marked-for-later` } },
+      'read-works': { at: '/series/9991#ao3e-open=read-works', link: { label: 'Open Read works', href: `${READINGS}#ao3e-open=read-works` } },
+      'review': { at: '/works/search?work_search[query]=tea#ao3e-tracked', link: { label: 'Open the review', href: `${READINGS}#ao3e-open=tracked-review` } },
+    }
+
+    /** Visit each of `cases`, a list without a record off its page, and read its toast's links. */
+    const builtinToastLinks = async (seed, cases) => {
+      const tab = await openTab(browser, { seed: { ...SEED, ...seed }, route })
       try {
-        for (const { at, link } of cases) {
+        const links = {}
+        for (const kind of cases) {
+          const { at } = BUILTIN_LINKS[kind]
           await visit(tab, `${ARCHIVE}${at}`)
           await until('the toast', async () => (await toasts(tab)).length > 0)
           assert.deepEqual(await toasts(tab), [CANT_OPEN], at)
-          assert.deepEqual(await toastLinks(tab), [link], at)
           assert.equal(await viewOpen(tab), false, at)
+          links[kind] = await toastLinks(tab)
         }
+        return links
       }
       finally {
         await tab.close()
       }
+    }
+
+    test('a list without a record, off its page, links the reader\'s readings, their account known', async () => {
+      const links = await builtinToastLinks(READER, Object.keys(BUILTIN_LINKS))
+      for (const [kind, { link }] of Object.entries(BUILTIN_LINKS))
+        assert.deepEqual(links[kind], [link], kind)
+    })
+
+    test('a list without a record whose view would open nothing on the reader\'s readings gets the toast alone', async () => {
+      const untracked = await builtinToastLinks({ ...READER, 'option.trackedLists': trackedOption([]) }, ['review', 'marked-for-later'])
+      assert.deepEqual(untracked.review, [], 'the review, with no list tracked')
+      assert.deepEqual(untracked['marked-for-later'], [BUILTIN_LINKS['marked-for-later'].link], 'which leaves the others\' links be')
+
+      const unmarked = await builtinToastLinks({ ...READER, 'option.workMarks': { ...READER['option.workMarks'], enabled: false } }, ['read-works', 'review'])
+      assert.deepEqual(unmarked['read-works'], [], 'Read works, with work marks off')
+      assert.deepEqual(unmarked.review, [BUILTIN_LINKS.review.link], 'which leaves the others\' links be')
     })
 
     test('a list without a record, off its page, with the reader\'s account not known, gets the toast alone', async () => {

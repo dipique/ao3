@@ -11,14 +11,15 @@
 
 import type { SnapshotDescriptor } from './cache.ts'
 import type { SavedList } from './savedLists.ts'
-import type { TrackedKind } from './trackedLists.ts'
+import type { TrackedKind, TrackedList } from './trackedLists.ts'
 
 import { fragmentParam, fragmentText, isListId, listPage, onListPage, parseArchiveUrl, sourceLabel } from './trackedLists.ts'
 
 /** What an open URL names: a saved list, by its id, or a list that has no record. */
 export type ListRef = { kind: 'list', id: string } | { kind: 'marked-for-later' | 'read-works' | 'review' }
 
-type BuiltinKind = Exclude<ListRef['kind'], 'list'>
+/** A list without a record. */
+export type BuiltinKind = Exclude<ListRef['kind'], 'list'>
 
 /** The fragment parameter an open URL carries its reference in: `#ao3e-open=<ref>`. */
 const OPEN_FRAGMENT = 'ao3e-open'
@@ -127,6 +128,36 @@ export function openAsk(ref: ListRef, lists: readonly SavedList[], href: string)
   return here ? { ref, host: ref.kind, list: null } : null
 }
 
+/** The reader's settings that decide whether a list without a record has anything to open. */
+export interface BuiltinSettings {
+  trackedLists: { lists: readonly Pick<TrackedList, 'tracked'>[] }
+  workMarks: { enabled: boolean }
+}
+
+/**
+ * Whether the view of a list without a record opens on its page, by the
+ * reader's settings: the review only with a list tracked, which it gathers
+ * from; the works read only with work marks on, since the marks say which
+ * works they are; Marked for Later always. Where it doesn't, its open URL
+ * opens nothing, and says nothing.
+ */
+export function builtinOpens(kind: BuiltinKind, settings: BuiltinSettings): boolean {
+  switch (kind) {
+    case 'review':
+      return settings.trackedLists.lists.some(list => list.tracked)
+    case 'read-works':
+      return settings.workMarks.enabled
+    case 'marked-for-later':
+      return true
+  }
+}
+
+/** The reader's settings a link to a list's own page depends on. */
+export interface LinkSettings extends BuiltinSettings {
+  /** The reader's account, whose readings the lists without a record are on. */
+  user: { userId?: string }
+}
+
 /** A link to a list's own page, named for the list. */
 export interface OwnPageLink {
   label: string
@@ -140,12 +171,15 @@ export interface OwnPageLink {
  * on its own page ({@link hostPage}). That is a saved list of `lists` with an
  * address on the archive, an open URL kept from before the list was saved
  * back to another search among them; or, with the reader's account known, a
- * list without a record, on their readings. Null for an id none of `lists`
- * has, and for a list with no page to point to.
+ * list without a record, on their readings, where its view opens
+ * ({@link builtinOpens}). Null for an id none of `lists` has, for a list with
+ * no page to point to, and for one whose view would open nothing there.
  */
-export function ownPageLink(ref: ListRef, lists: readonly SavedList[], userId?: string): OwnPageLink | null {
+export function ownPageLink(ref: ListRef, lists: readonly SavedList[], settings: LinkSettings): OwnPageLink | null {
+  if (ref.kind !== 'list' && !builtinOpens(ref.kind, settings))
+    return null
   const list = ref.kind === 'list' ? lists.find(one => one.id === ref.id) ?? null : null
-  const page = hostPage(ref, list, userId)
+  const page = hostPage(ref, list, settings.user.userId)
   const name = ref.kind !== 'list' ? BUILTIN_TITLES[ref.kind] : list && `“${sourceLabel({ id: list.id, alias: list.title, url: list.url })}”`
   return page && name ? { label: `Open ${name}`, href: openLink(ref, page) } : null
 }

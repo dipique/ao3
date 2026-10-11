@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, afterEach, before, describe, test } from 'node:test'
 
-import { REGEX_TIME_BUDGET_MS } from '../../src/common/constants.ts'
+import { REGEX_CHECKING_HOLD_MS, REGEX_TIME_BUDGET_MS } from '../../src/common/constants.ts'
 import { skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 
 /** A pattern that backtracks without end over a run of a's ending in anything else. */
@@ -117,6 +117,31 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
     await options.saved()
     assert.deepEqual((await options.lastWrite('option.rules')).filters, [{ target: 'C', value: '^a+!$', matcher: 'regex' }])
     assert.deepEqual(options.problems(), [])
+  })
+
+  test('a check under way keeps the last verdict for the hold, then says Checking…', async () => {
+    await openPage({ 'fandomCache.characters': learned(['Harry Potter']) })
+    await options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
+    await pick('What the rule matches', 'Character')
+    await pick('How to match', 'Regex')
+    await (await testField()).type(RUNAWAY_TAG)
+    await (await patternField()).type(RUNAWAY_PATTERN.slice(0, -1))
+    assert.equal(await verdict('match'), 'Matches')
+
+    // From the next keystroke on, each verdict the tester draws, and when.
+    await page.evaluate(() => {
+      const drawn = window.__verdicts = []
+      addEventListener('keydown', () => drawn.push({ kind: 'typed', at: performance.now() }), { capture: true, once: true })
+      const el = document.querySelector('[role="dialog"] [data-regex-verdict]')
+      new MutationObserver(() => drawn.push({ kind: el.dataset.regexVerdict, at: performance.now() }))
+        .observe(el, { attributes: true, attributeFilter: ['data-regex-verdict'] })
+    })
+    await (await patternField()).type(RUNAWAY_PATTERN.slice(-1))
+    await verdict('checking')
+    const [typed, first] = await page.evaluate(() => window.__verdicts)
+    assert.equal(typed.kind, 'typed')
+    assert.equal(first.kind, 'checking', 'the last verdict is kept until then')
+    assert.ok(first.at - typed.at >= REGEX_CHECKING_HOLD_MS, `Checking… drawn ${first.at - typed.at} ms after the keystroke`)
   })
 
   test('a rule opened with a pattern too slow for the names known here can\'t be saved again until it changes', async () => {

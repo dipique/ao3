@@ -48,7 +48,7 @@ let links: PageLinks | null = null
  * of the page, before any unit is built, since what they ask for decides which
  * units run. An open URL naming no list this page opens is said so, once the
  * page is there to say it on, with a link to the list's own page when it names
- * a list known here. Nothing goes there by itself.
+ * a list known here that would open there. Nothing goes there by itself.
  */
 export function readListLinks(options: Options): void {
   if (links)
@@ -68,7 +68,7 @@ export function readListLinks(options: Options): void {
     hosts: new Set([ask?.host, restoring].filter((host): host is ListHost => !!host)),
   }
   if (target && !ask) {
-    const link = ownPageLink(target, lists, options.user.userId) ?? undefined
+    const link = ownPageLink(target, lists, options) ?? undefined
     whenShown(() => toast(UNKNOWN_LINK, { type: 'error', link }))
   }
 }

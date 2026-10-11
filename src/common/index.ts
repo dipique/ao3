@@ -10,7 +10,7 @@ export * from './blurbRecord.ts'
 export { cache } from './cache.ts'
 
 export type { Cache, LegacySearchSnapshot, MarkedForLaterIndex, SearchViewPrefs, SnapshotDescriptor, StoredList, TrackedReviewCache } from './cache.ts'
-export { ADDON_CLASS, BUILD_CHECK_TIMEOUT_MS, OPTIONS_SAVE_DELAY_MS, REGEX_TIME_BUDGET_MS, REOPEN_GUARD_MS, SAVE_BACK_UNDO_TIMEOUT, SEARCH_PROMPT_TIMEOUT, SITE_EXPORT_JOB_KEY } from './constants.ts'
+export { ADDON_CLASS, BUILD_CHECK_TIMEOUT_MS, OPTIONS_SAVE_DELAY_MS, REGEX_CHECKING_HOLD_MS, REGEX_TIME_BUDGET_MS, REOPEN_GUARD_MS, SAVE_BACK_UNDO_TIMEOUT, SEARCH_PROMPT_TIMEOUT, SITE_EXPORT_JOB_KEY } from './constants.ts'
 export * from './data.ts'
 export { isContextInvalidatedError, isExtensionContextValid } from './extensionContext.ts'
 export { fandomCache } from './fandomCache.ts'

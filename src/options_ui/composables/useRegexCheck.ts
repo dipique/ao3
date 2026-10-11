@@ -1,5 +1,7 @@
 import type { Ref } from 'vue'
 
+import { REGEX_CHECKING_HOLD_MS } from '#common'
+
 import type { RegexJob, RegexRun } from '../model/regexCheck.ts'
 import type { RuleDraft } from '../model/ruleEditor.ts'
 import type { KnownPool } from './useKnownTags.ts'
@@ -17,7 +19,7 @@ import { checkedNames, checkedPattern, regexTester } from '../model/ruleEditor.t
  * the verdict back.
  *
  * `tester` is the regex tester as drawn. While a check of what is typed to test
- * runs, it keeps what it showed until two frames have gone by, so a quick
+ * runs, it keeps what it showed for {@link REGEX_CHECKING_HOLD_MS}, so a quick
  * check changes it once, and says it is checking after that.
  */
 export function useRegexCheck(draft: Ref<RuleDraft>, subject: Ref<string>, known: Ref<KnownPool | null>, open: Ref<boolean>) {
@@ -34,9 +36,9 @@ export function useRegexCheck(draft: Ref<RuleDraft>, subject: Ref<string>, known
   })
   const run = computed<RegexRun>(() => runOf(job.value, runner.ended.value))
 
-  /** Whether the check now under way began two frames ago or more. */
+  /** Whether the check now under way began {@link REGEX_CHECKING_HOLD_MS} ago or more. */
   const long = ref(false)
-  let asked = 0
+  let hold: ReturnType<typeof setTimeout> | undefined
   watch(job, (next, last) => {
     const changed = next === 'loading' || last === 'loading' ? next !== last : !sameJob(next, last)
     if (!changed)
@@ -44,12 +46,10 @@ export function useRegexCheck(draft: Ref<RuleDraft>, subject: Ref<string>, known
     if (next && next !== 'loading')
       runner.run(next)
     long.value = false
-    const at = ++asked
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (at === asked)
-        long.value = true
-    }))
+    clearTimeout(hold)
+    hold = setTimeout(() => long.value = true, REGEX_CHECKING_HOLD_MS)
   })
+  onScopeDispose(() => clearTimeout(hold))
 
   watch(open, (isOpen) => {
     if (isOpen)
