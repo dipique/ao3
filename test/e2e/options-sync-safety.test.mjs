@@ -30,6 +30,9 @@ const HELD = {
 /** What a question says where this browser's settings are backed up. */
 const BACKED_UP = 'This browser\'s settings are backed up.'
 
+/** The toast where an answer that replaces this browser's settings is refused, since their backup couldn't be saved. */
+const UNBACKED = 'The backup of this browser\'s settings couldn\'t be saved. Press again to replace them anyway.'
+
 /** The word a screen reader hears for each severity's glyph. */
 const WORDS = { destructive: 'Error:', warning: 'Warning:', success: 'Success:', neutral: 'Note:' }
 
@@ -350,6 +353,18 @@ describe('options UI — the sync panel', { skip }, () => {
       }
     })
 
+    test('accepting it, refused because this browser\'s backup can\'t be saved, says so', async () => {
+      const options = await open({ 'sync.enabled': true, 'sync.pause': HELD }, { resolveHeldSync: { resolved: false, refused: 'unbacked' } })
+      try {
+        await options.press(await options.page.$('[data-sync-accept]'))
+        await until('the refusal', async () => (await options.toasts()).includes(UNBACKED))
+        assert.deepEqual(await options.sent('resolveHeldSync'), [['accept']])
+      }
+      finally {
+        await options.close()
+      }
+    })
+
     test('on a phone, stacks the two answers', async () => {
       const options = await open({ 'sync.enabled': true, 'sync.pause': HELD }, {}, NARROW)
       try {
@@ -463,10 +478,10 @@ describe('options UI — the sync panel', { skip }, () => {
     /**
      * A backup due as the synced settings are used, here for an edit made
      * while it asked, that can't be saved: the first press applies nothing,
-     * and the question then says this browser's settings aren't backed up.
-     * A second press uses them anyway.
+     * says so in a toast, and the question then says this browser's settings
+     * aren't backed up. A second press uses them anyway.
      */
-    test('using the synced settings when their backup can\'t be saved: the first press says yours aren\'t backed up and changes nothing, a second uses them', async () => {
+    test('using the synced settings when their backup can\'t be saved: the first press changes nothing and says so, the question that yours aren\'t backed up, and a second uses them', async () => {
       const { options, manifest } = await openOverCopy()
       try {
         await turnOn(options)
@@ -481,7 +496,8 @@ describe('options UI — the sync panel', { skip }, () => {
         })
 
         await options.press(await options.page.$('[data-sync-accept]'))
-        await until('the failure to be recorded', async () => (await options.stored('sync.pause'))?.backupFailed === true)
+        await until('the refusal', async () => (await options.toasts()).includes(UNBACKED))
+        assert.equal((await options.stored('sync.pause'))?.backupFailed, true)
         assert.equal((await options.stored('sync.pause')).backedUp, false)
         assert.equal(await options.stored('option.wordsPerMinute'), 330, 'nothing applied')
         await until('the answer to say so', async () => (await options.page.evaluate(readAnswers)).find(a => a.answer === 'accept')?.consequence

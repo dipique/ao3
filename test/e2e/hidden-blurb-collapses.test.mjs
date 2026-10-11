@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock, REPO_ROOT } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
 import { settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -20,10 +20,17 @@ const SEED = {
   },
 }
 
-/** One AO3 search-results listing: a work tagged Fluff, and one that isn't. */
+/**
+ * One AO3 search-results listing: a work tagged Fluff, and one that isn't.
+ * Its style is AO3's own rule for a blurb, from the archive's default site
+ * skin, as far as it bears on a hidden one: the display, and the padding and
+ * border that keep a box.
+ */
 function listing() {
   return `<!doctype html>
-<html><head><title>Works</title></head><body class="logged-in works-index">
+<html><head><title>Works</title><style>
+  li.blurb { display: block; border: 1px solid #ddd; padding: 0.429em 0.75em; }
+</style></head><body class="logged-in works-index">
   <div id="header"><ul class="primary navigation"><li class="dropdown"></li></ul></div>
   <div id="main" class="works-index">
     <ol class="work index group">
@@ -64,11 +71,6 @@ describe('a work hidden outright leaves no gap', { skip }, () => {
     ensureBuilt()
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-    // AO3's real screen stylesheet — the source of the `li.blurb` display rule.
-    const ao3 = await readFile(
-      join(REPO_ROOT, '..', 'html', '_shared', 'stylesheets', 'skins', 'skin_1_default', '1_site_screen_.css'),
-      'utf8',
-    )
     browser = await puppeteer.launch({
       executablePath: chromePath,
       headless: 'new',
@@ -84,7 +86,6 @@ describe('a work hidden outright leaves no gap', { skip }, () => {
     })
     await tab.evaluateOnNewDocument(installMock, SEED)
     await tab.goto(LISTING_URL, { waitUntil: 'domcontentloaded' })
-    await tab.addStyleTag({ content: ao3 })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
     await settled(tab)

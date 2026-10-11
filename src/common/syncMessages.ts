@@ -1,5 +1,4 @@
-import type { SetSyncResult } from './api.ts'
-import type { AnswerRefusal } from './syncConsistency.ts'
+import type { HeldRefusal, SetSyncResult } from './api.ts'
 import type { SyncPause } from './syncMeta.ts'
 
 import { describePullLoss } from './syncGuard.ts'
@@ -12,13 +11,17 @@ import { describePullLoss } from './syncGuard.ts'
 export const HELD_BACKUP_NOTE = `This browser's settings are backed up.`
 
 /**
- * Why an answer to what sync asks was refused: the synced settings can't be
- * read whole, and keeping this browser's settings backs them up first, while
- * using them applies them. Within the wait another browser is taken to be
- * still sending them; past it, they are inconsistent, and the sync panel
- * offers to replace them.
+ * Why an answer to what sync asks was refused. Either the synced settings
+ * can't be read whole, and keeping this browser's settings backs them up
+ * first, while using them applies them: within the wait another browser is
+ * taken to be still sending them; past it, they are inconsistent, and the
+ * sync panel offers to replace them. Or the backup of this browser's settings
+ * that using the synced settings takes couldn't be saved, and a second press
+ * replaces them anyway.
  */
-export function answerRefusedMessage(refused: AnswerRefusal, choice: 'keep' | 'accept'): string {
+export function answerRefusedMessage(refused: HeldRefusal, choice: 'keep' | 'accept'): string {
+  if (refused === 'unbacked')
+    return 'The backup of this browser\'s settings couldn\'t be saved. Press again to replace them anyway.'
   if (refused === 'sending')
     return 'Another browser is still sending its settings. Try again in a moment.'
   return choice === 'keep'

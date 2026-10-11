@@ -129,13 +129,20 @@ export type SetSyncResult
     | { ok: false, reason: 'newer-version', remoteVersion: number, version: number }
 
 /**
- * What answering sync's question did. `refused`: the synced settings can't be
- * read whole, so they can be neither backed up before this browser's replace
- * them nor used; nothing was backed up, sent, applied or cleared. Not
- * `resolved`, with nothing refused: nothing was asked, or the backup the
- * answer takes couldn't be written, which the question now records.
+ * Why an answer to sync's question was refused: the synced settings can't be
+ * read whole ({@link AnswerRefusal}), or, for an answer that replaces this
+ * browser's settings, their backup couldn't be saved (`unbacked`), which the
+ * question now records, so a second press goes ahead.
  */
-export interface HeldAnswer { resolved: boolean, refused?: AnswerRefusal }
+export type HeldRefusal = AnswerRefusal | 'unbacked'
+
+/**
+ * What answering sync's question did. Over synced settings that can't be read
+ * whole, nothing was backed up, sent, applied or cleared; where this browser's
+ * backup couldn't be saved, nothing was applied. Not `resolved`, with nothing
+ * refused: nothing was asked.
+ */
+export interface HeldAnswer { resolved: boolean, refused?: HeldRefusal }
 
 export interface SyncStatus {
   enabled: boolean

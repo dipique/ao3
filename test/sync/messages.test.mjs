@@ -36,6 +36,15 @@ describe('sync messages', () => {
     assert.equal(answerRefusedMessage('inconsistent', 'accept'), 'Your synced settings are inconsistent, so they can\'t be used.')
   })
 
+  /**
+   * Using the synced settings, or accepting a held update, backs this
+   * browser's settings up as it replaces them. Where that backup, or the
+   * day's, can't be saved, the first press is refused, and a second applies.
+   */
+  test('using the synced settings, refused because this browser\'s backup can\'t be saved, says so, and that a second press goes ahead', () => {
+    assert.equal(answerRefusedMessage('unbacked', 'accept'), 'The backup of this browser\'s settings couldn\'t be saved. Press again to replace them anyway.')
+  })
+
   test('an out-of-date background says whether sync has stopped', () => {
     assert.match(staleBackgroundMessage(true), /Reload AO3 Enhancements .*Sync is paused until then\.$/)
     assert.match(staleBackgroundMessage(false), /Sync may not work until then\.$/)

@@ -243,7 +243,7 @@ describe('sync scenarios', () => {
         const question = desktop.meta.pause
         const before = cloud.manifest()
 
-        assert.deepEqual(await desktop.answer('accept'), { resolved: false }, daily)
+        assert.deepEqual(await desktop.answer('accept'), { resolved: false, refused: 'unbacked' }, daily)
         assert.deepEqual(desktop.meta.pause, { ...question, backedUp: false, backupFailed: true }, daily)
         assert.equal(desktop.options.wordsPerMinute, 330, `nothing applied, ${daily}`)
         assert.equal(desktop.options.rules.filters.length, 41, daily)
@@ -265,7 +265,7 @@ describe('sync scenarios', () => {
       const { desktop } = await asked({ meta: { backupsEnabled: true } })
       await desktop.setMeta({ lastBackupDate: '' })
       desktop.breakBackups()
-      assert.deepEqual(await desktop.answer('accept'), { resolved: false })
+      assert.deepEqual(await desktop.answer('accept'), { resolved: false, refused: 'unbacked' })
       assert.deepEqual([desktop.meta.pause?.reason, desktop.meta.pause?.backedUp, desktop.meta.pause?.backupFailed], ['first-sync', false, true])
       assert.equal(desktop.options.wordsPerMinute, 320, 'nothing applied')
 
@@ -2136,7 +2136,7 @@ describe('sync scenarios', () => {
         laptop.breakBackups()
         const hold = laptop.meta.pause
 
-        assert.deepEqual(await laptop.answer('accept'), { resolved: false }, daily)
+        assert.deepEqual(await laptop.answer('accept'), { resolved: false, refused: 'unbacked' }, daily)
         assert.deepEqual(laptop.meta.pause, { ...hold, backedUp: false, backupFailed: true }, daily)
         assert.equal(laptop.options.rules.filters.length, 40, `nothing applied, ${daily}`)
         const decision = decisionOn(laptop.meta.pause)
@@ -2155,7 +2155,7 @@ describe('sync scenarios', () => {
       const { laptop } = await bulkDelete({ meta: { backupsEnabled: true } })
       await laptop.setMeta({ lastBackupDate: '' })
       laptop.breakBackups()
-      assert.deepEqual(await laptop.answer('accept'), { resolved: false })
+      assert.deepEqual(await laptop.answer('accept'), { resolved: false, refused: 'unbacked' })
       assert.deepEqual([laptop.meta.pause?.reason, laptop.meta.pause?.backedUp, laptop.meta.pause?.backupFailed], ['held', false, true])
       assert.equal(laptop.options.rules.filters.length, 40, 'nothing applied')
 
@@ -2173,7 +2173,7 @@ describe('sync scenarios', () => {
       laptop.breakBackups()
       assert.equal(consequence(decisionOn(older), 'accept'), 'Replaces this browser\'s settings with the other browser\'s.', 'precondition: it says nothing of a backup')
 
-      assert.deepEqual(await laptop.answer('accept'), { resolved: false })
+      assert.deepEqual(await laptop.answer('accept'), { resolved: false, refused: 'unbacked' })
       assert.deepEqual(laptop.meta.pause, { ...older, backupFailed: true })
       assert.equal(consequence(decisionOn(laptop.meta.pause), 'accept'), 'Replaces this browser\'s settings with the other browser\'s. Yours aren\'t backed up: the backup couldn\'t be saved.')
       assert.equal(await laptop.resolveHeld('accept'), true)

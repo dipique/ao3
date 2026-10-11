@@ -240,7 +240,7 @@ export function createSyncEngine(deps: SyncDeps) {
    * Either is refused while the synced copy can't be read whole: `keep` can't
    * back it up, and `accept` can't apply it. Nothing is backed up, sent,
    * applied or cleared. `accept` whose backups can't be written is refused
-   * too, once ({@link refuseUnbacked}).
+   * too, once (`unbacked`, {@link refuseUnbacked}).
    */
   async function resolveHeld(choice: 'accept' | 'keep'): Promise<HeldAnswer> {
     return withLock(async () => {
@@ -258,7 +258,7 @@ export function createSyncEngine(deps: SyncDeps) {
         if (refused) {
           await meta.set({ pause: refused })
           logger.warn('not taking the synced settings: this browser\'s settings couldn\'t be backed up first, which the question now says')
-          return { resolved: false }
+          return { resolved: false, refused: 'unbacked' }
         }
         await pull({ acceptLoss: true, daily: false, items })
       }
