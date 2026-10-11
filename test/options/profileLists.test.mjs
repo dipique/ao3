@@ -64,8 +64,12 @@ function job(key, { job: fields, ...status } = {}) {
 
 const IDLE = jobView({ job: null, running: false, message: '', error: null, warnings: [], waitingUntil: null, waitReason: null }, () => '', NOW)
 
-/** Both tiles, with both copies stored and no job, unless told otherwise. */
-const tiles = (input = {}) => profileTiles({ copies: { 'marked-for-later': markedCopy(), 'read-works': readCopy }, userId: 'tester', job: IDLE, now: NOW, ...input })
+/** The reader's settings, with work marks on and no list tracked, which neither tile asks for. */
+const MARKS_ON = { trackedLists: { lists: [] }, workMarks: { enabled: true } }
+const MARKS_OFF = { ...MARKS_ON, workMarks: { enabled: false } }
+
+/** Both tiles, with both copies stored, work marks on and no job, unless told otherwise. */
+const tiles = (input = {}) => profileTiles({ copies: { 'marked-for-later': markedCopy(), 'read-works': readCopy }, userId: 'tester', settings: MARKS_ON, job: IDLE, now: NOW, ...input })
 const marked = input => tiles(input)[0]
 const read = input => tiles(input)[1]
 
@@ -158,6 +162,41 @@ describe('a tile with no copy', () => {
 
   test('another list\'s job has nothing here to turn off', () => {
     assert.equal(none({ job: job(OTHER) })[0].offlineOff, null)
+  })
+})
+
+describe('Read works with work marks off, when its view opens nothing', () => {
+  const NEEDS_MARKS = 'None yet. This list is made from your marks, so it needs Work marks on, under Reading.'
+  const none = (input = {}) => tiles({ copies: { 'marked-for-later': null, 'read-works': null }, settings: MARKS_OFF, ...input })
+
+  test('has no View on AO3, with its copy or without, whether or not the reader\'s account is known', () => {
+    assert.equal(read({ settings: MARKS_OFF }).view, null)
+    assert.equal(read({ settings: MARKS_OFF, userId: undefined }).view, null, 'not even on the page its copy was read from')
+    assert.equal(none()[1].view, null)
+    assert.equal(none({ userId: undefined })[1].view, null)
+  })
+
+  test('with no copy, its note says the list needs Work marks on, whether or not the reader\'s account is known', () => {
+    assert.equal(none()[1].empty, NEEDS_MARKS)
+    assert.equal(none({ userId: undefined })[1].empty, NEEDS_MARKS)
+  })
+
+  test('with its copy, it still counts the copy and says nothing of how one is kept', () => {
+    const tile = read({ settings: MARKS_OFF })
+    assert.equal(tile.empty, null)
+    assert.deepEqual(tile.figure, read().figure)
+  })
+
+  test('Marked for Later, which needs no marks, keeps its View on AO3 and its note', () => {
+    assert.equal(marked({ settings: MARKS_OFF }).view, '/users/tester/readings?show=to-read#ao3e-open=marked-for-later')
+    assert.equal(none()[0].view, '/users/tester/readings?show=to-read#ao3e-open=marked-for-later')
+    assert.equal(none()[0].empty, 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.')
+  })
+
+  test('a list tracked or not makes no difference to either tile', () => {
+    const tracked = { ...MARKS_ON, trackedLists: { lists: [{ tracked: true }] } }
+    assert.deepEqual(tiles({ settings: tracked }).map(tile => tile.view), tiles().map(tile => tile.view))
+    assert.deepEqual(tiles({ settings: { ...MARKS_OFF, trackedLists: { lists: [{ tracked: true }] } } }).map(tile => tile.view), tiles({ settings: MARKS_OFF }).map(tile => tile.view))
   })
 })
 

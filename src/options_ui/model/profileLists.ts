@@ -1,8 +1,9 @@
+import type { BuiltinSettings } from '../../common/listLinks.ts'
 import type { CachingBuckets } from '../../content_script/siteExport/workText.ts'
 import type { BucketBar, BucketFigures } from './buckets.ts'
 import type { JobActions, JobView } from './jobView.ts'
 
-import { hostPage, openLink } from '../../common/listLinks.ts'
+import { builtinOpens, hostPage, openLink } from '../../common/listLinks.ts'
 import { bucketBar, bucketFigures } from './buckets.ts'
 import { listJob } from './jobView.ts'
 import { timeAgo } from './moments.ts'
@@ -28,6 +29,12 @@ export interface ProfileList {
    * not known: the page on AO3 and the switch that keep one.
    */
   empty: string
+  /**
+   * With no copy kept while the reader's settings leave the list's view
+   * nothing to open ({@link builtinOpens}): the setting it needs. A list whose
+   * view always opens has none.
+   */
+  needs?: string
 }
 
 /**
@@ -48,6 +55,7 @@ export const PROFILE_LISTS: readonly ProfileList[] = [
     name: 'Read works',
     note: 'Everything you’ve marked read or given a verdict, Favorites included: a shelf to come back to. Not part of Review — it only changes when you mark something.',
     empty: 'None yet. Press Search read items on your History page on AO3, signed in, with Search the works you\'ve read on: a copy is kept from then on, and refreshes from here.',
+    needs: 'None yet. This list is made from your marks, so it needs Work marks on, under Reading.',
   },
 ]
 
@@ -72,10 +80,11 @@ export interface ProfileTileView {
    * Where View on AO3 goes: the list's open URL ({@link openLink}), which opens
    * its search view, on the reader's own page ({@link hostPage}), else, with
    * their account not known, on the page the copy was read from; null with
-   * neither.
+   * neither, and while the reader's settings leave the view nothing to open
+   * ({@link builtinOpens}).
    */
   view: string | null
-  /** With no copy: how one is kept. */
+  /** With no copy: how one is kept, or the setting the list needs before one can be. */
   empty: string | null
   /** "240", and "works · as of 3 hours ago". */
   figure: { count: string, detail: string } | null
@@ -102,18 +111,21 @@ export interface ProfileTilesInput {
   copies: Readonly<Record<ProfileListId, ProfileCopy | null>>
   /** The reader's AO3 account, when the extension has seen it. */
   userId?: string
+  /** The reader's settings that decide whether each list's view opens. */
+  settings: BuiltinSettings
   job: JobView
   now: number
 }
 
-export function profileTiles({ copies, userId, job, now }: ProfileTilesInput): ProfileTileView[] {
+export function profileTiles({ copies, userId, settings, job, now }: ProfileTilesInput): ProfileTileView[] {
   return PROFILE_LISTS.map((list) => {
     const copy = copies[list.id]
     const ref = { kind: list.id }
-    const page = hostPage(ref, null, userId) ?? copy?.listUrl
+    const opens = builtinOpens(list.id, settings)
+    const page = opens ? hostPage(ref, null, userId) ?? copy?.listUrl : undefined
     const base = { id: list.id, name: list.name, note: list.note, view: page ? openLink(ref, page) : null }
     if (!copy) {
-      const empty = base.view ? KEEP_BY_VIEW : list.empty
+      const empty = !opens && list.needs ? list.needs : base.view ? KEEP_BY_VIEW : list.empty
       return { ...base, empty, figure: null, bar: null, figures: null, actions: null, offlineOff: null, job: false, retry: 0, cached: 0 }
     }
 

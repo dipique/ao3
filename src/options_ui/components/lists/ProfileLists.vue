@@ -10,6 +10,8 @@ import { profileTiles } from '../../model/profileLists.ts'
  * where there isn't.
  */
 const { profileRows, userId, view, loading } = useSiteExport()
+const { lists } = useOption('trackedLists')
+const { enabled: workMarks } = useOption('workMarks')
 const now = useNow({ interval: 60_000 })
 
 function copyOf(row: SiteExportListRow | null): ProfileCopy | null {
@@ -19,6 +21,7 @@ function copyOf(row: SiteExportListRow | null): ProfileCopy | null {
 const tiles = computed(() => profileTiles({
   copies: { 'marked-for-later': copyOf(profileRows.value['marked-for-later']), 'read-works': copyOf(profileRows.value['read-works']) },
   userId: userId.value,
+  settings: { trackedLists: { lists: lists.value }, workMarks: { enabled: workMarks.value } },
   job: view.value,
   now: now.value.getTime(),
 }))

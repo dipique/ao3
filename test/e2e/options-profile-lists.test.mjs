@@ -52,13 +52,15 @@ const workPage = id => `<!doctype html>
 const described = (sourceId, label, listUrl) => ({ sourceId, label, listUrl })
 
 /**
- * The reader is `tester`. Their Marked for Later holds three works, one of
- * which failed to fetch; their read works two, one of them cached. An older
- * Marked for Later that no visit described, another account's read works, and
- * a tag's works are stored too.
+ * The reader is `tester`, with Work marks on, which their read works are made
+ * from. Their Marked for Later holds three works, one of which failed to
+ * fetch; their read works two, one of them cached. An older Marked for Later
+ * that no visit described, another account's read works, and a tag's works are
+ * stored too.
  */
 const SEED = {
   'option.user': { userId: 'tester' },
+  'option.workMarks': { enabled: true },
   ...storedLists({
     [MARKED]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(11), blurb(12), blurb(13)], descriptor: described('marked-for-later', 'Marked for Later — tester', MARKED_PAGE) },
     [READ]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(21), blurb(22)], descriptor: described('read-works', 'Read works — tester', READ_PAGE) },
@@ -381,6 +383,74 @@ describe('options UI — User profile lists, when AO3 says no', { skip }, () => 
     const problems = options.problems(/status of 429/)
     assert.equal(problems.length, 1, JSON.stringify(problems))
     assert.match(problems[0], /Site export job stopped/)
+  })
+})
+
+/**
+ * Read works is made from the reader's marks, so with Work marks off its open
+ * URL opens nothing: the tile offers no View on AO3, and its note says what the
+ * list needs. Work marks is switched on the same page, under Reading, and the
+ * tile follows it there and then.
+ */
+describe('options UI — User profile lists, with Work marks off', { skip }, () => {
+  const MARKS_OFF = {
+    'option.user': { userId: 'tester' },
+    ...storedLists({
+      [MARKED]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(11), blurb(12), blurb(13)], descriptor: described('marked-for-later', 'Marked for Later — tester', MARKED_PAGE) },
+    }),
+  }
+  const NEEDS_MARKS = /None yet\. This list is made from your marks, so it needs Work marks on, under Reading\./
+  const KEEP_BY_VIEW = /None yet\. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here\./
+
+  let session
+  let options
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({ seed: MARKS_OFF, hash: '#user-profile-lists', viewport: { width: 1440, height: 900 } })
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  const tile = id => options.tile(id)
+  const readText = async () => options.text(await tile('read-works'))
+  const readLinks = async () => options.controls(await tile('read-works'), 'link')
+
+  /** Switch Work marks, under Reading, and come back to the tiles. */
+  async function switchWorkMarks(enabled) {
+    await options.goTo('#marks-status')
+    await options.press(await options.control(await options.row('marks-status-work-marks'), 'switch'))
+    await until(`Work marks to be written ${enabled ? 'on' : 'off'}`, async () => (await options.lastWrite('option.workMarks'))?.enabled === enabled)
+    await options.goTo('#user-profile-lists')
+  }
+
+  test('Read works offers no View on AO3, and its note says the list needs Work marks on; Marked for Later keeps its own', async () => {
+    await until('the tiles to read their copies', async () => (await options.lines(await tile('marked-for-later'))).includes('3 works · as of 3 hours ago'))
+    assert.match(await readText(), NEEDS_MARKS)
+    assert.deepEqual(await readLinks(), [])
+    assert.equal(await (await options.control(await tile('marked-for-later'), 'link', 'View Marked for Later on AO3')).evaluate(a => a.getAttribute('href')), `${MARKED_PAGE}#ao3e-open=marked-for-later`)
+  })
+
+  test('Work marks switched on brings View on AO3 back, with the note on keeping a copy, and switched off takes them away, with no reload', async () => {
+    await options.page.evaluate(() => {
+      window.__notReloaded = true
+    })
+
+    await switchWorkMarks(true)
+    await until('Read works to offer View on AO3', async () => (await readLinks()).length === 1)
+    assert.equal(await (await options.control(await tile('read-works'), 'link', 'View Read works on AO3')).evaluate(a => a.getAttribute('href')), `${READ_PAGE}#ao3e-open=read-works`)
+    assert.match(await readText(), KEEP_BY_VIEW)
+    assert.doesNotMatch(await readText(), NEEDS_MARKS)
+
+    await switchWorkMarks(false)
+    await until('Read works to offer View on AO3 no more', async () => (await readLinks()).length === 0)
+    assert.match(await readText(), NEEDS_MARKS)
+
+    assert.equal(await options.page.evaluate(() => window.__notReloaded), true, 'the same page throughout')
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(options.problems(), [])
   })
 })
 
