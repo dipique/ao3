@@ -253,6 +253,31 @@ export function droppedIds(previous: readonly string[], next: readonly string[],
   return candidates.filter(id => !elsewhere.has(id))
 }
 
+/**
+ * `list` with the works `ids` taken off it, its readings blocks with them, and
+ * nothing else changed: for the reader taking works off a copy, which is no
+ * read of its listing. Its `scrapedAt` and descriptor say which read it is, and
+ * every work it names that isn't taken stays named — a work whose blurb has
+ * gone included — so the copy is trusted no more than before
+ * ({@link file://./../content_script/searchView/freshness.ts}). Null when it
+ * holds none of them, or isn't a list this build can read.
+ */
+export function takeFromList(list: StoredList, ids: Iterable<string>): StoredList | null {
+  if (list.v !== LIST_VERSION || typeof list.ids !== 'string')
+    return null
+  const taken = new Set(ids)
+  const held = unpackOrderedIds(list.ids)
+  const kept = held.filter(id => !taken.has(id))
+  if (kept.length === held.length)
+    return null
+  const { ctx, ...rest } = list
+  const next: StoredList = { ...rest, ids: packOrderedIds(kept) }
+  const keptCtx = Object.entries(ctx ?? {}).filter(([sid]) => !taken.has(fromShortId(sid) ?? ''))
+  if (keptCtx.length)
+    next.ctx = Object.fromEntries(keptCtx)
+  return next
+}
+
 export interface BlurbOrphanPlan {
   /** Work ids whose blurbs nothing holds and which are past {@link ORPHAN_GRACE_MS}. */
   ids: string[]

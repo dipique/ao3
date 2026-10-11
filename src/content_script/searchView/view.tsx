@@ -156,7 +156,7 @@ export interface SearchView {
 /**
  * An optional per-blurb action button (e.g. "Mark as Read"). `run` performs the
  * side effect for one work; if it resolves, the view drops that work from the
- * list (and reports the new set via {@link SearchViewConfig.onWorksChanged}). A
+ * list (and reports it via {@link SearchViewConfig.onWorkRemoved}). A
  * rejection leaves the work in place — the action is assumed to have surfaced its
  * own error. The button is disabled while `run` is pending.
  */
@@ -198,8 +198,8 @@ export interface SearchViewConfig {
    * say "show me those after all".
    */
   autoExcludes?: FacetValueRef[]
-  /** Called after a {@link BlurbAction} removes a work, so the host can persist. */
-  onWorksChanged?: (works: Work[]) => void
+  /** Called after a {@link BlurbAction} removes a work, so the host can take it off the stored copy too. */
+  onWorkRemoved?: (work: Work) => void
   /**
    * Called whenever the view has finished re-rendering — a filter, a sort, a page
    * turn, or fresh works. What the reader can actually see has changed, which is
@@ -1406,8 +1406,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
    * Drop a work from the view (a blurbAction removed it), detach its node, and
    * re-render over the reduced set. Facet rows aren't rebuilt — a value that hit
    * zero just hides via the normal drill-down visibility — so the user's facet UI
-   * state (filter boxes, collapsed groups) is preserved. Reports the new set so
-   * the host can persist it.
+   * state (filter boxes, collapsed groups) is preserved. Reports the work so the
+   * host can take it off the stored copy.
    */
   function removeWork(work: Work): void {
     const next = works.filter(w => w !== work)
@@ -1421,7 +1421,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     }
     sortSig = '' // force a re-sort over the reduced set
     render()
-    config.onWorksChanged?.(works)
+    config.onWorkRemoved?.(work)
   }
 
   /**

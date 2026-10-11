@@ -361,7 +361,7 @@ export function storedContext(work: Work): string | undefined {
 }
 
 /** Whether the store holds exactly this work's blurb already. */
-export function isPersisted(work: Work): boolean {
+function isPersisted(work: Work): boolean {
   return forms.get(work)?.persisted ?? false
 }
 

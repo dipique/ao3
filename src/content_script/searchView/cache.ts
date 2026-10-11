@@ -12,6 +12,7 @@ import {
   options,
   packIds,
   packOrderedIds,
+  takeFromList,
   toShortId,
   unpackIds,
   unpackOrderedIds,
@@ -20,7 +21,7 @@ import { parseWork } from '#content_script/blurb.js'
 
 import type { ParsedWork } from './blurbStore.ts'
 
-import { isPersisted, pruneBlurbs, readBlurbIndex, readParsed, readRecords, rewriteStale, storedContext, storeWorks, worksFromRecords } from './blurbStore.ts'
+import { pruneBlurbs, readBlurbIndex, readParsed, readRecords, rewriteStale, storedContext, storeWorks, worksFromRecords } from './blurbStore.ts'
 import { pristineBlurb } from './pristine.ts'
 
 export { normalizeBlurb, pristineBlurb } from './pristine.ts'
@@ -224,35 +225,20 @@ export async function snapshotSize(key: string): Promise<number> {
 // Writing.
 // ---------------------------------------------------------------------------
 
-export interface WriteSnapshotOptions {
-  /**
-   * This write is not a scrape — a blurb action took one work out of the stored
-   * list — so keep the time the list was last actually fetched. That time is
-   * what an auto-refresh interval measures and what "as of" displays; a
-   * "Mark as Read" click resetting it would put off a real refresh indefinitely.
-   */
-  keepScrapedAt?: boolean
-}
-
 /**
- * Store a list of the given works, in order, plus how to re-fetch the listing
- * later ({@link SnapshotDescriptor}).
+ * Store a list of the given works, in order, as a read of the listing just
+ * now, plus how to re-fetch the listing later ({@link SnapshotDescriptor}).
+ * Taking works off a stored list is no read, and is {@link takeFromSnapshot}.
  *
  * **Blurbs first, list second**, so a stored list never names a blurb that isn't
  * there: an interrupted write leaves a blurb nothing references, which the
  * orphan discard collects, rather than a list pointing at nothing.
  *
- * Works the store already holds cost nothing to write again, which is what makes
- * the commonest write — a blurb action taking one work out of the list — a
- * rewrite of one small list of ids and nothing else.
+ * Works the store already holds cost nothing to write again, so a read that
+ * found what was stored rewrites one small list of ids and nothing else.
  */
-export async function writeSnapshot(
-  key: string,
-  works: Work[],
-  descriptor: SnapshotDescriptor,
-  opts: WriteSnapshotOptions = {},
-): Promise<void> {
-  await storeWorks(opts.keepScrapedAt ? works.filter(work => !isPersisted(work)) : works)
+export async function writeSnapshot(key: string, works: Work[], descriptor: SnapshotDescriptor): Promise<void> {
+  await storeWorks(works)
 
   // Read after the blurbs are down, so a list another tab wrote meanwhile is kept.
   // Copied: with nothing stored yet, what comes back is the storage defaults.
@@ -268,7 +254,7 @@ export async function writeSnapshot(
   }
   const list: StoredList = {
     v: LIST_VERSION,
-    scrapedAt: opts.keepScrapedAt && previous ? previous.scrapedAt : Date.now(),
+    scrapedAt: Date.now(),
     ids: packOrderedIds(ids),
     descriptor,
   }
@@ -280,6 +266,24 @@ export async function writeSnapshot(
 
   if (previous && typeof previous.ids === 'string')
     await pruneIfWanted(key, unpackOrderedIds(previous.ids), ids, lists)
+}
+
+/**
+ * Take works off a stored list, by work id: the reader took them off its view.
+ * That is no read of the listing, so the list goes on saying which read it is
+ * — when, from where, and every other work it names, this page's or not
+ * ({@link takeFromList}) — and is trusted no more than it was. Nothing is
+ * written when nothing is stored under `key`, or it holds none of them.
+ */
+export async function takeFromSnapshot(key: string, ids: Iterable<string>): Promise<void> {
+  const lists = { ...await cache.get('searchLists') }
+  const previous = lists[key]
+  const next = previous && takeFromList(previous, ids)
+  if (!next)
+    return
+  lists[key] = next
+  await cache.set({ searchLists: lists })
+  await pruneIfWanted(key, unpackOrderedIds(previous.ids), unpackOrderedIds(next.ids), lists)
 }
 
 /**

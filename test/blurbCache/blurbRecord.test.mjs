@@ -13,9 +13,10 @@ import {
   planBlurbOrphans,
   planLegacyMigration,
   splitReadingModule,
+  takeFromList,
   TOUCH_MS,
 } from '../../src/common/blurbRecord.ts'
-import { packOrderedIds, toShortId } from '../../src/common/workId.ts'
+import { packOrderedIds, toShortId, unpackOrderedIds } from '../../src/common/workId.ts'
 
 const NOW = Date.UTC(2026, 8, 15)
 const DAY = 24 * 60 * 60
@@ -111,6 +112,36 @@ describe('droppedIds', () => {
   test('only ids no other list still holds', () => {
     assert.deepEqual(droppedIds(['1', '2', '3'], ['1'], [list(['3'])]), ['2'])
     assert.deepEqual(droppedIds(['1'], ['1'], []), [])
+  })
+})
+
+describe('takeFromList', () => {
+  const descriptor = { sourceId: 'works-filter', label: 'Bees', listUrl: 'https://archiveofourown.org/tags/Bees/works', dateFilter: 'work_search[date_from]=2026-01-01' }
+  const read = list(['1', '2', '3', '4'], { scrapedAt: NOW - DAY, descriptor })
+
+  test('takes the works off, the rest in their order', () => {
+    assert.deepEqual(unpackOrderedIds(takeFromList(read, ['3', '1']).ids), ['2', '4'])
+  })
+
+  test('the copy still claims the read it came from, and only that', () => {
+    assert.deepEqual({ ...takeFromList(read, ['2']), ids: read.ids }, read)
+  })
+
+  test('a work it names is kept unless taken, whatever else is known of it', () => {
+    // A work whose blurb has gone is still named, so the copy is still not one to trust.
+    assert.deepEqual(unpackOrderedIds(takeFromList(read, ['1']).ids), ['2', '3', '4'])
+  })
+
+  test('the readings block goes with its work', () => {
+    const ctx = { [toShortId('1')]: '<div>one</div>', [toShortId('2')]: '<div>two</div>' }
+    assert.deepEqual(takeFromList(list(['1', '2'], { ctx }), ['1']).ctx, { [toShortId('2')]: '<div>two</div>' })
+    assert.equal('ctx' in takeFromList(list(['1', '2'], { ctx }), ['1', '2']), false)
+  })
+
+  test('nothing to take, or a list this build can\'t read, is nothing to write', () => {
+    assert.equal(takeFromList(read, ['9']), null)
+    assert.equal(takeFromList(read, []), null)
+    assert.equal(takeFromList(list(['1', '2'], { v: LIST_VERSION + 1 }), ['1']), null)
   })
 })
 

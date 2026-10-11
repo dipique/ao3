@@ -9,7 +9,6 @@ import { extensionAlive } from '#content_script/extensionAlive.js'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
-import type { WriteSnapshotOptions } from './cache.ts'
 import type { FacetValueRef, FilterState } from './engine.ts'
 import type { Handover, OnPage } from './handover.ts'
 import type { SearchViewPrefs } from './prefs.ts'
@@ -17,7 +16,7 @@ import type { ScrapeResult } from './scrape.ts'
 import type { DeferredUpdate, SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
 
-import { pristineBlurb, readSnapshot, snapshotSize, writeSnapshot } from './cache.ts'
+import { pristineBlurb, readSnapshot, snapshotSize, takeFromSnapshot, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { collapseWork, decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
 import { isFresh } from './freshness.ts'
@@ -744,16 +743,23 @@ function prepare(source: SearchSource, works: Work[], options: Options, fresh: b
   return applyHidden(works, options, { hidesNothing: source.hidesNothing, log: log.log })
 }
 
-/** Write the blurb snapshot, plus whatever else the source keeps in step with it. */
-async function persist(
-  source: SearchSource,
-  works: Work[],
-  opts: WriteSnapshotOptions & { listing?: Work[] } = {},
-): Promise<void> {
-  await writeSnapshot(source.cacheKey, works, source.descriptor(), { keepScrapedAt: opts.keepScrapedAt })
+/** Write the blurb snapshot of a read just made, plus whatever else the source keeps in step with it. */
+async function persist(source: SearchSource, works: Work[], opts: { listing?: Work[] } = {}): Promise<void> {
+  await writeSnapshot(source.cacheKey, works, source.descriptor())
   // A pruned list says nothing about what the listing holds; see `belongs`.
   if (!source.belongs || opts.listing)
     await source.onPersist?.(opts.listing ?? works)
+}
+
+/**
+ * Take works the reader has taken off the view off its stored copy too. No
+ * read, so the copy keeps saying which read it is, and is trusted no more than
+ * it was: an open reading the listing again behind it may not get to write that
+ * read before the page is left.
+ */
+function takeOff(source: SearchSource, works: Work[]): void {
+  void takeFromSnapshot(source.cacheKey, works.map(work => work.workId))
+    .catch(err => log.error(`Failed to take works off the stored copy of ${source.id}`, err))
 }
 
 /**
@@ -1256,9 +1262,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         void savePrefs(source.id, next).catch(err => log.error('Failed to save search-view prefs', err))
       },
       // Fires when a blurb action drops a work; keep the snapshot in step.
-      onWorksChanged: (works) => {
-        void persist(source, works, { keepScrapedAt: true }).catch(err => log.error('Failed to persist the search-view snapshot', err))
-      },
+      onWorkRemoved: work => takeOff(source, [work]),
     }
     const handlers = {
       onBack: source.replacesListing ? undefined : () => closeSearchView(),
@@ -1323,8 +1327,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         // unmarked off the read list — come out of the stored copy now, not at the
         // next reload. This is also how the change reaches the screen: an options
         // change reopens the view through here.
-        if (kept.length < cached.works.length)
-          void persist(source, [...kept], { keepScrapedAt: true }).catch(err => log.error(`Failed to prune the stored copy of ${source.id}`, err))
+        if (kept.length < cached.works.length) {
+          const stays = new Set(kept)
+          takeOff(source, cached.works.filter(work => !stays.has(work)))
+        }
         // A snapshot taken under a higher ceiling than the reader now has; trim it
         // to what they asked for rather than waiting for the refresh to say so.
         // The ceiling alone: how long the listing is only matters to a scrape, and

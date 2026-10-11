@@ -167,19 +167,44 @@ describe('searchView/blurbStore', { skip }, () => {
     assert.deepEqual(result.blurb, result.liveBlurb, 'and so is the stored blurb')
   })
 
-  test('re-storing a list of stored works writes the list and nothing else', async () => {
+  test('re-storing a list of stored works, or taking one off, writes the list and nothing else', async () => {
     const writes = await page.evaluate(async (descriptor) => {
-      const { writeSnapshot, readSnapshot } = window.Store
+      const { writeSnapshot, readSnapshot, takeFromSnapshot } = window.Store
       await window.reset()
       await writeSnapshot('a', [window.scraped('1'), window.scraped('2'), window.scraped('3')], descriptor)
       const { works } = await readSnapshot('a')
       window.__writes.length = 0
-      await writeSnapshot('a', works.slice(1), descriptor, { keepScrapedAt: true })
       await writeSnapshot('a', works.slice(1), descriptor)
+      await takeFromSnapshot('a', ['2'])
       return window.__writes.map(write => Object.keys(write))
     }, DESCRIPTOR)
 
     assert.deepEqual(writes, [['cache.searchLists'], ['cache.searchLists']])
+  })
+
+  test('taking a work off a list keeps the read it is and every other work it names; off nothing, nothing is written', async () => {
+    const result = await page.evaluate(async ({ descriptor, HOUR }) => {
+      const { writeSnapshot, readSnapshot, takeFromSnapshot } = window.Store
+      const old = Date.now() - HOUR
+      await window.reset()
+      await writeSnapshot('a', [window.scraped('1'), window.scraped('2'), window.scraped('3')], descriptor)
+      const lists = (await window.store())['cache.searchLists']
+      lists.a.scrapedAt = old
+      await window.browser.storage.local.set({ 'cache.searchLists': lists })
+      await window.browser.storage.local.remove(['blurb.3', 'blurbData.3'])
+      await takeFromSnapshot('a', ['1'])
+      const list = (await window.store())['cache.searchLists'].a
+      const snapshot = await readSnapshot('a')
+      window.__writes.length = 0
+      await takeFromSnapshot('b', ['2'])
+      return { old, list, ids: snapshot.works.map(work => work.workId), missing: snapshot.missing, writes: window.__writes.length }
+    }, { descriptor: DESCRIPTOR, HOUR })
+
+    assert.equal(result.list.scrapedAt, result.old, 'no read moved it')
+    assert.deepEqual(result.list.descriptor, DESCRIPTOR)
+    assert.deepEqual(result.ids, ['2'])
+    assert.equal(result.missing, 1, 'the work whose blurb has gone is still named')
+    assert.equal(result.writes, 0)
   })
 
   test('a newer copy of a blurb replaces the stored one; an older copy, or an unchanged one, does not', async () => {
