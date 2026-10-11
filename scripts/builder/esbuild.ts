@@ -15,6 +15,8 @@ import { ALIAS, DEFINE, ESBUILD, IconsPlugin } from './common.ts'
 import { inlineMap, logBuild, realPath, writeFile } from './utils.ts'
 
 export async function createEsbuildContext(asset: AssetMain) {
+  // Each runs as one classic script, which can neither import a split-out chunk nor be a module.
+  const classic = asset.type === 'content_script' || asset.type === 'worker'
   const context = {
     entryPoints: [asset.inputPath],
     bundle: true,
@@ -23,7 +25,7 @@ export async function createEsbuildContext(asset: AssetMain) {
     chunkNames: `${relative(asset.opts.src, dirname(asset.inputPath))}/[name]`,
     outbase: asset.opts.src,
     outdir: asset.opts.dist,
-    format: asset.type === 'content_script' ? 'iife' : 'esm',
+    format: classic ? 'iife' : 'esm',
     banner: {
       js: process.env.BROWSER !== 'firefox' ? `if (!('browser' in self)) { self.browser = self.chrome; }` : '',
     },
@@ -31,7 +33,7 @@ export async function createEsbuildContext(asset: AssetMain) {
     sourcemap: 'external',
     alias: ALIAS(asset),
     define: DEFINE(asset),
-    splitting: asset.type !== 'content_script' && process.env.BROWSER === 'firefox',
+    splitting: !classic && process.env.BROWSER === 'firefox',
     ...ESBUILD(asset),
 
     loader: {

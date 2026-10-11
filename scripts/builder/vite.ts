@@ -3,7 +3,7 @@ import unocss from '@unocss/vite'
 import vue from '@vitejs/plugin-vue'
 import type { Ref } from '@vue/reactivity'
 import { Buffer } from 'node:buffer'
-import { dirname, join, relative } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import RekaResolver from 'reka-ui/resolver'
 import { visualizer } from 'rollup-plugin-visualizer'
 import type { ImportCommon } from 'unimport'
@@ -14,15 +14,23 @@ import type * as vite from 'vite'
 
 import { ICONS_CUSTOM_COLLECTIONS, ICONS_TRANSFORM } from '#uno.config'
 
+import type { AssetBase } from './AssetBase.ts'
 import type { AssetPage, ViteInput } from './AssetPage.ts'
 import type { AssetSite } from './AssetSite.ts'
 import type { File } from './utils.ts'
 
 import { createAsset } from './Asset.ts'
 import { ALIAS, DEFINE, ESBUILD, ESBUILD_TARGET, IconsPlugin, LIGHTNING_CSS_TARGET, MINIFY } from './common.ts'
-import { logBuild, makeHash, realPath, writeFile } from './utils.ts'
+import { logBuild, makeHash, posixPath, realPath, writeFile } from './utils.ts'
 
 const ORIGIN_PLACEHOLDER = '__VITE_ORIGIN__'
+
+/**
+ * A worker started the way Vite finds one to bundle:
+ * `new Worker(new URL('./x.ts', import.meta.url))`, or a `SharedWorker`.
+ * Group 1 is the `new URL(…)`, group 3 the path in it.
+ */
+const WORKER_URL_RE = /\bnew\s+(?:Worker|SharedWorker)\s*\(\s*(new\s+URL\s*\(\s*(['"`])([^'"`]+)\2\s*,\s*import\.meta\.url\s*(?:,\s*)?\))/dg
 
 /**
  * Guarantee a usable `localStorage` global before vue-devtools loads. Node 25
@@ -82,6 +90,9 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
     },
     server: {
       origin: ORIGIN_PLACEHOLDER,
+      // Transformed as the server starts, which is what finds a worker for
+      // `WorkerFilePlugin` to write: it is in `dist/` before the page loads.
+      warmup: { clientFiles: inputs.map(input => input.inputPath) },
       cors: {
         origin: [
           /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/,
@@ -167,6 +178,7 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
       }),
       AssetPlugin(),
       SiteBundlePlugin(),
+      WorkerFilePlugin(),
       {
         name: 'origin',
         transform(code) {
@@ -207,6 +219,61 @@ export async function createViteConfig(asset: AssetPage, inputs: ViteInput[], or
           `export const loader = ${JSON.stringify(site.loader)}`,
           `export const css = ${JSON.stringify(site.css)}`,
         ].join('\n')
+      },
+    }
+  }
+
+  /**
+   * Under `serve`, writes each worker the page starts to `dist/`, where the
+   * build puts it, and points the page at that file. The page's scripts come
+   * from the dev server, so the address Vite would give a worker is the dev
+   * server's too, and a page can start a worker only from its own origin: the
+   * extension's.
+   *
+   * A worker is bundled and watched with esbuild, as the background is, for as
+   * long as the dev server runs.
+   */
+  function WorkerFilePlugin(): vite.Plugin {
+    const workers = new Map<string, Promise<AssetBase>>()
+
+    function serveWorker(inputPath: string) {
+      let served = workers.get(inputPath)
+      if (!served) {
+        const worker = createAsset(inputPath, asset.opts, 'worker')
+        served = worker.serve().then(() => worker)
+        workers.set(inputPath, served)
+      }
+      return served
+    }
+
+    return {
+      name: 'worker-file',
+      apply: 'serve',
+      applyToEnvironment: environment => environment.config.consumer === 'client',
+      transform: {
+        filter: { code: 'import.meta.url' },
+        async handler(code, id) {
+          const found = [...code.matchAll(WORKER_URL_RE)]
+          if (found.length === 0)
+            return
+          let rewritten = code
+          for (const match of found.reverse()) {
+            const spec = match[3]!
+            const resolved = await this.resolve(spec, id)
+            if (!resolved)
+              this.error(`No file answers to the worker '${spec}'`)
+            const worker = await serveWorker(resolve(resolved.id.replace(/[?#].*$/, '')))
+            if (!worker.outputPath.value)
+              this.error(`The worker '${spec}' built to nothing`)
+            const url = `/${posixPath(relative(asset.opts.dist, worker.outputPath.value))}`
+            const [start, end] = match.indices![1]!
+            rewritten = `${rewritten.slice(0, start)}new URL(${JSON.stringify(url)}, location.href)${rewritten.slice(end)}`
+          }
+          return { code: rewritten, map: null }
+        },
+      },
+      async closeBundle() {
+        await Promise.all([...workers.values()].map(async served => (await served).stop()))
       },
     }
   }

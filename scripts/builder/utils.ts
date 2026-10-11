@@ -5,7 +5,7 @@ import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import { realpathSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { dirname, relative, resolve } from 'node:path'
+import { dirname, relative, resolve, sep } from 'node:path'
 import type * as parse5 from 'parse5'
 import type { EmptyObject } from 'type-fest'
 
@@ -82,6 +82,9 @@ export const FILENAME_COLORS = new RegexMap([
 export function colorizePath(root: string, path: string, dir: string, color: (s: string) => string = s => s) {
   return `${chalk.dim(relative(root, dir))}/${color(relative(dir, path))}`
 }
+
+/** A path with POSIX separators, as a manifest or a URL wants it on any platform. */
+export const posixPath = (p: string): string => p.split(sep).join('/')
 
 const externalRE = /^(?:https?:)?\/\//
 export const isExternalUrl = (url: string): boolean => externalRE.test(url)

@@ -8,9 +8,9 @@ import type { Promisable } from 'type-fest'
 
 import type { Args } from './args.ts'
 
-import { logBuild, logTime, writeFile } from './utils.ts'
+import { logBuild, logTime, posixPath, writeFile } from './utils.ts'
 
-export type AssetType = 'manifest' | 'background' | 'content_script' | 'module' | 'style' | 'page' | 'site' | 'other'
+export type AssetType = 'manifest' | 'background' | 'content_script' | 'module' | 'worker' | 'style' | 'page' | 'site' | 'other'
 
 export interface AssetOpts extends Args {
   root: string
@@ -65,8 +65,7 @@ export class AssetBase {
   }
 
   formatRelativePath(p: string) {
-    // Web-extension manifests require POSIX separators; normalize for Windows.
-    return path.relative(path.dirname(this.outputPath.value || ''), p).split(path.sep).join('/')
+    return posixPath(path.relative(path.dirname(this.outputPath.value || ''), p))
   }
 
   onStop(fn: AssetBase['onStopHandlers'][0]) {
