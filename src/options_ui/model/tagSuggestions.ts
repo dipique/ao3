@@ -94,8 +94,9 @@ export function withAnswer(state: SuggestState, request: SuggestRequest, names: 
 /**
  * AO3 refused the request on its way, and `pause` is the archive's pause since:
  * suggestions pause until its refusal ends. A refusal that left none to sit out
- * (a `Retry-After` already past) is a failure, breather or not, since asking
- * again the moment it allows would be the retry loop a refusal forbids.
+ * (a wait so short it was over before it was read) is a failure, breather or
+ * not, since asking again the moment it allows would be the retry loop a
+ * refusal forbids.
  */
 export function withRefusal(state: SuggestState, pause: ArchivePause | null): SuggestState {
   return pause?.reason === 'refused' ? { ...state, asking: null, pausedUntil: pause.until } : withFailure(state)

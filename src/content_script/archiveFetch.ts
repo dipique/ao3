@@ -43,28 +43,33 @@
  * nothing to read, so the only safe reading is that we are unwelcome for a
  * while: start at five minutes rather than the second or two a normal backoff
  * would try, and add another five every time a retry meets the same wall.
+ *
+ * A `Retry-After` of zero, or a date already past, is read the same way. A
+ * refusal that says to come straight back has not said how long the archive
+ * needs, and taking it at its word would ask again at once, and again, for as
+ * long as the caller's patience lasts.
  */
-const BLIND_WAIT_STEP_MS = 5 * 60_000
+export const BLIND_WAIT_STEP_MS = 5 * 60_000
 
 /** Ceiling on any single wait, asked for or worked out. */
-const MAX_WAIT_MS = 60 * 60_000
+export const MAX_WAIT_MS = 60 * 60_000
 
 /**
  * Requests we will make back-to-back before pausing for {@link PACE_PAUSE_MS}.
  * Twenty is one AO3 listing page's worth of works, so a set is roughly what a
  * reader going through the same list by hand would have loaded.
  */
-const PACE_EVERY = 20
+export const PACE_EVERY = 20
 
 /** The breather taken between sets. Short: it is courtesy, not a punishment. */
-const PACE_PAUSE_MS = 5_000
+export const PACE_PAUSE_MS = 5_000
 
 /**
  * A gap long enough that whatever burst the counter was measuring is over, so
  * the next request starts a fresh set rather than inheriting a stale count. A
  * job already going slower than the pacing is not one the pacing need slow.
  */
-const PACE_IDLE_RESET_MS = 60_000
+export const PACE_IDLE_RESET_MS = 60_000
 
 /**
  * How long a request will spend waiting out 429s before handing the refusal
@@ -302,16 +307,17 @@ function pauseFor(asked: number | null): void {
   refusedUntil = now + Math.min(MAX_WAIT_MS, asked ?? blindWait)
 }
 
-/** `Retry-After` in ms — it may be a count of seconds or an HTTP date. */
-function retryAfterMs(res: Response): number | null {
-  const header = res.headers.get('Retry-After')
+/**
+ * The wait a `Retry-After` names, in ms — it may be a count of seconds or an
+ * HTTP date — or null when it names none: absent, unreadable, zero or less, or
+ * a date not still ahead of `now`.
+ */
+export function retryAfterMs(header: string | null, now: number): number | null {
   if (!header)
     return null
   const seconds = Number(header)
-  if (Number.isFinite(seconds) && seconds > 0)
-    return seconds * 1000
-  const at = Date.parse(header)
-  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - now
+  return ms > 0 ? ms : null
 }
 
 /**
@@ -341,7 +347,7 @@ export async function fetchWithRetry(
     // queue of pages used to fail one at a time, each rediscovering the same
     // wall from scratch; with it written down, everything else holds off, and a
     // job that means to come back knows exactly how long to wait.
-    pauseFor(retryAfterMs(res))
+    pauseFor(retryAfterMs(res.headers.get('Retry-After'), Date.now()))
     // Would sitting this one out spend the budget? Measured from the start
     // rather than accumulated, so a wait this request merely joined still
     // counts against it.
