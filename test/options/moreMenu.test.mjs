@@ -70,4 +70,16 @@ describe('a More menu', () => {
     ])
     assert.deepEqual(review({ off: OFF }).items, [{ kind: 'retry', off: OFF }, { kind: 'download-cached', off: OFF }])
   })
+
+  test('a list that can\'t be refreshed turns off refreshing first alone, with its own reason; the rest work from the copy as it is', () => {
+    const needs = 'off while Work marks, under Reading, is switched off'
+    assert.deepEqual(tile({ refreshOff: needs }).items, [
+      { kind: 'refresh-first', off: needs },
+      { kind: 'retry', off: null },
+      { kind: 'download-cached', off: null },
+      { kind: 'remove', off: null },
+    ])
+    assert.deepEqual(tile({ refreshOff: needs, off: OFF }).items.map(item => item.off), [needs, OFF, OFF, null], 'another list\'s job turns the rest off')
+    assert.equal(tile({ refreshOff: needs }).title, tile().title)
+  })
 })

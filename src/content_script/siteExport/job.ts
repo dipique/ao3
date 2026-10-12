@@ -599,7 +599,9 @@ const PRIVATE_SOURCES = new Set(['read-works', 'marked-for-later'])
  * Only the read list needs choosing: it reads the reader's AO3 history looking
  * for the works they have marked, so refreshing it without this would replace
  * the list with their whole browsing history — and the next export would be of
- * that.
+ * that. With Work marks off there are no marks to choose by, and the refresh
+ * would store the list empty, so it is refused before anything is fetched,
+ * however the job was started.
  * Recognised from the descriptor's `sourceId`, since the source's module is
  * content-script-only and importing it here would drag every Unit in with it;
  * the question it asks is of the mark table, which is shared
@@ -611,7 +613,14 @@ async function selectionFor(
 ): Promise<Pick<RefreshOptions, 'select' | 'satisfied' | 'recover' | 'requireLogin'>> {
   if (descriptor.sourceId !== 'read-works')
     return { requireLogin: PRIVATE_SOURCES.has(descriptor.sourceId) }
-  const wanted = readWorkIds(await options.get('workMarks'))
+  const workMarks = await options.get('workMarks')
+  if (!workMarks.enabled) {
+    throw new Error(
+      'This list is made from your marks, and Work marks is switched off, so it was left as it was rather than emptied. '
+      + 'Switch Work marks on, under Reading, then try again.',
+    )
+  }
+  const wanted = readWorkIds(workMarks)
   return {
     requireLogin: true,
     select: works => works.filter(work => wanted.has(work.workId)),

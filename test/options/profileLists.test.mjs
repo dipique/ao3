@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 import { bucketBar, bucketFigures } from '../../src/options_ui/model/buckets.ts'
 import { jobView } from '../../src/options_ui/model/jobView.ts'
 import { timeAgo } from '../../src/options_ui/model/moments.ts'
-import { PROFILE_LISTS, profileTiles } from '../../src/options_ui/model/profileLists.ts'
+import { PROFILE_LISTS, profileTiles, REFRESH_OFF, refreshNeeds } from '../../src/options_ui/model/profileLists.ts'
 
 const NOW = 1_800_000_000_000
 const ARCHIVE = 'https://archiveofourown.org'
@@ -112,9 +112,13 @@ describe('a tile with its copy', () => {
   })
 
   test('with no job, Refresh list, Cache works and Download Offline Copy, all on', () => {
-    assert.equal(marked().actions, 'offline')
-    assert.equal(marked().offlineOff, null)
-    assert.equal(marked().job, false)
+    for (const tile of tiles()) {
+      assert.equal(tile.actions, 'offline', tile.id)
+      assert.equal(tile.offlineOff, null, tile.id)
+      assert.equal(tile.refreshOff, null, tile.id)
+      assert.equal(tile.refreshNeeds, null, tile.id)
+      assert.equal(tile.job, false, tile.id)
+    }
   })
 
   test('More offers a retry while any work has failed, stale ones included', () => {
@@ -197,6 +201,58 @@ describe('Read works with work marks off, when its view opens nothing', () => {
     const tracked = { ...MARKS_ON, trackedLists: { lists: [{ tracked: true }] } }
     assert.deepEqual(tiles({ settings: tracked }).map(tile => tile.view), tiles().map(tile => tile.view))
     assert.deepEqual(tiles({ settings: { ...MARKS_OFF, trackedLists: { lists: [{ tracked: true }] } } }).map(tile => tile.view), tiles({ settings: MARKS_OFF }).map(tile => tile.view))
+  })
+})
+
+describe('Read works with work marks off and its copy kept, which a refresh would empty', () => {
+  test('Refresh list, Download Offline Copy and Refresh the list first are off, saying the list needs Work marks', () => {
+    const tile = read({ settings: MARKS_OFF })
+    assert.equal(tile.refreshOff, REFRESH_OFF.workMarks)
+    assert.equal(tile.refreshNeeds, REFRESH_OFF.workMarks, 'said in the tile, where the reader is looking')
+    assert.equal(REFRESH_OFF.workMarks, 'off while Work marks, under Reading, is switched off: this list is made from your marks, so without them it can\'t be refreshed or viewed on AO3')
+  })
+
+  test('Cache works, the retry and Download without refreshing work from the copy as it is, so they stay on', () => {
+    const tile = read({ settings: MARKS_OFF })
+    assert.equal(tile.actions, 'offline')
+    assert.equal(tile.offlineOff, null)
+  })
+
+  test('Marked for Later, made from no marks, refreshes as before', () => {
+    assert.equal(marked({ settings: MARKS_OFF }).refreshOff, null)
+    assert.equal(marked({ settings: MARKS_OFF }).refreshNeeds, null)
+  })
+
+  test('with no copy there is nothing to refresh, and its note already says what the list needs', () => {
+    const tile = tiles({ copies: { 'marked-for-later': null, 'read-works': null }, settings: MARKS_OFF })[1]
+    assert.equal(tile.refreshOff, null)
+    assert.equal(tile.refreshNeeds, null)
+  })
+
+  test('another list\'s job turns every offline action off, and the refresh keeps its own reason, which outlasts the job', () => {
+    const tile = read({ settings: MARKS_OFF, job: job(MARKED) })
+    assert.equal(tile.offlineOff, 'off for now: one job at a time, and Marked for Later is caching')
+    assert.equal(tile.refreshOff, REFRESH_OFF.workMarks)
+    assert.equal(tile.refreshNeeds, REFRESH_OFF.workMarks)
+  })
+
+  test('with work marks on, another list\'s job is the refresh\'s reason too', () => {
+    const tile = read({ job: job(MARKED) })
+    assert.equal(tile.refreshOff, 'off for now: one job at a time, and Marked for Later is caching')
+    assert.equal(tile.refreshNeeds, null)
+  })
+
+  test('while its own job runs or waits to continue, the tile still says why the list can\'t be refreshed', () => {
+    assert.equal(read({ settings: MARKS_OFF, job: job(READ) }).refreshNeeds, REFRESH_OFF.workMarks)
+    assert.equal(read({ settings: MARKS_OFF, job: job(READ, { running: false }) }).refreshNeeds, REFRESH_OFF.workMarks)
+  })
+
+  test('refreshNeeds: only Read works, and only with work marks off', () => {
+    assert.equal(refreshNeeds('read-works', false), REFRESH_OFF.workMarks)
+    assert.equal(refreshNeeds('read-works', true), null)
+    assert.equal(refreshNeeds('marked-for-later', false), null)
+    assert.equal(refreshNeeds('tag-works', false), null)
+    assert.equal(refreshNeeds(undefined, false), null, 'a list no visit has described is said to be off for its own reason')
   })
 })
 

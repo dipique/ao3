@@ -114,6 +114,9 @@ const savedLists = useSavedLists()
 /** Whether Tracked lists is on, which tracking from a row waits on. */
 const reviewing = computed(() => useOption('trackedLists').enabled.value)
 
+/** Whether Work marks is on, which refreshing Read works waits on. */
+const workMarks = computed(() => useOption('workMarks').enabled.value)
+
 /**
  * The reader's AO3 account, which says whose profile lists are theirs. Read
  * through the option afresh each time, since this module runs before the
@@ -243,6 +246,7 @@ const savedRows = computed(() => savedListRows(joined.value, {
     return { buckets: row?.buckets ?? NO_WORKS, unstored: row?.unstored ?? 0 }
   },
   review: reviewing.value,
+  workMarks: workMarks.value,
   jobOff: keys => offReason(view.value, keys),
 }))
 

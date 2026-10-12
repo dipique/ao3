@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
-import type { MoreItemKind } from '../../model/moreMenu.ts'
+import type { MoreItem, MoreItemKind } from '../../model/moreMenu.ts'
 
 import { moreMenu } from '../../model/moreMenu.ts'
 import { withReason } from '../../model/phrases.ts'
@@ -12,7 +12,8 @@ import { blurbsOnRemove } from '../../model/savedListRows.ts'
  * Absent with nothing to offer.
  *
  * An item another list's job turns off says why in its tooltip, and is
- * described by the reason the list says in its own place.
+ * described by the reason the list says in its own place. So is refreshing
+ * first, where the list can't be refreshed for a reason of its own.
  */
 const props = withDefaults(defineProps<{
   /** What the list is called, in the trigger's name: "More for …". */
@@ -25,6 +26,10 @@ const props = withDefaults(defineProps<{
   off: string | null
   /** The id of where the list says that reason. */
   offId: string
+  /** Why refreshing first is off, where the list gives its own reason. */
+  refreshOff?: string | null
+  /** The id of where the list says why refreshing first is off; `offId` without one. */
+  refreshOffId?: string
   /** Offer the list refreshed before it is cached: only for a list read from one listing. */
   refresh?: boolean
   /** Offer to remove the copy. */
@@ -34,6 +39,13 @@ const props = withDefaults(defineProps<{
 const { refreshAndCache, cacheWorks, downloadCached, deleteList } = useSiteExport()
 
 const menu = computed(() => moreMenu(props))
+
+/** Where an item that is off has its reason said. */
+function reasonId(item: MoreItem): string | undefined {
+  if (!item.off)
+    return undefined
+  return item.kind === 'refresh-first' ? props.refreshOffId ?? props.offId : props.offId
+}
 
 type JobItem = Exclude<MoreItemKind, 'remove'>
 
@@ -101,7 +113,7 @@ const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
           v-else
           :disabled="!!item.off"
           :title="withReason(JOBS[item.kind].name, item.off)"
-          :aria-describedby="item.off ? offId : undefined"
+          :aria-describedby="reasonId(item)"
           :class="ITEM"
           @select="run(item.kind)"
         >

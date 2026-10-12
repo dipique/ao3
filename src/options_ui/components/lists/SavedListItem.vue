@@ -89,6 +89,7 @@ const sameSearch = computed(() => sameSearchNote(props.row))
 const ids = {
   trackOff: useId(),
   offlineOff: useId(),
+  refreshOff: useId(),
   removeCopyOff: useId(),
   removeListOff: useId(),
   how: useId(),
@@ -377,7 +378,7 @@ function removeTheList(): void {
           :aria-label="`Download ${name}`"
           :title="withReason(DOWNLOAD_LABEL, action.off)"
           :disabled="!!action.off"
-          :aria-describedby="action.off ? ids.offlineOff : undefined"
+          :aria-describedby="action.off ? ids.refreshOff : undefined"
           @click="run(downloadSite)"
         >
           <span class="i-tabler-download" aria-hidden="true" />
@@ -403,6 +404,7 @@ function removeTheList(): void {
           <span class="i-tabler-chevron-down" text="[15px]" aria-hidden="true" />
         </button>
         <span v-if="offline.off" :id="ids.offlineOff" hidden>{{ sentence(offline.off) }}.</span>
+        <span v-if="offline.refreshOff" :id="ids.refreshOff" hidden>{{ sentence(offline.refreshOff) }}.</span>
       </div>
     </div>
 
@@ -429,6 +431,10 @@ function removeTheList(): void {
           <p class="saved-list__dd">
             {{ offline.summary }}
           </p>
+          <p v-if="offline.refreshNote" class="saved-list__note">
+            <SeverityGlyph :severity="offline.refreshNote.severity" class="saved-list__glyph" />
+            <span class="saved-list__muted">{{ offline.refreshNote.text }}</span>
+          </p>
           <p v-if="offline.note" class="saved-list__note">
             <SeverityGlyph :severity="offline.note.severity" class="saved-list__glyph" />
             <span :class="{ 'saved-list__muted': offline.note.severity === 'neutral' }">{{ offline.note.text }}</span>
@@ -437,9 +443,9 @@ function removeTheList(): void {
             <button
               type="button"
               class="saved-list__btn outline-btn"
-              :title="withReason(refreshLabel, offline.off)"
-              :disabled="!!offline.off"
-              :aria-describedby="offline.off ? ids.offlineOff : undefined"
+              :title="withReason(refreshLabel, offline.refreshOff)"
+              :disabled="!!offline.refreshOff"
+              :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
               @click="run(refreshList)"
             >
               <span class="i-tabler-refresh" aria-hidden="true" />
@@ -459,9 +465,9 @@ function removeTheList(): void {
             <button
               type="button"
               class="saved-list__btn outline-btn"
-              :title="withReason(DOWNLOAD_LABEL, offline.off)"
-              :disabled="!!offline.off"
-              :aria-describedby="offline.off ? ids.offlineOff : undefined"
+              :title="withReason(DOWNLOAD_LABEL, offline.refreshOff)"
+              :disabled="!!offline.refreshOff"
+              :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
               @click="run(downloadSite)"
             >
               <span class="i-tabler-download" aria-hidden="true" />
@@ -472,9 +478,9 @@ function removeTheList(): void {
             <button
               type="button"
               class="saved-list__link-btn touch-target link"
-              :title="offline.off ? sentence(offline.off) : 'Re-scrape the list, then cache against it. Slower, and the only way the “has this work changed?” check can be accurate.'"
-              :disabled="!!offline.off"
-              :aria-describedby="offline.off ? ids.offlineOff : undefined"
+              :title="offline.refreshOff ? sentence(offline.refreshOff) : 'Re-scrape the list, then cache against it. Slower, and the only way the “has this work changed?” check can be accurate.'"
+              :disabled="!!offline.refreshOff"
+              :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
               @click="run(refreshAndCache)"
             >
               Refresh the list first, then cache

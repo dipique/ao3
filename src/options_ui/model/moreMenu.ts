@@ -35,6 +35,8 @@ export interface MoreMenuInput extends MoreCounts {
   remove: boolean
   /** Why what would start a job is off: another list's job. */
   off: string | null
+  /** Why refreshing first is off, where the list gives its own reason; `off` without one. */
+  refreshOff?: string | null
 }
 
 export interface MoreItem {
@@ -49,10 +51,10 @@ export interface MoreMenu {
 }
 
 /** The menu, or null with nothing in it to offer. Removing a copy starts no job, so another's never turns it off. */
-export function moreMenu({ refresh, remove, retry, cached, off }: MoreMenuInput): MoreMenu | null {
+export function moreMenu({ refresh, remove, retry, cached, off, refreshOff }: MoreMenuInput): MoreMenu | null {
   const items: MoreItem[] = []
   if (refresh)
-    items.push({ kind: 'refresh-first', off })
+    items.push({ kind: 'refresh-first', off: refreshOff ?? off })
   if (retry)
     items.push({ kind: 'retry', off })
   if (cached)

@@ -6,6 +6,8 @@ import { formatDay } from '../../src/common/trackedLists.ts'
 import { bucketBar, formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { jobView, offReason } from '../../src/options_ui/model/jobView.ts'
 import { timeAgo } from '../../src/options_ui/model/moments.ts'
+import { sentence } from '../../src/options_ui/model/phrases.ts'
+import { REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
 import { blurbsOnRemove, cachingCell, copyTitle, describeList, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, statusCell, STOP_NOTE, titleRefusal, titlesInWords, TRACK_OFF, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
 
 const AO3 = 'https://archiveofourown.org'
@@ -35,7 +37,7 @@ const described = (key, sourceId, path, label, fields = {}) => copy(key, { sourc
 
 /** What a stored list holds, by key, made up for each copy. */
 const figures = key => ({ buckets: { total: 10, cached: 6, failed: 1, unfetched: 3, bytes: key.length, staleFailures: 2 }, unstored: 4 })
-const IDLE = { copy: figures, review: true, jobOff: () => null }
+const IDLE = { copy: figures, review: true, workMarks: true, jobOff: () => null }
 
 /** The rows, by id. */
 function rows(join, ctx = IDLE) {
@@ -442,6 +444,8 @@ describe('the row\'s details', () => {
         empty: null,
         note: null,
         off: null,
+        refreshOff: null,
+        refreshNote: null,
         retry: 3,
         cached: 6,
         remove: { off: null, note: `${blurbsOnRemove(false)} ${keeps}` },
@@ -657,6 +661,69 @@ describe('a job on an older sort order of a list\'s search', () => {
   test('a row with no copy has no job of its own', () => {
     const bare = rowsWith(joinSavedLists(state([], [tea]), []), running).t3a
     assert.equal(rowJob(bare, running), null)
+  })
+})
+
+/**
+ * Read works is the works the reader's marks name, so with Work marks off a
+ * refresh finds none of them and would store the list empty. Another account's
+ * copy is a row, whose controls that refresh first are off, saying why; what
+ * works from the copy as it is stays on.
+ */
+describe('another account\'s Read works, with Work marks off', () => {
+  const theirRead = described('read-works:them', 'read-works', '/users/them/readings', 'Read works — them')
+  const theirMarked = described('marked-for-later:them', 'marked-for-later', '/users/them/readings?show=to-read', 'Marked for Later — them')
+  const join = joinSavedLists(state([], []), [theirRead, theirMarked], 'me')
+  const READ_ROW = 'copy:read-works:them'
+  const MARKED_ROW = 'copy:marked-for-later:them'
+  const marksOff = (job = NO_JOB) => rowsWith(join, job, { workMarks: false })
+  const NEEDS = { severity: 'neutral', text: `${sentence(REFRESH_OFF.workMarks)}.` }
+
+  test('the row says the list needs Work marks to be refreshed; nothing else of it is off', () => {
+    const row = marksOff()[READ_ROW]
+    assert.equal(row.refreshNeeds, REFRESH_OFF.workMarks)
+    assert.equal(row.offlineOff, undefined)
+    assert.equal(row.trackOff, TRACK_OFF.notSearch, 'it is no more trackable than before')
+  })
+
+  test('with Work marks on, or for a list made from no marks, there is nothing to say', () => {
+    assert.equal(rowsWith(join, NO_JOB)[READ_ROW].refreshNeeds, undefined)
+    assert.equal(marksOff()[MARKED_ROW].refreshNeeds, undefined)
+  })
+
+  test('Download, which refreshes first, is off with that reason', () => {
+    assert.deepEqual(rowAction(marksOff()[READ_ROW], NO_JOB), { kind: 'download', off: REFRESH_OFF.workMarks })
+    assert.deepEqual(rowAction(marksOff()[MARKED_ROW], NO_JOB), { kind: 'download', off: null })
+  })
+
+  test('the details turn off Refresh list, Download and Refresh the list first, saying why where the reader is looking; Cache works, the retry, Download without refreshing and Remove offline copy stay on', () => {
+    const got = offlineDetails(marksOff()[READ_ROW], NO_JOB, NOW, false)
+    assert.equal(got.refreshOff, REFRESH_OFF.workMarks)
+    assert.deepEqual(got.refreshNote, NEEDS)
+    assert.equal(got.off, null)
+    assert.equal(got.note, null)
+    assert.equal(got.remove.off, null)
+  })
+
+  test('another list\'s job turns the rest off too, and the refresh keeps its own reason, which outlasts the job', () => {
+    const other = jobOn('tag-works:Coffee%20Shop%20AU')
+    const row = marksOff(other)[READ_ROW]
+    assert.equal(row.offlineOff, BUSY)
+    assert.deepEqual(rowAction(row, other), { kind: 'download', off: REFRESH_OFF.workMarks })
+    const got = offlineDetails(row, other, NOW, false)
+    assert.equal(got.off, BUSY)
+    assert.equal(got.refreshOff, REFRESH_OFF.workMarks)
+    assert.deepEqual(got.note, { severity: 'neutral', text: `${sentence(BUSY)}.` })
+    assert.deepEqual(got.refreshNote, NEEDS)
+  })
+
+  test('with Work marks on, a job is the refresh\'s only reason, as it is every other action\'s', () => {
+    const other = jobOn('tag-works:Coffee%20Shop%20AU')
+    const row = rowsWith(join, other)[READ_ROW]
+    assert.deepEqual(rowAction(row, other), { kind: 'download', off: BUSY })
+    const got = offlineDetails(row, other, NOW, false)
+    assert.equal(got.refreshOff, BUSY)
+    assert.equal(got.refreshNote, null)
   })
 })
 

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { sentence } from '../../src/options_ui/model/phrases.ts'
+import { REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
 import { blurbsOnRemove } from '../../src/options_ui/model/savedListRows.ts'
-import { storedLists } from './helpers.mjs'
+import { storedListIds, storedLists } from './helpers.mjs'
 import { ARCHIVE, captureDownloads, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 
 const MARKED = 'marked-for-later:tester'
@@ -89,6 +91,14 @@ async function saysOn(control, label) {
 
 /** The state of the job line in `scope`, or null with none there. */
 const jobState = scope => scope.evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
+
+/** Switch Work marks, under Reading, and come back to the tiles. */
+async function switchWorkMarks(options, enabled) {
+  await options.goTo('#marks-status')
+  await options.press(await options.control(await options.row('marks-status-work-marks'), 'switch'))
+  await until(`Work marks to be written ${enabled ? 'on' : 'off'}`, async () => (await options.lastWrite('option.workMarks'))?.enabled === enabled)
+  await options.goTo('#user-profile-lists')
+}
 
 /**
  * Lists → User profile lists: the reader's own Marked for Later and read works,
@@ -416,14 +426,6 @@ describe('options UI — User profile lists, with Work marks off', { skip }, () 
   const readText = async () => options.text(await tile('read-works'))
   const readLinks = async () => options.controls(await tile('read-works'), 'link')
 
-  /** Switch Work marks, under Reading, and come back to the tiles. */
-  async function switchWorkMarks(enabled) {
-    await options.goTo('#marks-status')
-    await options.press(await options.control(await options.row('marks-status-work-marks'), 'switch'))
-    await until(`Work marks to be written ${enabled ? 'on' : 'off'}`, async () => (await options.lastWrite('option.workMarks'))?.enabled === enabled)
-    await options.goTo('#user-profile-lists')
-  }
-
   test('Read works offers no View on AO3, and its note says the list needs Work marks on; Marked for Later keeps its own', async () => {
     await until('the tiles to read their copies', async () => (await options.lines(await tile('marked-for-later'))).includes('3 works · as of 3 hours ago'))
     assert.match(await readText(), NEEDS_MARKS)
@@ -436,13 +438,13 @@ describe('options UI — User profile lists, with Work marks off', { skip }, () 
       window.__notReloaded = true
     })
 
-    await switchWorkMarks(true)
+    await switchWorkMarks(options, true)
     await until('Read works to offer View on AO3', async () => (await readLinks()).length === 1)
     assert.equal(await (await options.control(await tile('read-works'), 'link', 'View Read works on AO3')).evaluate(a => a.getAttribute('href')), `${READ_PAGE}#ao3e-open=read-works`)
     assert.match(await readText(), KEEP_BY_VIEW)
     assert.doesNotMatch(await readText(), NEEDS_MARKS)
 
-    await switchWorkMarks(false)
+    await switchWorkMarks(options, false)
     await until('Read works to offer View on AO3 no more', async () => (await readLinks()).length === 0)
     assert.match(await readText(), NEEDS_MARKS)
 
@@ -451,6 +453,230 @@ describe('options UI — User profile lists, with Work marks off', { skip }, () 
 
   test('nothing threw along the way', () => {
     assert.deepEqual(options.problems(), [])
+  })
+})
+
+/**
+ * Read works is the works the reader's marks name, so with Work marks off a
+ * refresh finds none of them and would store the list empty. While it is off,
+ * each control that refreshes a kept copy is off and says why, on the tile and
+ * on another account's row; what works from the copy as it is stays on. The
+ * stand-in for AO3 serves the reader's History as a refresh would find it, so
+ * a refresh that got through would show.
+ */
+describe('options UI — User profile lists, a Read works copy kept with Work marks off', { skip }, () => {
+  const KEPT = {
+    'option.user': { userId: 'tester' },
+    ...storedLists({
+      [READ]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(21), blurb(22)], descriptor: described('read-works', 'Read works — tester', READ_PAGE) },
+      [THEIR_READ]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(41)], descriptor: described('read-works', 'Read works — someone', `${ARCHIVE}/users/someone/readings`) },
+    }),
+    'workTextIndex': { 21: { size: 2048, updatedAt: 0, chapters: 1, words: 1000, fetchedAt: HOURS_AGO, v: 1 } },
+  }
+  const REASON = REFRESH_OFF.workMarks
+  const SAID = `${sentence(REASON)}.`
+  const THEIRS = 'Read works — someone'
+  const REFRESH_LABEL = 'Refresh the list of works in Read works'
+  const DOWNLOAD_LABEL = 'Refresh, cache, then save this list as one HTML file'
+
+  let session
+  let options
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed: KEPT,
+      hash: '#user-profile-lists',
+      viewport: { width: 1440, height: 900 },
+      prepare: p => stubArchive(p, (url) => {
+        const path = new URL(url).pathname
+        const workId = /^\/works\/(\d+)$/.exec(path)?.[1]
+        if (workId)
+          return { body: workPage(workId) }
+        if (/^\/users\/[^/]+\/readings$/.test(path))
+          return { body: listingPage([21, 22, 41]) }
+        return { status: 404 }
+      }),
+    })
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  const tile = () => options.tile('read-works')
+  const inTile = async (role, name) => options.control(await tile(), role, name)
+  const theirRow = () => options.savedListDetails(copyRow(THEIR_READ))
+  const inRow = async (role, name) => options.control(await theirRow(), role, name)
+  const openMore = async () => options.openMenu(await inTile('button', 'More for Read works'))
+
+  /** More's item is off, and says why in its tooltip and in what describes it; or on, with nothing to say. */
+  async function itemSays(name, reason) {
+    const item = await options.menuItem(name)
+    assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), !!reason, `${name} should be ${reason ? 'off' : 'on'}`)
+    if (reason) {
+      assert.equal(await item.evaluate(el => el.title), `${name} — ${reason}`)
+      assert.equal(await options.description(item), `${sentence(reason)}.`)
+    }
+  }
+
+  /** The row's Refresh the list first, then cache: off, its tooltip and what describes it the reason; or on. */
+  async function refreshFirstSays(reason) {
+    const link = await inRow('button', 'Refresh the list first, then cache')
+    assert.equal(await link.evaluate(el => el.disabled), !!reason)
+    if (reason) {
+      assert.equal(await link.evaluate(el => el.title), sentence(reason))
+      assert.equal(await options.description(link), `${sentence(reason)}.`)
+    }
+  }
+
+  test('the tile: no View on AO3; Refresh list, Download Offline Copy and More\'s Refresh the list first off, saying why in the tile; Cache works and the rest on', async () => {
+    await until('the tile to read its copy', async () => (await options.lines(await tile())).includes('2 works · as of 3 hours ago'))
+    assert.deepEqual(await options.controls(await tile(), 'link'), [])
+    assert.ok((await options.text(await tile())).includes(SAID), 'the reason is said in the tile')
+
+    await saysOff(options, await inTile('button', 'Refresh list'), REFRESH_LABEL, REASON)
+    await saysOff(options, await inTile('button', 'Download Offline Copy'), DOWNLOAD_LABEL, REASON)
+    await saysOn(await inTile('button', 'Cache works'), 'Cache works')
+
+    await openMore()
+    await itemSays('Refresh the list first', REASON)
+    await itemSays('Download without refreshing', null)
+    await itemSays('Remove offline copy', null)
+    await options.closeMenu()
+  })
+
+  test('another account\'s row: Download, Refresh list and Refresh the list first, then cache off, saying why in its details; Cache works on', async () => {
+    await saysOff(options, await options.control(await theirRow(), 'button', `Download ${THEIRS}`), DOWNLOAD_LABEL, REASON)
+    await saysOff(options, await inRow('button', 'Refresh list'), `Refresh the list of works in ${THEIRS}`, REASON)
+    await saysOff(options, await inRow('button', 'Download'), DOWNLOAD_LABEL, REASON)
+    await refreshFirstSays(REASON)
+    await saysOn(await inRow('button', 'Cache works'), 'Cache works')
+    assert.ok((await options.text(await theirRow())).includes(SAID), 'the reason is said in the details')
+  })
+
+  test('pressed anyway, they start nothing: the copies keep their works, and Cache works runs from them as they are', async () => {
+    for (const name of ['Refresh list', 'Download Offline Copy'])
+      await options.press(await inTile('button', name))
+    for (const name of [`Download ${THEIRS}`, 'Refresh list', 'Download', 'Refresh the list first, then cache'])
+      await options.press(await inRow('button', name))
+
+    // One job at a time: once this one has run, any job a press had started has been written.
+    await options.press(await inTile('button', 'Cache works'))
+    await until('Cache works to finish', async () => await jobState(await tile()) === 'finished', 40000)
+
+    const jobs = await options.page.evaluate(() => window.__writes.filter(w => 'siteExportJob' in w).map(w => w.siteExportJob))
+    assert.deepEqual(jobs.filter(Boolean).map(job => job.cacheKey).filter((key, i, all) => all.indexOf(key) === i), [READ], 'only the one job ran')
+    assert.ok(jobs.filter(Boolean).every(job => !job.steps.includes('refreshing')), 'no job refreshed anything')
+    const lists = await options.stored('cache.searchLists')
+    assert.deepEqual(storedListIds(lists[READ]), ['21', '22'])
+    assert.deepEqual(storedListIds(lists[THEIR_READ]), ['41'])
+    assert.ok((await options.stored('workTextIndex'))['22']?.size > 0, 'the uncached work was cached')
+  })
+
+  test('Work marks switched on turns them on, and brings View on AO3 back, with no reload; switched off turns them off again', async () => {
+    await options.page.evaluate(() => {
+      window.__notReloaded = true
+    })
+
+    await switchWorkMarks(options, true)
+    await until('Read works to offer View on AO3', async () => (await options.controls(await tile(), 'link')).length === 1)
+    await saysOn(await inTile('button', 'Refresh list'), 'Refresh list')
+    await saysOn(await inTile('button', 'Download Offline Copy'), 'Download Offline Copy')
+    assert.ok(!(await options.text(await tile())).includes(SAID), 'nothing left to say')
+    await openMore()
+    await itemSays('Refresh the list first', null)
+    await options.closeMenu()
+    await saysOn(await options.control(await theirRow(), 'button', `Download ${THEIRS}`), `Download ${THEIRS}`)
+    await saysOn(await inRow('button', 'Refresh list'), 'Refresh list')
+    await saysOn(await inRow('button', 'Download'), 'Download')
+    await refreshFirstSays(null)
+
+    await switchWorkMarks(options, false)
+    await until('Read works to offer View on AO3 no more', async () => (await options.controls(await tile(), 'link')).length === 0)
+    await saysOff(options, await inTile('button', 'Refresh list'), REFRESH_LABEL, REASON)
+    await saysOff(options, await inRow('button', 'Refresh list'), `Refresh the list of works in ${THEIRS}`, REASON)
+
+    assert.equal(await options.page.evaluate(() => window.__notReloaded), true, 'the same page throughout')
+  })
+
+  test('nothing threw along the way', () => {
+    assert.deepEqual(options.problems(), [])
+  })
+})
+
+/**
+ * A refresh of Read works stopped before it finished, continued with Work
+ * marks off: the job itself refuses to store the list empty, whatever started
+ * it, and says why.
+ */
+describe('options UI — User profile lists, a stopped Read works refresh continued with Work marks off', { skip }, () => {
+  const STOPPED = {
+    'option.user': { userId: 'tester' },
+    ...storedLists({
+      [READ]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(21), blurb(22)], descriptor: described('read-works', 'Read works — tester', READ_PAGE) },
+    }),
+    'siteExportJob': {
+      cacheKey: READ,
+      descriptor: described('read-works', 'Read works — tester', READ_PAGE),
+      steps: ['refreshing', 'caching'],
+      queue: [],
+      done: 0,
+      total: 0,
+      startedAt: HOURS_AGO,
+      updatedAt: HOURS_AGO,
+      errors: [],
+      errorCount: 0,
+    },
+  }
+
+  let session
+  let options
+  let archive
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed: STOPPED,
+      hash: '#user-profile-lists',
+      viewport: { width: 1440, height: 900 },
+      prepare: async (p) => {
+        archive = await stubArchive(p, (url) => {
+          const path = new URL(url).pathname
+          if (path === '/users/tester/readings')
+            return { body: listingPage([21, 22]) }
+          const workId = /^\/works\/(\d+)$/.exec(path)?.[1]
+          return workId ? { body: workPage(workId) } : { status: 404 }
+        })
+      },
+    })
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  const tile = () => options.tile('read-works')
+  const jobWrites = () => options.page.evaluate(() => window.__writes.filter(w => 'siteExportJob' in w).length)
+
+  test('Continue refuses to refresh it, saying why, and the stored copy keeps its works', async () => {
+    await until('the tile to offer to continue the job', async () => (await options.controls(await tile(), 'button', 'Continue')).length === 1)
+    const before = await jobWrites()
+    await options.press(await options.control(await tile(), 'button', 'Continue'))
+    await until('the job to stop again', async () => await jobWrites() > before && ['stopped', 'finished'].includes(await jobState(await tile())))
+
+    assert.deepEqual(storedListIds((await options.stored('cache.searchLists'))[READ]), ['21', '22'])
+    await archive.heard()
+    assert.deepEqual(archive.asked, [], 'nothing was asked of AO3')
+
+    const callout = await (await tile()).$('[data-callout="destructive"]')
+    assert.ok(callout, 'the reason is an error callout')
+    assert.match(await options.text(callout), /This list is made from your marks, and Work marks is switched off, so it was left as it was rather than emptied\. Switch Work marks on, under Reading, then try again\./)
+    assert.deepEqual((await options.stored('siteExportJob')).steps, ['refreshing', 'caching'], 'the job waits to be continued')
+    await options.control(await tile(), 'button', 'Continue')
+    await options.control(await tile(), 'button', 'Discard')
+  })
+
+  test('the refusal is logged as the error it is', () => {
+    const problems = options.problems()
+    assert.equal(problems.length, 1, JSON.stringify(problems))
+    assert.match(problems[0], /Site export job stopped/)
   })
 })
 

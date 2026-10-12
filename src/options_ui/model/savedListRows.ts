@@ -11,6 +11,7 @@ import { bucketBar, formatBytes } from './buckets.ts'
 import { isRunning, jobIsOn, jobVerb, listJob, removeOff } from './jobView.ts'
 import { timeAgo } from './moments.ts'
 import { sentence, withReason } from './phrases.ts'
+import { refreshNeeds } from './profileLists.ts'
 
 /** What each kind of query is called in the reader's words. */
 export const KIND_LABELS: Readonly<Record<TrackedKind, string>> = {
@@ -108,6 +109,8 @@ export interface SavedListRow {
   trackOff?: string
   /** Why the offline actions (refresh, cache, download) are off. */
   offlineOff?: string
+  /** Why its copy can't be refreshed whatever any job does ({@link refreshNeeds}): another account's Read works, with Work marks off. */
+  refreshNeeds?: string
 }
 
 /** The filter line of a list that filters by nothing it can name. */
@@ -119,6 +122,8 @@ export interface SavedListRowsContext {
   copy: (key: string) => { buckets: CachingBuckets, unstored: number }
   /** Whether *Tracked lists* is on: with it off, no list can be tracked or stopped. */
   review: boolean
+  /** Whether *Work marks* is on: with it off, Read works can't be refreshed. */
+  workMarks: boolean
   /** Why a running job keeps a row's offline actions off, or null: the row is its copies, by key. */
   jobOff: (keys: readonly string[]) => string | null
 }
@@ -188,6 +193,7 @@ export function savedListRows(join: SavedListJoin, ctx: SavedListRowsContext): S
       caching: cachingOf(copy, [copy.key], ctx),
       trackOff: trackOff(pending, savedSearch, ctx.review, false),
       offlineOff: pending === 'needs-visit' ? OFFLINE_OFF.undescribed : ctx.jobOff([copy.key]) ?? undefined,
+      refreshNeeds: refreshNeeds(copy.sourceId, ctx.workMarks) ?? undefined,
     })
   })
 
@@ -399,9 +405,10 @@ export function cachingCell(row: SavedListRow, view: JobView, now: number): Save
 }
 
 /**
- * The row's own control in its Offline copy column: Download, off with the
- * reason while it can't run; Stop while its own job runs; nothing while its
- * job is stopped, whose line offers Continue and Discard, or with no copy.
+ * The row's own control in its Offline copy column: Download, which refreshes
+ * first, off with the reason while it can't run; Stop while its own job runs;
+ * nothing while its job is stopped, whose line offers Continue and Discard, or
+ * with no copy.
  */
 export type SavedListRowAction
   = | { kind: 'download', off: string | null }
@@ -417,7 +424,7 @@ export function rowAction(row: SavedListRow, view: JobView): SavedListRowAction 
     return { kind: 'stop', verb: runningHere(row, view) ?? 'working' }
   if (actions === 'resume')
     return { kind: 'none' }
-  return { kind: 'download', off: row.offlineOff ?? null }
+  return { kind: 'download', off: row.refreshNeeds ?? row.offlineOff ?? null }
 }
 
 /** Something that can be removed, why it is off while it is, and what removing it does. */
@@ -438,6 +445,13 @@ export interface SavedListOfflineDetails {
   note: { severity: 'neutral' | 'warning', text: string } | null
   /** Why refreshing, caching and downloading are off. */
   off: string | null
+  /**
+   * Why Refresh list, Download and Refresh the list first are off: the row's
+   * {@link SavedListRow.refreshNeeds}, which outlasts any job, else `off`.
+   */
+  refreshOff: string | null
+  /** The row's own reason a refresh is off, said where the reader is looking, beside `note`. */
+  refreshNote: { severity: 'neutral', text: string } | null
   retry: number
   cached: number
   remove: SavedListRemove | null
@@ -449,7 +463,7 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
     const empty = row.open
       ? 'None yet. Open it on AO3 to keep a copy: from then on, it refreshes from here.'
       : 'None yet. Open the list on AO3 and press the search button there: a copy is kept from then on, and refreshes from here.'
-    return { summary: null, empty, note: null, off: null, retry: 0, cached: 0, remove: null }
+    return { summary: null, empty, note: null, off: null, refreshOff: null, refreshNote: null, retry: 0, cached: 0, remove: null }
   }
 
   const { total, cached, failed, unfetched, bytes, staleFailures } = caching.buckets
@@ -481,6 +495,8 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
     empty: null,
     note,
     off,
+    refreshOff: row.refreshNeeds ?? off,
+    refreshNote: row.refreshNeeds ? { severity: 'neutral', text: `${sentence(row.refreshNeeds)}.` } : null,
     retry: failed + staleFailures,
     cached,
     remove: { off: removeOff(view, caching.keys), note: removing.join(' ') },

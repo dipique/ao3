@@ -37,6 +37,9 @@ const ICONS: Record<ProfileListId, string> = {
 const view = computed(() => (props.tile.view ? getArchiveLink(props.tile.view) : null))
 
 const offlineOffId = useId()
+const refreshNeedsId = useId()
+/** Where the reason Refresh list, Download Offline Copy and Refresh the list first give is said: the list's own, else the job's. */
+const refreshOffId = computed(() => (props.tile.refreshNeeds ? refreshNeedsId : offlineOffId))
 
 const refreshLabel = computed(() => `Refresh the list of works in ${props.tile.name}`)
 const cacheLabel = computed(() => (props.tile.cached ? 'Update the cached works' : 'Cache this list\'s works'))
@@ -127,7 +130,11 @@ function run(start: (row: SiteExportListRow) => unknown): void {
       </template>
     </SiteExportProgress>
 
-    <!-- Said where the reader is looking, beside the buttons it turns off. -->
+    <!-- Said where the reader is looking, beside the buttons they turn off. -->
+    <p v-if="tile.refreshNeeds" class="tile__off">
+      <SeverityGlyph severity="neutral" shrink-0 />
+      <span :id="refreshNeedsId">{{ sentence(tile.refreshNeeds) }}.</span>
+    </p>
     <p v-if="tile.offlineOff" class="tile__off">
       <SeverityGlyph severity="neutral" shrink-0 />
       <span :id="offlineOffId">{{ sentence(tile.offlineOff) }}.</span>
@@ -137,9 +144,9 @@ function run(start: (row: SiteExportListRow) => unknown): void {
       <button
         type="button"
         class="outline-btn small-btn"
-        :title="withReason(refreshLabel, tile.offlineOff)"
-        :disabled="!!tile.offlineOff"
-        :aria-describedby="tile.offlineOff ? offlineOffId : undefined"
+        :title="withReason(refreshLabel, tile.refreshOff)"
+        :disabled="!!tile.refreshOff"
+        :aria-describedby="tile.refreshOff ? refreshOffId : undefined"
         @click="run(refreshList)"
       >
         <span class="i-tabler-refresh" aria-hidden="true" />
@@ -159,9 +166,9 @@ function run(start: (row: SiteExportListRow) => unknown): void {
       <button
         type="button"
         class="outline-btn small-btn"
-        :title="withReason(downloadLabel, tile.offlineOff)"
-        :disabled="!!tile.offlineOff"
-        :aria-describedby="tile.offlineOff ? offlineOffId : undefined"
+        :title="withReason(downloadLabel, tile.refreshOff)"
+        :disabled="!!tile.refreshOff"
+        :aria-describedby="tile.refreshOff ? refreshOffId : undefined"
         @click="run(downloadSite)"
       >
         <span class="i-tabler-download" aria-hidden="true" />
@@ -175,6 +182,8 @@ function run(start: (row: SiteExportListRow) => unknown): void {
         :cached="tile.cached"
         :off="tile.offlineOff"
         :off-id="offlineOffId"
+        :refresh-off="tile.refreshOff"
+        :refresh-off-id="refreshOffId"
         refresh
         remove
       />

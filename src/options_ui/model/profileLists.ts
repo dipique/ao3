@@ -59,6 +59,21 @@ export const PROFILE_LISTS: readonly ProfileList[] = [
   },
 ]
 
+/**
+ * Why a kept copy can't be refreshed from here whatever any job does, worded
+ * to follow a control's name after a dash. Read works is the works the
+ * reader's marks name, so with Work marks off a refresh finds none of them,
+ * and would store the list empty.
+ */
+export const REFRESH_OFF = {
+  workMarks: 'off while Work marks, under Reading, is switched off: this list is made from your marks, so without them it can\'t be refreshed or viewed on AO3',
+} as const
+
+/** Why a stored list, by the source its copy was read from, can't be refreshed ({@link REFRESH_OFF}), or null. */
+export function refreshNeeds(sourceId: string | undefined, workMarks: boolean): string | null {
+  return sourceId === 'read-works' && !workMarks ? REFRESH_OFF.workMarks : null
+}
+
 /** A profile list's offline copy, as its tile reads it. */
 export interface ProfileCopy {
   /** Its stored key, which is also what a job names it by. */
@@ -98,6 +113,19 @@ export interface ProfileTileView {
   actions: JobActions | null
   /** Why the offline actions are off: another list's job. */
   offlineOff: string | null
+  /**
+   * Why the kept copy can't be refreshed from here whatever any job does
+   * ({@link refreshNeeds}), said in the tile. Null with no copy, whose note
+   * says what the list needs.
+   */
+  refreshNeeds: string | null
+  /**
+   * Why Refresh list, Download Offline Copy and More's Refresh the list first
+   * are off: {@link refreshNeeds}, which outlasts any job, else
+   * {@link offlineOff}. What works from the copy as it is follows
+   * {@link offlineOff} alone.
+   */
+  refreshOff: string | null
   /** The job is on this list, so its line goes in the tile. */
   job: boolean
   /** The works a retry asks for again, stale ones included; with none, More offers no retry. */
@@ -126,10 +154,11 @@ export function profileTiles({ copies, userId, settings, job, now }: ProfileTile
     const base = { id: list.id, name: list.name, note: list.note, view: page ? openLink(ref, page) : null }
     if (!copy) {
       const empty = !opens && list.needs ? list.needs : base.view ? KEEP_BY_VIEW : list.empty
-      return { ...base, empty, figure: null, bar: null, figures: null, actions: null, offlineOff: null, job: false, retry: 0, cached: 0 }
+      return { ...base, empty, figure: null, bar: null, figures: null, actions: null, offlineOff: null, refreshNeeds: null, refreshOff: null, job: false, retry: 0, cached: 0 }
     }
 
     const { actions, off, here } = listJob(job, copy.key)
+    const needs = refreshNeeds(list.id, settings.workMarks.enabled)
     const detail = [`${copy.count === 1 ? 'work' : 'works'} · as of ${timeAgo(copy.scrapedAt, now)}`]
     if (copy.unstored)
       detail.push(`${copy.unstored.toLocaleString()} need refreshing`)
@@ -141,6 +170,8 @@ export function profileTiles({ copies, userId, settings, job, now }: ProfileTile
       figures: bucketFigures(copy.buckets),
       actions,
       offlineOff: off,
+      refreshNeeds: needs,
+      refreshOff: needs ?? off,
       job: here,
       ...moreCounts(copy.buckets),
     }
