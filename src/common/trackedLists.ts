@@ -1937,6 +1937,56 @@ export function sameReviewBasis(stored: Partial<ReviewBasis>, option: Pick<Track
     && stored.target === current.target
 }
 
+/**
+ * A page's word that it is gathering the review window for a basis.
+ *
+ * Every tab with the review open re-runs on the same option write, and finds
+ * the same stored window stale at the same moment; left to themselves, each
+ * would ask the archive for the same pages, against a rate limit they share.
+ * So the page gathering says so here, and the others wait for its window to
+ * land in the store ({@link claimWait}). It renews the claim while it gathers;
+ * one left unrenewed for {@link CLAIM_TTL_MS} is a page that went away
+ * mid-gather, and holds nobody.
+ */
+export interface ReviewClaim extends ReviewBasis {
+  /** The page run gathering: a token of its own, made when it loaded. */
+  by: string
+  /** Epoch ms the claim was made or last renewed; 0 once it is withdrawn. */
+  at: number
+}
+
+/** How long a claim holds without being renewed. */
+export const CLAIM_TTL_MS = 60_000
+
+/** How often a page gathering renews its claim: well inside {@link CLAIM_TTL_MS}. */
+export const CLAIM_RENEW_MS = 20_000
+
+/** A claim, by page run `by` at `now`, on the window `option` asks for. */
+export function reviewClaim(option: Pick<TrackedListsOption, 'reviewedThrough' | 'lists' | 'target'>, by: string, now: number): ReviewClaim {
+  return { ...reviewBasis(option), by, at: now }
+}
+
+/**
+ * What page run `self` should do about a review window `option` asks for and
+ * the store doesn't hold: `landed` once the store does hold it, `waiting`
+ * while another page run's live claim is on it, and `gather` — read it itself —
+ * when nobody else is, the page that claimed it having stopped without it
+ * included.
+ */
+export function claimWait(
+  window: Partial<ReviewBasis> & { computedAt: number },
+  claim: Partial<ReviewClaim>,
+  option: Pick<TrackedListsOption, 'reviewedThrough' | 'lists' | 'target'>,
+  self: string,
+  now: number,
+): 'landed' | 'waiting' | 'gather' {
+  if (window.computedAt > 0 && sameReviewBasis(window, option))
+    return 'landed'
+  const at = claim.at
+  const live = typeof at === 'number' && at > 0 && Math.abs(now - at) < CLAIM_TTL_MS
+  return live && claim.by !== self && sameReviewBasis(claim, option) ? 'waiting' : 'gather'
+}
+
 function listsSig(lists: readonly TrackedList[]): string {
   // Serialized rather than joined on a separator: a URL can hold very nearly
   // any character, and two lists must never be able to spell one signature

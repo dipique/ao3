@@ -1,4 +1,4 @@
-import type { ReviewBasis } from './trackedLists.ts'
+import type { ReviewBasis, ReviewClaim } from './trackedLists.ts'
 
 import { createStorage } from './storage.ts'
 
@@ -204,6 +204,8 @@ export interface Cache {
   appliedChangeOps: string[]
   /** The review window the tracked lists were last gathered into (see {@link TrackedReviewCache}). */
   trackedReview: TrackedReviewCache
+  /** Which page is gathering the review window, for the others to wait on (see {@link ReviewClaim}). */
+  trackedReviewClaim: ReviewClaim
 }
 
 export const cache = createStorage<Cache>({
@@ -220,6 +222,7 @@ export const cache = createStorage<Cache>({
     // An empty range nothing was computed for: `computedAt: 0` and a start past
     // its end say "no window yet" without a second flag to keep in step.
     trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', target: 0, sources: {}, days: {}, failed: [], retired: '' },
+    trackedReviewClaim: { reviewedThrough: 0, listsSig: '', target: 0, by: '', at: 0 },
   },
 })
 

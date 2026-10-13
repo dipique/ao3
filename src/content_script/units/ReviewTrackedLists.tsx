@@ -3,7 +3,7 @@ import MdiChevronLeft from '~icons/mdi/chevron-left.jsx'
 import MdiChevronRight from '~icons/mdi/chevron-right.jsx'
 import MdiLoading from '~icons/mdi/loading.jsx'
 
-import type { Day, Options, SnapshotDescriptor, TrackedList, TrackedListsOption, TrackedReviewCache } from '#common'
+import type { Cache, Day, Options, SnapshotDescriptor, TrackedList, TrackedListsOption, TrackedReviewCache } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { LoadOptions, LoadResult, SearchHeaderControl, SearchSource } from '#content_script/searchView/host.tsx'
 import type { DeferredUpdate, ViewState } from '#content_script/searchView/view.tsx'
@@ -13,6 +13,9 @@ import {
   ADDON_CLASS,
   builtinOpens,
   cache,
+  CLAIM_RENEW_MS,
+  CLAIM_TTL_MS,
+  claimWait,
   formatDay,
   fromShortId,
   getArchiveLink,
@@ -23,6 +26,7 @@ import {
   parseUser,
   readWorkIds,
   reviewBasis,
+  reviewClaim,
   reviewStart,
   sameReviewBasis,
   sourceLabel,
@@ -36,7 +40,7 @@ import { linkedTo, openLinked } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, markedForLaterIds } from '#content_script/markedForLaterIndex.js'
 import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
-import { snapshotWorkIds, writeSnapshot } from '#content_script/searchView/cache.ts'
+import { readSnapshot, snapshotWorkIds, writeSnapshot } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { isSearchViewOpen, openSearchView, resumeSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
@@ -77,6 +81,13 @@ const HASH = '#ao3e-tracked'
  */
 const UNDO_TIMEOUT_MS = 20_000
 
+/**
+ * Whose gather a {@link ReviewClaim} is: this page run's own token. Not
+ * `randomUUID`, which a page served over plain http doesn't have — and this
+ * module is loaded on every page the content script runs on.
+ */
+const PAGE_RUN = Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(36)).join('')
+
 // ---------------------------------------------------------------------------
 // What one page run remembers.
 //
@@ -104,7 +115,11 @@ let heldIds: Set<string> | null = null
 let lastDiff = { added: 0, removed: 0 }
 /** What only a gather knows, so a window drawn from the cache simply leaves it out. */
 let extras: { backlog: number, capped: CappedDay[], nextDayCount: number } | null = null
-/** Set by Mark reviewed, read by the reopen its option write causes. */
+/**
+ * Set by Mark reviewed, read by the reopen its option write causes: the works
+ * that view held are the range just finished, so the reader's filters come
+ * across but the works and their page layout don't.
+ */
 let advanced = false
 /**
  * Redraw the toolbar this open built, if it has built one.
@@ -221,8 +236,8 @@ export class ReviewTrackedLists extends Unit {
     // A global re-run took the view down: put it back where the reader left
     // off, or, still loading, as far as it had got. After a Mark reviewed the
     // window has moved on, so the reader's filters come across but the works
-    // don't — they are read from the store, where the new window has just been
-    // written.
+    // don't — the stored window answers to the old watermark, so the next one
+    // is gathered.
     const resumed = resumeSearchView(CACHE_KEY, (opts) => {
       const moved = advanced
       advanced = false
@@ -328,33 +343,67 @@ export class ReviewTrackedLists extends Unit {
 
   /** Read the review window out of the archive, and write down what it is. */
   private async load(userId: string, opts: LoadOptions): Promise<LoadResult> {
-    const option = this.options.trackedLists
-    const lists = option.lists.filter(list => list.tracked)
-    const start = reviewStart(option)
-    const today = utcToday()
     // A load is a fresh look at the window, so the already-reviewed set is taken
     // again here — and only here. The reopens a mark click causes reuse it, which
     // is what keeps a work the reader just marked from vanishing from under them.
     reviewed = await takeReviewed(userId, this.options)
 
-    const result = await fetchWindow({
-      lists,
-      start,
-      today,
-      target: option.target,
-      endOverride,
-      reviewed: reviewed.ids,
-      options: this.options,
-      signal: opts.signal,
-      onProgress: opts.onProgress,
-      session,
-    })
+    let option = this.options.trackedLists
+    for (;;) {
+      // Every tab with the review open finds the stored window stale on the same
+      // option write. One of them reads the archive for the next; the rest wait
+      // for its window rather than ask for the same pages again.
+      if (factsStale) {
+        const landed = await awaitClaimed(option, opts)
+        if (landed)
+          return this.adopt(landed, opts)
+      }
+      const result = await this.readWindow(userId, option, opts)
+      if (result)
+        return result
+      // The reader moved the review on while it was being read — an Undo, a
+      // list tracked — so what was read answers to nothing, and the window they
+      // are now asking for may already be in the store.
+      option = await options.get('trackedLists')
+      factsStale = true
+    }
+  }
 
-    // The same condition the host writes the snapshot under: a refusal that
-    // brought nothing back is not news about what the lists hold, and the stored
-    // window stays exactly as it was.
-    if (!result.blocked || result.works.length)
-      await this.commit(result, userId, option)
+  /**
+   * Read the window `option` asks for, claimed for as long as that takes when
+   * the store doesn't hold it, and keep it. Null when the options have moved off
+   * `option` meanwhile: that window is neither kept nor shown.
+   */
+  private async readWindow(userId: string, option: TrackedListsOption, opts: LoadOptions): Promise<LoadResult | null> {
+    const release = factsStale ? await holdClaim(option) : null
+    let result: FetchedWindow
+    try {
+      result = await fetchWindow({
+        lists: option.lists.filter(list => list.tracked),
+        start: reviewStart(option),
+        today: utcToday(),
+        target: option.target,
+        endOverride,
+        reviewed: (reviewed ??= await takeReviewed(userId, this.options)).ids,
+        options: this.options,
+        signal: opts.signal,
+        onProgress: opts.onProgress,
+        session,
+      })
+      if (!sameReviewBasis(reviewBasis(option), await options.get('trackedLists')))
+        return null
+
+      // The same condition the host writes the snapshot under: a refusal that
+      // brought nothing back is not news about what the lists hold, and the stored
+      // window stays exactly as it was.
+      if (!result.blocked || result.works.length)
+        await this.commit(result, userId, option)
+    }
+    finally {
+      // After the commit, so a tab waiting on the claim hears the window land
+      // before it hears the claim go.
+      await release?.()
+    }
     // These works are going straight on screen (a first load, or the reader's
     // own Refresh), so the toolbar has to describe the window they came from.
     // A reload that is only being offered leaves it alone — see {@link redrawBar}.
@@ -362,6 +411,28 @@ export class ReviewTrackedLists extends Unit {
       redrawBar?.()
     emptyWindow = result.works.length ? null : result.window
     return { works: result.works, blocked: result.blocked }
+  }
+
+  /**
+   * Take up a window another tab gathered: its facts as this page's, and its
+   * works from the store, where that tab wrote them before the facts.
+   */
+  private async adopt(landed: TrackedReviewCache, opts: LoadOptions): Promise<LoadResult> {
+    const stored = await readSnapshot(CACHE_KEY)
+    carried = facts ? Object.keys(facts.sources) : []
+    lastDiff = countDiff(facts?.sources ?? {}, landed.sources)
+    // What only a gather knows stays with the tab that gathered.
+    extras = null
+    facts = landed
+    factsStale = false
+    heldIds = null
+    if (opts.applied)
+      redrawBar?.()
+    const works = stored?.works ?? []
+    emptyWindow = works.length
+      ? null
+      : { start: landed.start, end: landed.end, reviewable: !landed.failed.length && landed.end < utcToday() }
+    return { works, blocked: false }
   }
 
   /**
@@ -663,7 +734,7 @@ export class ReviewTrackedLists extends Unit {
       const failed = failedLabels(current.failed, this.options.trackedLists.lists)
       const capped = extras?.capped ?? []
       if (!failed.length && !capped.length) {
-        void this.markReviewed(userId, current, setBusy)
+        void this.markReviewed(current, setBusy, true)
         return
       }
       // Skipping a list's works silently is the one way a review can lose a
@@ -673,7 +744,7 @@ export class ReviewTrackedLists extends Unit {
         'Mark reviewed anyway',
         () => {
           prompt.replaceChildren()
-          void this.markReviewed(userId, current, setBusy)
+          void this.markReviewed(current, setBusy, true)
         },
         () => prompt.replaceChildren(),
       ))
@@ -711,48 +782,47 @@ export class ReviewTrackedLists extends Unit {
   }
 
   /**
-   * Finish the range: move the watermark, read the next window, and only then
-   * write the option — whose broadcast re-runs the page and reopens the view on
-   * what has just been stored.
+   * Finish the range: move the watermark. The next window isn't read here: it
+   * is gathered the way any window the store doesn't hold is. The option's
+   * broadcast re-runs the page, the reopen finds the stored window answering to
+   * a watermark that has moved ({@link readFacts}), and the host loads the next
+   * one behind its own progress — which waits out a rate limit where the reader
+   * can see it, and leaves the stored window alone if the archive gives it
+   * nothing. So the reader's say-so never waits on the archive, and a range
+   * marked while it is refusing stays marked.
    *
    * The watermark is read fresh and never lowered, so a tab that has been
    * sitting open can't rewind another tab's progress. The session can't survive
    * the window's start moving (every list's query starts a day before it), so
    * the next window is read from nothing.
+   *
+   * `reopens` says the view is up, so the reopen will gather the next window
+   * here — which this page claims before the write, for the other tabs with
+   * the review open to find it claimed when they re-run, and wait for it.
    */
-  private async markReviewed(userId: string, range: TrackedReviewCache, setBusy: (on: boolean) => void): Promise<void> {
+  private async markReviewed(range: TrackedReviewCache, setBusy: (on: boolean) => void, reopens: boolean): Promise<void> {
     if (!extensionAlive())
       return
     setBusy(true)
     try {
       const option = await options.get('trackedLists')
       const current = Number.isSafeInteger(option.reviewedThrough) ? option.reviewedThrough : 0
-      const next = Math.max(current, range.end)
-      const lists = option.lists.filter(list => list.tracked)
-      const start = reviewStart({ reviewedThrough: next, lists: option.lists })
+      const moved = { ...option, reviewedThrough: Math.max(current, range.end) }
 
-      reviewed = await takeReviewed(userId, this.options)
       session = createTrackedSession()
       endOverride = undefined
-      const result = await fetchWindow({
-        lists,
-        start,
-        today: utcToday(),
-        target: option.target,
-        reviewed: reviewed.ids,
-        options: this.options,
-        session,
-      })
-      await this.commit(result, userId, { ...option, reviewedThrough: next })
-
-      // Last, and the thing that makes it so: the write re-runs every unit, and
-      // the reopen it causes reads the window written just above.
+      // Not being able to say so costs the other tabs a read of their own, and
+      // is no reason not to mark the range.
+      if (reopens) {
+        await cache.set({ trackedReviewClaim: reviewClaim(moved, PAGE_RUN, Date.now()) })
+          .catch(err => this.logger.error('Could not claim the next review window', err))
+      }
       advanced = true
-      await options.set({ trackedLists: { ...option, reviewedThrough: next } })
+      await options.set({ trackedLists: moved })
       toast(`Marked ${formatRange(range.start, range.end)} reviewed.`, {
         type: 'success',
         timeout: UNDO_TIMEOUT_MS,
-        action: { label: 'Undo', onClick: () => void undoReviewed(current, next) },
+        action: { label: 'Undo', onClick: () => void undoReviewed(current, moved.reviewedThrough) },
       })
     }
     catch (err) {
@@ -782,7 +852,7 @@ export class ReviewTrackedLists extends Unit {
         onClick: () => {
           const gathered = facts
           if (gathered)
-            void this.markReviewed(userId, gathered, () => {})
+            void this.markReviewed(gathered, () => {}, false)
         },
       },
     })
@@ -813,6 +883,83 @@ async function takeReviewed(userId: string, opts: Options): Promise<ReviewedSet>
     // turns up in the review.
   }
   return { ids, savedKnown }
+}
+
+/**
+ * Wait for the window another tab is gathering for `option` to land in the
+ * store, and hand back its facts. Null when no other tab is gathering it —
+ * none was, or the one that was stopped without it — and this page has to.
+ */
+async function awaitClaimed(option: TrackedListsOption, opts: LoadOptions): Promise<TrackedReviewCache | null> {
+  let heard = false
+  let wake: (() => void) | null = null
+  const listener = (change: Partial<Cache>): void => {
+    if (!('trackedReview' in change) && !('trackedReviewClaim' in change))
+      return
+    heard = true
+    wake?.()
+  }
+  const aborted = (): void => wake?.()
+  cache.addListener(listener)
+  opts.signal?.addEventListener('abort', aborted)
+  let said = false
+  try {
+    for (;;) {
+      opts.signal?.throwIfAborted()
+      heard = false
+      const { trackedReview, trackedReviewClaim } = await cache.get(['trackedReview', 'trackedReviewClaim'])
+      const now = Date.now()
+      const state = claimWait(trackedReview, trackedReviewClaim, option, PAGE_RUN, now)
+      if (state === 'landed')
+        return trackedReview
+      if (state === 'gather')
+        return null
+      if (!said) {
+        opts.onProgress?.('Waiting for another tab to gather your tracked lists…', 0, 0)
+        said = true
+      }
+      if (heard)
+        continue
+      // Until the store changes, or the claim lapses unrenewed.
+      await new Promise<void>((resolve) => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const done = (): void => {
+          clearTimeout(timer)
+          wake = null
+          resolve()
+        }
+        timer = setTimeout(done, trackedReviewClaim.at + CLAIM_TTL_MS - now)
+        wake = done
+      })
+    }
+  }
+  finally {
+    cache.removeListener(listener)
+    opts.signal?.removeEventListener('abort', aborted)
+  }
+}
+
+/**
+ * Claim the window `option` asks for while this page gathers it, renewing the
+ * claim until the function handed back withdraws it. A claim that can't be
+ * written costs only the other tabs' patience: they gather it themselves.
+ */
+async function holdClaim(option: TrackedListsOption): Promise<() => Promise<void>> {
+  const write = (): Promise<void> => cache.set({ trackedReviewClaim: reviewClaim(option, PAGE_RUN, Date.now()) })
+    .catch(err => console.error('[tracked] could not claim the review window', err))
+  await write()
+  const renew = setInterval(() => void write(), CLAIM_RENEW_MS)
+  return async () => {
+    clearInterval(renew)
+    try {
+      const claim = await cache.get('trackedReviewClaim')
+      if (claim.by === PAGE_RUN && claim.at > 0)
+        await cache.set({ trackedReviewClaim: { ...claim, at: 0 } })
+    }
+    catch (err) {
+      console.error('[tracked] could not withdraw the claim on the review window', err)
+    }
+  }
 }
 
 /** Every work id any mark holds — the works a retired blurb is kept for. */

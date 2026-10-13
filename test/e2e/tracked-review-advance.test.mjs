@@ -7,7 +7,7 @@ import puppeteer from 'puppeteer-core'
 import { formatDay } from '../../src/common/trackedLists.ts'
 import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
 import { pressFacet, rerun, runs, settled } from './trackedPages.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, search, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { archiveRoutes, CLOCK_BASE, dayOfIso, installClock, listing, resetWorkIds, reviewDrawn, search, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -18,11 +18,12 @@ const REVIEW_URL = 'https://archiveofourown.org/users/me/readings#ao3e-tracked'
  * Finishing a range and moving on.
  *
  * "Mark reviewed" is the whole of the review's bookkeeping: it moves one day
- * number, reads the next range, and hands the reader an Undo. So what matters is
- * that the watermark goes exactly where it should, that the next range is on
- * screen with the reader's filters still applied, that Undo puts it back — and
- * that a range with a list missing from it is never marked reviewed without
- * being asked first, since that is the one way this design could lose a work.
+ * number and hands the reader an Undo, and the review reads the next range. So
+ * what matters is that the watermark goes exactly where it should, that the
+ * next range is on screen with the reader's filters still applied, that Undo
+ * puts it back — even while the next range is still being read — and that a
+ * range with a list missing from it is never marked reviewed without being
+ * asked first, since that is the one way this design could lose a work.
  *
  * Three works a day over eight days, a target of six: the window is two days.
  * The first work of each day carries the tag Fluff, so a facet selection has
@@ -63,18 +64,34 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     'cache.markedForLater': { userId: 'me', updatedAt: CLOCK_BASE, ids: '' },
   }
 
-  const open = async ({ fixtures = [solo], seed = SEED } = {}) => {
+  /** Answers the archive holds back while `holding` says so, until {@link answerHeld}. */
+  let holding = () => false
+  const held = []
+  const answerHeld = () => {
+    holding = () => false
+    for (const answer of held.splice(0))
+      answer()
+  }
+
+  const open = async ({ fixtures = [solo], seed = SEED, drawn = true } = {}) => {
     const page = await browser.newPage()
     await page.setViewport({ width: 1280, height: 900 })
     await page.setRequestInterception(true)
-    page.on('request', archiveRoutes({ fixtures }))
+    const route = archiveRoutes({ fixtures })
+    page.on('request', (req) => {
+      if (req.url().startsWith('https://archiveofourown.org/') && holding(new URL(req.url())))
+        held.push(() => route(req))
+      else
+        route(req)
+    })
     await page.evaluateOnNewDocument(installClock, CLOCK_BASE)
     await page.evaluateOnNewDocument(installMock, seed)
     await page.goto(REVIEW_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
     await page.addScriptTag({ content: js })
     await settled(page)
-    await reviewDrawn(page)
+    if (drawn)
+      await reviewDrawn(page)
     return page
   }
 
@@ -178,5 +195,51 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     }))
     await reviewDrawn(tab)
     assert.equal(await watermark(), since + 1)
+    await tab.close()
+    tab = null
+  })
+
+  test('Undo while the next range is still being read puts the range back, and drops the one being read', async () => {
+    tab = await open()
+    // Every list's query starts a day before its range.
+    holding = url => (dayOfIso(url.searchParams.get('work_search[date_from]')) ?? -Infinity) >= since + 1
+    await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
+    await tab.waitForFunction(() => !!document.querySelector('.AO3E--search-host--progress'))
+    assert.equal(await watermark(), since + 1)
+    assert.ok(held.length > 0, 'the next range is being read')
+
+    const before = await runs(tab)
+    assert.equal(await clickToast('Undo'), true, 'the Undo offer is up while it is')
+    await settled(tab, before)
+    assert.equal(await watermark(), since - 1)
+
+    answerHeld()
+    await reviewDrawn(tab)
+    assert.equal(await barText('--range'), `Reviewing ${formatDay(since).slice(0, -5)} – ${formatDay(since + 1)}`)
+    const stored = await tab.evaluate(async () => (await browser.storage.local.get('cache.trackedReview'))['cache.trackedReview'])
+    assert.equal(stored.start, since, 'the range read for the watermark Undo took back is not kept')
+    assert.equal(stored.reviewedThrough, since - 1)
+    await tab.close()
+    tab = null
+  })
+
+  test('a range that turned up nothing is marked reviewed from its toast, with no view up', async () => {
+    const quiet = listing('quiet', [[TODAY, 2]], { entry: { alias: 'Quiet', since } })
+    tab = await open({
+      fixtures: [quiet],
+      seed: { ...SEED, 'option.trackedLists': trackedOption([quiet], { target: 6, reviewedThrough: since - 1 }) },
+      drawn: false,
+    })
+    // Today's works can't be reviewed yet, so the range up to yesterday is empty.
+    await tab.waitForFunction(() => [...document.querySelectorAll('body > div')]
+      .some(el => [...el.shadowRoot?.querySelectorAll('.toast button.action') ?? []].some(button => button.textContent.trim() === 'Mark reviewed')))
+    assert.equal(await tab.$('.AO3E--search-host'), null, 'the view closed, with nothing to show')
+
+    const before = await runs(tab)
+    assert.equal(await clickToast('Mark reviewed'), true)
+    await settled(tab, before)
+    assert.equal(await watermark(), TODAY - 1)
+    const claim = await tab.evaluate(async () => (await browser.storage.local.get('cache.trackedReviewClaim'))['cache.trackedReviewClaim'])
+    assert.equal(claim?.at ?? 0, 0, 'no tab is left waiting on a read nothing will make')
   })
 })

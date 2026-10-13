@@ -183,7 +183,8 @@ function keyOf(url) {
     ?? url.pathname
 }
 
-function dayOfIso(iso) {
+/** The UTC day an ISO date (`2026-10-13`) names, or null for none. */
+export function dayOfIso(iso) {
   return iso ? Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_PER_DAY) : null
 }
 
@@ -213,9 +214,11 @@ function listingPage(list, url) {
  * reads as a list that couldn't be loaded.
  *
  * `fetched` collects every list URL asked for, so a test can say what was read
- * and what wasn't. A fixture marked `fail` answers 500 to everything.
+ * and what wasn't. A fixture marked `fail` answers 500 to everything. A list
+ * request `refuse(url)` names a wait for, in seconds, is turned away as a
+ * rate-limited archive turns it away: a 429, asking for that wait.
  */
-export function archiveRoutes({ fixtures, user = 'me', fetched = [] }) {
+export function archiveRoutes({ fixtures, user = 'me', fetched = [], refuse = () => 0 }) {
   const lists = Object.fromEntries(fixtures.map(fixture => [fixture.key, fixture]))
   return (req) => {
     if (!req.url().startsWith('https://archiveofourown.org/'))
@@ -244,6 +247,9 @@ export function archiveRoutes({ fixtures, user = 'me', fetched = [] }) {
       })
     }
     fetched.push(url.pathname + url.search)
+    const wait = refuse(url)
+    if (wait)
+      return void req.respond({ status: 429, headers: { 'retry-after': String(wait) }, body: 'slow down' })
     const list = lists[keyOf(url)]
     if (!list || list.fail)
       return void req.respond({ status: list ? 500 : 404, body: 'no' })
