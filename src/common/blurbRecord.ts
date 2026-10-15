@@ -278,6 +278,25 @@ export function takeFromList(list: StoredList, ids: Iterable<string>): StoredLis
   return next
 }
 
+/**
+ * `list` with the works `ids` at its front, in that order — moved there if it
+ * held them already, and nothing else changed: for a work the reader put on a
+ * list somewhere other than its listing, which is no read of it either, so the
+ * copy is trusted no more than before ({@link takeFromList}). A work keeps its
+ * readings block when it moves. Null when the list already starts with them, or
+ * isn't a list this build can read.
+ */
+export function putOnList(list: StoredList, ids: readonly string[]): StoredList | null {
+  if (list.v !== LIST_VERSION || typeof list.ids !== 'string')
+    return null
+  const front = [...new Set(ids)]
+  const held = unpackOrderedIds(list.ids)
+  if (front.every((id, i) => held[i] === id))
+    return null
+  const moved = new Set(front)
+  return { ...list, ids: packOrderedIds([...front, ...held.filter(id => !moved.has(id))]) }
+}
+
 export interface BlurbOrphanPlan {
   /** Work ids whose blurbs nothing holds and which are past {@link ORPHAN_GRACE_MS}. */
   ids: string[]

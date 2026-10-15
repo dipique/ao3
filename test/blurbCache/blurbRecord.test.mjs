@@ -12,6 +12,7 @@ import {
   PARSE_VERSION,
   planBlurbOrphans,
   planLegacyMigration,
+  putOnList,
   splitReadingModule,
   takeFromList,
   TOUCH_MS,
@@ -209,5 +210,37 @@ describe('planLegacyMigration', () => {
   test('migrated meta says nothing was parsed', () => {
     const meta = migratedBlurbMeta(blurb(1), 42)
     assert.deepEqual(meta, { pv: 0, seenAt: 42, src: 'listing', hash: hashBlurbHtml(blurb(1)), size: blurb(1).length })
+  })
+})
+
+describe('putOnList', () => {
+  const descriptor = { sourceId: 'marked-for-later', label: 'Marked for Later — me', listUrl: 'https://archiveofourown.org/users/me/readings?show=to-read' }
+  const held = list(['1', '2', '3'], { scrapedAt: NOW - DAY, descriptor })
+
+  test('a work it doesn\'t hold goes first, the rest in their order', () => {
+    assert.deepEqual(unpackOrderedIds(putOnList(held, ['9']).ids), ['9', '1', '2', '3'])
+  })
+
+  test('a work it holds moves to the front, once', () => {
+    assert.deepEqual(unpackOrderedIds(putOnList(held, ['3']).ids), ['3', '1', '2'])
+  })
+
+  test('several go first in the order given', () => {
+    assert.deepEqual(unpackOrderedIds(putOnList(held, ['9', '2']).ids), ['9', '2', '1', '3'])
+  })
+
+  test('the copy still claims the read it came from, and only that', () => {
+    assert.deepEqual({ ...putOnList(held, ['9']), ids: held.ids }, held)
+  })
+
+  test('a work keeps its readings block when it moves', () => {
+    const ctx = { [toShortId('2')]: '<div>two</div>' }
+    assert.deepEqual(putOnList(list(['1', '2'], { ctx }), ['2']).ctx, ctx)
+  })
+
+  test('works already first, in that order, or a list this build can\'t read, is nothing to write', () => {
+    assert.equal(putOnList(held, ['1']), null)
+    assert.equal(putOnList(held, []), null)
+    assert.equal(putOnList(list(['1', '2'], { v: LIST_VERSION + 1 }), ['9']), null)
   })
 })

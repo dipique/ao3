@@ -12,6 +12,7 @@ import {
   options,
   packIds,
   packOrderedIds,
+  putOnList,
   takeFromList,
   toShortId,
   unpackIds,
@@ -284,6 +285,32 @@ export async function takeFromSnapshot(key: string, ids: Iterable<string>): Prom
   lists[key] = next
   await cache.set({ searchLists: lists })
   await pruneIfWanted(key, unpackOrderedIds(previous.ids), unpackOrderedIds(next.ids), lists)
+}
+
+/**
+ * Put works at the front of a stored list, their blurbs stored with them: the
+ * reader put them on its listing somewhere other than the listing itself. That
+ * is no read of it either, so, as with {@link takeFromSnapshot}, the list goes
+ * on saying which read it is ({@link putOnList}).
+ *
+ * Only a list already stored is added to: one with nothing stored is read
+ * whole when it's first opened. Each blurb is stored as any read would store
+ * it, so one the list already holds is replaced only where it has changed, and
+ * the list itself is only written when it didn't already start with them.
+ */
+export async function putOnSnapshot(key: string, works: Work[]): Promise<void> {
+  const ids = works.map(work => work.workId).filter(Boolean)
+  if (!readable((await cache.get('searchLists'))[key]))
+    return
+  // Blurbs first, list second, as {@link writeSnapshot} writes them.
+  await storeWorks(works)
+  const lists = { ...await cache.get('searchLists') }
+  const previous = lists[key]
+  const next = previous && putOnList(previous, ids)
+  if (!next)
+    return
+  lists[key] = next
+  await cache.set({ searchLists: lists })
 }
 
 /**

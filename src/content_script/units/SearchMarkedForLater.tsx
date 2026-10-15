@@ -3,6 +3,7 @@ import type { OpenOptions, SearchSource } from '#content_script/searchView/host.
 
 import { getArchiveLink, parseUser, readWorkIds, toast } from '#common'
 import { linkedTo } from '#content_script/lists/openLink.ts'
+import { markedForLaterKey } from '#content_script/markedForLaterCopy.ts'
 import { loadMarkedForLaterIndex, noteMarkedForLater, saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
 import { hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
@@ -68,7 +69,7 @@ export class SearchMarkedForLater extends Unit {
     // re-scrape) where the reader left off — so e.g. a "Hide tag" context-menu
     // action doesn't reset their filters — or, still loading, as far as it had
     // got. Otherwise it simply opens, as the page.
-    if (!resumeSearchView(snapshotKey(pageUser), opts => this.openView(pageUser, opts)))
+    if (!resumeSearchView(markedForLaterKey(pageUser), opts => this.openView(pageUser, opts)))
       void this.openView(pageUser)
   }
 
@@ -84,7 +85,7 @@ export class SearchMarkedForLater extends Unit {
   source(userId: string, read: ReadonlySet<string>): SearchSource {
     return {
       id: SOURCE_ID,
-      cacheKey: snapshotKey(userId),
+      cacheKey: markedForLaterKey(userId),
       descriptor: () => ({
         sourceId: SOURCE_ID,
         label: `Marked for Later — ${userId}`,
@@ -156,8 +157,4 @@ export class SearchMarkedForLater extends Unit {
       errorMessage: 'Could not load your Marked for Later list.',
     }
   }
-}
-
-function snapshotKey(userId: string): string {
-  return `${SOURCE_ID}:${userId}`
 }

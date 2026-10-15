@@ -4,6 +4,8 @@ import { fetchWithRetry, PATIENCE } from '#content_script/archiveFetch.js'
 import { parseWork } from '#content_script/blurb.js'
 import React from '#dom'
 
+import { pristineBlurb } from './pristine.ts'
+
 /**
  * A listing blurb, built from a work's own page.
  *
@@ -178,6 +180,27 @@ export function blurbFromWorkPage(doc: Document, workId: string): HTMLLIElement 
       <dl class="stats">{...statRows}</dl>
     </li>
   ) as HTMLElement as HTMLLIElement
+}
+
+/**
+ * A listing blurb for the work page the reader is on, built from the page as
+ * AO3 served it: the parts {@link blurbFromWorkPage} reads are copied out and
+ * stripped of what the extension did to them ({@link pristineBlurb}). Taken
+ * before the page is decorated it also misses what can't be stripped, such as
+ * a text replacement's rewrite of the summary. Null when the page isn't a work
+ * page.
+ */
+export function blurbFromLivePage(workId: string): HTMLLIElement | null {
+  const meta = document.querySelector('dl.work.meta')
+  const preface = document.querySelector('#workskin > .preface.group')
+  if (!meta || !preface)
+    return null
+  const page = document.implementation.createHTMLDocument('')
+  const workskin = page.createElement('div')
+  workskin.id = 'workskin'
+  workskin.append(page.adoptNode(pristineBlurb(preface)))
+  page.body.append(page.adoptNode(pristineBlurb(meta)), workskin)
+  return blurbFromWorkPage(page, workId)
 }
 
 /** Build blurbs for works from their own pages. */

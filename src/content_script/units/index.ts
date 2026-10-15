@@ -17,6 +17,7 @@ import { HideWorks } from './HideWorks.tsx'
 import { HighlightAuthors } from './HighlightAuthors.ts'
 import { HighlightSeries, HighlightWorks } from './HighlightEntities.ts'
 import { HighlightTags } from './HighlightTags.ts'
+import { KeepMarkedForLater } from './KeepMarkedForLater.ts'
 import { OptionsUpdater } from './OptionsUpdater.tsx'
 import { ReaderMode } from './ReaderMode.ts'
 import { RequiredTagsToolbar } from './RequiredTagsToolbar.tsx'
@@ -42,6 +43,8 @@ export const UNITS = [
   // over StyleTweaks' stylesheet rule) and measures the resulting column width.
   ReaderMode,
   CollapsibleDashboard,
+  // Before TextReplace: it copies the work's summary as the author wrote it.
+  KeepMarkedForLater,
   TextReplace,
   // After TextReplace, whose spans are what its underlines and click-to-edit hang on.
   TextReplaceTools,

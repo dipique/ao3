@@ -212,6 +212,51 @@ export function archivePause(): ArchivePause | null {
   return until > Date.now() ? { until, reason: waitReason() } : null
 }
 
+/** What a reader waiting on a pause is told: which kind it is and how long it has left. Null once it is over. */
+export function waitLine(until: number, reason: WaitReason, now: number): string | null {
+  const left = until - now
+  return left > 0 ? `${WAIT_WORDS[reason]} — trying again in ${countdown(left)}` : null
+}
+
+/**
+ * Keep a {@link waitLine} on screen: `onLine` hears it at once if a pause is
+ * already being sat out, again every second while one lasts, and `null` when
+ * it ends. Returns the way to stop.
+ *
+ * A wait runs for minutes, and a line that only changed when the pause did
+ * would read the same for all of them — the same silence as no line at all.
+ */
+export function watchWaitLine(onLine: (line: string | null) => void): () => void {
+  let until = 0
+  let reason: WaitReason = 'pacing'
+  let ticker: ReturnType<typeof setInterval> | undefined
+
+  const draw = (): void => {
+    const line = waitLine(until, reason, Date.now())
+    if (line === null && ticker !== undefined) {
+      clearInterval(ticker)
+      ticker = undefined
+    }
+    onLine(line)
+  }
+  const follow = (next: number, why: WaitReason): void => {
+    until = next
+    reason = why
+    if (until && ticker === undefined)
+      ticker = setInterval(draw, 1000)
+    draw()
+  }
+
+  const unwatch = onArchiveWait(follow)
+  const current = archivePause()
+  if (current)
+    follow(current.until, current.reason)
+  return () => {
+    unwatch()
+    clearInterval(ticker)
+  }
+}
+
 function announce(until: number, reason: WaitReason): void {
   for (const listener of waitListeners)
     listener(until, reason)

@@ -19,7 +19,8 @@ import {
   markIndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
-import { loadMarkedForLaterIndex, noteMarkedForLater } from '#content_script/markedForLaterIndex.js'
+import { putOnMarkedForLater } from '#content_script/markedForLaterCopy.ts'
+import { loadMarkedForLaterIndex, noteMarkedForLater, onSavedChange } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
 import { markIcon } from '#content_script/markIcons.js'
 import { entityKey, ruleBehavior, ruleIndicatorBehavior } from '#content_script/persistentFilters.js'
@@ -27,6 +28,7 @@ import { openProgressEditor } from '#content_script/progressEditor.js'
 import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
 import { applyMark, applyMarkGroup, applyMarkProgress } from '#content_script/workMarks.js'
+import { workPageId } from '#content_script/workPage.ts'
 import React from '#dom'
 
 /**
@@ -532,6 +534,7 @@ abstract class FilterEntityToolbar extends Unit {
       // ...and must not be overwritten by a re-seed from the now-stale page.
       state.acted = true
       noteMarkedForLater(id, true)
+      await this.keepSaved(id)
       toast('Added to your Marked for Later list.', { type: 'success' })
     }
     catch (err) {
@@ -708,6 +711,33 @@ abstract class FilterEntityToolbar extends Unit {
     return saved
   }
 
+  /**
+   * Put a work just saved for later from here on the stored copy of the
+   * Marked for Later list, with the blurb this page shows it by, so the list
+   * opens with it ({@link putOnMarkedForLater}). Awaited before the toast says
+   * it's saved, and never a reason to say it wasn't: the save itself is done.
+   *
+   * A work page has no blurb to take; its work is kept from the page itself
+   * ({@link file://./KeepMarkedForLater.ts}).
+   */
+  private async keepSaved(id: string): Promise<void> {
+    const userId = parseUser(document)?.userId
+    if (!userId || !this.options.searchMarkedForLater)
+      return
+    const blurb = this.entries
+      .filter(entry => entry.id === id)
+      .map(entry => entry.link.closest<HTMLLIElement>('li.blurb'))
+      .find(li => li?.isConnected)
+    if (!blurb)
+      return
+    try {
+      await putOnMarkedForLater(userId, blurb, 'listing')
+    }
+    catch (err) {
+      this.logger.error(`Could not put work ${id} on the stored Marked for Later list.`, err)
+    }
+  }
+
   /** Refresh the indicator on every decorated link showing this entity. */
   protected syncEntriesFor(id: string): void {
     for (const entry of this.entries) {
@@ -845,6 +875,8 @@ abstract class FilterEntityToolbar extends Unit {
       // same step — this branch is the fetch fallback, where no button exists.
       if (this.marksEnabled())
         this.setReadLocally(id, !save)
+      if (save)
+        await this.keepSaved(id)
       toast(
         save ? 'Saved for later.' : 'Marked as read — removed from your Marked for Later list.',
         { type: 'success' },
@@ -866,52 +898,8 @@ abstract class FilterEntityToolbar extends Unit {
 const workEntries: EntityEntry[] = []
 const seriesEntries: EntityEntry[] = []
 
-/**
- * The work id for the page we are on, or null when this isn't a work page.
- *
- * Usually the URL says it. But AO3 also serves a chapter at its own permalink —
- * `/chapters/:id`, carrying no work id and *not* redirecting to the `/works/`
- * form — and there the URL knows nothing, so the id has to come out of the
- * markup. Without this the work menu simply never appeared on those pages, while
- * the author menu (which reads its own link) went on working, so the page looked
- * half-decorated rather than broken.
- *
- * Every fallback below sits in a container that only exists on a work page, so a
- * listing can't match one by accident, and each points at *this* work rather
- * than one it merely links to (a series, or an "inspired by" work).
- */
-function workPageId(): string | null {
-  const fromUrl = location.pathname.match(/^\/works\/(\d+)(?:\/|$)/)?.[1]
-  if (fromUrl)
-    return fromUrl
-
-  const selectors = [
-    // The chapter's own permalink, on its heading.
-    '#chapters .chapter h3.title a[href*="/works/"]',
-    // The chapter-index jump form.
-    '#chapter_index form[action*="/works/"]',
-    // The work navigation's Entire Work / Share / Comments rows.
-    'ul.work.navigation a[href*="/works/"]',
-  ]
-  for (const selector of selectors) {
-    for (const el of document.querySelectorAll(selector)) {
-      const raw = el.getAttribute('href') ?? el.getAttribute('action')
-      if (!raw)
-        continue
-      let path: string
-      try {
-        path = new URL(raw, location.origin).pathname
-      }
-      catch {
-        continue
-      }
-      const id = path.match(/^\/works\/(\d+)(?:\/|$)/)?.[1]
-      if (id)
-        return id
-    }
-  }
-  return null
-}
+/** This run's subscription to the saved-work index, taken down by the next clean. */
+let stopHearing: (() => void) | null = null
 
 /**
  * The individual work page's own title heading — a bare `<h2>`, not a link, so the
@@ -949,6 +937,23 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     this.seedMarkedForLaterPage()
     this.seedWorkPageMark()
     await super.ready()
+    stopHearing?.()
+    stopHearing = this.markEnabled() ? onSavedChange((id, saved) => this.onSavedChange(id, saved)) : null
+  }
+
+  /**
+   * A work saved for later or taken off the list, here or in another tab: the
+   * indicator follows. Another tab's toggle is as first-hand as one of ours,
+   * and this page's own markup still says otherwise, so it is held as ours
+   * ({@link MarkState.acted}) and a re-seed from the page can't undo it. A
+   * toggle in flight here is left to settle.
+   */
+  private onSavedChange(id: string, saved: boolean): void {
+    const state = savedState.get(id)
+    if (state?.busy || (state?.known && !state.cached && state.saved === saved))
+      return
+    savedState.set(id, { saved, busy: false, known: true, acted: true, cached: false })
+    this.syncEntriesFor(id)
   }
 
   /**
@@ -1044,6 +1049,8 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   }
 
   static override async clean(): Promise<void> {
+    stopHearing?.()
+    stopHearing = null
     workEntries.length = 0
     clearMenuTriggers()
   }

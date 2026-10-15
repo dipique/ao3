@@ -132,8 +132,11 @@ export interface SearchView {
    * reader. `force` overrides that, for a caller who *is* the reader's answer.
    */
   update: (works: Work[], autoExcludes?: FacetValueRef[], opts?: { force?: boolean }) => void
-  /** Toggle the subtle "updating in the background" indicator. */
-  setUpdating: (updating: boolean) => void
+  /**
+   * Toggle the subtle "updating in the background" indicator, with `note`
+   * after it while there is something to say about why it is taking a while.
+   */
+  setUpdating: (updating: boolean, note?: string | null) => void
   /** Record when the works were last fetched, for the Refresh button to say. */
   setRefreshedAt: (at: number) => void
   /** Current filter/sort/page, so a caller can rebuild the view where it left off. */
@@ -1681,7 +1684,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       showTextCoverage()
   }
 
-  function setUpdating(updating: boolean): void {
+  function setUpdating(updating: boolean, note?: string | null): void {
+    updatingEl.textContent = note ? `Updating… ${note}` : 'Updating…'
     updatingEl.classList.toggle(cx('updating-on'), updating)
     refreshBtn?.classList.toggle(cx('refresh-spinning'), updating)
   }

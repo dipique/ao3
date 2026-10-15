@@ -1,4 +1,6 @@
-import { cache, packIds, unpackIds } from '#common'
+import type { Cache, MarkedForLaterIndex } from '#common'
+
+import { cache, packIds, savedIndexChanges, unpackIds } from '#common'
 
 /**
  * The set of works on your Marked for Later list, as of the last time we scraped
@@ -26,8 +28,75 @@ function normalize(userId: string): string {
   return userId.toLowerCase()
 }
 
+/** Told of each work that came onto the index or went off it, from this page or another. */
+export type SavedListener = (workId: string, saved: boolean) => void
+
+const listeners = new Set<SavedListener>()
+
+/**
+ * This page's own writes, oldest first, by {@link echoOf}: storage tells the
+ * page that wrote a value as well as every other, and a write of ours that
+ * arrives after a newer one would otherwise read as the newer one undone.
+ */
+const ownWrites: string[] = []
+
+function echoOf(entry: MarkedForLaterIndex): string {
+  return `${entry.updatedAt}:${entry.ids}`
+}
+
 function write(userId: string, ids: Set<string>): Promise<void> {
-  return cache.set({ markedForLater: { userId, updatedAt: Date.now(), ids: packIds(ids) } })
+  const entry = { userId, updatedAt: Date.now(), ids: packIds(ids) }
+  ownWrites.push(echoOf(entry))
+  return cache.set({ markedForLater: entry })
+}
+
+function announce(changes: Map<string, boolean>): void {
+  for (const [id, saved] of changes) {
+    for (const listener of listeners)
+      listener(id, saved)
+  }
+}
+
+/**
+ * Another page's write: taken in as this page's index, so a toggle here goes on
+ * from it rather than writing back a set from before it, and announced.
+ */
+function onCacheChange(change: Partial<Cache>): void {
+  const entry = change.markedForLater
+  if (!entry || !loaded)
+    return
+  const echo = ownWrites.indexOf(echoOf(entry))
+  if (echo >= 0) {
+    ownWrites.splice(0, echo + 1)
+    return
+  }
+  if (normalize(entry.userId) !== loaded.userId)
+    return
+  const changes = savedIndexChanges(loaded.ids, unpackIds(entry.ids))
+  // In place: the set is handed out ({@link markedForLaterIds}) and read live.
+  for (const [id, saved] of changes) {
+    if (saved)
+      loaded.ids.add(id)
+    else
+      loaded.ids.delete(id)
+  }
+  announce(changes)
+}
+
+/** From the first load on, so a toggle here goes on from what other pages wrote. Idempotent. */
+function hear(): void {
+  cache.addListener(onCacheChange)
+}
+
+/**
+ * Hear of every work that comes onto the index or goes off it once it has been
+ * loaded this run — by this page's toggles, and by any other page's — so what
+ * a page shows can follow a work saved for later in another tab. Returns the
+ * way to stop.
+ */
+export function onSavedChange(listener: SavedListener): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
 }
 
 /**
@@ -41,6 +110,7 @@ export async function loadMarkedForLaterIndex(userId: string): Promise<Set<strin
     return loaded.ids
   const entry = await cache.get('markedForLater')
   const ids = entry.userId === key ? unpackIds(entry.ids) : new Set<string>()
+  hear()
   loaded = { userId: key, ids }
   return ids
 }
@@ -59,7 +129,11 @@ export function markedForLaterIds(): ReadonlySet<string> | null {
 /** Replace the index with a freshly scraped list. */
 export async function saveMarkedForLaterIndex(userId: string, ids: Iterable<string>): Promise<void> {
   const key = normalize(userId)
+  const before = loaded?.userId === key ? loaded.ids : null
+  hear()
   loaded = { userId: key, ids: new Set(ids) }
+  if (before)
+    announce(savedIndexChanges(before, loaded.ids))
   await write(key, loaded.ids)
 }
 
@@ -82,4 +156,5 @@ export function noteMarkedForLater(id: string, saved: boolean): void {
   else
     loaded.ids.delete(id)
   void write(loaded.userId, loaded.ids)
+  announce(new Map([[id, saved]]))
 }

@@ -2,7 +2,7 @@ import type { Options, SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import { ADDON_CLASS, logger, toast } from '#common'
-import { countdown, onArchiveWait, WAIT_WORDS } from '#content_script/archiveFetch.js'
+import { watchWaitLine } from '#content_script/archiveFetch.js'
 import { hasNode } from '#content_script/blurb.js'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
@@ -815,26 +815,16 @@ function mountProgress(container: HTMLElement): ProgressPanel {
   container.replaceChildren(panel)
 
   let progressText = 'Preparing…'
-  let waitUntil = 0
-  let waitText = ''
-  let ticker: ReturnType<typeof setInterval> | undefined
+  let waitText: string | null = null
 
   const draw = (): void => {
-    const left = Math.max(0, waitUntil - Date.now())
-    if (left <= 0 && ticker !== undefined) {
-      clearInterval(ticker)
-      ticker = undefined
-    }
-    label.textContent = left > 0 ? `${waitText} — trying again in ${countdown(left)}` : progressText
+    label.textContent = waitText ?? progressText
   }
 
   // The pause is held for the whole pool, so one subscription says it once
   // rather than once per worker sitting inside it.
-  const unwatch = onArchiveWait((until, reason) => {
-    waitUntil = until
-    waitText = WAIT_WORDS[reason]
-    if (until && ticker === undefined)
-      ticker = setInterval(draw, 1000)
+  const unwatch = watchWaitLine((line) => {
+    waitText = line
     draw()
   })
 
@@ -857,10 +847,7 @@ function mountProgress(container: HTMLElement): ProgressPanel {
         fill.style.width = `${Math.round((Math.min(done, total) / total) * 100)}%`
       draw()
     },
-    dispose: () => {
-      unwatch()
-      clearInterval(ticker)
-    },
+    dispose: unwatch,
   }
 }
 
@@ -1071,6 +1058,9 @@ async function refresh(
   controller?.abort()
   const own = new AbortController()
   controller = own
+  // The list stays on screen while this runs, so a pause is all there is to
+  // say — and minutes of a bare "Updating…" would read as hung.
+  const unwatch = watchWaitLine(line => view.setUpdating(true, line))
   try {
     if (source.load) {
       await reload(source, view, options, own.signal, !topUp, force)
@@ -1138,6 +1128,7 @@ async function refresh(
       log.error(`Background refresh failed for ${source.id}`, err)
   }
   finally {
+    unwatch()
     if (controller === own)
       controller = null
   }

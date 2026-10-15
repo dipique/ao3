@@ -3,7 +3,7 @@ import type { Work } from '#content_script/blurb.js'
 import type { FilterState } from '#content_script/searchView/engine.ts'
 
 import { canonicalFilter, dayOf, getArchiveLink, listBase, mergeItems, PAGE_SIZE, pageUrl, planWindow, sourceLabel, toShortId } from '#common'
-import { archiveWaitRemaining, countdown, onArchiveWait, PATIENCE, WAIT_BUDGET, WAIT_WORDS, waitForArchive } from '#content_script/archiveFetch.js'
+import { archiveWaitRemaining, PATIENCE, WAIT_BUDGET, waitForArchive, watchWaitLine } from '#content_script/archiveFetch.js'
 import { matches } from '#content_script/searchView/engine.ts'
 import { applyHidden } from '#content_script/searchView/hidden.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
@@ -313,17 +313,14 @@ export async function fetchWindow(opts: FetchWindowOptions): Promise<FetchedWind
   let recount = true
 
   let progressText = 'Reading your tracked lists…'
-  let waitUntil = 0
-  let waitText = ''
+  let waitText: string | null = null
   const report = (): void => {
-    const left = Math.max(0, waitUntil - Date.now())
-    opts.onProgress?.(left > 0 ? `${waitText} — trying again in ${countdown(left)}` : progressText, requests, 0)
+    opts.onProgress?.(waitText ?? progressText, requests, 0)
   }
   // One subscription rather than one per request: a pause is held for every
   // caller at once, so it is one thing happening, and saying it once is right.
-  const unwatch = onArchiveWait((until, reason) => {
-    waitUntil = until
-    waitText = WAIT_WORDS[reason]
+  const unwatch = watchWaitLine((line) => {
+    waitText = line
     report()
   })
 

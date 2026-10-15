@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 // Node strips the TS types on import; archiveFetch.ts imports nothing at all, so
 // it loads under a plain `node --test`. `fetch` is stubbed per test and the
 // clock is mocked, which is the only way an hours-long budget is testable.
-import { archivePause, archiveWaitRemaining, BLIND_WAIT_STEP_MS, countdown, fetchWithRetry, MAX_WAIT_MS, onArchiveWait, PACE_EVERY, PACE_IDLE_RESET_MS, PACE_PAUSE_MS, PATIENCE, retryAfterMs, WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
+import { archivePause, archiveWaitRemaining, BLIND_WAIT_STEP_MS, countdown, fetchWithRetry, MAX_WAIT_MS, onArchiveWait, PACE_EVERY, PACE_IDLE_RESET_MS, PACE_PAUSE_MS, PATIENCE, retryAfterMs, WAIT_WORDS, waitLine, watchWaitLine } from '../../src/content_script/archiveFetch.ts'
 
 const MINUTE = 60_000
 
@@ -54,7 +54,7 @@ let clock = Date.UTC(2026, 0, 1)
 
 function useClock(t) {
   clock += 2 * LONGEST_RUN
-  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: clock })
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'], now: clock })
   return {
     now: () => Date.now(),
     /** Let pending promises settle, move the clock, let them settle again. */
@@ -593,5 +593,47 @@ describe('archiveFetch — a pause, as a reader watches it', () => {
     assert.equal(countdown(60_000), '1:00')
     assert.equal(countdown(296_000), '4:56')
     assert.equal(countdown(0), '0s')
+  })
+})
+
+describe('archiveFetch — the line a waiting reader is shown', () => {
+  test('what the pause is and how long it has left, while it lasts', () => {
+    const now = Date.UTC(2026, 0, 1)
+    assert.equal(waitLine(now + 296_000, 'refused', now), 'AO3 asked us to slow down — trying again in 4:56')
+    assert.equal(waitLine(now + 8_100, 'pacing', now), 'Giving AO3 a moment — trying again in 9s')
+  })
+
+  test('nothing once it is over', () => {
+    const now = Date.UTC(2026, 0, 1)
+    assert.equal(waitLine(now, 'refused', now), null)
+    assert.equal(waitLine(0, 'refused', now), null)
+  })
+
+  test('watched, it says a pause already under way at once, counts it down, and says when it is over', async (t) => {
+    const clk = useClock(t)
+    stubFetch(t, [{ status: 429, retryAfter: 5 }, { status: 200 }])
+    const pending = watch(fetchWithRetry(url))
+    await clk.until(() => archivePause() !== null, 1)
+
+    const lines = []
+    const stop = watchWaitLine(line => lines.push(line))
+    assert.equal(lines[0], 'AO3 asked us to slow down — trying again in 5s')
+    await clk.tick(1000)
+    assert.equal(lines.at(-1), 'AO3 asked us to slow down — trying again in 4s')
+    await clk.until(() => pending.done)
+    assert.equal(lines.at(-1), null)
+
+    const said = lines.length
+    stop()
+    await clk.tick(10_000)
+    assert.equal(lines.length, said, 'nothing more once it is stopped')
+  })
+
+  test('watched with nothing paused, it says nothing until there is', async (t) => {
+    useClock(t)
+    const lines = []
+    const stop = watchWaitLine(line => lines.push(line))
+    stop()
+    assert.deepEqual(lines, [])
   })
 })
