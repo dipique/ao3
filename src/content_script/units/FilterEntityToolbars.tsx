@@ -38,6 +38,19 @@ interface EntityEntry {
   link: HTMLElement
   id: string
   indicator: HTMLElement | null
+  /**
+   * Where the indicator goes when it doesn't sit with `link`: right after this
+   * element. The menu is still `link`'s, and `link` isn't made a trigger again.
+   */
+  after?: HTMLElement
+}
+
+/** One entity to decorate, as {@link FilterEntityToolbar.links} finds it. */
+interface EntityLink {
+  id: string
+  link: HTMLElement
+  clickToOpen?: boolean
+  after?: HTMLElement
 }
 
 // ---------------------------------------------------------------------------
@@ -274,9 +287,9 @@ abstract class FilterEntityToolbar extends Unit {
    * id and the link the menu/indicator hang off. Works use the blurb title;
    * series use each series link.
    */
-  protected links(): { id: string, link: HTMLElement, clickToOpen?: boolean }[] {
+  protected links(): EntityLink[] {
     const idRe = new RegExp(`^/${this.kind}/(\\d+)(?:/|$)`)
-    const out: { id: string, link: HTMLElement, clickToOpen?: boolean }[] = []
+    const out: EntityLink[] = []
     const selector = this.kind === 'works'
       ? '.blurb .header h4.heading a[href*="/works/"]'
       : 'a[href*="/series/"]'
@@ -297,10 +310,12 @@ abstract class FilterEntityToolbar extends Unit {
   override async ready(): Promise<void> {
     this.entries.length = 0
 
-    for (const { id, link, clickToOpen } of this.links()) {
-      const entry: EntityEntry = { link, id, indicator: existingIndicator(link) }
+    for (const { id, link, clickToOpen, after } of this.links()) {
+      const indicator = after ? existingIndicator(after, { after: true }) : existingIndicator(link)
+      const entry: EntityEntry = { link, id, indicator, after }
       this.entries.push(entry)
-      attachMenuTrigger(link, () => this.buildMenu(id, link), { clickToOpen })
+      if (!after)
+        attachMenuTrigger(link, () => this.buildMenu(id, link), { clickToOpen })
       this.syncIndicator(entry)
     }
 
@@ -784,10 +799,13 @@ abstract class FilterEntityToolbar extends Unit {
    * Place a freshly built indicator relative to its anchor. Blurb/series titles are
    * links, so the indicator sits right after them, inline in the heading. The work
    * page's own title is a bare `<h2>` block — append inside it so the indicator
-   * stays on the title's line instead of dropping to the next.
+   * stays on the title's line instead of dropping to the next. An entry placed
+   * elsewhere ({@link EntityEntry.after}) goes where it says.
    */
   protected insertIndicator(entry: EntityEntry, indicator: HTMLElement): void {
-    if (entry.link instanceof HTMLAnchorElement)
+    if (entry.after)
+      entry.after.after(indicator)
+    else if (entry.link instanceof HTMLAnchorElement)
       entry.link.after(indicator)
     else
       entry.link.append(indicator)
@@ -978,16 +996,27 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   /**
    * On the blurb-less work page the title link doesn't exist, so decorate the
    * page's own `<h2>` title with the same work menu (and indicator).
+   *
+   * The indicator is repeated beside the "Mark as Read" AO3 puts at the foot of
+   * a work on your Marked for Later list — where you are when you finish it —
+   * so a finer read mark can be chosen there rather than back up at the title.
+   * Its menu is the title's, so choosing one does exactly what it does there.
    */
-  protected override links(): { id: string, link: HTMLElement }[] {
+  protected override links(): EntityLink[] {
     const found = super.links()
     const title = workPageTitle(this.root)
     const id = workPageId()
+    if (!title || !id)
+      return found
     // The work page's own title opens on a plain click as well as the usual
     // right-click/long-press. Unlike a blurb's title it isn't a link, so there
     // is no navigation to suppress and nothing else a click could have meant.
-    if (title && id)
-      found.push({ id, link: title, clickToOpen: true })
+    found.push({ id, link: title, clickToOpen: true })
+    const foot = this.root.querySelector<HTMLElement>(
+      `#feedback ul.actions form.button_to[action*="/works/${id}/mark_as_read"]`,
+    )
+    if (foot)
+      found.push({ id, link: title, after: foot })
     return found
   }
 

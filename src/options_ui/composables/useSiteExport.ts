@@ -250,14 +250,20 @@ const savedRows = computed(() => savedListRows(joined.value, {
   jobOff: keys => offReason(view.value, keys),
 }))
 
+/** How many reads {@link reload} has begun: only the latest is drawn, so one that overlapped a newer one can't put back what it read. */
+let reloads = 0
+
 /** Re-read the lists and the cache index. Cheap enough to run after every action. */
 async function reload(): Promise<void> {
+  const reading = ++reloads
   const [snapshots, index, listed] = await Promise.all([listSnapshots(), readWorkTextIndex(), snapshotWorkIds()])
-  usage.value = summarizeWorkText(index)
   // Read from every stored list rather than from `snapshots`, which is filtered
   // to the ones this build can render — see {@link snapshotWorkIds}.
   const stranded = planOrphanDiscard(index, listed)
   const blurbs = await blurbOrphans(listed)
+  if (reading !== reloads)
+    return
+  usage.value = summarizeWorkText(index)
   orphans.value = {
     works: stranded.workIds.length,
     cached: stranded.usage.cached,
@@ -337,6 +343,13 @@ async function run(label: string, start: () => Promise<void>): Promise<void> {
 // Auto-resume: adopt whatever a previous session left unfinished, so opening
 // this page after a crash or a browser restart can offer to carry on.
 void loadJob().then(reload)
+
+// A stored list kept or changed by another page — a list opened on AO3 by its
+// own link keeps its copy there — is shown as it now stands.
+cache.addListener((change) => {
+  if ('searchLists' in change)
+    void reload()
+})
 
 export function useSiteExport() {
   return {

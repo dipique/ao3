@@ -103,8 +103,9 @@ describe('options UI — saved lists on their open URLs', { skip }, () => {
 /**
  * A filtered listing's Not cached, followed: its listing on AO3 opens on the
  * list's search view, though *Search a filtered listing's works* is off, and
- * the walk keeps the copy at the list's address. Back on the options page the
- * list is cached, and offers Download.
+ * the walk keeps the copy at the list's address. The options page, left open
+ * where the link was followed from, hears of the copy and shows the list
+ * cached, offering Download.
  */
 describe('options UI — a filtered listing kept from its open URL', { skip }, () => {
   const seed = savedLists([FILTERED])
@@ -116,45 +117,39 @@ describe('options UI — a filtered listing kept from its open URL', { skip }, (
 
   after(() => session?.close())
 
-  test('the hint\'s link keeps the copy, and the list then offers Download', async () => {
-    const uncached = await session.open({ seed, hash: '#saved-lists', viewport: { width: 1440, height: 900 } })
-    let link
+  test('the hint\'s link keeps the copy, and the open options page then shows it cached and offers Download', async () => {
+    const options = await session.open({ seed, hash: '#saved-lists', viewport: { width: 1440, height: 900 } })
     try {
-      const row = await uncached.savedList(FILTERED.id)
+      const row = await options.savedList(FILTERED.id)
       await until('the stored lists to be read', async () => (await part(row, 'caching'))[0] === 'Not cached')
-      assert.deepEqual(await uncached.controls(row, 'button', `Download ${FILTERED.title}`), [], 'nothing to download yet')
-      link = await (await uncached.control(row, 'link', HINT(FILTERED))).evaluate(a => a.href)
-      assert.deepEqual(uncached.problems(), [])
-    }
-    finally {
-      await uncached.close()
-    }
+      assert.deepEqual(await options.controls(row, 'button', `Download ${FILTERED.title}`), [], 'nothing to download yet')
+      const link = await (await options.control(row, 'link', HINT(FILTERED))).evaluate(a => a.href)
 
-    const tab = await openTab(session.browser, {
-      seed,
-      route: url => (url.pathname === FILTERED.url ? listingPage(url, { tagId: 'Bees', subnav: true }) : null),
-    })
-    let kept
-    try {
-      await visit(tab, link)
-      await until('the copy to be kept', async () => storedListIds((await stored(tab, 'cache.searchLists'))?.[FILTERED_KEY]).length === 2)
-      kept = await keptStore(tab)
-    }
-    finally {
-      await tab.close()
-    }
+      const tab = await openTab(session.browser, {
+        seed,
+        route: url => (url.pathname === FILTERED.url ? listingPage(url, { tagId: 'Bees', subnav: true }) : null),
+      })
+      let kept
+      try {
+        await visit(tab, link)
+        await until('the copy to be kept', async () => storedListIds((await stored(tab, 'cache.searchLists'))?.[FILTERED_KEY]).length === 2)
+        kept = await keptStore(tab)
+      }
+      finally {
+        await tab.close()
+      }
 
-    const cached = await session.open({ seed: kept, hash: '#saved-lists', viewport: { width: 1440, height: 900 } })
-    try {
-      const row = await cached.savedList(FILTERED.id)
+      // The listing's tab wrote into the storage every extension page shares,
+      // which tells each open page what changed.
+      await options.page.evaluate(items => window.browser.storage.local.set(items), kept)
       await until('the copy to be read', async () => (await part(row, 'caching'))[0] === '0 of 2 cached · 0 B')
-      const download = await cached.control(row, 'button', `Download ${FILTERED.title}`)
+      const download = await options.control(row, 'button', `Download ${FILTERED.title}`)
       assert.equal(await download.evaluate(el => el.disabled), false)
-      assert.deepEqual(await cached.controls(row, 'link', HINT(FILTERED)), [], 'cached, so no hint')
-      assert.deepEqual(cached.problems(), [])
+      assert.deepEqual(await options.controls(row, 'link', HINT(FILTERED)), [], 'cached, so no hint')
+      assert.deepEqual(options.problems(), [])
     }
     finally {
-      await cached.close()
+      await options.close()
     }
   })
 })
