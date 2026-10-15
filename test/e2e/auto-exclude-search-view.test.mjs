@@ -27,21 +27,28 @@ const SEED = {
   'option.rules': {
     enabled: true,
     colors: {},
-    filters: [{ target: 'F', value: 'Gone', matcher: 'exact', behavior: 'hide' }],
+    filters: [
+      { target: 'F', value: 'Gone', matcher: 'exact', behavior: 'hide' },
+      { target: 'f', value: 'Hide This Fandom', matcher: 'exact', behavior: 'hide' },
+      { target: 'C', value: 'Hide This Character', matcher: 'exact', behavior: 'hide' },
+    ],
   },
 }
 
 const PAGES = 2
 
-function blurb(id, title, tags, language = 'English') {
-  const tagList = ['marriage problems', ...tags]
-    .map(t => `<li class="freeforms"><a class="tag" href="https://archiveofourown.org/tags/${encodeURIComponent(t)}/works">${t}</a></li>`)
-    .join('')
+const tagLink = t => `<a class="tag" href="https://archiveofourown.org/tags/${encodeURIComponent(t)}/works">${t}</a>`
+
+function blurb(id, title, tags, { language = 'English', fandoms = ['A Fandom'], characters = [] } = {}) {
+  const tagList = [
+    ...characters.map(t => `<li class="characters">${tagLink(t)}</li>`),
+    ...['marriage problems', ...tags].map(t => `<li class="freeforms">${tagLink(t)}</li>`),
+  ].join('')
   return `
     <li class="work blurb group" id="work_${id}">
       <div class="header module">
         <h4 class="heading"><a href="https://archiveofourown.org/works/${id}">${title}</a> by <a rel="author" href="https://archiveofourown.org/users/s/pseuds/s">s</a></h4>
-        <h5 class="fandoms heading"><a class="tag" href="https://archiveofourown.org/tags/F/works">A Fandom</a></h5>
+        <h5 class="fandoms heading">${fandoms.map(tagLink).join(', ')}</h5>
       </div>
       <ul class="tags commas">${tagList}</ul>
       <dl class="stats">
@@ -59,7 +66,9 @@ const WORKS = {
   ],
   2: [
     blurb(3, 'A rule-gone one', ['Gone']),
-    blurb(4, 'A Spanish one', [], 'Español'),
+    blurb(4, 'A Spanish one', [], { language: 'Español' }),
+    blurb(5, 'A crossover', [], { fandoms: ['Other Fandom', 'Hide This Fandom'] }),
+    blurb(6, 'An ensemble', [], { characters: ['Other Character', 'Hide This Character'] }),
   ],
 }
 
@@ -190,6 +199,16 @@ describe('auto-excluding what the rules hide, in a search view', { skip }, () =>
       section.querySelector('.AO3E--search-view--sel-head').click()
     })
     assert.deepEqual(await excludedSection(), { shown: true, expanded: true, bodyShown: true, count: '1' })
+  })
+
+  test('excludes the fandom and the character the rules matched, not the ones listed before them', async () => {
+    const titles = await visibleTitles()
+    assert.ok(!titles.includes('A crossover'), `got ${JSON.stringify(titles)}`)
+    assert.ok(!titles.includes('An ensemble'), `got ${JSON.stringify(titles)}`)
+    assert.deepEqual(await facetRow('Hide This Fandom'), { shown: true, excluded: true })
+    assert.equal((await facetRow('Other Fandom'))?.excluded, false)
+    assert.deepEqual(await facetRow('Hide This Character'), { shown: true, excluded: true })
+    assert.equal((await facetRow('Other Character'))?.excluded, false)
   })
 
   test('a hide no filter can express still just takes the work away', async () => {

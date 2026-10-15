@@ -44,10 +44,13 @@ const SEED = {
   },
 }
 
-function blurb(id, title, tags, { rating = 'General Audiences', author = 's' } = {}) {
-  const tagList = tags
-    .map(t => `<li class="freeforms"><a class="tag" href="https://archiveofourown.org/tags/${encodeURIComponent(t)}/works">${t}</a></li>`)
-    .join('')
+const tagLink = t => `<a class="tag" href="https://archiveofourown.org/tags/${encodeURIComponent(t)}/works">${t}</a>`
+
+function blurb(id, title, tags, { rating = 'General Audiences', author = 's', fandoms = ['A Fandom'], characters = [] } = {}) {
+  const tagList = [
+    ...characters.map(t => `<li class="characters">${tagLink(t)}</li>`),
+    ...tags.map(t => `<li class="freeforms">${tagLink(t)}</li>`),
+  ].join('')
   return `
     <li class="work blurb group" id="work_${id}">
       <div class="header module">
@@ -56,7 +59,11 @@ function blurb(id, title, tags, { rating = 'General Audiences', author = 's' } =
           <a href="https://archiveofourown.org/works/${id}">${title}</a> by
           <a rel="author" href="https://archiveofourown.org/users/${author}/pseuds/${author}">${author}</a>
         </h4>
-        <h5 class="fandoms heading"><a class="tag" href="https://archiveofourown.org/tags/A%20Fandom/works">A Fandom</a></h5>
+        <h5 class="fandoms heading">
+          <span class="landmark">Fandoms:</span>
+          ${fandoms.map(tagLink).join(', ')}
+          &nbsp;
+        </h5>
       </div>
       <ul class="tags commas">${tagList}</ul>
     </li>`
@@ -105,6 +112,27 @@ const PAGE = `
 </div>
 `
 
+/** The content script run over `html` in a fresh browser, with storage seeded from `seed`. */
+async function openListing(seed, html) {
+  ensureBuilt()
+  const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
+
+  const browser = await puppeteer.launch({
+    executablePath: chromePath,
+    headless: 'new',
+    args: ['--no-first-run', '--no-default-browser-check'],
+  })
+  const page = await browser.newPage()
+  await page.goto('about:blank')
+  await page.evaluate(installMock, seed)
+  await page.evaluate((body) => {
+    document.body.innerHTML = body
+  }, html)
+  await page.addScriptTag({ content: js })
+  await settled(page)
+  return { browser, page }
+}
+
 /**
  * "Exclude hidden works from the search": a rule that takes a work out of the
  * listing outright also goes into AO3's own filter, so the next search never
@@ -116,22 +144,7 @@ describe('auto-excluding what the rules hide', { skip }, () => {
   let page
 
   before(async () => {
-    ensureBuilt()
-    const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
-    page = await browser.newPage()
-    await page.goto('about:blank')
-    await page.evaluate(installMock, SEED)
-    await page.evaluate((html) => {
-      document.body.innerHTML = html
-    }, PAGE)
-    await page.addScriptTag({ content: js })
-    await settled(page)
+    ({ browser, page } = await openListing(SEED, PAGE))
   }, { timeout: 180000 })
 
   after(async () => {
@@ -189,5 +202,150 @@ describe('auto-excluding what the rules hide', { skip }, () => {
 
   test('submits nothing — the reader presses Sort and Filter', async () => {
     assert.equal(page.url(), 'about:blank')
+  })
+})
+
+/**
+ * Each work here carries the tag its rule hides *after* one no rule touches, in
+ * its fandoms, its characters and its additional tags. Both fandoms are known by
+ * id and listed in the sidebar, so either could be ticked.
+ */
+const MATCHED_SEED = {
+  'option.autoExcludeHidden': true,
+  'option.rules': {
+    enabled: true,
+    colors: {},
+    filters: [
+      { target: 'f', value: 'Hide This Fandom', matcher: 'exact', behavior: 'hide' },
+      { target: 'C', value: 'Hide This Character', matcher: 'exact', behavior: 'hide' },
+      { target: 'F', value: 'Hide This Tag', matcher: 'exact', behavior: 'hide' },
+    ],
+  },
+  'fandomCache.fandoms': {
+    'other fandom': { id: 501, name: 'Other Fandom' },
+    'hide this fandom': { id: 502, name: 'Hide This Fandom' },
+  },
+}
+
+const MATCHED_PAGE = `
+<div id="main">
+  <ol class="work index group">
+    ${blurb(1, 'A crossover', [], { fandoms: ['Other Fandom', 'Hide This Fandom'] })}
+    ${blurb(2, 'An ensemble', [], { characters: ['Other Character', 'Hide This Character'] })}
+    ${blurb(3, 'A tagged one', ['Other Tag', 'Hide This Tag'])}
+  </ol>
+
+  <form id="work-filters" action="/tags/x/works">
+    <dd>
+      <input id="work_search_other_tag_names" name="work_search[other_tag_names]" type="text" value="">
+    </dd>
+    <dd>
+      <input id="work_search_excluded_tag_names" name="work_search[excluded_tag_names]" type="text" value="">
+    </dd>
+    <dd id="exclude_fandom_tags" class="expandable fandom tags">
+      <ul>
+        <li><label for="exclude_work_search_fandom_ids_501"><input type="checkbox" name="exclude_work_search[fandom_ids][]" id="exclude_work_search_fandom_ids_501" value="501"><span class="indicator"></span><span>Other Fandom (20)</span></label></li>
+        <li><label for="exclude_work_search_fandom_ids_502"><input type="checkbox" name="exclude_work_search[fandom_ids][]" id="exclude_work_search_fandom_ids_502" value="502"><span class="indicator"></span><span>Hide This Fandom (3)</span></label></li>
+      </ul>
+    </dd>
+  </form>
+</div>
+`
+
+describe('auto-excluding the tag the rule matched, not the first one listed', { skip }, () => {
+  let browser
+  let page
+
+  before(async () => {
+    ({ browser, page } = await openListing(MATCHED_SEED, MATCHED_PAGE))
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  const excluded = () => page.evaluate(() => {
+    const { value } = document.getElementById('work_search_excluded_tag_names')
+    return value.split(',').map(name => name.trim()).filter(Boolean)
+  })
+  const excludedFandoms = () => page.evaluate(() =>
+    [...document.querySelectorAll('input[name="exclude_work_search[fandom_ids][]"]')]
+      .filter(input => input.checked)
+      .map(input => input.value))
+
+  test('ticks the fandom the rule hid, not the one listed before it', async () => {
+    assert.deepEqual(await excludedFandoms(), ['502'])
+  })
+
+  test('types the character and the additional tag the rules hid, not the ones listed before them', async () => {
+    assert.deepEqual(await excluded(), ['Hide This Character', 'Hide This Tag'])
+  })
+})
+
+/**
+ * AO3 merges many fandoms that aren't one — a subreddit, a podcast — into
+ * Original Work as synonyms, so their own tag pages redirect there and the id
+ * learned for them is Original Work's. Excluding that id would take every
+ * original work out of the search; the work's own tag, typed in by name, takes
+ * out only the works that carry it.
+ */
+const ORIGINAL_WORK_ID = 2692
+const MERGED_FANDOM = 'GoneWildAudio (r/gonewildaudio)'
+
+const MERGED_SEED = {
+  'option.autoExcludeHidden': true,
+  'option.rules': {
+    enabled: true,
+    colors: {},
+    filters: [{ target: 'f', value: MERGED_FANDOM, matcher: 'exact', behavior: 'hide' }],
+  },
+  'fandomCache.fandoms': {
+    'original work': { id: ORIGINAL_WORK_ID, name: 'Original Work' },
+    [MERGED_FANDOM.toLowerCase()]: { id: ORIGINAL_WORK_ID, name: MERGED_FANDOM },
+  },
+}
+
+const MERGED_PAGE = `
+<div id="main">
+  <ol class="work index group">
+    ${blurb(1, 'An audio script', [], { fandoms: ['Other Fandom', MERGED_FANDOM] })}
+  </ol>
+
+  <form id="work-filters" action="/tags/x/works">
+    <dd>
+      <input id="work_search_other_tag_names" name="work_search[other_tag_names]" type="text" value="">
+    </dd>
+    <dd>
+      <input id="work_search_excluded_tag_names" name="work_search[excluded_tag_names]" type="text" value="">
+    </dd>
+    <dd id="exclude_fandom_tags" class="expandable fandom tags">
+      <ul>
+        <li><label for="exclude_work_search_fandom_ids_${ORIGINAL_WORK_ID}"><input type="checkbox" name="exclude_work_search[fandom_ids][]" id="exclude_work_search_fandom_ids_${ORIGINAL_WORK_ID}" value="${ORIGINAL_WORK_ID}"><span class="indicator"></span><span>Original Work (20)</span></label></li>
+      </ul>
+    </dd>
+  </form>
+</div>
+`
+
+describe('auto-excluding a fandom AO3 merged into Original Work', { skip }, () => {
+  let browser
+  let page
+
+  before(async () => {
+    ({ browser, page } = await openListing(MERGED_SEED, MERGED_PAGE))
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  test('leaves Original Work itself alone', async () => {
+    const checked = await page.evaluate(id => document.getElementById(`exclude_work_search_fandom_ids_${id}`).checked, ORIGINAL_WORK_ID)
+    assert.equal(checked, false)
+  })
+
+  test('types the merged fandom\'s own name into the excluded tags field instead', async () => {
+    const value = await page.evaluate(() => document.getElementById('work_search_excluded_tag_names').value)
+    assert.equal(value, MERGED_FANDOM)
   })
 })

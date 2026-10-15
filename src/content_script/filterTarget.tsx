@@ -11,6 +11,7 @@ import type { MenuItem } from './contextMenu.tsx'
 import type { CheckboxGroup } from './filterSidebar.js'
 import type { FacetDir, FacetKey } from './searchView/engine.ts'
 
+import { mergedIntoOriginalWork, ORIGINAL_WORK } from './fandomSynonyms.ts'
 import {
   hasCheckboxGroupFields,
   hasFandomCheckbox,
@@ -152,10 +153,17 @@ export function nativeTagTarget(): FilterTarget | null {
  * The sidebar's fandom filter, which works by numeric id — so a displayed name
  * has to be resolved first, from the bundled index, the learned cache, or (once,
  * on demand) the fandom's own page at `href`.
+ *
+ * A fandom that resolves to Original Work without being it goes to the text-tag
+ * fields by name instead (see {@link mergedIntoOriginalWork}), and is left
+ * alone on a page that has none.
  */
 export function nativeFandomTarget(href?: string): FilterTarget | null {
   if (!hasFandomFilterFields())
     return null
+  const byName = nativeTagTarget()
+  const filtersByName = (value: string, id: number | null) =>
+    mergedIntoOriginalWork(value, id, resolveFandomIdSync(ORIGINAL_WORK))
   return {
     kind: 'native',
     dirs: NATIVE_DIRS,
@@ -163,6 +171,8 @@ export function nativeFandomTarget(href?: string): FilterTarget | null {
       if (dir === 'require')
         return false
       const id = resolveFandomIdSync(value)
+      if (filtersByName(value, id))
+        return byName?.isSelected(dir, value) ?? false
       return id != null && isFandomSelected(dir, id)
     },
     toggle: (dir, value) => {
@@ -172,7 +182,9 @@ export function nativeFandomTarget(href?: string): FilterTarget | null {
         let id = resolveFandomIdSync(value)
         if (id == null && href)
           id = await resolveFandomIdWithFetch(value, href)
-        if (id != null)
+        if (filtersByName(value, id))
+          byName?.toggle(dir, value)
+        else if (id != null)
           toggleFandomFilter(dir, id, value)
       })()
     },
@@ -183,6 +195,8 @@ export function nativeFandomTarget(href?: string): FilterTarget | null {
       if (dir === 'require')
         return false
       const id = resolveFandomIdSync(value)
+      if (filtersByName(value, id))
+        return byName?.hasControl(dir, value) ?? false
       return id != null && hasFandomCheckbox(dir, id)
     },
   }
