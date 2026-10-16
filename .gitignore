@@ -9,3 +9,4 @@ dist/
 ao3-enhancements/
 
 *.tmp.mjs
+*.tsbuildinfo
