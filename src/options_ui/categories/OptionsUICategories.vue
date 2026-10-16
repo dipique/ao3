@@ -26,5 +26,7 @@ const { query, searching, matchCount, total } = useOptionSearch()
     <Reading />
     <SyncBackups />
     <Advanced />
+
+    <RuleTimings v-if="!searching" />
   </div>
 </template>

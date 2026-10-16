@@ -6,6 +6,7 @@ import { watchWaitLine } from '#content_script/archiveFetch.js'
 import { hasNode } from '#content_script/blurb.js'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
+import { recordRuleTiming } from '#content_script/ruleTiming.ts'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
@@ -740,7 +741,7 @@ function undecorated(works: Work[]): Work[] {
  */
 function prepare(source: SearchSource, works: Work[], options: Options, fresh: boolean): FacetValueRef[] {
   source.prepare?.(works, { fresh })
-  return applyHidden(works, options, { hidesNothing: source.hidesNothing, log: log.log })
+  return applyHidden(works, options, { hidesNothing: source.hidesNothing, log: log.log, timed: recordRuleTiming })
 }
 
 /** Write the blurb snapshot of a read just made, plus whatever else the source keeps in step with it. */

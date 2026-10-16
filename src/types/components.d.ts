@@ -138,6 +138,7 @@ declare module 'vue' {
     RekaTooltipRoot: typeof import('reka-ui')['TooltipRoot']
     RekaTooltipTrigger: typeof import('reka-ui')['TooltipTrigger']
     ReviewCell: typeof import('./../options_ui/components/lists/ReviewCell.vue')['default']
+    RuleTimings: typeof import('./../options_ui/components/RuleTimings.vue')['default']
     SavedListItem: typeof import('./../options_ui/components/lists/SavedListItem.vue')['default']
     SavedLists: typeof import('./../options_ui/components/lists/SavedLists.vue')['default']
     Select: typeof import('./../options_ui/components/basic/Select/Select.vue')['default']

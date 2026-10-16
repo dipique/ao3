@@ -36,6 +36,52 @@ describe('ruleValueMatches', () => {
   test('an invalid regex matches nothing rather than throwing', () => {
     assert.equal(ruleValueMatches({ value: '(', matcher: 'regex' }, '('), false)
   })
+
+  /** How many times `pattern` is compiled while `run` runs. */
+  function compilations(pattern, run) {
+    const Original = globalThis.RegExp
+    let count = 0
+    globalThis.RegExp = new Proxy(Original, {
+      construct(target, args) {
+        if (args[0] === pattern)
+          count++
+        return Reflect.construct(target, args)
+      },
+    })
+    try {
+      run()
+    }
+    finally {
+      globalThis.RegExp = Original
+    }
+    return count
+  }
+
+  test('a regex is compiled once, however many names it is tested against', () => {
+    const pattern = '^compiled once'
+    const count = compilations(pattern, () => {
+      for (const subject of ['Compiled once', 'compiled twice', 'Not compiled once'])
+        ruleValueMatches({ value: pattern, matcher: 'regex' }, subject)
+    })
+    assert.equal(count, 1)
+  })
+
+  test('an invalid regex is not compiled again either', () => {
+    const pattern = '(never closed'
+    const count = compilations(pattern, () => {
+      for (let i = 0; i < 3; i++)
+        assert.equal(ruleValueMatches({ value: pattern, matcher: 'regex' }, pattern), false)
+    })
+    assert.equal(count, 1)
+  })
+
+  test('a rule whose pattern changes matches by the new one', () => {
+    const live = { value: '^old', matcher: 'regex' }
+    assert.ok(ruleValueMatches(live, 'Old Name'))
+    live.value = '^new'
+    assert.ok(!ruleValueMatches(live, 'Old Name'))
+    assert.ok(ruleValueMatches(live, 'New Name'))
+  })
 })
 
 describe('rulePriority', () => {

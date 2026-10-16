@@ -1,4 +1,5 @@
 import type { Tag } from './data.ts'
+import type { RuleTiming } from './ruleTiming.ts'
 import type { AnswerRefusal } from './syncConsistency.ts'
 import type { toast } from './toast/toast.tsx'
 
@@ -187,4 +188,7 @@ export const api = /* @__PURE__ */ createAPI<{
   getSyncStatus: () => Promise<SyncStatus>
   listBackups: () => Promise<BackupSummary[]>
   restoreBackup: (key: string) => Promise<boolean>
+
+  /** Add one pass of the rules to the stored record of them. */
+  recordRuleTiming: (entry: RuleTiming) => Promise<boolean>
 }>()

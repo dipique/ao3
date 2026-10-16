@@ -4,6 +4,7 @@ import type { FilterState } from '#content_script/searchView/engine.ts'
 
 import { canonicalFilter, dayOf, getArchiveLink, listBase, mergeItems, PAGE_SIZE, pageUrl, planWindow, sourceLabel, toShortId } from '#common'
 import { archiveWaitRemaining, PATIENCE, WAIT_BUDGET, waitForArchive, watchWaitLine } from '#content_script/archiveFetch.js'
+import { recordRuleTiming } from '#content_script/ruleTiming.ts'
 import { matches } from '#content_script/searchView/engine.ts'
 import { applyHidden } from '#content_script/searchView/hidden.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
@@ -342,7 +343,7 @@ export async function fetchWindow(opts: FetchWindowOptions): Promise<FetchedWind
         // the *whole* set carries, but a work is out of the results either way,
         // and out of the results is all counting asks.) The set that comes back
         // is stamped once more below, so what the caller gets is coherent.
-        applyHidden(fresh, options)
+        applyHidden(fresh, options, { timed: recordRuleTiming })
         fresh = []
         recount = true
       }
@@ -724,7 +725,7 @@ function assemble(opts: AssembleOptions): FetchedWindow {
 
   // Once more over exactly the set going out, so that a work's `hidden` and
   // `filtered` stamps describe this list rather than the page it arrived on.
-  applyHidden(works, options)
+  applyHidden(works, options, { timed: recordRuleTiming })
 
   // Each list's page-1 count is everything its query holds from the window's
   // start through today, so the sum less the window is what is still waiting. A

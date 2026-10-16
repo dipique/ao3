@@ -422,21 +422,37 @@ export function ruleValueMatches(rule: Pick<Rule, 'value' | 'matcher'>, subject:
   if (rule.matcher === 'contains')
     return subject.toLowerCase().includes(rule.value.toLowerCase())
 
-  if (rule.matcher === 'regex') {
-    try {
-      // Case-insensitivity is the `i` flag's job, not `toLowerCase()`'s: lowering
-      // the *pattern* rewrites every negated class into its opposite (`\S`→`\s`,
-      // `\D`→`\d`, `\W`→`\w`, `\B`→`\b`), so `omega\S+verse` used to match the
-      // one set of tags the reader meant to exclude.
-      return new RegExp(rule.value, 'i').test(subject)
-    }
-    catch {
-      // An invalid regex matches nothing rather than throwing mid-render.
-      return false
-    }
-  }
+  if (rule.matcher === 'regex')
+    return ruleRegex(rule.value)?.test(subject) ?? false
 
   return rule.value === subject
+}
+
+/**
+ * Every pattern compiled so far, by its source; null for one that doesn't
+ * compile. A listing tests each regex rule against every tag of every work, so
+ * compiling it once per test would be most of what the rule costs.
+ */
+const compiledRegexes = new Map<string, RegExp | null>()
+
+function ruleRegex(pattern: string): RegExp | null {
+  let compiled = compiledRegexes.get(pattern)
+  if (compiled !== undefined)
+    return compiled
+  try {
+    // Case-insensitivity is the `i` flag's job, not `toLowerCase()`'s: lowering
+    // the *pattern* rewrites every negated class into its opposite (`\S`→`\s`,
+    // `\D`→`\d`, `\W`→`\w`, `\B`→`\b`), so `omega\S+verse` used to match the
+    // one set of tags the reader meant to exclude. No `g` flag either, so
+    // `test` keeps no position between one name and the next.
+    compiled = new RegExp(pattern, 'i')
+  }
+  catch {
+    // An invalid regex matches nothing rather than throwing mid-render.
+    compiled = null
+  }
+  compiledRegexes.set(pattern, compiled)
+  return compiled
 }
 
 /** Whether a tag-targeted rule matches a given tag (by type, then name). */

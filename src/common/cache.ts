@@ -1,3 +1,4 @@
+import type { RuleTiming } from './ruleTiming.ts'
 import type { ReviewBasis, ReviewClaim } from './trackedLists.ts'
 
 import { createStorage } from './storage.ts'
@@ -206,6 +207,8 @@ export interface Cache {
   trackedReview: TrackedReviewCache
   /** Which page is gathering the review window, for the others to wait on (see {@link ReviewClaim}). */
   trackedReviewClaim: ReviewClaim
+  /** The latest passes of the rules over a set of works, oldest first (see {@link RuleTiming}). */
+  ruleTimings: RuleTiming[]
 }
 
 export const cache = createStorage<Cache>({
@@ -223,6 +226,7 @@ export const cache = createStorage<Cache>({
     // its end say "no window yet" without a second flag to keep in step.
     trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', target: 0, sources: {}, days: {}, failed: [], retired: '' },
     trackedReviewClaim: { reviewedThrough: 0, listsSig: '', target: 0, by: '', at: 0 },
+    ruleTimings: [],
   },
 })
 

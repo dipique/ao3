@@ -265,6 +265,7 @@ declare global {
   const useRegexCheck: typeof import('../options_ui/composables/useRegexCheck').useRegexCheck
   const useRegexRunner: typeof import('../options_ui/composables/useRegexRunner').useRegexRunner
   const useResizeObserver: typeof import('@vueuse/core').useResizeObserver
+  const useRuleTimings: typeof import('../options_ui/composables/useRuleTimings').useRuleTimings
   const useSSRWidth: typeof import('@vueuse/core').useSSRWidth
   const useSavedLists: typeof import('../options_ui/composables/useSavedLists').useSavedLists
   const useScreenOrientation: typeof import('@vueuse/core').useScreenOrientation

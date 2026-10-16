@@ -21,6 +21,7 @@ import {
 } from '#content_script/filterTarget.js'
 import { markIcon } from '#content_script/markIcons.js'
 import { describeRemoval } from '#content_script/removalLog.js'
+import { recordRuleTiming } from '#content_script/ruleTiming.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -316,20 +317,33 @@ export class HideWorks extends Unit {
 
     const blurbElements = this.rootBlurbs()
 
+    const started = performance.now()
+    let works = 0
+    let matchMs = 0
+    let pageMs = 0
     let usedFandomExclude = false
     for (const blurbElement of blurbElements) {
+      works++
       // A search view's blurb was parsed already, when its list was read.
       const blurb = knownBlurb(blurbElement) ?? getBlurb(blurbElement)
+      const matchStarted = performance.now()
       const { mode, reasons, kinds } = this.processBlurb(blurb)
+      matchMs += performance.now() - matchStarted
 
       if (!mode)
         continue
 
       const removal = handedToFilter(blurbElement) ? 'collapse' : mode
       this.logger.log(describeRemoval(removal, blurb, reasons), blurbElement)
+      const pageStarted = performance.now()
       if (this.hideWork(blurbElement, removal, reasons, kinds))
         usedFandomExclude = true
+      pageMs += performance.now() - pageStarted
     }
+    // A search view's per-blurb runs are left out: its whole set was weighed,
+    // and recorded, before any blurb was shown (see `applyHidden`).
+    if (this.root === document)
+      recordRuleTiming({ at: Date.now(), where: 'page', works, rules: this.run.rules, ms: performance.now() - started, matchMs, pageMs })
 
     // A fandom exclude button pointed at the sidebar needs the id lookup to show
     // its initial state and to filter on click. Load it lazily, then re-sync any
@@ -804,4 +818,9 @@ function tagExcludeTarget(tag: BlurbTag): ExcludeTarget {
  */
 export function hideVerdict(blurb: Blurb, options: Options): HideVerdict {
   return new HideWorks(options).processBlurb(blurb)
+}
+
+/** The rules {@link hideVerdict} weighs: the enabled ones able to hide or show a work. */
+export function hidingRules(options: Options): Rule[] {
+  return runState(options).rules
 }

@@ -1,4 +1,4 @@
-import { api, cache, logBanner, options, SYNC_SCHEMA_VERSION, syncMeta } from '#common'
+import { api, appendRuleTiming, cache, logBanner, options, SYNC_SCHEMA_VERSION, syncMeta } from '#common'
 
 import { listBackups, restoreBackup } from './backups.ts'
 import { checkBuild } from './buildCheck.ts'
@@ -78,6 +78,16 @@ api.getSyncStatus.addListener(async () => getSyncStatus())
 api.listBackups.addListener(async () => listBackups())
 api.restoreBackup.addListener(async (key) => {
   await restoreBackup(key)
+  return true
+})
+
+// One append at a time: each reads the list the one before it wrote.
+let ruleTimingWrites = Promise.resolve()
+api.recordRuleTiming.addListener(async (entry) => {
+  ruleTimingWrites = ruleTimingWrites
+    .then(async () => cache.set({ ruleTimings: appendRuleTiming(await cache.get('ruleTimings'), entry) }))
+    .catch(error => console.error('[ruleTiming] not recorded', error))
+  await ruleTimingWrites
   return true
 })
 

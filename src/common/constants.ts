@@ -57,3 +57,13 @@ export const REGEX_TIME_BUDGET_MS = 1000
  * between, and alike on every display, whatever its frame rate.
  */
 export const REGEX_CHECKING_HOLD_MS = 50
+
+/**
+ * How far back the record of ruleset evaluations reaches, in milliseconds.
+ * Older evaluations are still kept while there are fewer than
+ * {@link RULE_TIMING_MIN_KEPT} of them.
+ */
+export const RULE_TIMING_WINDOW_MS = 7 * 24 * 60 * 60_000
+
+/** How many ruleset evaluations are kept however old they are. */
+export const RULE_TIMING_MIN_KEPT = 100
