@@ -15,7 +15,7 @@ import { latestReviewable, REVIEW_NAME, reviewBlock, reviewedThroughFrom, review
  * what only the review uses is off and says why.
  */
 const { enabled, target, reviewedThrough, lists } = useOption('trackedLists')
-const { review, userId, view: job, cacheWorks, downloadSite, stop, resume, discard } = useSiteExport()
+const { review, userId, view: job, cacheWorks, downloadSite, stop, cancel, resume, discard } = useSiteExport()
 const now = useNow({ interval: 60_000 })
 
 const block = computed(() => reviewBlock({
@@ -219,10 +219,15 @@ function download(): void {
                     :off-id="offlineOffId"
                   />
                 </template>
-                <button v-else-if="block.actions === 'stop'" type="button" class="outline-btn small-btn" @click="stop()">
-                  <span class="i-tabler-player-stop" aria-hidden="true" />
-                  Stop
-                </button>
+                <template v-else-if="block.actions === 'stop'">
+                  <button type="button" class="outline-btn small-btn" @click="stop()">
+                    <span class="i-tabler-player-pause" aria-hidden="true" />
+                    Pause
+                  </button>
+                  <button type="button" class="outline-btn small-btn" @click="cancel()">
+                    Cancel
+                  </button>
+                </template>
                 <template v-else>
                   <button type="button" class="primary-btn small-btn" @click="resume()">
                     <span class="i-tabler-player-play" aria-hidden="true" />

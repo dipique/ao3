@@ -1,14 +1,19 @@
 import type { SnapshotDescriptor } from '#common'
 import type { WaitReason } from '#content_script/archiveFetch.js'
 import type { Work } from '#content_script/blurb.js'
-import type { RefreshOptions } from '#content_script/searchView/refresh.js'
+import type { FollowState, ListRefresh, RefreshHolder, RefreshOutcome } from '#content_script/searchView/listRefresh.ts'
+import type { RefreshOptions, RefreshResult } from '#content_script/searchView/refresh.js'
+import type { Hold } from '#content_script/searchView/refreshClaim.ts'
 
 import { createLogger, options, readWorkIds, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
 import { onArchiveWait, PATIENCE } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
+import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
 import { readSnapshotData } from '#content_script/searchView/cache.js'
+import { followState, refreshStep, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
+import { acquireRefresh, awaitRefresh, readRefresh, requestCancel } from '#content_script/searchView/refreshClaim.ts'
 
 import type { WorkFreshness } from './workText.ts'
 
@@ -131,6 +136,10 @@ let warnings: string[] = []
 let waitingUntil: number | null = null
 let waitReason: WaitReason | null = null
 let controller: AbortController | null = null
+/** The running job is to be thrown away once it stops, not left to continue. */
+let cancelling = false
+/** A refresh another page runs that the job's refresh step is waiting on, for a Cancel to name. */
+let following: { cacheKey: string, id: string } | null = null
 
 let status: JobStatus = { job: null, running: false, message: '', error: null, warnings: [], waitingUntil: null, waitReason: null }
 
@@ -156,6 +165,17 @@ export function subscribeJob(listener: Listener): () => void {
     listeners.delete(listener)
   }
 }
+
+// Another options page threw away the job this one holds as paused: so does this one.
+browser.storage.onChanged.addListener((changes, area) => {
+  const change = changes[SITE_EXPORT_JOB_KEY]
+  if (area !== 'local' || !change || change.newValue !== undefined || running || !current?.steps.length)
+    return
+  current = null
+  error = null
+  warnings = []
+  publish()
+})
 
 /** The stored job, if a previous run left one unfinished. */
 export async function readJob(): Promise<ExportJob | null> {
@@ -248,6 +268,27 @@ export function stopJob(): void {
   controller?.abort()
 }
 
+/**
+ * Stop the job and throw it away: the reader doesn't want it finished, now or
+ * later. A refresh on another page that the job is waiting on is asked to stop
+ * too, since this job's refresh is that one.
+ */
+export async function cancelJob(): Promise<void> {
+  const elsewhere = following ?? (running && current?.steps[0] === 'refreshing' ? await refreshElsewhere(current.cacheKey) : null)
+  if (elsewhere)
+    void requestCancel(elsewhere.cacheKey, elsewhere.id).catch(err => log.error('Could not ask for the refresh to stop', err))
+  if (!running)
+    return discardJob()
+  cancelling = true
+  stopJob()
+}
+
+/** The refresh of `cacheKey` another page is running now, if there is one: the one a job about to follow it is waiting on. */
+async function refreshElsewhere(cacheKey: string): Promise<{ cacheKey: string, id: string } | null> {
+  const stored = await readRefresh(cacheKey).catch(() => null)
+  return stored && refreshStep(stored, PAGE_RUN, Date.now()) === 'follow' ? { cacheKey, id: stored.id } : null
+}
+
 /** Throw the stored job away — the reader has decided they don't want it finished. */
 export async function discardJob(): Promise<void> {
   stopJob()
@@ -298,7 +339,7 @@ async function drive(job: ExportJob): Promise<void> {
     }
   }
   catch (err) {
-    // A Stop is the reader's doing, not a failure, so it is logged quietly.
+    // A Pause or a Cancel is the reader's doing, not a failure, so it is logged quietly.
     if (signal.aborted) {
       log.log('Site export job stopped', err)
     }
@@ -314,11 +355,17 @@ async function drive(job: ExportJob): Promise<void> {
     message = ''
     waitingUntil = null
     waitReason = null
-    if (job.blocked === 'rate-limited' && !error) {
+    if (cancelling) {
+      cancelling = false
+      current = null
+      error = null
+      warnings = []
+    }
+    else if (job.blocked === 'rate-limited' && !error) {
       error = 'AO3 kept asking us to wait, so the run stopped after waiting it out for as long as is sensible. '
         + 'Everything fetched so far is saved, and nothing is held against the works that were still queued — press Continue when you like.'
     }
-    if (!job.steps.length && !job.blocked)
+    if (!current || (!job.steps.length && !job.blocked))
       await forget()
     else
       await persist(job)
@@ -326,12 +373,122 @@ async function drive(job: ExportJob): Promise<void> {
   }
 }
 
+/**
+ * Refresh the job's list. A list that shares its refresh between pages
+ * (`sharesRefresh`) is refreshed by one page at a time: while another page is
+ * refreshing it, the step waits for that refresh, says how it is going, and
+ * takes its end as its own; should that page drop it, the step refreshes it
+ * here. A claim lost to a page that claimed it at the same moment is followed
+ * in the same way.
+ */
 async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
+  if (!sharesRefresh(job.descriptor.sourceId)) {
+    await refreshHere(job, signal, null)
+    return
+  }
+  // Since the job was last written: a refresh that landed while it was paused
+  // is still the one it was waiting for.
+  const before = followState(await readRefresh(job.cacheKey), PAGE_RUN, job.updatedAt, Date.now())
+  if (before.kind === 'landed')
+    return endFollowed(job, before)
+  for (;;) {
+    const lost = new AbortController()
+    const acquired = await acquireRefresh(job.cacheKey, { holder: 'options', onCancel: () => void cancelJob(), onLost: leaving => leaving ? stopJob() : lost.abort() })
+    if (acquired.kind === 'hold' && await refreshHere(job, signal, acquired.hold, lost.signal))
+      return
+    signal.throwIfAborted()
+    const ended = await followElsewhere(job, signal)
+    if (ended.state.kind !== 'free')
+      return endFollowed(job, ended.state, ended.holder)
+    signal.throwIfAborted()
+  }
+}
+
+/** Where a refresh another page runs is said to run. */
+const ELSEWHERE: Readonly<Record<RefreshHolder, string>> = { page: 'in an AO3 tab', options: 'in another options tab' }
+
+/** Wait for the refresh of the job's list another page is running, mirroring its progress. */
+async function followElsewhere(job: ExportJob, signal: AbortSignal): Promise<{ state: Exclude<FollowState, { kind: 'following' }>, holder: RefreshHolder }> {
+  let holder: RefreshHolder = 'page'
+  const mirror = (claim: ListRefresh): void => {
+    holder = claim.holder
+    following = { cacheKey: job.cacheKey, id: claim.id }
+    job.done = claim.done
+    job.total = claim.total
+    waitingUntil = claim.waitUntil || null
+    waitReason = claim.waitReason
+    message = `Waiting for the refresh ${ELSEWHERE[claim.holder]}`
+    publish()
+  }
+  try {
+    return { state: await awaitRefresh(job.cacheKey, job.updatedAt, mirror, signal), holder }
+  }
+  finally {
+    following = null
+    waitingUntil = null
+    waitReason = null
+  }
+}
+
+/** Take the end of a refresh another page ran as the end of the job's own. */
+function endFollowed(job: ExportJob, state: Exclude<FollowState, { kind: 'following' | 'free' }>, holder: RefreshHolder = 'page'): void {
+  if (state.kind === 'landed') {
+    job.queue = []
+    job.total = 0
+    job.done = 0
+    return
+  }
+  if (state.outcome === 'blocked') {
+    job.blocked = 'rate-limited'
+    return
+  }
+  // The reader stopped it where it ran, and this job's refresh was that one.
+  if (state.outcome === 'cancelled') {
+    cancelling = true
+    stopJob()
+    return
+  }
+  throw new Error(`The refresh ${ELSEWHERE[holder]} didn’t store the list, so it was left as it was. Try again when you like.`)
+}
+
+/**
+ * Refresh the job's list from here, saying how it goes in `hold`'s claim when
+ * it holds one. False when the claim was `lost` before the refresh was done.
+ */
+async function refreshHere(job: ExportJob, signal: AbortSignal, hold: Hold | null, lost?: AbortSignal): Promise<boolean> {
+  let outcome: RefreshOutcome = 'dropped'
+  const either = new AbortController()
+  const stop = (): void => either.abort()
+  signal.addEventListener('abort', stop)
+  lost?.addEventListener('abort', stop)
+  if (signal.aborted || lost?.aborted)
+    stop()
+  try {
+    const result = await fetchList(job, either.signal, hold)
+    outcome = result.written ? 'written' : result.notWritten === 'blocked' ? 'blocked' : 'refused'
+    await settleRefresh(job, result)
+    return true
+  }
+  catch (err) {
+    if (lost?.aborted && !signal.aborted)
+      return false
+    if (outcome === 'dropped' && !signal.aborted)
+      outcome = 'failed'
+    throw err
+  }
+  finally {
+    signal.removeEventListener('abort', stop)
+    lost?.removeEventListener('abort', stop)
+    await hold?.release(outcome === 'dropped' && (cancelling || hold.cancelled) ? 'cancelled' : outcome)
+  }
+}
+
+async function fetchList(job: ExportJob, signal: AbortSignal, hold: Hold | null): Promise<RefreshResult> {
   message = 'Fetching the list…'
   publish()
 
   const limit = await options.get('searchMaxResults')
-  const result = await refreshSnapshot({
+  return refreshSnapshot({
     cacheKey: job.cacheKey,
     descriptor: job.descriptor,
     limit,
@@ -342,10 +499,14 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
       job.done = done
       job.total = total
       message = `Loading page ${done} of ${total}…`
+      hold?.progress(done, total)
       publish()
     },
   })
+}
 
+/** What a refresh from here came to: the job stopped, or told what didn't stop it. */
+async function settleRefresh(job: ExportJob, result: RefreshResult): Promise<void> {
   // Nothing was written, so the stored list and any queue planned against it are
   // still good; the step stays in place and Continue picks it up where it left
   // off, exactly as a rate-limited caching run does.

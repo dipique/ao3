@@ -106,9 +106,10 @@ export interface ProfileTileView {
   bar: BucketBar | null
   figures: BucketFigures | null
   /**
-   * Refresh list, Cache works and Download Offline Copy; Stop while its job
-   * runs; Continue or Discard while its job is stopped; nothing with no copy,
-   * which has no page to fetch from yet.
+   * Refresh list, Cache works and Download Offline Copy; Pause or Cancel while
+   * its job runs; Continue or Discard while its job is paused; Cancel while
+   * another page refreshes it; nothing with no copy, which has no page to fetch
+   * from yet.
    */
   actions: JobActions | null
   /** Why the offline actions are off: another list's job. */
@@ -142,10 +143,12 @@ export interface ProfileTilesInput {
   /** The reader's settings that decide whether each list's view opens. */
   settings: BuiltinSettings
   job: JobView
+  /** A refresh another page runs on one of the lists (`foreignView` in `jobView.ts`), or null. */
+  foreign?: JobView | null
   now: number
 }
 
-export function profileTiles({ copies, userId, settings, job, now }: ProfileTilesInput): ProfileTileView[] {
+export function profileTiles({ copies, userId, settings, job, foreign = null, now }: ProfileTilesInput): ProfileTileView[] {
   return PROFILE_LISTS.map((list) => {
     const copy = copies[list.id]
     const ref = { kind: list.id }
@@ -157,7 +160,7 @@ export function profileTiles({ copies, userId, settings, job, now }: ProfileTile
       return { ...base, empty, figure: null, bar: null, figures: null, actions: null, offlineOff: null, refreshNeeds: null, refreshOff: null, job: false, retry: 0, cached: 0 }
     }
 
-    const { actions, off, here } = listJob(job, copy.key)
+    const { actions, off, here } = listJob(job, copy.key, foreign)
     const needs = refreshNeeds(list.id, settings.workMarks.enabled)
     const detail = [`${copy.count === 1 ? 'work' : 'works'} · as of ${timeAgo(copy.scrapedAt, now)}`]
     if (copy.unstored)

@@ -263,15 +263,15 @@ describe('options UI — the Review block', { skip }, () => {
     await saysOn(await options.control(await options.savedList('c0ffee'), 'switch', 'Track Coffee shop AUs'), 'Track Coffee shop AUs')
   })
 
-  test('Cache works runs a job on the window, its line in the cell, with Stop, then Continue or Discard', async () => {
+  test('Cache works runs a job on the window, its line in the cell, with Pause or Cancel, then Continue or Discard', async () => {
     await options.press(await inCell('this-review', 'button', 'Cache works'))
     await until('the job to be running', async () => await jobState(await cell('this-review')) === 'running')
     assert.equal(await (await cell('this-review')).evaluate(el => el.querySelector('[role="progressbar"]')?.getAttribute('aria-label')), 'Caching this review')
     await saysOff(await options.control(await options.savedListDetails(copyRow(OTHER)), 'button', 'Cache works'), 'Cache this list\'s works', REVIEW_JOB)
-    assert.deepEqual(await options.controls(await cell('this-review'), 'button', 'Cache works'), [], 'Stop takes the actions\' place')
+    assert.deepEqual(await options.controls(await cell('this-review'), 'button', 'Cache works'), [], 'Pause and Cancel take the actions\' place')
 
     const before = await jobWrites()
-    await options.press(await inCell('this-review', 'button', 'Stop'))
+    await options.press(await inCell('this-review', 'button', 'Pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(await cell('this-review')) === 'stopped')
     const job = await options.lastWrite('siteExportJob')
     assert.equal(job.cacheKey, WINDOW)
@@ -284,11 +284,20 @@ describe('options UI — the Review block', { skip }, () => {
     await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
   })
 
+  test('Cancel stops the window\'s job and throws it away', async () => {
+    await options.press(await inCell('this-review', 'button', 'Cache works'))
+    await until('the job to be running', async () => await jobState(await cell('this-review')) === 'running')
+    await options.press(await inCell('this-review', 'button', 'Cancel'))
+    await until('the job to be gone', async () => await options.stored('siteExportJob') === null)
+    await until('the cell to drop its line', async () => await jobState(await cell('this-review')) === null)
+    await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
+  })
+
   test('Download Offline Copy caches the window\'s works, then exports them', async () => {
     await options.press(await inCell('this-review', 'button', 'Download Offline Copy'))
     await until('the job to be running', async () => await jobState(await cell('this-review')) === 'running')
     const before = await jobWrites()
-    await options.press(await inCell('this-review', 'button', 'Stop'))
+    await options.press(await inCell('this-review', 'button', 'Pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(await cell('this-review')) === 'stopped')
     const job = await options.lastWrite('siteExportJob')
     assert.equal(job.cacheKey, WINDOW)
@@ -308,7 +317,7 @@ describe('options UI — the Review block', { skip }, () => {
     assert.match(await options.text(await cell('this-review')), /Off for now: one job at a time, and Tag: Coffee Shop AU is caching\./)
     assert.ok(await inCell('this-review', 'link', 'Start the review: 2 works'))
 
-    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Stop caching Tag: Coffee Shop AU'))
+    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Pause caching Tag: Coffee Shop AU'))
     await until('the job to stop', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'stopped')
     await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
@@ -447,9 +456,9 @@ describe('options UI — This review\'s More', { skip }, () => {
     assert.deepEqual(job.steps, ['caching'])
     assert.equal(job.retryNow, true)
     await until('the work that failed to be asked for again', () => asked.includes('/works/61'))
-    assert.deepEqual(await options.controls(await cell(), 'button', MORE), [], 'Stop takes the actions\' place, and More\'s')
+    assert.deepEqual(await options.controls(await cell(), 'button', MORE), [], 'Pause and Cancel take the actions\' place, and More\'s')
 
-    await options.press(await options.control(await cell(), 'button', 'Stop'))
+    await options.press(await options.control(await cell(), 'button', 'Pause'))
     await until('the job to stop', async () => await jobState(await cell()) === 'stopped')
     assert.deepEqual(await options.controls(await cell(), 'button', MORE), [], 'so do Continue and Discard')
     await options.press(await options.control(await cell(), 'button', 'Discard'))
@@ -470,7 +479,7 @@ describe('options UI — This review\'s More', { skip }, () => {
     }
     await options.closeMenu()
 
-    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Stop caching Tag: Coffee Shop AU'))
+    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Pause caching Tag: Coffee Shop AU'))
     await until('the job to stop', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'stopped')
     await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)

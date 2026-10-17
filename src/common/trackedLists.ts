@@ -1,3 +1,5 @@
+import { claimLive } from './claim.ts'
+
 /**
  * Tracked lists — saved queries (a works search, a filtered works listing, an
  * uncommon tag's works, a series) whose new and updated works are gathered into
@@ -1982,9 +1984,7 @@ export function claimWait(
 ): 'landed' | 'waiting' | 'gather' {
   if (window.computedAt > 0 && sameReviewBasis(window, option))
     return 'landed'
-  const at = claim.at
-  const live = typeof at === 'number' && at > 0 && Math.abs(now - at) < CLAIM_TTL_MS
-  return live && claim.by !== self && sameReviewBasis(claim, option) ? 'waiting' : 'gather'
+  return claimLive(claim.at, now, CLAIM_TTL_MS) && claim.by !== self && sameReviewBasis(claim, option) ? 'waiting' : 'gather'
 }
 
 function listsSig(lists: readonly TrackedList[]): string {

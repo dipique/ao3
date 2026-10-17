@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { claimRefresh } from '../../src/content_script/searchView/listRefresh.ts'
 import { bucketBar, bucketFigures } from '../../src/options_ui/model/buckets.ts'
-import { jobView } from '../../src/options_ui/model/jobView.ts'
+import { foreignView, jobView } from '../../src/options_ui/model/jobView.ts'
 import { timeAgo } from '../../src/options_ui/model/moments.ts'
 import { PROFILE_LISTS, profileTiles, REFRESH_OFF, refreshNeeds } from '../../src/options_ui/model/profileLists.ts'
 
@@ -264,7 +265,15 @@ describe('a tile and the job', () => {
     assert.equal(tile.job, false)
   })
 
-  test('its own job: the line in the tile, and Stop in place of the actions', () => {
+  test('a refresh an AO3 tab runs on it: the line in the tile, and Cancel in place of the actions', () => {
+    const foreign = foreignView(claimRefresh('tab', 'page', NOW), MARKED, () => 'Marked for Later', NOW)
+    const tile = marked({ foreign })
+    assert.equal(tile.actions, 'cancel')
+    assert.equal(tile.job, true)
+    assert.equal(read({ foreign }).actions, 'offline', 'and nothing on the other tile')
+  })
+
+  test('its own job: the line in the tile, and Pause or Cancel in place of the actions', () => {
     const tile = marked({ job: job(MARKED) })
     assert.equal(tile.actions, 'stop')
     assert.equal(tile.offlineOff, null)

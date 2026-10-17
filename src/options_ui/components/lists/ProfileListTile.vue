@@ -25,7 +25,7 @@ const props = defineProps<{
   loading: boolean
 }>()
 
-const { refreshList, cacheWorks, downloadSite, stop, resume, discard } = useSiteExport()
+const { refreshList, cacheWorks, downloadSite, stop, cancel, cancelForeign, foreign, resume, discard } = useSiteExport()
 
 const { id, visible, titleHtml, subtitleHtml } = useSearchableRow(() => ({ title: props.tile.name, subtitle: props.tile.note }))
 
@@ -112,11 +112,19 @@ function run(start: (row: SiteExportListRow) => unknown): void {
       </div>
     </template>
 
-    <SiteExportProgress v-if="tile.job">
+    <SiteExportProgress v-if="tile.job" :view="tile.actions === 'cancel' ? foreign : null">
       <template v-if="tile.actions !== 'offline'" #foot>
-        <button v-if="tile.actions === 'stop'" type="button" class="outline-btn small-btn" @click="stop()">
-          <span class="i-tabler-player-stop" aria-hidden="true" />
-          Stop
+        <template v-if="tile.actions === 'stop'">
+          <button type="button" class="outline-btn small-btn" @click="stop()">
+            <span class="i-tabler-player-pause" aria-hidden="true" />
+            Pause
+          </button>
+          <button type="button" class="outline-btn small-btn" @click="cancel()">
+            Cancel
+          </button>
+        </template>
+        <button v-else-if="tile.actions === 'cancel'" type="button" class="outline-btn small-btn" @click="foreign && cancelForeign(foreign)">
+          Cancel
         </button>
         <template v-else>
           <button type="button" class="primary-btn small-btn" @click="resume()">

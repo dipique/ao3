@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { JobView } from '../../model/jobView.ts'
+
 /**
  * The job's line, under the row it belongs to: what it is doing, a bar, why it
  * stopped, what it warns of, and the per-work failures behind a count — a list
@@ -16,7 +18,12 @@
  * Its quieter words are muted, or `--quiet-fg` where its owner sets one: a
  * job's tint does, since muted reads under AA on it in light.
  */
-const { view } = useSiteExport()
+const props = defineProps<{
+  /** The line to draw in place of the job's: a refresh another page runs. */
+  view?: JobView | null
+}>()
+const site = useSiteExport()
+const view = computed(() => props.view ?? site.view.value)
 
 /** A state with a glyph of its own; the others take their severity's. */
 const glyph = computed(() => {

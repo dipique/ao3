@@ -9,7 +9,7 @@ import { profileTiles } from '../../model/profileLists.ts'
  * two tiles side by side where there is room for both, and one over the other
  * where there isn't.
  */
-const { profileRows, userId, view, loading } = useSiteExport()
+const { profileRows, userId, view, foreign, loading } = useSiteExport()
 const { lists } = useOption('trackedLists')
 const { enabled: workMarks } = useOption('workMarks')
 const now = useNow({ interval: 60_000 })
@@ -23,6 +23,7 @@ const tiles = computed(() => profileTiles({
   userId: userId.value,
   settings: { trackedLists: { lists: lists.value }, workMarks: { enabled: workMarks.value } },
   job: view.value,
+  foreign: foreign.value,
   now: now.value.getTime(),
 }))
 </script>

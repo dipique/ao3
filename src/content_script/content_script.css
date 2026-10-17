@@ -1414,6 +1414,17 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   display: inline;
 }
 
+.AO3E--search-view--updating-stop {
+  margin-left: 0.5em;
+  font-style: normal;
+  cursor: pointer;
+}
+
+/* AO3's own button rule outranks the hidden attribute. */
+.AO3E--search-view--updating-stop[hidden] {
+  display: none;
+}
+
 /* Sits immediately after the count, not floated to the far end of the row: the
    toolbar shares its line with the page's own actions (the works-search page
    puts "Edit Your Search" there), and a refresh flung right lands next to a

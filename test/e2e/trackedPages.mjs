@@ -67,6 +67,43 @@ export function persistentMock(seed) {
   })()`
 }
 
+/**
+ * A script for `evaluateOnNewDocument`, after the storage mock: once the page
+ * is linked to others ({@link linkWrites}), every write it makes is handed to
+ * `window.__relay`, and `window.__relayed` writes one made elsewhere — as
+ * another tab's write reaches this one, change event and all, without being
+ * handed on again.
+ */
+export function relayWrites() {
+  const local = window.browser.storage.local
+  const own = local.set
+  window.__relayed = items => own(items)
+  local.set = (items) => {
+    if (typeof window.__relay === 'function')
+      window.__relay(JSON.parse(JSON.stringify(items)))
+    return own(items)
+  }
+}
+
+/**
+ * Keep the storage of pages that run {@link relayWrites} in step from now on,
+ * the way a browser's is: each write one makes reaches every other, in the
+ * order it was made, and on every page they load after. Writes made before
+ * aren't handed on. Call it once for a set of pages; any pages will do, so an
+ * archive tab and the options page share one store as two archive tabs do.
+ */
+export async function linkWrites(pages) {
+  for (const from of pages) {
+    let queue = Promise.resolve()
+    await from.exposeFunction('__relay', (items) => {
+      for (const to of pages) {
+        if (to !== from)
+          queue = queue.then(() => to.evaluate(i => window.__relayed?.(i), items)).catch(() => {})
+      }
+    })
+  }
+}
+
 /** A stored option, as the tab's store now holds it. */
 export function storedOption(tab, name = 'trackedLists') {
   return stored(tab, `option.${name}`)

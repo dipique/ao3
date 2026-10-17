@@ -1,20 +1,25 @@
 import type { JoinedSavedList, SnapshotDescriptor, StoredListRef } from '#common'
+import type { ListRefresh } from '#content_script/searchView/listRefresh.ts'
 import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { CachingBuckets, WorkTextUsage } from '#content_script/siteExport/workText.js'
 
 import { cache, copyOwner, getArchiveLink, joinSavedLists, listCopies, listUrlFor, planRemoveList, planTrackCopy, REVIEW_SOURCE_ID, storedListRefs, toast, utcToday } from '#common'
+import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
+import { followState, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
+import { requestCancel, watchRefresh } from '#content_script/searchView/refreshClaim.ts'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
-import { discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
+import { cancelJob, discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
 import { cachingBuckets, planOrphanDiscard, summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { discardOrphanedWorkText, purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
 
+import type { JobView } from '../model/jobView.ts'
 import type { ProfileList, ProfileListId } from '../model/profileLists.ts'
 
 import { formatBytes } from '../model/buckets.ts'
-import { jobView, offReason } from '../model/jobView.ts'
+import { foreignView, jobView, offReason } from '../model/jobView.ts'
 import { timeAgo } from '../model/moments.ts'
 import { PROFILE_LISTS } from '../model/profileLists.ts'
 import { REVIEW_NAME } from '../model/review.ts'
@@ -236,6 +241,35 @@ function nameOf(key: string): string {
 /** The job as the page shows it ({@link jobView}): every control it turns off, and its own line, read it from here. */
 const view = computed(() => jobView(status.value, nameOf, now.value))
 
+/**
+ * The refresh claims of the stored lists that share their refresh between
+ * pages, as storage holds them, by key: what another page's refresh of one of
+ * them is doing. Heard every second while one sits out a pause, so its
+ * countdown goes down.
+ */
+const claims = shallowRef<Record<string, ListRefresh | null>>({})
+watch(() => rows.value.filter(row => row.descriptor && sharesRefresh(row.descriptor.sourceId)).map(row => row.key).join('\n'), (joined, _, onCleanup) => {
+  const watching = new AbortController()
+  onCleanup(() => watching.abort())
+  claims.value = {}
+  for (const key of joined ? joined.split('\n') : []) {
+    watchRefresh(key, (claim) => {
+      claims.value = { ...claims.value, [key]: claim }
+    }, watching.signal)
+  }
+}, { immediate: true })
+
+/** A refresh another page is running on one of those lists ({@link foreignView}), or null. */
+const foreign = computed(() => {
+  const at = Date.now()
+  for (const [key, claim] of Object.entries(claims.value)) {
+    const state = followState(claim, PAGE_RUN, 0, at)
+    if (state.kind === 'following')
+      return foreignView(state.claim, key, nameOf, at)
+  }
+  return null
+})
+
 /** What a key with no stored list holds. */
 const NO_WORKS: CachingBuckets = { total: 0, cached: 0, failed: 0, unfetched: 0, bytes: 0, staleFailures: 0 }
 
@@ -363,6 +397,7 @@ export function useSiteExport() {
     orphans,
     loading,
     view,
+    foreign,
     reload,
     changeReport,
     importingChanges,
@@ -422,6 +457,19 @@ export function useSiteExport() {
 
     stop() {
       stopJob()
+    },
+
+    /** Stop the job and throw it away, rather than leave it to continue. */
+    cancel() {
+      return run('cancel the job', cancelJob)
+    },
+
+    /** Ask the page refreshing a list ({@link foreignView}) to stop. */
+    cancelForeign(foreignJob: JobView) {
+      if (foreignJob.key && foreignJob.claimId) {
+        void requestCancel(foreignJob.key, foreignJob.claimId)
+          .catch(() => toast('Could not ask the other page to stop.', { type: 'error' }))
+      }
     },
 
     discard() {

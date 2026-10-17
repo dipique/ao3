@@ -1,4 +1,5 @@
 import type { WaitReason } from '../../content_script/archiveFetch.ts'
+import type { ListRefresh } from '../../content_script/searchView/listRefresh.ts'
 import type { ExportJobError, ExportJobPhase, JobStatus } from '../../content_script/siteExport/job.ts'
 import type { Severity } from './severity.ts'
 
@@ -45,6 +46,8 @@ export interface JobView {
   warnings: string[]
   /** The works it couldn't fetch that it kept, and how many more it counted. */
   failures: { shown: ExportJobError[], more: number }
+  /** For a refresh another page runs ({@link foreignView}): its claim, which a Cancel names. */
+  claimId?: string
 }
 
 /**
@@ -83,20 +86,13 @@ export function jobView(status: JobStatus, names: (key: string) => string, now: 
     view.error = status.error
 
   if (status.running) {
-    const left = (status.waitingUntil ?? 0) - now
-    if (left > 0 && status.waitReason) {
-      view.state = 'waiting'
-      view.wait = status.waitReason
-      view.countdown = countdown(left)
-      view.line = WAIT_WORDS[status.waitReason]
-      view.severity = status.waitReason === 'refused' ? 'warning' : 'neutral'
-    }
+    waiting(view, status.waitingUntil, status.waitReason, now)
     return view
   }
 
   if (job.steps.length || status.error) {
     view.state = 'stopped'
-    view.line = 'Stopped'
+    view.line = status.error ? 'Stopped' : 'Paused'
     view.severity = status.error ? 'destructive' : 'neutral'
   }
   else {
@@ -105,6 +101,43 @@ export function jobView(status: JobStatus, names: (key: string) => string, now: 
     view.severity = 'success'
   }
   return view
+}
+
+/**
+ * A refresh another page runs on the stored list `key` (a list that shares its
+ * refresh, {@link file://./../../content_script/searchView/listRefresh.ts}), as
+ * this page shows it: a job refreshing that list, running there, which this
+ * page can cancel and nothing more.
+ */
+export function foreignView(claim: ListRefresh, key: string, names: (key: string) => string, now: number): JobView {
+  const name = names(key) || key
+  const view: JobView = {
+    key,
+    name,
+    phase: 'refreshing',
+    label: sentence(`refreshing ${name}`),
+    state: 'running',
+    done: claim.done,
+    total: claim.total,
+    line: claim.holder === 'options' ? 'Refreshing in another options tab' : 'Refreshing in an AO3 tab',
+    warnings: [],
+    failures: { shown: [], more: 0 },
+    claimId: claim.id,
+  }
+  waiting(view, claim.waitUntil, claim.waitReason, now)
+  return view
+}
+
+/** `view`, sitting out a pause in requests until `until`, if it hasn't run out. */
+function waiting(view: JobView, until: number | null, reason: WaitReason | null, now: number): void {
+  const left = (until ?? 0) - now
+  if (left <= 0 || !reason)
+    return
+  view.state = 'waiting'
+  view.wait = reason
+  view.countdown = countdown(left)
+  view.line = WAIT_WORDS[reason]
+  view.severity = reason === 'refused' ? 'warning' : 'neutral'
 }
 
 /** Whether the job is running now, sitting out a pause included. */
@@ -139,16 +172,24 @@ export function offReason(view: JobView, keys: ListKeys): string | null {
     : `off for now: one job at a time, and ${view.name} is ${verb}`
 }
 
-/** What a list offers in place of its own offline actions while its job runs, Stop, or is stopped, Continue or Discard. */
-export type JobActions = 'offline' | 'stop' | 'resume'
+/**
+ * What a list offers in place of its own offline actions: while its job runs,
+ * Pause or Cancel (`stop`); while it is paused, Continue or Discard; while
+ * another page refreshes it, Cancel.
+ */
+export type JobActions = 'offline' | 'stop' | 'resume' | 'cancel'
 
 /**
  * The job as one list's offline controls see it: which of them the list
  * shows, why its actions are off, and whether the job's line is its own. A
- * finished job leaves its line, and the actions come back.
+ * finished job leaves its line, and the actions come back. A refresh another
+ * page runs on the list (`foreign`, {@link foreignView}) takes the line over
+ * from any job of this page's but a running one, which is following it.
  */
-export function listJob(view: JobView, keys: ListKeys): { actions: JobActions, off: string | null, here: boolean } {
+export function listJob(view: JobView, keys: ListKeys, foreign: JobView | null = null): { actions: JobActions, off: string | null, here: boolean } {
   const mine = jobIsOn(view, keys)
+  if (foreign && jobIsOn(foreign, keys) && !(mine && isRunning(view)))
+    return { actions: 'cancel', off: null, here: true }
   const actions: JobActions = mine && isRunning(view) ? 'stop' : mine && view.state === 'stopped' ? 'resume' : 'offline'
   return { actions, off: actions === 'offline' ? offReason(view, keys) : null, here: mine && view.state !== 'idle' }
 }

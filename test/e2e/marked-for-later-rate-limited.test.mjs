@@ -95,7 +95,7 @@ describe('Marked for Later refused at once', { skip }, () => {
     }))
     try {
       await tab.waitForSelector('.AO3E--search-view--results li.blurb')
-      const note = () => tab.$eval('.AO3E--search-view--updating-on', el => el.textContent.trim()).catch(() => '')
+      const note = () => tab.$eval('.AO3E--search-view--updating-on .AO3E--search-view--updating-text', el => el.textContent.trim()).catch(() => '')
       await until('the wait is beside Updating', async () => (await note()).startsWith('Updating… ')
         && WAIT_LINE.test((await note()).slice('Updating… '.length)))
       assert.match(await tab.$eval('.AO3E--search-view--results', el => el.textContent), /Stored work 2/)

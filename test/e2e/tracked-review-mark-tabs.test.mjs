@@ -6,31 +6,13 @@ import puppeteer from 'puppeteer-core'
 
 import { formatDay } from '../../src/common/trackedLists.ts'
 import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
-import { runs, settled } from './trackedPages.mjs'
+import { linkWrites, relayWrites, runs, settled } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, dayOfIso, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 const REVIEW_URL = 'https://archiveofourown.org/users/me/readings#ao3e-tracked'
-
-/**
- * Runs in the page, after the storage mock: every write the page makes is
- * handed to `window.__relay` while `window.__relaying` is set, and
- * `window.__relayed` writes one made elsewhere — as another tab's write
- * reaches this one, change event and all, without being handed on again.
- */
-function relayWrites() {
-  const local = window.browser.storage.local
-  const own = local.set
-  window.__relaying = false
-  window.__relayed = items => own(items)
-  local.set = (items) => {
-    if (window.__relaying)
-      window.__relay(JSON.parse(JSON.stringify(items)))
-    return own(items)
-  }
-}
 
 /**
  * Two tabs with the review open, and the reader marking the range reviewed in
@@ -110,15 +92,6 @@ describe('tracked review: marking reviewed with the review open in another tab',
     return tab
   }
 
-  /** Hand every write `from` makes to `to`, in the order they were made. */
-  const relay = async (from, to) => {
-    let queue = Promise.resolve()
-    await from.exposeFunction('__relay', (items) => {
-      queue = queue.then(() => to.evaluate(i => window.__relayed(i), items)).catch(() => {})
-    })
-    await from.evaluate(() => (window.__relaying = true))
-  }
-
   const rangeText = tab => tab.evaluate(() =>
     document.querySelector('.AO3E--tracked-review--bar--range')?.textContent?.trim() ?? null)
 
@@ -133,8 +106,7 @@ describe('tracked review: marking reviewed with the review open in another tab',
     const first = `Reviewing ${formatDay(since).slice(0, -5)} – ${formatDay(since + 1)}`
     assert.equal(await rangeText(clicking), first)
     assert.equal(await rangeText(other), first)
-    await relay(clicking, other)
-    await relay(other, clicking)
+    await linkWrites([clicking, other])
   })
 
   test('only the tab Mark reviewed was clicked in reads the next range', async () => {

@@ -55,6 +55,7 @@ const {
   removeListCopies,
   removeList,
   stop,
+  cancel,
   resume,
   discard,
   trackCopy,
@@ -97,7 +98,7 @@ const ids = {
 
 /**
  * A control pressed in the row can go with the press: Download turns into
- * Stop, Stop leaves the row its job's Continue, a removed copy takes its
+ * Pause, Pause leaves the row its job's Continue, a removed copy takes its
  * button. Focus then goes to the row's own control in the Offline copy column,
  * else its details chevron, so the keyboard stays in the row.
  */
@@ -384,16 +385,27 @@ function removeTheList(): void {
           <span class="i-tabler-download" aria-hidden="true" />
           <span class="saved-list__act-label">Download</span>
         </button>
-        <button
-          v-else-if="action.kind === 'stop'"
-          type="button"
-          class="saved-list__act outline-btn"
-          :aria-label="`Stop ${action.verb} ${name}`"
-          @click="stop()"
-        >
-          <span class="i-tabler-player-stop" aria-hidden="true" />
-          <span class="saved-list__act-label">Stop</span>
-        </button>
+        <template v-else-if="action.kind === 'stop'">
+          <!-- Two to a column that holds one labelled button: their names are their tooltips. -->
+          <button
+            type="button"
+            class="saved-list__act saved-list__act--icon outline-btn"
+            :aria-label="`Pause ${action.verb} ${name}`"
+            title="Pause"
+            @click="stop()"
+          >
+            <span class="i-tabler-player-pause" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            class="saved-list__act saved-list__act--icon outline-btn"
+            :aria-label="`Cancel ${action.verb} ${name}`"
+            title="Cancel"
+            @click="cancel()"
+          >
+            <span class="i-tabler-x" aria-hidden="true" />
+          </button>
+        </template>
         <button
           type="button"
           class="saved-list__disclose icon-btn"
@@ -839,6 +851,11 @@ function removeTheList(): void {
   height: 26px;
   padding: 0 9px;
   font-size: 12px;
+}
+.saved-list__act--icon {
+  justify-content: center;
+  width: 26px;
+  padding: 0;
 }
 
 .saved-list__job {

@@ -1212,12 +1212,12 @@ describe('options UI — site export', { skip }, () => {
  * off says why: the other lists' refresh, cache and download, removing the
  * job's own list's copy, and the cache's two deletions. A list saved before it
  * could be fetched again says why its controls are off too. The job shows in
- * its row, its Download become Stop; in the saved lists' header; and on the
+ * its row, its Download becomes Pause and Cancel; in the saved lists' header; and on the
  * rail.
  *
  * The stand-in for AO3 holds every work page until the last test lets them go,
  * so the job is caught running for as long as a test needs it to be, and its
- * Stop, Continue and Discard are each seen in the stored job.
+ * Pause, Continue and Discard are each seen in the stored job.
  */
 describe('options UI — site export, one job at a time', { skip }, () => {
   const MINE = 'marked-for-later:reader'
@@ -1363,8 +1363,8 @@ describe('options UI — site export, one job at a time', { skip }, () => {
     // A list nothing can fetch keeps its own reason.
     assert.match(await options.description(await button(UNDESCRIBED, 'Cache works')), /^Off until you open it on AO3/)
 
-    // The list the job is on: its Download is Stop, its caching says so, and its copy can't be removed from under it.
-    assert.ok(await options.control(await row(MINE), 'button', 'Stop caching Marked for Later'))
+    // The list the job is on: its Download is Pause, its caching says so, and its copy can't be removed from under it.
+    assert.ok(await options.control(await row(MINE), 'button', 'Pause caching Marked for Later'))
     assert.match(await options.text(await row(MINE)), /caching now/)
     await saysOff(await button(MINE, 'Remove offline copy'), 'Remove offline copy', 'off while this list is caching')
 
@@ -1373,9 +1373,9 @@ describe('options UI — site export, one job at a time', { skip }, () => {
       await saysOff(await cacheButton(name), name, 'off while Marked for Later is caching')
   })
 
-  test('Stop leaves the job stored, offering to continue or discard it, and frees every other control', async () => {
+  test('Pause leaves the job stored, offering to continue or discard it, and frees every other control', async () => {
     const before = await jobWrites()
-    await options.press(await button(MINE, 'Stop caching Marked for Later'))
+    await options.press(await button(MINE, 'Pause caching Marked for Later'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(MINE) === 'stopped')
 
     // As written: the storage stand-in keeps the runner's own object, which a
@@ -1409,7 +1409,7 @@ describe('options UI — site export, one job at a time', { skip }, () => {
     await options.press(await button(MINE, 'Cache works'))
     await until('the job to be running', async () => await jobState(MINE) === 'running')
     const before = await jobWrites()
-    await options.press(await button(MINE, 'Stop caching Marked for Later'))
+    await options.press(await button(MINE, 'Pause caching Marked for Later'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(MINE) === 'stopped')
     const stopped = await options.lastWrite('siteExportJob')
 
@@ -1461,7 +1461,7 @@ describe('options UI — site export, one job at a time', { skip }, () => {
     await options.press(await button(OTHER, 'Cache works'))
     await until('the job to be running', async () => await jobState(OTHER) === 'running')
     const before = await jobWrites()
-    await options.press(await options.control(await row(OTHER), 'button', `Stop caching ${OTHER_NAME}`))
+    await options.press(await options.control(await row(OTHER), 'button', `Pause caching ${OTHER_NAME}`))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(OTHER) === 'stopped')
 
     const remove = await button(OTHER, 'Remove offline copy')
@@ -1557,10 +1557,10 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
     assert.match(await options.text(await details()), /Its stopped job is discarded with it\./)
   })
 
-  test('running, the row is busy itself: Stop, caching now, and neither removal can take a copy from under it', async () => {
+  test('running, the row is busy itself: Pause, caching now, and neither removal can take a copy from under it', async () => {
     await options.press(await options.control(await row(), 'button', 'Continue'))
     await until('the job to run', async () => await jobState() === 'running')
-    assert.ok(await options.control(await row(), 'button', `Stop caching ${NAME}`))
+    assert.ok(await options.control(await row(), 'button', `Pause caching ${NAME}`))
     assert.match(await options.text(await row()), /caching now/)
     await saysOff(await options.control(await details(), 'button', 'Cache works'), 'Cache this list\'s works', OWN)
 
@@ -1580,7 +1580,7 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
   })
 
   test('stopped again, Remove offline copy takes both copies and the job on the older', async () => {
-    await options.press(await options.control(await row(), 'button', `Stop caching ${NAME}`))
+    await options.press(await options.control(await row(), 'button', `Pause caching ${NAME}`))
     await until('the job to stop', async () => await jobState() === 'stopped')
     const remove = await options.control(await details(), 'button', 'Remove offline copy')
     await options.press(remove)
@@ -1600,7 +1600,7 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
 })
 
 /**
- * A row's job, driven from the keyboard: Download turns into Stop, Stop leaves
+ * A row's job, driven from the keyboard: Download turns into Pause, Pause leaves
  * Continue and Discard in the job's line, and each press takes away the control
  * that was pressed. Focus stays in the row, on the control in its place.
  */
@@ -1640,23 +1640,23 @@ describe('options UI — a saved list\'s job, from the keyboard', { skip }, () =
     await options.page.keyboard.press('Enter')
   }
 
-  test('Download hands focus to Stop', async () => {
+  test('Download hands focus to Pause', async () => {
     await until('the copy to be read', async () => (await options.controls(await row(), 'button', `Download ${NAME}`)).length === 1)
     await pressKey(await options.control(await row(), 'button', `Download ${NAME}`))
     await until('the job to run', async () => await jobState() === 'running')
-    assert.equal(await focused(), `Stop refreshing ${NAME}`)
+    assert.equal(await focused(), `Pause refreshing ${NAME}`)
   })
 
-  test('Stop hands it to the row\'s details, beside the place it left', async () => {
+  test('Pause hands it to the row\'s details, beside the place it left', async () => {
     await options.page.keyboard.press('Enter')
     await until('the job to stop', async () => await jobState() === 'stopped')
     assert.equal(await focused(), `Details for ${NAME}`)
   })
 
-  test('Continue hands it to Stop', async () => {
+  test('Continue hands it to Pause', async () => {
     await pressKey(await options.control(await row(), 'button', 'Continue'))
     await until('the job to run again', async () => await jobState() === 'running')
-    assert.equal(await focused(), `Stop refreshing ${NAME}`)
+    assert.equal(await focused(), `Pause refreshing ${NAME}`)
   })
 
   test('Discard hands it to Download', async () => {
@@ -1667,7 +1667,7 @@ describe('options UI — a saved list\'s job, from the keyboard', { skip }, () =
     assert.equal(await focused(), `Download ${NAME}`)
   })
 
-  test('nothing threw along the way, and no Stop was logged as an error', () => {
+  test('nothing threw along the way, and no Pause was logged as an error', () => {
     assert.deepEqual(options.problems(), [])
   })
 })

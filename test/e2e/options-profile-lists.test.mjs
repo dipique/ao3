@@ -203,7 +203,7 @@ describe('options UI — User profile lists', { skip }, () => {
     assert.deepEqual((await options.savedListIds()).sort(), [OLD_MARKED, OTHER, THEIR_READ].map(copyRow).sort())
   })
 
-  test('Refresh list starts a job on the tile: its line there, Stop in its actions\' place, and every other list saying why its own are off', async () => {
+  test('Refresh list starts a job on the tile: its line there, Pause and Cancel in its actions\' place, and every other list saying why its own are off', async () => {
     await options.press(await inTile('marked-for-later', 'button', 'Refresh list'))
     await until('the job to be fetching the list', async () => await jobState(await tile('marked-for-later')) === 'running'
       && /Fetching the list…/.test(await options.text(await tile('marked-for-later'))))
@@ -214,9 +214,9 @@ describe('options UI — User profile lists', { skip }, () => {
 
     const marked = await tile('marked-for-later')
     assert.equal(await marked.evaluate(el => el.querySelector('[role="progressbar"]')?.getAttribute('aria-label') ?? null), null, 'no count yet, so no bar')
-    assert.deepEqual(await options.controls(marked, 'button', 'Refresh list'), [], 'Stop takes the actions\' place')
+    assert.deepEqual(await options.controls(marked, 'button', 'Refresh list'), [], 'Pause and Cancel take the actions\' place')
     assert.equal(await marked.$('[role="img"]'), null, 'the job\'s line stands in for the copy\'s bar')
-    await inTile('marked-for-later', 'button', 'Stop')
+    await inTile('marked-for-later', 'button', 'Pause')
 
     const reason = 'off for now: one job at a time, and Marked for Later is refreshing'
     await saysOff(options, await inTile('read-works', 'button', 'Refresh list'), 'Refresh the list of works in Read works', reason)
@@ -226,7 +226,7 @@ describe('options UI — User profile lists', { skip }, () => {
     await saysOff(options, await options.control(await options.savedListDetails(copyRow(OTHER)), 'button', 'Cache works'), 'Cache this list\'s works', reason)
 
     const before = await jobWrites()
-    await options.press(await inTile('marked-for-later', 'button', 'Stop'))
+    await options.press(await inTile('marked-for-later', 'button', 'Pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(await tile('marked-for-later')) === 'stopped')
     assert.deepEqual((await options.lastWrite('siteExportJob')).steps, ['refreshing'])
     await inTile('marked-for-later', 'button', 'Continue')
@@ -235,6 +235,16 @@ describe('options UI — User profile lists', { skip }, () => {
     await options.press(await inTile('marked-for-later', 'button', 'Discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
     await until('the tile to drop its line', async () => await jobState(await tile('marked-for-later')) === null)
+    await saysOn(await inTile('marked-for-later', 'button', 'Refresh list'), 'Refresh list')
+  })
+
+  test('Cancel stops the job and throws it away, with nothing left to continue', async () => {
+    await options.press(await inTile('marked-for-later', 'button', 'Refresh list'))
+    await until('the job to be running', async () => await jobState(await tile('marked-for-later')) === 'running')
+    await options.press(await inTile('marked-for-later', 'button', 'Cancel'))
+    await until('the job to be gone', async () => await options.stored('siteExportJob') === null)
+    await until('the tile to drop its line', async () => await jobState(await tile('marked-for-later')) === null)
+    assert.deepEqual(await options.controls(await tile('marked-for-later'), 'button', 'Continue'), [])
     await saysOn(await inTile('marked-for-later', 'button', 'Refresh list'), 'Refresh list')
   })
 
@@ -260,7 +270,7 @@ describe('options UI — User profile lists', { skip }, () => {
     assert.equal(job.retryNow, true)
 
     const before = await jobWrites()
-    await options.press(await inTile('marked-for-later', 'button', 'Stop'))
+    await options.press(await inTile('marked-for-later', 'button', 'Pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(await tile('marked-for-later')) === 'stopped')
     await options.press(await inTile('marked-for-later', 'button', 'Discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
@@ -281,7 +291,7 @@ describe('options UI — User profile lists', { skip }, () => {
     assert.equal(await (await options.menuItem('Remove offline copy')).evaluate(el => el.hasAttribute('data-disabled')), false)
     await options.closeMenu()
 
-    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Stop caching Tag: Coffee Shop AU'))
+    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Pause caching Tag: Coffee Shop AU'))
     await until('the job to stop', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'stopped')
     await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
@@ -322,7 +332,7 @@ describe('options UI — User profile lists', { skip }, () => {
     await until('the tile to count what was cached', async () => (await options.lines(await tile('marked-for-later'))).some(line => /^2 cached \(/.test(line)))
   })
 
-  test('nothing threw along the way, and no Stop was logged as an error', () => {
+  test('nothing threw along the way, and no Pause was logged as an error', () => {
     // Chrome logs every non-2xx response as a console error of its own, and
     // a work AO3 no longer has is the subject of a test.
     assert.deepEqual(options.problems(/status of 404/), [])
@@ -381,14 +391,14 @@ describe('options UI — User profile lists, when AO3 says no', { skip }, () => 
     assert.match(await options.text(marked), /AO3 asked us to slow down — trying again in \d+:\d\d/)
     assert.match(await marked.evaluate(el => getComputedStyle(el.querySelector('[role="progressbar"] > div')).backgroundImage), /repeating-linear-gradient/, 'a striped bar')
 
-    await options.press(await inTile('button', 'Stop'))
+    await options.press(await inTile('button', 'Pause'))
     await until('the job to stop', async () => await jobState(await tile()) === 'stopped')
     const job = await options.lastWrite('siteExportJob')
     assert.equal(job.cacheKey, MARKED)
     assert.deepEqual(job.steps, ['caching'])
   })
 
-  test('the signed-out refresh is logged as the error it is, and the Stop isn\'t', () => {
+  test('the signed-out refresh is logged as the error it is, and the Pause isn\'t', () => {
     // The refusals the stub serves are the subject of a test.
     const problems = options.problems(/status of 429/)
     assert.equal(problems.length, 1, JSON.stringify(problems))

@@ -38,6 +38,7 @@ import {
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { linkedTo, openLinked } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, markedForLaterIds } from '#content_script/markedForLaterIndex.js'
+import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
 import { readSnapshot, snapshotWorkIds, writeSnapshot } from '#content_script/searchView/cache.ts'
@@ -80,13 +81,6 @@ const HASH = '#ao3e-tracked'
  * the next window has drawn itself, which is a request or two away.
  */
 const UNDO_TIMEOUT_MS = 20_000
-
-/**
- * Whose gather a {@link ReviewClaim} is: this page run's own token. Not
- * `randomUUID`, which a page served over plain http doesn't have — and this
- * module is loaded on every page the content script runs on.
- */
-const PAGE_RUN = Array.from(crypto.getRandomValues(new Uint32Array(4)), n => n.toString(36)).join('')
 
 // ---------------------------------------------------------------------------
 // What one page run remembers.

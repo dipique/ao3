@@ -133,10 +133,11 @@ export interface SearchView {
    */
   update: (works: Work[], autoExcludes?: FacetValueRef[], opts?: { force?: boolean }) => void
   /**
-   * Toggle the subtle "updating in the background" indicator, with `note`
-   * after it while there is something to say about why it is taking a while.
+   * Toggle the subtle "updating in the background" indicator. `text` replaces
+   * its plain "Updating…" while there is more to say (how far it has got, a
+   * pause it is sitting out), and `onStop` puts a Stop button beside it.
    */
-  setUpdating: (updating: boolean, note?: string | null) => void
+  setUpdating: (updating: boolean, opts?: { text?: string | null, onStop?: () => void }) => void
   /** Record when the works were last fetched, for the Refresh button to say. */
   setRefreshedAt: (at: number) => void
   /** Current filter/sort/page, so a caller can rebuild the view where it left off. */
@@ -553,7 +554,16 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   const countEl = (<span class={cx('count')} />) as HTMLElement
-  const updatingEl = (<span class={cx('updating')}>Updating…</span>) as HTMLElement
+  const updatingText = (<span class={cx('updating-text')}>Updating…</span>) as HTMLElement
+  const updatingStop = (<button type="button" class={cx('updating-stop')} title="Stop updating this list" hidden>Stop</button>) as HTMLElement
+  let onUpdatingStop: (() => void) | undefined
+  updatingStop.addEventListener('click', () => onUpdatingStop?.())
+  const updatingEl = (
+    <span class={cx('updating')}>
+      {updatingText}
+      {updatingStop}
+    </span>
+  ) as HTMLElement
   const resultsOl = (<ol class={`work index group ${cx('results')}`} />) as HTMLElement as HTMLOListElement
   const facetsEl = (<div class={cx('facets')} />) as HTMLElement
   const pagerEl = (<nav class={cx('pager')} aria-label="Results pages" />) as HTMLElement
@@ -1684,8 +1694,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       showTextCoverage()
   }
 
-  function setUpdating(updating: boolean, note?: string | null): void {
-    updatingEl.textContent = note ? `Updating… ${note}` : 'Updating…'
+  function setUpdating(updating: boolean, opts: { text?: string | null, onStop?: () => void } = {}): void {
+    updatingText.textContent = opts.text || 'Updating…'
+    onUpdatingStop = updating ? opts.onStop : undefined
+    updatingStop.hidden = !onUpdatingStop
     updatingEl.classList.toggle(cx('updating-on'), updating)
     refreshBtn?.classList.toggle(cx('refresh-spinning'), updating)
   }

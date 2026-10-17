@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { busyNotice, cachedTextOff, jobView, listJob, offReason, railJob, removeOff } from '../../src/options_ui/model/jobView.ts'
+import { claimRefresh, withPause, withProgress } from '../../src/content_script/searchView/listRefresh.ts'
+import { busyNotice, cachedTextOff, foreignView, jobView, listJob, offReason, railJob, removeOff } from '../../src/options_ui/model/jobView.ts'
 
 const NOW = 1_800_000_000_000
 const MINE = 'marked-for-later:tester'
@@ -105,10 +106,10 @@ describe('jobView', () => {
     assert.equal(over.line, 'Fetching “A work with a reasonably long title”…')
   })
 
-  test('stopped part-way: the steps and queue it left, to continue or discard', () => {
+  test('paused part-way: the steps and queue it left, to continue or discard', () => {
     const stopped = view({ running: false, message: '' })
     assert.equal(stopped.state, 'stopped')
-    assert.equal(stopped.line, 'Stopped')
+    assert.equal(stopped.line, 'Paused')
     assert.equal(stopped.severity, 'neutral')
     assert.equal(stopped.error, undefined)
     assert.equal(stopped.done, 148)
@@ -141,6 +142,42 @@ describe('jobView', () => {
 
     const few = view({ job: job({ errors: [failure(1), failure(2)], errorCount: 2 }) })
     assert.deepEqual(few.failures, { shown: [failure(1), failure(2)], more: 0 })
+  })
+})
+
+describe('foreignView', () => {
+  const claim = withProgress(claimRefresh('tab', 'page', NOW - 5_000), 2, 5, NOW - 1_000)
+
+  test('a refresh an AO3 tab runs: the list, refreshing, how far it has got, and where it runs', () => {
+    const there = foreignView(claim, MINE, names, NOW)
+    assert.equal(there.key, MINE)
+    assert.equal(there.name, 'Marked for Later')
+    assert.equal(there.phase, 'refreshing')
+    assert.equal(there.label, 'Refreshing Marked for Later')
+    assert.equal(there.state, 'running')
+    assert.equal(there.line, 'Refreshing in an AO3 tab')
+    assert.equal(there.done, 2)
+    assert.equal(there.total, 5)
+    assert.equal(there.claimId, claim.id)
+    assert.deepEqual(there.warnings, [])
+    assert.deepEqual(there.failures, { shown: [], more: 0 })
+  })
+
+  test('one another options page runs says so', () => {
+    assert.equal(foreignView(claimRefresh('options', 'options', NOW), MINE, names, NOW).line, 'Refreshing in another options tab')
+  })
+
+  test('sitting out a pause: waiting, with its kind and countdown', () => {
+    const paused = foreignView(withPause(claim, NOW + 65_000, 'refused', NOW - 500), MINE, names, NOW)
+    assert.equal(paused.state, 'waiting')
+    assert.equal(paused.wait, 'refused')
+    assert.equal(paused.countdown, '1:05')
+    assert.equal(paused.line, 'AO3 asked us to slow down')
+    assert.equal(paused.severity, 'warning')
+  })
+
+  test('a list the page has no name for goes by its key', () => {
+    assert.equal(foreignView(claim, OTHER, names, NOW).name, OTHER)
   })
 })
 
@@ -186,7 +223,7 @@ describe('listJob', () => {
     assert.deepEqual(listJob(view({ waitingUntil: NOW + 5_000, waitReason: 'refused' }), OTHER).off, 'off for now: one job at a time, and Marked for Later is caching')
   })
 
-  test('its own job, running or sitting out a pause: Stop, and the line is its', () => {
+  test('its own job, running or sitting out a pause: Pause or Cancel, and the line is its', () => {
     assert.deepEqual(listJob(view(), MINE), { actions: 'stop', off: null, here: true })
     assert.deepEqual(listJob(view({ waitingUntil: NOW + 5_000, waitReason: 'pacing' }), MINE), { actions: 'stop', off: null, here: true })
   })
@@ -210,6 +247,22 @@ describe('listJob', () => {
     assert.deepEqual(listJob(view({ running: false }), copies), { actions: 'resume', off: null, here: true })
     assert.deepEqual(listJob(view({ job: job({ steps: [] }), running: false }), copies), { actions: 'offline', off: null, here: true })
     assert.deepEqual(listJob(view(), [OTHER]), { actions: 'offline', off: 'off for now: one job at a time, and Marked for Later is caching', here: false })
+  })
+
+  test('a refresh another page runs on it: Cancel alone, and the line is its', () => {
+    const there = foreignView(claimRefresh('tab', 'page', NOW), MINE, names, NOW)
+    assert.deepEqual(listJob(view({ job: null, running: false }), MINE, there), { actions: 'cancel', off: null, here: true })
+    assert.deepEqual(listJob(view({ running: false }), MINE, there), { actions: 'cancel', off: null, here: true }, 'over a job of its own left paused')
+  })
+
+  test('its own job running, following that refresh, keeps Pause and Cancel', () => {
+    const there = foreignView(claimRefresh('tab', 'page', NOW), MINE, names, NOW)
+    assert.deepEqual(listJob(view(), MINE, there), { actions: 'stop', off: null, here: true })
+  })
+
+  test('a refresh another page runs on another list turns nothing off here', () => {
+    const there = foreignView(claimRefresh('tab', 'page', NOW), OTHER, names, NOW)
+    assert.deepEqual(listJob(view({ job: null, running: false }), MINE, there), { actions: 'offline', off: null, here: false })
   })
 })
 

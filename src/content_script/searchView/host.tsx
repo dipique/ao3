@@ -6,13 +6,16 @@ import { watchWaitLine } from '#content_script/archiveFetch.js'
 import { hasNode } from '#content_script/blurb.js'
 import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
+import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { recordRuleTiming } from '#content_script/ruleTiming.ts'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
 import type { FacetValueRef, FilterState } from './engine.ts'
 import type { Handover, OnPage } from './handover.ts'
+import type { ListRefresh, RefreshOutcome } from './listRefresh.ts'
 import type { SearchViewPrefs } from './prefs.ts'
+import type { Hold } from './refreshClaim.ts'
 import type { ScrapeResult } from './scrape.ts'
 import type { DeferredUpdate, SearchView, SearchViewConfig, ViewState } from './view.tsx'
 import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
@@ -23,7 +26,9 @@ import { collapseWork, decorateBlurb, decorateContainer, makeFacetHider } from '
 import { isFresh } from './freshness.ts'
 import { onClaim, onClose, onOpen, onRelease, onRunEnd, onSuspend } from './handover.ts'
 import { applyHidden } from './hidden.ts'
+import { followState, sharesRefresh, updatingNote } from './listRefresh.ts'
 import { loadPrefs, savePrefs } from './prefs.ts'
+import { acquireRefresh, readRefresh, requestCancel, watchRefresh } from './refreshClaim.ts'
 import { isArchiveBusy, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 import { createSearchView } from './view.tsx'
 
@@ -471,6 +476,30 @@ let generation = 0
 let controller: AbortController | null = null
 let busy = false
 /**
+ * What the view on screen knows of its list's refresh, for a list that shares
+ * its refresh between pages ({@link sharesRefresh}); null for any other.
+ */
+interface SharedRefresh {
+  view: SearchView
+  /** Stops watching the list's claim, with the view. */
+  watching: AbortController
+  /** When the view began following the list's claim: a refresh another page stores after that is news. */
+  since: number
+  /**
+   * This view wanted a refresh and found another page's under way, or lost its
+   * own claim to one: it refreshes the list itself should that page drop it,
+   * as the reader asked (`force`, the Refresh button) or not.
+   */
+  waiting: { force: boolean } | null
+  /** This view's own refresh, while it holds one. */
+  hold: Hold | null
+  /** The note is showing another page's refresh. */
+  following: boolean
+  /** Look at the list's claim again now: once this view's own refresh is over, which it ignores the claim during. */
+  recheck: () => void
+}
+let shared: SharedRefresh | null = null
+/**
  * An open view a global re-run took down, with everything needed to put it back
  * as it was — without going back to storage for any of it.
  *
@@ -582,6 +611,8 @@ export function closeSearchView(): void {
   generation++
   controller?.abort()
   controller = null
+  shared?.watching.abort()
+  shared = null
   active = null
   busy = false
   // A close means "don't come back" unless the caller re-arms a reopen after,
@@ -1059,9 +1090,46 @@ async function refresh(
   controller?.abort()
   const own = new AbortController()
   controller = own
+  // A list another page may be refreshing is refreshed by one page at a time:
+  // this view follows that one's instead ({@link followShared}).
+  const share = shared?.view === view ? shared : null
+  let hold: Hold | null = null
+  if (share) {
+    const acquired = await acquireRefresh(source.cacheKey, {
+      holder: 'page',
+      onCancel: () => own.abort(),
+      onLost: (leaving) => {
+        // A newer refresh of this page's own took it over: that one is the wait.
+        if (controller === own && !leaving)
+          share.waiting = { force }
+        own.abort()
+      },
+      onChange: () => draw(null),
+    })
+    if (acquired.kind === 'follow' || own.signal.aborted) {
+      if (acquired.kind === 'hold')
+        await acquired.hold.release('dropped')
+      else if (!own.signal.aborted)
+        share.waiting = { force }
+      if (controller === own)
+        controller = null
+      return
+    }
+    hold = acquired.hold
+    share.hold = hold
+  }
+  /** How the refresh ended, for a page following it; a refresh stopped short of any end was dropped. */
+  let outcome: RefreshOutcome = 'dropped'
   // The list stays on screen while this runs, so a pause is all there is to
   // say — and minutes of a bare "Updating…" would read as hung.
-  const unwatch = watchWaitLine(line => view.setUpdating(true, line))
+  function draw(line: string | null): void {
+    if (hold)
+      view.setUpdating(true, { text: updatingNote(hold.claim, PAGE_RUN, Date.now()), onStop: hold.cancel })
+    else
+      view.setUpdating(true, { text: line && `Updating… ${line}` })
+  }
+  draw(null)
+  const unwatch = watchWaitLine(draw)
   try {
     if (source.load) {
       await reload(source, view, options, own.signal, !topUp, force)
@@ -1079,6 +1147,7 @@ async function refresh(
       firstPageDoc: source.firstPageDoc?.(),
       satisfied: topUp ? topUp.plan.satisfied : source.satisfied,
       signal: own.signal,
+      onProgress: hold ? hold.progress : undefined,
     })
     if (own.signal.aborted)
       return
@@ -1089,6 +1158,7 @@ async function refresh(
     // works from under them and write the gap to disk (and, for Marked for
     // Later, out of the saved-work index) on the strength of a bad minute.
     if (result.blocked) {
+      outcome = 'blocked'
       toast(`AO3 asked us to slow down, so the list wasn't refreshed. It is still showing what was stored. Try again in a few minutes.`, { type: 'error' })
       return
     }
@@ -1108,10 +1178,12 @@ async function refresh(
     // the blurbs and cached text of every work in it; keeping the stored copy on
     // screen is always recoverable.
     if (result.works.length === 0 && works.length === 0 && await snapshotSize(source.cacheKey) > 0) {
+      outcome = 'refused'
       toast(`AO3 returned this list with no works in it, so it wasn't refreshed. It is still showing what was stored.`, { type: 'error' })
       return
     }
     await persist(source, works, { listing: topUp ? undefined : result.works })
+    outcome = 'written'
     view.update(works, prepare(source, works, options, true), { force })
     const now = Date.now()
     view.setRefreshedAt(now)
@@ -1125,14 +1197,85 @@ async function refresh(
       toast(`Updated with ${result.loadedPages} of ${result.totalPages} pages.`, { type: 'error' })
   }
   catch (err) {
-    if ((err as Error)?.name !== 'AbortError')
+    if ((err as Error)?.name !== 'AbortError') {
+      outcome = 'failed'
       log.error(`Background refresh failed for ${source.id}`, err)
+    }
   }
   finally {
     unwatch()
-    if (controller === own)
+    if (hold) {
+      if (share?.hold === hold)
+        share.hold = null
+      await hold.release(outcome === 'dropped' && hold.cancelled ? 'cancelled' : outcome)
+      share?.recheck()
+    }
+    // A newer refresh has the note now, or the view has gone with the page's.
+    if (controller === own) {
       controller = null
+      view.setUpdating(false)
+    }
   }
+}
+
+/**
+ * Keep the view of a list that shares its refresh in step with a refresh another
+ * page holds: its progress on the note, with a Stop that asks that page to stop;
+ * the list, once that page has stored it; and the refresh itself, should that
+ * page drop it while this view was waiting on it. Nothing for any other list.
+ */
+function followShared(source: SearchSource, view: SearchView, options: Options, since: number): void {
+  if (!sharesRefresh(source.id))
+    return
+  shared?.watching.abort()
+  const state: SharedRefresh = { view, watching: new AbortController(), since, waiting: null, hold: null, following: false, recheck: () => {} }
+  shared = state
+  const look = (stored: ListRefresh | null): void => {
+    if (state.hold)
+      return
+    const now = Date.now()
+    const step = followState(stored, PAGE_RUN, state.since, now)
+    if (step.kind === 'following') {
+      state.following = true
+      const { id } = step.claim
+      view.setUpdating(true, {
+        text: updatingNote(step.claim, PAGE_RUN, now),
+        onStop: () => void requestCancel(source.cacheKey, id).catch(err => log.error(`Could not ask for the refresh of ${source.id} to stop`, err)),
+      })
+      return
+    }
+    if (state.following)
+      view.setUpdating(false)
+    state.following = false
+    if (step.kind === 'free') {
+      const { waiting } = state
+      state.waiting = null
+      if (waiting)
+        void refresh(source, view, options, undefined, waiting.force)
+      return
+    }
+    state.waiting = null
+    // Past its end, so the same release is news once.
+    state.since = stored!.endedAt + 1
+    if (step.kind === 'landed')
+      void showStored(source, view, options).catch(err => log.error(`Could not show the refreshed ${source.id}`, err))
+  }
+  state.recheck = () => void readRefresh(source.cacheKey).then((stored) => {
+    if (!state.watching.signal.aborted)
+      look(stored)
+  }).catch(err => log.error(`Could not read the refresh of ${source.id}`, err))
+  watchRefresh(source.cacheKey, look, state.watching.signal)
+}
+
+/** Show the list another page has just stored in place of the works on screen, as an open from the stored copy would. */
+async function showStored(source: SearchSource, view: SearchView, options: Options): Promise<void> {
+  const stored = await readSnapshot(source.cacheKey)
+  if (!stored || active?.view !== view)
+    return
+  const works = applyLimit(selected(source, stored.works), limitFor(options))
+  view.update(works, prepare(source, works, options, true))
+  view.setRefreshedAt(stored.scrapedAt)
+  active.scrapedAt = stored.scrapedAt
 }
 
 export interface OpenOptions {
@@ -1261,10 +1404,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       onRefresh: () => {
         if (!active)
           return
-        const { view } = active
-        view.setUpdating(true)
         // Forced: this is the reader asking, not a reload arriving.
-        void refresh(source, view, options, undefined, true).finally(() => view.setUpdating(false))
+        void refresh(source, active.view, options, undefined, true)
       },
     }
     // Everything a source's own strip can ask of the view. Each call checks that
@@ -1338,6 +1479,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         // Render instantly, then refresh in the background (unless the caller
         // knows the works are fresh, e.g. a reopen right after a re-run).
         const view = show(stored, cached.scrapedAt)
+        followShared(source, view, options, Date.now())
         // Taking the old view down can shorten the page for as long as a layout
         // lasts, and a shorter page pulls the scroll position up with it.
         if (carried && window.scrollY !== carried.scrollY)
@@ -1352,10 +1494,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         )
         // `undefined` is a full reload, `null` is a top-up with nothing to find.
         const plan = !recent && opts.refresh !== false && source.topUp ? source.topUp(stored) : undefined
-        if (opts.refresh !== false && !recent && plan !== null) {
-          view.setUpdating(true)
-          void refresh(source, view, options, plan ? { plan, stored } : undefined).finally(() => view.setUpdating(false))
-        }
+        if (opts.refresh !== false && !recent && plan !== null)
+          void refresh(source, view, options, plan ? { plan, stored } : undefined)
         return
       }
 
@@ -1415,7 +1555,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
           return
         }
         fresh = true
-        show(works, Date.now())
+        const now = Date.now()
+        followShared(source, show(works, now), options, now)
         if (loaded.blocked)
           toast('AO3 asked us to slow down before the whole list could be loaded. The rest will be tried again next time.', { type: 'error' })
         return
@@ -1437,7 +1578,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         return
       }
       fresh = true
-      show(works, Date.now())
+      const now = Date.now()
+      followShared(source, show(works, now), options, now)
       // A scrape that stopped because it had found everything it came for is not
       // a scrape that fell short.
       if (completed.blocked && !result.blocked) {
