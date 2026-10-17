@@ -28,7 +28,7 @@ import { onClaim, onClose, onOpen, onRelease, onRunEnd, onSuspend } from './hand
 import { applyHidden } from './hidden.ts'
 import { followState, sharesRefresh, updatingNote } from './listRefresh.ts'
 import { loadPrefs, savePrefs } from './prefs.ts'
-import { acquireRefresh, readRefresh, requestCancel, watchRefresh } from './refreshClaim.ts'
+import { acquireRefresh, requestCancel, watchRefresh } from './refreshClaim.ts'
 import { isArchiveBusy, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 import { createSearchView } from './view.tsx'
 
@@ -1124,7 +1124,7 @@ async function refresh(
   // say — and minutes of a bare "Updating…" would read as hung.
   function draw(line: string | null): void {
     if (hold)
-      view.setUpdating(true, { text: updatingNote(hold.claim, PAGE_RUN, Date.now()), onStop: hold.cancel })
+      view.setUpdating(true, { text: updatingNote(hold.claim, Date.now()), onStop: hold.cancel })
     else
       view.setUpdating(true, { text: line && `Updating… ${line}` })
   }
@@ -1239,7 +1239,7 @@ function followShared(source: SearchSource, view: SearchView, options: Options, 
       state.following = true
       const { id } = step.claim
       view.setUpdating(true, {
-        text: updatingNote(step.claim, PAGE_RUN, now),
+        text: updatingNote(step.claim, now),
         onStop: () => void requestCancel(source.cacheKey, id).catch(err => log.error(`Could not ask for the refresh of ${source.id} to stop`, err)),
       })
       return
@@ -1260,11 +1260,7 @@ function followShared(source: SearchSource, view: SearchView, options: Options, 
     if (step.kind === 'landed')
       void showStored(source, view, options).catch(err => log.error(`Could not show the refreshed ${source.id}`, err))
   }
-  state.recheck = () => void readRefresh(source.cacheKey).then((stored) => {
-    if (!state.watching.signal.aborted)
-      look(stored)
-  }).catch(err => log.error(`Could not read the refresh of ${source.id}`, err))
-  watchRefresh(source.cacheKey, look, state.watching.signal)
+  state.recheck = watchRefresh(source.cacheKey, look, state.watching.signal)
 }
 
 /** Show the list another page has just stored in place of the works on screen, as an open from the stored copy would. */

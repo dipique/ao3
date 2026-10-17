@@ -8,6 +8,8 @@ import {
   followState,
   holds,
   lapseIn,
+  listStored,
+  loadingLine,
   outranks,
   REFRESH_CLAIM_RENEW_MS,
   REFRESH_CLAIM_TTL_MS,
@@ -235,6 +237,19 @@ describe('followState', () => {
   })
 })
 
+describe('listStored', () => {
+  const claim = claimRefresh('them', 'page', NOW)
+
+  test('a copy read since the refresh began is what it stored, whatever its claim still says', () => {
+    assert.equal(listStored(claim, NOW + 5000), true)
+    assert.equal(listStored(claim, NOW), true)
+  })
+
+  test('a copy read before it is not', () => {
+    assert.equal(listStored(claim, NOW - 1), false)
+  })
+})
+
 describe('lapseIn', () => {
   test('how long a live claim has before it lapses unrenewed', () => {
     assert.equal(lapseIn(claimRefresh('them', 'page', NOW), NOW + 1000), REFRESH_CLAIM_TTL_MS - 1000)
@@ -247,34 +262,41 @@ describe('lapseIn', () => {
 })
 
 describe('updatingNote', () => {
-  test('its own refresh, before the page count is known', () => {
-    assert.equal(updatingNote(claimRefresh('me', 'page', NOW), 'me', NOW), 'Updating…')
+  test('before the page count is known', () => {
+    assert.equal(updatingNote(claimRefresh('me', 'page', NOW), NOW), 'Updating…')
   })
 
-  test('its own refresh, pages loaded', () => {
-    assert.equal(updatingNote(withProgress(claimRefresh('me', 'page', NOW), 2, 5, NOW), 'me', NOW), 'Updating… Loaded 2 of 5 pages')
+  test('pages loaded', () => {
+    assert.equal(updatingNote(withProgress(claimRefresh('me', 'page', NOW), 2, 5, NOW), NOW), 'Updating… Loaded 2 of 5 pages')
   })
 
-  test('a refresh started on the options page', () => {
-    assert.equal(updatingNote(withProgress(claimRefresh('them', 'options', NOW), 2, 5, NOW), 'me', NOW), 'Updating from the options page… Loaded 2 of 5 pages')
-  })
-
-  test('a refresh started in another AO3 tab', () => {
-    assert.equal(updatingNote(withProgress(claimRefresh('them', 'page', NOW), 1, 3, NOW), 'me', NOW), 'Updating in another tab… Loaded 1 of 3 pages')
+  test('the same whichever page runs it', () => {
+    assert.equal(updatingNote(withProgress(claimRefresh('them', 'options', NOW), 2, 5, NOW), NOW), 'Updating… Loaded 2 of 5 pages')
+    assert.equal(updatingNote(withProgress(claimRefresh('them', 'page', NOW), 2, 5, NOW), NOW), 'Updating… Loaded 2 of 5 pages')
   })
 
   test('a pause takes the page count’s place, counting down', () => {
     const paused = withPause(withProgress(claimRefresh('me', 'page', NOW), 2, 5, NOW), NOW + 65_000, 'refused', NOW)
-    assert.equal(updatingNote(paused, 'me', NOW), 'Updating… AO3 asked us to slow down — trying again in 1:05')
-    assert.equal(updatingNote(paused, 'me', NOW + 60_000), 'Updating… AO3 asked us to slow down — trying again in 5s')
+    assert.equal(updatingNote(paused, NOW), 'Updating… AO3 asked us to slow down — trying again in 1:05')
+    assert.equal(updatingNote(paused, NOW + 60_000), 'Updating… AO3 asked us to slow down — trying again in 5s')
   })
 
   test('a pause that has run out goes back to the page count', () => {
     const paused = withPause(withProgress(claimRefresh('them', 'page', NOW), 2, 5, NOW), NOW + 5000, 'pacing', NOW)
-    assert.equal(updatingNote(paused, 'me', NOW + 5000), 'Updating in another tab… Loaded 2 of 5 pages')
+    assert.equal(updatingNote(paused, NOW + 5000), 'Updating… Loaded 2 of 5 pages')
   })
 
   test('one page is a page', () => {
-    assert.equal(updatingNote(withProgress(claimRefresh('me', 'page', NOW), 1, 1, NOW), 'me', NOW), 'Updating… Loaded 1 of 1 page')
+    assert.equal(updatingNote(withProgress(claimRefresh('me', 'page', NOW), 1, 1, NOW), NOW), 'Updating… Loaded 1 of 1 page')
+  })
+})
+
+describe('loadingLine', () => {
+  test('the page the refresh is on, as a job says it', () => {
+    assert.equal(loadingLine(2, 5), 'Loading page 2 of 5…')
+  })
+
+  test('before the page count is known, the list being fetched', () => {
+    assert.equal(loadingLine(0, 0), 'Fetching the list…')
   })
 })

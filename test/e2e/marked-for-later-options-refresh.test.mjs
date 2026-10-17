@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { archiveTab, liveTitles, loadToRead, runToRead, shownTitles, storedClaim, storedSeed, toReadPage, updatingNote, updatingStop } from './markedForLater.mjs'
+import { claimRefresh, released } from '../../src/content_script/searchView/listRefresh.ts'
+import { archiveTab, KEY, liveTitles, loadToRead, runToRead, shownTitles, storedClaim, storedSeed, toReadPage, updatingNote, updatingStop } from './markedForLater.mjs'
 import { skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 import { linkWrites, relayWrites } from './trackedPages.mjs'
 
@@ -85,7 +86,7 @@ describe('Marked for Later: the options page and an AO3 tab share one refresh', 
     try {
       await runToRead(tab)
       await until('the tile to show the refresh, sitting out AO3’s pause', async () =>
-        /Refreshing in an AO3 tab|AO3 asked us to slow down — trying again in 1:[23]\d/.test(await tileText()))
+        /Loading page \d of 3…|AO3 asked us to slow down — trying again in 1:[23]\d/.test(await tileText()))
       await until('the pause, counting down', async () => /AO3 asked us to slow down — trying again in 1:[23]\d/.test(await tileText()))
       assert.deepEqual(await options.controls(await options.tile('marked-for-later'), 'button', 'Refresh list'), [], 'Cancel takes the actions’ place')
 
@@ -102,6 +103,25 @@ describe('Marked for Later: the options page and an AO3 tab share one refresh', 
     }
   })
 
+  test('a refresh on the AO3 page leaves the tile once it has stored the list', async () => {
+    const page2 = hold()
+    const { tab, options, tileText, close } = await open((name, page) =>
+      name === 'tab' && page === 2 ? page2.held.then(() => toReadPage(2)) : toReadPage(page))
+    try {
+      await runToRead(tab)
+      await until('the tile to show the refresh', async () => /Loaded \d of 3 pages|\d \/ 3/.test(await tileText()))
+
+      page2.release()
+      await until('the AO3 page to store the list', async () => JSON.stringify(await shownTitles(tab)) === JSON.stringify(liveTitles()))
+      await until('the tile’s actions to be back', async () => (await options.controls(await options.tile('marked-for-later'), 'button', 'Refresh list')).length === 1)
+      assert.equal(await (await options.tile('marked-for-later')).evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null), null, 'and no job line left')
+    }
+    finally {
+      page2.release()
+      await close()
+    }
+  })
+
   test('a job’s refresh shows on the AO3 page, which asks AO3 for nothing, and the list it stores reaches the page', async () => {
     const page2 = hold()
     const { tab, options, asked, inTile, tileText, close } = await open((name, page) =>
@@ -112,7 +132,7 @@ describe('Marked for Later: the options page and an AO3 tab share one refresh', 
       await until('the job to be loading the list', async () => /Loading page \d of 3/.test(await tileText()))
 
       await runToRead(tab)
-      await until('the AO3 page to show the job’s refresh', async () => /^Updating from the options page… Loaded \d of 3 pages$/.test(await updatingNote(tab) ?? ''))
+      await until('the AO3 page to show the job’s refresh', async () => /^Updating… Loaded \d of 3 pages$/.test(await updatingNote(tab) ?? ''))
       assert.ok(await updatingStop(tab), 'with a Stop')
 
       page2.release()
@@ -136,11 +156,11 @@ describe('Marked for Later: the options page and an AO3 tab share one refresh', 
       await options.press(await inTile('button', 'Refresh list'))
       await until('the job to be fetching the list', async () => /Fetching the list…/.test(await tileText()))
       await runToRead(tab)
-      await until('the AO3 page to show the job’s refresh', async () => (await updatingNote(tab) ?? '').startsWith('Updating from the options page…'))
+      await until('the AO3 page to show the job’s refresh', async () => !!await updatingStop(tab))
 
       page1.release()
       await until('the job to stop on it', async () => /signed-out view/.test(await tileText()))
-      assert.equal((await storedClaim(tab))?.outcome, 'refused')
+      await until('the refresh to end refused, as the AO3 page hears it', async () => (await storedClaim(tab))?.outcome === 'refused')
       await until('the AO3 page to stop updating', async () => await updatingNote(tab) === null)
       assert.deepEqual(await shownTitles(tab), ['Stored work 1', 'Stored work 2'])
     }
@@ -204,6 +224,48 @@ describe('Marked for Later: the options page and an AO3 tab share one refresh', 
       options1.release()
       tab2.release()
       await close()
+    }
+  })
+
+  /**
+   * The options page with an AO3 page's refresh under way, whose end it is then
+   * not told of: the end is stored without a change event, as a tab the browser
+   * froze in the background misses one.
+   */
+  const missedEnd = async () => {
+    const claim = claimRefresh('elsewhere', 'page', Date.now())
+    const options = await session.open({ seed: { ...SEED, [`listRefresh.${KEY}`]: claim }, hash: '#user-profile-lists' })
+    const tile = () => options.tile('marked-for-later')
+    await until('the tile to show the refresh', async () => /Fetching the list…/.test(await options.text(await tile())))
+    await options.page.evaluate((key, ended) => window.__storeQuietly({ [key]: ended }), `listRefresh.${KEY}`, released(claim, 'written', Date.now()))
+    const actionsBack = async () => (await options.controls(await tile(), 'button', 'Refresh list')).length === 1
+    return { options, actionsBack }
+  }
+
+  test('a refresh whose end the page missed leaves the tile once the list it stored arrives', async () => {
+    const { options, actionsBack } = await missedEnd()
+    try {
+      // What the refresh stored, which the page does hear.
+      await options.page.evaluate(async (key) => {
+        const lists = (await window.browser.storage.local.get('cache.searchLists'))['cache.searchLists']
+        lists[key] = { ...lists[key], scrapedAt: Date.now() }
+        await window.browser.storage.local.set({ 'cache.searchLists': lists })
+      }, KEY)
+      await until('the tile’s actions to be back', actionsBack)
+    }
+    finally {
+      await options.page.close()
+    }
+  })
+
+  test('a refresh whose end the page missed leaves the tile once the page is looked at again', async () => {
+    const { options, actionsBack } = await missedEnd()
+    try {
+      await options.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await until('the tile’s actions to be back', actionsBack)
+    }
+    finally {
+      await options.page.close()
     }
   })
 })

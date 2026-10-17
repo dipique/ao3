@@ -1,7 +1,7 @@
 import type { SnapshotDescriptor } from '#common'
 import type { WaitReason } from '#content_script/archiveFetch.js'
 import type { Work } from '#content_script/blurb.js'
-import type { FollowState, ListRefresh, RefreshHolder, RefreshOutcome } from '#content_script/searchView/listRefresh.ts'
+import type { FollowState, ListRefresh, RefreshOutcome } from '#content_script/searchView/listRefresh.ts'
 import type { RefreshOptions, RefreshResult } from '#content_script/searchView/refresh.js'
 import type { Hold } from '#content_script/searchView/refreshClaim.ts'
 
@@ -11,7 +11,7 @@ import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
 import { readSnapshotData } from '#content_script/searchView/cache.js'
-import { followState, refreshStep, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
+import { followState, loadingLine, refreshStep, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
 import { acquireRefresh, awaitRefresh, readRefresh, requestCancel } from '#content_script/searchView/refreshClaim.ts'
 
@@ -398,30 +398,25 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
       return
     signal.throwIfAborted()
     const ended = await followElsewhere(job, signal)
-    if (ended.state.kind !== 'free')
-      return endFollowed(job, ended.state, ended.holder)
+    if (ended.kind !== 'free')
+      return endFollowed(job, ended)
     signal.throwIfAborted()
   }
 }
 
-/** Where a refresh another page runs is said to run. */
-const ELSEWHERE: Readonly<Record<RefreshHolder, string>> = { page: 'in an AO3 tab', options: 'in another options tab' }
-
 /** Wait for the refresh of the job's list another page is running, mirroring its progress. */
-async function followElsewhere(job: ExportJob, signal: AbortSignal): Promise<{ state: Exclude<FollowState, { kind: 'following' }>, holder: RefreshHolder }> {
-  let holder: RefreshHolder = 'page'
+async function followElsewhere(job: ExportJob, signal: AbortSignal): Promise<Exclude<FollowState, { kind: 'following' }>> {
   const mirror = (claim: ListRefresh): void => {
-    holder = claim.holder
     following = { cacheKey: job.cacheKey, id: claim.id }
     job.done = claim.done
     job.total = claim.total
     waitingUntil = claim.waitUntil || null
     waitReason = claim.waitReason
-    message = `Waiting for the refresh ${ELSEWHERE[claim.holder]}`
+    message = loadingLine(claim.done, claim.total)
     publish()
   }
   try {
-    return { state: await awaitRefresh(job.cacheKey, job.updatedAt, mirror, signal), holder }
+    return await awaitRefresh(job.cacheKey, job.updatedAt, mirror, signal)
   }
   finally {
     following = null
@@ -431,7 +426,7 @@ async function followElsewhere(job: ExportJob, signal: AbortSignal): Promise<{ s
 }
 
 /** Take the end of a refresh another page ran as the end of the job's own. */
-function endFollowed(job: ExportJob, state: Exclude<FollowState, { kind: 'following' | 'free' }>, holder: RefreshHolder = 'page'): void {
+function endFollowed(job: ExportJob, state: Exclude<FollowState, { kind: 'following' | 'free' }>): void {
   if (state.kind === 'landed') {
     job.queue = []
     job.total = 0
@@ -448,7 +443,7 @@ function endFollowed(job: ExportJob, state: Exclude<FollowState, { kind: 'follow
     stopJob()
     return
   }
-  throw new Error(`The refresh ${ELSEWHERE[holder]} didn’t store the list, so it was left as it was. Try again when you like.`)
+  throw new Error('The list’s refresh didn’t store it, so it was left as it was. Try again when you like.')
 }
 
 /**
@@ -484,7 +479,7 @@ async function refreshHere(job: ExportJob, signal: AbortSignal, hold: Hold | nul
 }
 
 async function fetchList(job: ExportJob, signal: AbortSignal, hold: Hold | null): Promise<RefreshResult> {
-  message = 'Fetching the list…'
+  message = loadingLine(0, 0)
   publish()
 
   const limit = await options.get('searchMaxResults')
@@ -498,7 +493,7 @@ async function fetchList(job: ExportJob, signal: AbortSignal, hold: Hold | null)
     onProgress: (done, total) => {
       job.done = done
       job.total = total
-      message = `Loading page ${done} of ${total}…`
+      message = loadingLine(done, total)
       hold?.progress(done, total)
       publish()
     },

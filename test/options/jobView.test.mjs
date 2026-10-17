@@ -148,14 +148,14 @@ describe('jobView', () => {
 describe('foreignView', () => {
   const claim = withProgress(claimRefresh('tab', 'page', NOW - 5_000), 2, 5, NOW - 1_000)
 
-  test('a refresh an AO3 tab runs: the list, refreshing, how far it has got, and where it runs', () => {
+  test('a refresh another page runs: the list, refreshing, and how far it has got', () => {
     const there = foreignView(claim, MINE, names, NOW)
     assert.equal(there.key, MINE)
     assert.equal(there.name, 'Marked for Later')
     assert.equal(there.phase, 'refreshing')
     assert.equal(there.label, 'Refreshing Marked for Later')
     assert.equal(there.state, 'running')
-    assert.equal(there.line, 'Refreshing in an AO3 tab')
+    assert.equal(there.line, 'Loading page 2 of 5…')
     assert.equal(there.done, 2)
     assert.equal(there.total, 5)
     assert.equal(there.claimId, claim.id)
@@ -163,8 +163,8 @@ describe('foreignView', () => {
     assert.deepEqual(there.failures, { shown: [], more: 0 })
   })
 
-  test('one another options page runs says so', () => {
-    assert.equal(foreignView(claimRefresh('options', 'options', NOW), MINE, names, NOW).line, 'Refreshing in another options tab')
+  test('before its page count is known, it is fetching the list', () => {
+    assert.equal(foreignView(claimRefresh('options', 'options', NOW), MINE, names, NOW).line, 'Fetching the list…')
   })
 
   test('sitting out a pause: waiting, with its kind and countdown', () => {

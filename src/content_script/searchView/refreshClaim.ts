@@ -199,14 +199,22 @@ function keep(cacheKey: string, first: ListRefresh, opts: HoldOptions, stored = 
 
 /**
  * Watch the claim on `cacheKey`: `onClaim` hears it as it is stored now, on
- * every write to it, when a running one would lapse unrenewed, and every second
- * while one sits out a pause (so a countdown can be drawn), until `signal`
- * aborts. What it means to the caller is {@link followState}'s to say.
+ * every write to it, when a running one would lapse unrenewed, every second
+ * while one sits out a pause (so a countdown can be drawn), and as it is stored
+ * again whenever the page is shown, until `signal` aborts. What it means to the
+ * caller is {@link followState}'s to say.
+ *
+ * A page the browser froze in the background can miss a write, and so go on
+ * showing a refresh that has ended. Returned is the way to read the claim
+ * again, for a caller that has heard something which says it may have: the
+ * list the refresh was storing, stored.
  */
-export function watchRefresh(cacheKey: string, onClaim: (stored: ListRefresh | null) => void, signal: AbortSignal): void {
+export function watchRefresh(cacheKey: string, onClaim: (stored: ListRefresh | null) => void, signal: AbortSignal): () => void {
   if (signal.aborted)
-    return
+    return () => {}
   let timer: ReturnType<typeof setTimeout> | undefined
+  /** Writes heard so far: a read begun before the latest of them is older than it, and is dropped. */
+  let heardCount = 0
 
   const look = (stored: ListRefresh | null): void => {
     clearTimeout(timer)
@@ -226,21 +234,39 @@ export function watchRefresh(cacheKey: string, onClaim: (stored: ListRefresh | n
 
   const heard = (changes: Record<string, { newValue?: unknown }>, area: string): void => {
     const change = changes[refreshClaimKey(cacheKey)]
-    if (area === 'local' && change)
-      look((change.newValue as ListRefresh | undefined) ?? null)
+    if (area !== 'local' || !change)
+      return
+    heardCount++
+    look((change.newValue as ListRefresh | undefined) ?? null)
+  }
+
+  const read = (): void => {
+    const before = heardCount
+    readRefresh(cacheKey)
+      .then((stored) => {
+        if (heardCount === before)
+          look(stored)
+      })
+      .catch(err => console.error('[refresh] could not read the refresh of', cacheKey, err))
+  }
+
+  const shown = (): void => {
+    if (document.visibilityState === 'visible')
+      read()
   }
 
   browser.storage.onChanged.addListener(heard)
+  document.addEventListener('visibilitychange', shown)
   signal.addEventListener('abort', () => {
     clearTimeout(timer)
     browser.storage.onChanged.removeListener(heard)
+    document.removeEventListener('visibilitychange', shown)
   }, { once: true })
-  readRefresh(cacheKey)
-    .then(look)
-    .catch((err) => {
-      console.error('[refresh] could not read the refresh of', cacheKey, err)
-      look(null)
-    })
+  read()
+  return () => {
+    if (!signal.aborted)
+      read()
+  }
 }
 
 /** Ask whoever holds claim `id` on `cacheKey` to stop. */

@@ -71,7 +71,7 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
       await until('tab A to be refreshing', async () => /^Updating… Loaded \d of 3 pages$/.test(await updatingNote(a) ?? ''))
 
       await runToRead(b)
-      await until('tab B to show tab A’s refresh', async () => /^Updating in another tab… Loaded \d of 3 pages$/.test(await updatingNote(b) ?? ''))
+      await until('tab B to show tab A’s refresh', async () => /^Updating… Loaded \d of 3 pages$/.test(await updatingNote(b) ?? ''))
       assert.ok(await updatingStop(b), 'with a Stop')
       assert.deepEqual(await shownTitles(b), ['Stored work 1', 'Stored work 2'], 'over the stored copy')
 
@@ -99,7 +99,7 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
       archive.titles = 'Newer'
       archive.refusing = true
       await a.$eval('.AO3E--search-view--refresh', button => button.click())
-      const waiting = /^Updating in another tab… AO3 asked us to slow down — trying again in 1:[23]\d$/
+      const waiting = /^Updating… AO3 asked us to slow down — trying again in 1:[23]\d$/
       await until('tab B to show the pause, counting down', async () => waiting.test(await updatingNote(b) ?? ''))
       const first = await updatingNote(b)
       await until('it counts down', async () => waiting.test(await updatingNote(b) ?? '') && await updatingNote(b) !== first)
@@ -124,7 +124,7 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
       await runToRead(a)
       await until('tab A to be refreshing', async () => (await updatingNote(a) ?? '').startsWith('Updating…'))
       await runToRead(b)
-      await until('tab B to follow it', async () => (await updatingNote(b) ?? '').startsWith('Updating in another tab…'))
+      await until('tab B to follow it', async () => (await updatingNote(b) ?? '').startsWith('Updating…'))
 
       await (await updatingStop(a)).evaluate(button => button.click())
       await until('tab B’s note to go', async () => await updatingNote(b) === null)
@@ -146,7 +146,7 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
       await runToRead(a)
       await until('tab A to be refreshing', async () => (await updatingNote(a) ?? '').startsWith('Updating…'))
       await runToRead(b)
-      await until('tab B to follow it', async () => (await updatingNote(b) ?? '').startsWith('Updating in another tab…'))
+      await until('tab B to follow it', async () => (await updatingNote(b) ?? '').startsWith('Updating…'))
 
       // An option written in tab A alone re-runs it, which takes its view
       // down mid-refresh and puts it back without refreshing again.

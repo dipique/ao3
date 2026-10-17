@@ -183,21 +183,33 @@ export function followState(stored: ListRefresh | null, self: string, since: num
   return stored.outcome === 'written' ? { kind: 'landed', endedAt: stored.endedAt } : { kind: 'ended', outcome: stored.outcome }
 }
 
+/**
+ * Whether the copy of the list, last read at `scrapedAt`, is what `claim`'s
+ * refresh stored: read since it began. Only a read moves `scrapedAt`, and the
+ * holder stores the list before it releases the claim, so a page that has the
+ * copy but missed the release still knows the refresh is over.
+ */
+export function listStored(claim: ListRefresh, scrapedAt: number): boolean {
+  return scrapedAt >= claim.startedAt
+}
+
 /** How long until `stored`, unrenewed, lapses: 0 for one already lapsed or released. */
 export function lapseIn(stored: ListRefresh, now: number): number {
   return running(stored, now) ? Math.max(0, stored.at + REFRESH_CLAIM_TTL_MS - now) : 0
 }
 
 /**
- * What a search view's *Updating…* note says of `claim`, to page run `self`:
- * where the refresh runs, then the pause it is sitting out, counting down, or
- * else the pages it has loaded.
+ * What a search view's *Updating…* note says of `claim`, whichever page runs
+ * it: the pause it is sitting out, counting down, or else the pages it has
+ * loaded.
  */
-export function updatingNote(claim: ListRefresh, self: string, now: number): string {
-  const head = claim.by === self
-    ? 'Updating…'
-    : claim.holder === 'options' ? 'Updating from the options page…' : 'Updating in another tab…'
+export function updatingNote(claim: ListRefresh, now: number): string {
   const detail = (claim.waitReason && waitLine(claim.waitUntil, claim.waitReason, now))
     ?? (claim.total ? `Loaded ${claim.done} of ${claim.total} ${claim.total === 1 ? 'page' : 'pages'}` : null)
-  return detail ? `${head} ${detail}` : head
+  return detail ? `Updating… ${detail}` : 'Updating…'
+}
+
+/** What a job's line says of a refresh that has loaded `done` of `total` listing pages, whichever page runs it. */
+export function loadingLine(done: number, total: number): string {
+  return total ? `Loading page ${done} of ${total}…` : 'Fetching the list…'
 }

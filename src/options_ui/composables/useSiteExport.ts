@@ -8,7 +8,7 @@ import { cache, copyOwner, getArchiveLink, joinSavedLists, listCopies, listUrlFo
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
-import { followState, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
+import { followState, listStored, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
 import { requestCancel, watchRefresh } from '#content_script/searchView/refreshClaim.ts'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
 import { cancelJob, discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
@@ -259,12 +259,17 @@ watch(() => rows.value.filter(row => row.descriptor && sharesRefresh(row.descrip
   }
 }, { immediate: true })
 
-/** A refresh another page is running on one of those lists ({@link foreignView}), or null. */
+/**
+ * A refresh another page is running on one of those lists ({@link foreignView}),
+ * or null. One whose list has arrived is over, even if its end hasn't
+ * ({@link listStored}).
+ */
 const foreign = computed(() => {
   const at = Date.now()
   for (const [key, claim] of Object.entries(claims.value)) {
     const state = followState(claim, PAGE_RUN, 0, at)
-    if (state.kind === 'following')
+    const copy = rowFor(key)
+    if (state.kind === 'following' && !(copy && listStored(state.claim, copy.scrapedAt)))
       return foreignView(state.claim, key, nameOf, at)
   }
   return null

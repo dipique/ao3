@@ -4,6 +4,7 @@ import type { ExportJobError, ExportJobPhase, JobStatus } from '../../content_sc
 import type { Severity } from './severity.ts'
 
 import { countdown, WAIT_WORDS } from '../../content_script/archiveFetch.ts'
+import { loadingLine } from '../../content_script/searchView/listRefresh.ts'
 import { sentence } from './phrases.ts'
 
 /**
@@ -119,7 +120,7 @@ export function foreignView(claim: ListRefresh, key: string, names: (key: string
     state: 'running',
     done: claim.done,
     total: claim.total,
-    line: claim.holder === 'options' ? 'Refreshing in another options tab' : 'Refreshing in an AO3 tab',
+    line: loadingLine(claim.done, claim.total),
     warnings: [],
     failures: { shown: [], more: 0 },
     claimId: claim.id,

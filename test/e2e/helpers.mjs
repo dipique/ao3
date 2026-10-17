@@ -217,6 +217,9 @@ export function installMock(seed) {
   window.__writes = []
   const store = { ...seed }
   const listeners = new Set()
+  // A write this page never hears about, as a tab the browser froze in the
+  // background misses another page's.
+  window.__storeQuietly = items => Object.assign(store, items)
   const toArr = k => (k == null ? null : (Array.isArray(k) ? k : (typeof k === 'object' ? Object.keys(k) : [k])))
   const area = name => ({
     get: keys => Promise.resolve((() => {
