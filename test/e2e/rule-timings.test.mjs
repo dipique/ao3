@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, installMock, launch } from './helpers.mjs'
 import { chromePath, skip, startOptions, until } from './optionsPage.mjs'
 import { settled } from './trackedPages.mjs'
 
@@ -57,7 +56,7 @@ describe('rule timings — a listing page records its pass', { skip }, () => {
     ensureBuilt()
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-    browser = await puppeteer.launch({ executablePath: chromePath, headless: 'new', args: ['--no-first-run', '--no-default-browser-check'] })
+    browser = await launch(chromePath)
     page = await browser.newPage()
     await page.goto('about:blank')
     await page.evaluate(installMock, RULES)

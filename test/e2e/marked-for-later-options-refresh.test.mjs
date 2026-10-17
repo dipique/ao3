@@ -45,6 +45,9 @@ describe('Marked for Later: the options page and an AO3 tab share one refresh', 
     const options = await session.open({
       seed: SEED,
       hash: '#user-profile-lists',
+      // Beside the AO3 tab, not in front of it: hidden, the tab's refresh would
+      // run on timers slowed to one a second.
+      window: true,
       prepare: async (page) => {
         await page.evaluateOnNewDocument(relayWrites)
         archive = await stubArchive(page, async (raw) => {

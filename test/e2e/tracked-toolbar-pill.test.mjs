@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { openToolbar, rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -79,7 +78,7 @@ const LATER_PAGE = `<!doctype html>
  * raised by the previous write is still up: the toast shares this corner with
  * the toolbar, and pressing the next pill without waiting for it to go is the
  * ordinary case. That the two can share the corner is pinned down in
- * `filter-toolbar-hit-area`.
+ * `visual/filter-toolbar-hit-area`.
  */
 describe('the toolbar\'s tracked-list pill', { skip }, () => {
   let browser
@@ -90,11 +89,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     ensureBuilt()
     css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
   }, { timeout: 180000 })
 
   after(async () => {

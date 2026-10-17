@@ -34,9 +34,9 @@ const LIST = 'rules'
 const DEFAULT_ORDER = ['Mango', 'apple', 'Zebra', 'banana']
 
 /**
- * The rules list's sort: a menu in the list's header of the four keys. Each
- * press of a key sorts by it ascending, then descending, then not at all; the
- * menu button and each key say where the sort is in `aria-sort`'s terms.
+ * The rules list's sort: a menu in the list's header of the four keys, each
+ * press of which steps the sort on; the menu button and each key say where the
+ * sort is in `aria-sort`'s terms, and nothing of it is stored.
  */
 describe('options UI — rules sorting', { skip }, () => {
   let session
@@ -96,19 +96,20 @@ describe('options UI — rules sorting', { skip }, () => {
     await closeMenu()
   }
 
-  test('the menu offers the four keys, Action first, none of them sorting yet', async () => {
+  test('the menu offers the four keys, Action first, none of them sorting yet: the list is in its default grouping', async () => {
     const items = await menu()
     assert.deepEqual(items.map(item => item.text), ['Action', 'Priority', 'Rule', 'Applies to'])
     assert.deepEqual(items.map(item => item.name), ['Action', 'Priority', 'Rule', 'Applies to'])
     assert.ok(items.every(item => item.hint === 'Sort ascending'), JSON.stringify(items))
-  })
-
-  test('it starts unsorted, grouped by target then value', async () => {
     assert.deepEqual(await order(), DEFAULT_ORDER)
     assert.equal(await sortName(), 'Sort: none')
   })
 
-  test('pressing Rule sorts by text, ignoring case', async () => {
+  test('pressing a key sorts the rows by it, and the button and the key say so', async () => {
+    // How each key orders, and what each press of it does next, is `shownRules`'
+    // and `cycleSort`'s business, tested case by case in
+    // `test/options/listView.test.mjs`; here, that the menu reaches them and the
+    // list and its labels show the result.
     await press('Rule')
     assert.deepEqual(await order(), ['apple', 'banana', 'Mango', 'Zebra'])
     assert.equal(await sortName(), 'Sort: Rule, ascending')
@@ -116,77 +117,10 @@ describe('options UI — rules sorting', { skip }, () => {
     assert.deepEqual(rule, { text: 'Rule', name: 'Rule, sorted ascending', hint: 'Sort descending' })
   })
 
-  test('pressing it again reverses', async () => {
-    await press('Rule')
-    assert.deepEqual(await order(), ['Zebra', 'Mango', 'banana', 'apple'])
-    assert.equal(await sortName(), 'Sort: Rule, descending')
-    const rule = (await menu()).find(item => item.text === 'Rule')
-    assert.deepEqual(rule, { text: 'Rule', name: 'Rule, sorted descending', hint: 'Clear sort' })
-  })
-
-  test('a third press turns sorting off, back to the default grouping', async () => {
-    await press('Rule')
+  test('the menu stays open, so the cycle can be stepped through at once: two more presses and the sort is off', async () => {
+    await press('Rule', 2)
     assert.deepEqual(await order(), DEFAULT_ORDER)
     assert.equal(await sortName(), 'Sort: none')
-  })
-
-  test('the menu stays open, so the cycle can be stepped through at once', async () => {
-    await press('Rule', 2)
-    assert.equal(await sortName(), 'Sort: Rule, descending')
-    await press('Rule')
-    assert.equal(await sortName(), 'Sort: none')
-  })
-
-  test('Priority sorts numerically, both ways, with the rules that show none after, in the list\'s own order', async () => {
-    await press('Priority')
-    assert.deepEqual(await order(), ['Zebra', 'apple', 'Mango', 'banana'])
-    await press('Priority')
-    assert.deepEqual(await order(), ['apple', 'Zebra', 'Mango', 'banana'])
-    await press('Priority')
-  })
-
-  test('Applies to sorts by the label shown, not the stored target', async () => {
-    // Stored targets are 'F', 'f', 'author', 'series' — sorting those raw would
-    // put 'F' first. By label it is Additional Tags, Author, Fandom, Series.
-    await press('Applies to')
-    assert.deepEqual(await order(), ['Zebra', 'Mango', 'apple', 'banana'])
-    await press('Applies to')
-    assert.deepEqual(await order(), ['banana', 'apple', 'Mango', 'Zebra'])
-    await press('Applies to')
-  })
-
-  test('Action sorts by effect: hide, show, highlight, hide-tag', async () => {
-    await press('Action')
-    assert.deepEqual(await order(), ['Zebra', 'apple', 'Mango', 'banana'])
-    await press('Action')
-    assert.deepEqual(await order(), ['banana', 'Mango', 'apple', 'Zebra'])
-    await press('Action')
-  })
-
-  test('sorting by one key clears the sort by another', async () => {
-    await press('Rule')
-    await press('Priority')
-    const items = await menu()
-    assert.deepEqual(items.map(item => item.name), ['Action', 'Priority, sorted ascending', 'Rule', 'Applies to'])
-    assert.equal(await sortName(), 'Sort: Priority, ascending')
-    await press('Priority', 2)
-  })
-
-  test('sorting and the filter compose', async () => {
-    const search = await options.control(await options.list(LIST), 'textbox', 'Search rules by text')
-    await search.type('an')
-    await page.waitForFunction(el => el.value === 'an', {}, search)
-    await press('Rule')
-    const sorted = await order()
-    await press('Rule')
-    const reversed = await order()
-    await (await options.control(await options.list(LIST), 'button', 'Clear rule search')).click()
-    await press('Rule')
-
-    // Only Mango and banana contain "an" — the sort has to run over what the
-    // filter left, not over the whole list.
-    assert.deepEqual(sorted, ['banana', 'Mango'])
-    assert.deepEqual(reversed, ['Mango', 'banana'])
   })
 
   test('sorting writes nothing, and a reload starts unsorted', async () => {

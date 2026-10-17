@@ -1,4 +1,4 @@
-import { archiveWaitRemaining, fetchWithRetry, PATIENCE, WAIT_BUDGET, waitForArchive } from '#content_script/archiveFetch.js'
+import { archiveNow, archiveWaitRemaining, fetchWithRetry, PATIENCE, WAIT_BUDGET, waitForArchive } from '#content_script/archiveFetch.js'
 import { parseWork, type Work } from '#content_script/blurb.js'
 
 /**
@@ -291,7 +291,7 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
   const selector = blurbSelector ?? DEFAULT_BLURB_SELECTOR
   // A scrape that began before another tab's finished holds the older blurbs,
   // however late it lands.
-  const startedAt = Date.now()
+  const startedAt = archiveNow()
   // Sparse by page index; pages we never got stay holes and are filtered out below.
   const docs: (Document | undefined)[] = []
   // Pages still wanted, by index. A page leaves this list when it lands, or when
@@ -405,11 +405,11 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
         blocked = true
         break
       }
-      const before = Date.now()
+      const before = archiveNow()
       await waitForArchive(signal)
       // Measured rather than assumed: the pause may have been extended while we
       // sat in it, and the running total has to be of time actually spent.
-      waited += Date.now() - before
+      waited += archiveNow() - before
     }
   }
 

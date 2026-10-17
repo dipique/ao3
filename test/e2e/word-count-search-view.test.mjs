@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { menuClosed, openMenu, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -66,11 +65,7 @@ describe('word-count range menu in the search view', { skip }, () => {
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
     page = await browser.newPage()
     // Serve every archiveofourown.org request from the fixture: the page itself,
     // and the page-1 fetch the view's scrape makes. Nothing leaves the machine.
@@ -143,59 +138,34 @@ describe('word-count range menu in the search view', { skip }, () => {
     await menuClosed(page)
   }
 
-  test('the view opened with every work', async () => {
-    assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'])
-  })
-
-  test('the word counts in the view carry the menu', async () => {
+  test('the word counts in the view carry the menu, with the ranges and the bound sections', async () => {
+    assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'], 'the view opened with every work')
     const labels = await openMenuOnFirstWordCount()
     assert.deepEqual(labels.filter(l => l.includes('words')).length, 2, labels.join(' | '))
     assert.ok(!labels.some(l => l.startsWith('Clear')), 'nothing to clear yet')
+    assert.deepEqual(await sectionLabels('Set lower bound'), ['1,000', '5,000'])
   })
 
-  test('picking a range filters the loaded list, not AO3', async () => {
+  test('a pick drives the view\'s own word-count filter, not AO3, and clearing it brings the list back', async () => {
+    // Which bounds a pick sets and which it keeps is `withBound`'s business,
+    // tested case by case in `test/wordCount/ranges.test.mjs`, and which works a
+    // bound keeps is the engine's, in `test/searchView/engine.test.mjs`; here,
+    // that the menu reaches the view's filter and the list shows the result.
     await pick('5,000')
     assert.deepEqual(await wordBounds(), { min: '5000', max: '100000' })
     // 7,000 and 40,000 are inside 5,000–100,000; the 2,000-word one is not.
     assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one'])
     // Still on our own page — the pick must not have submitted anything.
     assert.equal(page.url(), READINGS_URL)
-  })
 
-  test('clearing restores the full list', async () => {
+    await openMenuOnFirstWordCount()
+    await pickInSection('Set lower bound', '1,000')
+    assert.deepEqual(await wordBounds(), { min: '1000', max: '100000' }, 'a bound section writes its bound alone')
+    assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'])
+
     await openMenuOnFirstWordCount()
     await pick('Clear')
     assert.deepEqual(await wordBounds(), { min: '', max: '' })
     assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'])
-  })
-
-  test('the bound sections offer each configured bound', async () => {
-    await openMenuOnFirstWordCount()
-    assert.deepEqual(await sectionLabels('Set lower bound'), ['1,000', '5,000'])
-    assert.deepEqual(await sectionLabels('Set upper bound'), ['3,000', '100,000'])
-  })
-
-  test('picking a lower bound filters the view and leaves the upper one unset', async () => {
-    await pickInSection('Set lower bound', '5,000')
-    assert.deepEqual(await wordBounds(), { min: '5000', max: '' })
-    assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one'])
-    assert.equal(page.url(), READINGS_URL)
-  })
-
-  test('picking an upper bound leaves the lower one alone', async () => {
-    await openMenuOnFirstWordCount()
-    await pickInSection('Set upper bound', '100,000')
-    assert.deepEqual(await wordBounds(), { min: '5000', max: '100000' })
-    assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one'])
-  })
-
-  test('a bound that would invert the range drops the other one', async () => {
-    await openMenuOnFirstWordCount()
-    // 3,000 is below the standing lower bound of 5,000, so that one goes — and
-    // the row is labelled with the range that results, not the bare bound.
-    assert.deepEqual(await sectionLabels('Set upper bound'), ['0 – 3,000 words', '100,000'])
-    await pickInSection('Set upper bound', '0 – 3,000 words')
-    assert.deepEqual(await wordBounds(), { min: '', max: '3000' })
-    assert.deepEqual((await visibleTitles()).sort(), ['A short one'])
   })
 })

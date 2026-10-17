@@ -4,7 +4,7 @@ import { inflateSync } from 'node:zlib'
 
 import { OPTIONS_SAVE_DELAY_MS } from '../../src/common/constants.ts'
 import { SUGGEST_DELAY_MS } from '../../src/options_ui/model/tagSuggestions.ts'
-import { ensureBuilt, findChrome, installMock, launch, outlast, serveDist, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome, hurryTimers, installMock, launch, openWindow, outlast, serveDist, sleep } from './helpers.mjs'
 
 /**
  * The options page, opened the one way every e2e test opens it, and read
@@ -92,19 +92,26 @@ export async function startOptions({ scrollbars = false } = {}) {
  * - `prepare(page)`: whatever has to be in place before the page loads, such as
  *   request interception or a script of its own. It runs after the storage mock
  *   is installed, so a script can build on the mock.
+ * - `hurry`: the page's timers of these delays fire sooner ({@link hurryTimers}),
+ *   for a test that would otherwise wait out one of the page's constants.
+ * - `window`: open the page in a window of its own ({@link openWindow}) rather
+ *   than a tab in front of the last page, for a test that keeps another page
+ *   working beside it.
  *
  * @returns {Promise<OptionsPage>} the page, once it has read its options, drawn
  *   them, and opened on what `hash` names (the body's `data-landed`): nothing
  *   is left to scroll under a test's first click.
  */
-export async function openOptions(browser, server, { seed = {}, hash = '', viewport = DEFAULT_VIEWPORT, theme, prepare } = {}) {
-  const page = await browser.newPage()
+export async function openOptions(browser, server, { seed = {}, hash = '', viewport = DEFAULT_VIEWPORT, theme, prepare, hurry, window = false } = {}) {
+  const page = window ? await openWindow(browser) : await browser.newPage()
   await page.setViewport(viewport)
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: theme ?? 'light' }])
   const messages = []
   page.on('console', m => messages.push({ type: m.type(), text: m.text() }))
   page.on('pageerror', e => messages.push({ type: 'pageerror', text: e.message }))
   const themed = theme && !('option.theme' in seed) ? { ...seed, 'option.theme': { chosen: theme, current: theme } } : seed
+  if (hurry)
+    await page.evaluateOnNewDocument(hurryTimers, hurry)
   await page.evaluateOnNewDocument(installMock, themed)
   // The page is served from the build's root, so a file the extension ships,
   // such as the bundled fandom index, is found where the extension finds it.

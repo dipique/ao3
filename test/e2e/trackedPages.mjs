@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { REOPEN_GUARD_MS } from '../../src/common/constants.ts'
-import { DIST, installMock, sleep } from './helpers.mjs'
+import { DIST, hurryTimers, installMock, sleep } from './helpers.mjs'
 
 export { launch } from './helpers.mjs'
 
@@ -234,10 +234,14 @@ export function viewDrawn(tab) {
  * (which returns a page's HTML, or null for a 404, or a promise of either, to
  * hold the answer back until it settles), the extension's storage seeded with
  * `seed` and kept across loads. `requests` collects every URL the tab asked for.
+ * `hurry` shortens the page's timers of the delays it names, on every page of
+ * the tab ({@link hurryTimers}).
  */
-export async function openTab(browser, { seed, route, requests = [] }) {
+export async function openTab(browser, { seed, route, requests = [], hurry }) {
   const tab = await browser.newPage()
   await tab.setViewport({ width: 1280, height: 900 })
+  if (hurry)
+    await tab.evaluateOnNewDocument(hurryTimers, hurry)
   await tab.setRequestInterception(true)
   tab.on('request', async (req) => {
     const url = req.url()

@@ -11,10 +11,16 @@ const RUNAWAY_PATTERN = '(a+)+$'
 const RUNAWAY_TAG = `${'a'.repeat(40)}!`
 
 /**
- * How long a test gives a check to be stopped: the budget, and as long again
- * for the worker to say it began and for the page to draw what it found.
+ * The budget as these tests run it: cut from a second, since what matters is
+ * that a check is stopped once it runs out, not how long that takes.
  */
-const STOPPED_WITHIN = REGEX_TIME_BUDGET_MS * 2
+const BUDGET = 250
+
+/**
+ * How long a test gives a check to be stopped: the budget, and time over for
+ * the worker to say it began and for the page to draw what it found.
+ */
+const STOPPED_WITHIN = BUDGET + 1000
 
 const TOO_SLOW = 'Too slow to test: change the pattern to save the rule.'
 
@@ -39,6 +45,7 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
     options = await session.open({
       seed: { 'option.rules': { enabled: true, filters: [], colors: {} }, ...seed },
       hash: '#customize-search-results',
+      hurry: { [REGEX_TIME_BUDGET_MS]: BUDGET },
       // Nothing here is a pattern AO3 is asked about; the stand-in makes sure of it.
       prepare: async (tab) => {
         await stubArchive(tab, () => ({ json: [] }))
@@ -91,7 +98,7 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
     assert.equal(await verdictKind(), 'checking', 'and answers, still checking')
 
     assert.equal(await verdict('slow', STOPPED_WITHIN), 'Error: Too slow')
-    assert.ok(Date.now() - typed >= REGEX_TIME_BUDGET_MS, 'stopped only once the budget ran out')
+    assert.ok(Date.now() - typed >= BUDGET, 'stopped only once the budget ran out')
     const verdictHandle = await page.$('[role="dialog"] [data-regex-verdict]')
     assert.ok(await options.contrast(verdictHandle) >= 4.5, 'the verdict reads at AA')
     assert.equal(await options.description(await testField()), 'Testing stopped: the pattern took too long.')

@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import { pressFacet, settled, viewDrawn } from './trackedPages.mjs'
 
@@ -99,11 +98,7 @@ describe('the Status facet in the search view', { skip }, () => {
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
     page = await browser.newPage()
     // Serve every archive request from the fixture: the page itself, and the
     // page-1 fetch the view's scrape makes.
@@ -152,7 +147,7 @@ describe('the Status facet in the search view', { skip }, () => {
     return writes.at(-1)?.['cache.searchViewPrefs']['marked-for-later']?.status ?? null
   })
 
-  test('the facet exists, listing every status present', async () => {
+  test('the facet exists, listing every status present, with Ready alone selected', async () => {
     const rows = await statusRows()
     assert.notEqual(rows, null, 'no Status facet group was rendered')
     // Works 1 and 2 carry the ongoing mark (one Ready, one Caught up); work 3
@@ -163,23 +158,15 @@ describe('the Status facet in the search view', { skip }, () => {
       rows.map(r => r.value).sort(),
       ['Caught up', 'Marked for later', 'Ongoing', 'Ready', 'Unread'],
     )
+    assert.deepEqual(rows.filter(r => r.included).map(r => r.value), ['Ready'])
   })
 
-  test('it defaults to Ready, with nothing else selected', async () => {
-    const rows = await statusRows()
-    assert.deepEqual(
-      rows.filter(r => r.included).map(r => r.value),
-      ['Ready'],
-    )
-  })
-
-  test('so a caught-up work is out of the list, and the rest are in', async () => {
-    // Work 2 is on chapter 5 of 5 published; works 1 and 3 have something to read
-    // (work 3 carries no mark at all, which reads as Ready).
+  test('so the view shows what the facet leaves, and collapses nothing: the facet is the only filter', async () => {
+    // Which works each status keeps is the engine's business, tested case by
+    // case in `test/searchView/engine.test.mjs`; here, that the default
+    // selection reaches it and the view draws the result. Work 2 is on chapter
+    // 5 of 5 published; works 1 and 3 have something to read.
     assert.deepEqual((await visibleTitles()).sort(), ['Never marked', 'Still going'])
-  })
-
-  test('nothing is collapsed inside the view — the facet is the only filter', async () => {
     const collapsed = await page.evaluate(() =>
       document.querySelectorAll('.AO3E--search-view--results .AO3E--hide-works--msg').length)
     assert.equal(collapsed, 0)
@@ -187,28 +174,15 @@ describe('the Status facet in the search view', { skip }, () => {
 
   test('the selection lands in the stored search-view prefs', async () => {
     await until('the Status selection to be stored', async () => (await storedStatus())?.join() === 'Ready')
-    const status = await page.evaluate(() => {
-      const writes = window.__writes.filter(w => 'cache.searchViewPrefs' in w)
-      if (!writes.length)
-        return null
-      return writes[writes.length - 1]['cache.searchViewPrefs']['marked-for-later']?.status ?? null
-    })
-    assert.deepEqual(status, ['Ready'])
+    assert.deepEqual(await storedStatus(), ['Ready'])
   })
 
-  test('picking Caught up as well brings the whole list back', async () => {
+  test('pressing Caught up as well brings the whole list back, and that selection is stored too, so it is what opens next time', async () => {
     await pressFacet(page, 'Caught up')
     assert.deepEqual((await visibleTitles()).sort(), ['All caught up', 'Never marked', 'Still going'])
     const rows = await statusRows()
     assert.deepEqual(rows.filter(r => r.included).map(r => r.value).sort(), ['Caught up', 'Ready'])
-  })
-
-  test('and that change is persisted too, so it is what opens next time', async () => {
     await until('the new Status selection to be stored', async () => (await storedStatus())?.includes('Caught up'))
-    const status = await page.evaluate(() => {
-      const writes = window.__writes.filter(w => 'cache.searchViewPrefs' in w)
-      return writes[writes.length - 1]['cache.searchViewPrefs']['marked-for-later'].status
-    })
-    assert.deepEqual([...status].sort(), ['Caught up', 'Ready'])
+    assert.deepEqual([...await storedStatus()].sort(), ['Caught up', 'Ready'])
   })
 })

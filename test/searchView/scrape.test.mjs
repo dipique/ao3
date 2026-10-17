@@ -4,6 +4,57 @@ import { after, before, describe, test } from 'node:test'
 import { loadModuleInPage, skipWithoutChrome } from '../siteExport/helpers.mjs'
 
 /**
+ * Runs in the page: a clock for the pacing to read and wait on, in place of
+ * real time. It stands still until something sleeps on it; then, once the
+ * answers already in flight have landed, it jumps to the earliest wake-up and
+ * wakes everyone due. Three workers refused together sleep to the same instant
+ * and wake together, as they would in real time — in a few milliseconds.
+ */
+function installClock() {
+  let now = Date.UTC(2026, 0, 1)
+  const sleepers = []
+  let waking = false
+  function wake() {
+    waking = false
+    if (!sleepers.length)
+      return
+    now = Math.max(now, Math.min(...sleepers.map(sleeper => sleeper.at)))
+    for (const sleeper of sleepers.splice(0)) {
+      if (sleeper.at <= now)
+        sleeper.resolve()
+      else
+        sleepers.push(sleeper)
+    }
+    if (sleepers.length)
+      schedule()
+  }
+  // A task, not a microtask, so that answers on their way land first.
+  function schedule() {
+    if (!waking) {
+      waking = true
+      setTimeout(wake, 0)
+    }
+  }
+  globalThis.__clock = {
+    now: () => now,
+    sleep: (ms, signal) => new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason)
+        return
+      }
+      const sleeper = { at: now + ms, resolve }
+      signal?.addEventListener('abort', () => {
+        sleepers.splice(sleepers.indexOf(sleeper), 1)
+        reject(signal.reason)
+      }, { once: true })
+      sleepers.push(sleeper)
+      schedule()
+    }),
+  }
+  globalThis.Scrape.useArchiveClock(globalThis.__clock)
+}
+
+/**
  * The listing scraper's behaviour when AO3 pushes back.
  *
  * It needs a DOM — it parses fetched pages and adopts blurbs into the document —
@@ -15,6 +66,12 @@ import { loadModuleInPage, skipWithoutChrome } from '../siteExport/helpers.mjs'
  * 429 inside the request" — so the fetch layer hands the refusal straight back,
  * which is precisely the state the scraper's rounds exist to recover from, and
  * the state a real reader reaches after two minutes of being turned away.
+ *
+ * The pauses the pool then sits out run to seconds each, so the pacing is given
+ * a clock of the test's own ({@link installClock}): one that stands still while
+ * requests are answered and jumps to the end of a pause once everyone is
+ * waiting on it. What the tests measure — how often the pool stood still, and
+ * for how long — reads the same off either clock.
  */
 describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => {
   let page
@@ -22,10 +79,11 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
 
   before(async () => {
     ({ page, close } = await loadModuleInPage(
-      'src/content_script/searchView/scrape.ts',
+      'test/searchView/scrapeEntry.ts',
       'Scrape',
       { stubBrowser: true },
     ))
+    await page.evaluate(installClock)
   }, { timeout: 120000 })
 
   after(async () => {
@@ -56,7 +114,7 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
 
     globalThis.fetch = async (url) => {
       const n = new URL(url).searchParams.get('page')
-      asked.push({ page: Number(n), at: Date.now() })
+      asked.push({ page: Number(n), at: globalThis.__clock.now() })
       if (refusals > 0) {
         refusals--
         return refused(1)

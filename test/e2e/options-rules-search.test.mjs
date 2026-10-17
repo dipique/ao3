@@ -3,19 +3,13 @@ import { after, before, describe, test } from 'node:test'
 
 import { skip, startOptions } from './optionsPage.mjs'
 
-/**
- * Rules chosen to pin down what the filter does and does not look at:
- * casing, a substring that is not a prefix, a `.` and a `*` that must stay
- * literal, and a pseud/target that must NOT be searchable.
- */
+/** A few rules, two of them sharing a word for the filter to find. */
 const RULES = [
   { target: 'tag', value: 'Slow Burn', matcher: 'exact', behavior: 'hide' },
   { target: 'tag', value: 'slow build', matcher: 'exact', behavior: 'hide' },
   { target: 'tag', value: 'Enemies to Lovers', matcher: 'exact', behavior: 'hide' },
   { target: 'f', value: 'Teen Wolf (TV)', matcher: 'exact', behavior: 'hide' },
   { target: 'author', value: 'someone', pseud: 'BurnNotice', matcher: 'exact', behavior: 'hide' },
-  { target: 'tag', value: 'A.B.O. Dynamics', matcher: 'exact', behavior: 'hide' },
-  { target: 'tag', value: '5*Stars', matcher: 'exact', behavior: 'hide' },
 ]
 
 const SEED = { 'option.rules': { enabled: true, filters: RULES, colors: {} } }
@@ -23,10 +17,9 @@ const SEED = { 'option.rules': { enabled: true, filters: RULES, colors: {} } }
 const LIST = 'rules'
 
 /**
- * Filtering the rules list from the filter in its header. It filters on the
- * rule *text* alone — a few hundred rules are searched for the tag you
- * half-remember, and matching the target or pseud would turn up rules whose
- * text has nothing to do with what was typed.
+ * Filtering the rules list from the filter in its header: the field drives
+ * the filter, and the list shows what it leaves, says so when that is nothing,
+ * and comes back whole when the field is cleared.
  */
 describe('options UI — rules filter', { skip }, () => {
   let session
@@ -54,62 +47,21 @@ describe('options UI — rules filter', { skip }, () => {
   /** The text of every rule the list is showing. Each row is the rule at that place in the stored list. */
   const rows = async () => (await options.listRowIds(LIST)).map(at => RULES[Number(at)].value)
 
-  test('every rule is listed before anything is typed, and the header counts them', async () => {
+  test('the field drives the filter: typing narrows the rows, and the header counts what is showing', async () => {
     await filter('')
-    const listed = await rows()
-    assert.equal(listed.length, RULES.length, listed.join(' | '))
+    const all = await rows()
+    assert.equal(all.length, RULES.length, all.join(' | '))
     assert.equal(await options.listCount(LIST), `${RULES.length} rules`)
-  })
 
-  test('matching is case-insensitive', async () => {
-    await filter('SLOW')
+    // What the filter matches is `shownRules`' business, tested case by case in
+    // `test/options/listView.test.mjs`; here, that the field reaches it and
+    // the list shows what it leaves.
+    await filter('slow')
     const listed = await rows()
+    const count = await options.listCount(LIST)
     await filter('')
     assert.deepEqual(listed.sort(), ['Slow Burn', 'slow build'])
-  })
-
-  test('it matches anywhere in the text, not just the start', async () => {
-    await filter('lovers')
-    const listed = await rows()
-    await filter('')
-    assert.deepEqual(listed, ['Enemies to Lovers'])
-  })
-
-  test('what a rule applies to is not searched', async () => {
-    // "Fandom" is what one of these rules applies to, but no rule has the word
-    // in its text — so this must find nothing.
-    await filter('fandom')
-    const listed = await rows()
-    await filter('')
-    assert.deepEqual(listed, [])
-  })
-
-  test('an author pseud is not searched either', async () => {
-    // The pseud renders right beside the rule text, so it is the obvious thing
-    // to match by accident.
-    await filter('BurnNotice')
-    const listed = await rows()
-    await filter('')
-    assert.deepEqual(listed, [])
-
-    await filter('someone')
-    const byValue = await rows()
-    await filter('')
-    assert.deepEqual(byValue, ['someone'], 'the author value itself still matches')
-  })
-
-  test('a dot is a dot, not a wildcard', async () => {
-    await filter('A.B.O')
-    const listed = await rows()
-    await filter('')
-    assert.deepEqual(listed, ['A.B.O. Dynamics'])
-  })
-
-  test('a star is a star, not a wildcard', async () => {
-    await filter('5*')
-    const listed = await rows()
-    await filter('')
-    assert.deepEqual(listed, ['5*Stars'])
+    assert.equal(count, `2 of ${RULES.length}`)
   })
 
   test('no matches says so in the list\'s place', async () => {
@@ -119,13 +71,6 @@ describe('options UI — rules filter', { skip }, () => {
     await filter('')
     assert.deepEqual(listed, [])
     assert.match(text, /No rules match “zzzzz”/, 'an empty result explains itself')
-  })
-
-  test('the header\'s count shows how much of the list is showing', async () => {
-    await filter('slow')
-    const count = await options.listCount(LIST)
-    await filter('')
-    assert.equal(count, `2 of ${RULES.length}`)
   })
 
   test('clearing the filter brings the whole list back, and keeps the focus in it', async () => {

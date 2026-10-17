@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { menuClosed, menuGuardOver, openMenu, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -72,11 +71,7 @@ describe('word-count range menu', { skip }, () => {
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
     page = await browser.newPage()
     await page.goto('about:blank')
     await page.evaluate(installMock, SEED)
@@ -217,41 +212,21 @@ describe('word-count range menu', { skip }, () => {
     assert.deepEqual(await bounds(), { from: '50000', to: '', submits: 0 })
   })
 
-  test('lists each distinct bound of the configured ranges in its own section', async () => {
+  test('the bound sections list the configured bounds, the one applied marked current, and a pick writes its bound alone', async () => {
+    // Which bounds the sections offer, how each row is labelled and which bound
+    // a pick keeps is `uniqueBounds`', `formatBoundPick`'s and `withBound`'s
+    // business, tested case by case in `test/wordCount/ranges.test.mjs`; here,
+    // that the menu draws their result and a pick reaches AO3's filter.
     const items = await openWordCountMenu()
     const inSection = name => items.filter(i => i.section === name).map(i => i.label)
-    // Ascending, de-duplicated, and an unbounded side (50,000+) contributes no
-    // upper bound of its own.
     assert.deepEqual(inSection('Set lower bound'), ['1,000', '5,000', '50,000'])
-    // 3,000 is below the standing lower bound of 50,000, so picking it can't
-    // leave that one alone — the row says what the range would become instead.
     assert.deepEqual(inSection('Set upper bound'), ['0 – 3,000 words', '100,000'])
     // 50,000+ is the range currently applied, so its lower bound is the one on.
     const applied = items.find(i => i.section === 'Set lower bound' && i.label === '50,000')
     assert.equal(applied.disabled, true, 'the bound already on should not be selectable again')
-  })
 
-  test('picking an upper bound leaves the lower one alone', async () => {
-    await openWordCountMenu()
     await pickInSection('Set upper bound', '100,000')
     assert.deepEqual(await bounds(), { from: '50000', to: '100000', submits: 0 })
-  })
-
-  test('picking a lower bound leaves the upper one alone', async () => {
-    await openWordCountMenu()
-    await pickInSection('Set lower bound', '5,000')
-    assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 0 })
-  })
-
-  test('a bound that would invert the range drops the other one', async () => {
-    const items = await openWordCountMenu()
-    // 3,000 is below the standing lower bound of 5,000; keeping it would filter
-    // to nothing, so the range goes open-ended downwards instead — and the row
-    // is labelled with that whole range rather than the bare bound.
-    const row = items.find(i => i.section === 'Set upper bound' && i.label.startsWith('0'))
-    assert.equal(row.label, '0 – 3,000 words')
-    await pickInSection('Set upper bound', row.label)
-    assert.deepEqual(await bounds(), { from: '', to: '3000', submits: 0 })
   })
 })
 
@@ -265,11 +240,7 @@ describe('default word count range', { skip }, () => {
 
   before(async () => {
     ensureBuilt()
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
   }, { timeout: 180000 })
 
   after(async () => {

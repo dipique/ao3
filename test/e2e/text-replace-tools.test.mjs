@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -65,11 +64,7 @@ describe('text replacement tools on a work page', { skip }, () => {
     ensureBuilt()
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
 
     tab = await browser.newPage()
     await tab.setRequestInterception(true)

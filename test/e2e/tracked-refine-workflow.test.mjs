@@ -32,6 +32,12 @@ import {
 } from './trackedPages.mjs'
 
 const chromePath = findChrome()
+
+/**
+ * Undo's window, cut to a few seconds: long enough for the steps a test takes
+ * inside it, short enough that the tests waiting it out don't wait twenty.
+ */
+const HURRY = { [SAVE_BACK_UNDO_TIMEOUT]: 3000 }
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 const TODAY = utcToday()
@@ -106,7 +112,7 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
       links[id] = await (await options.control(await options.savedList(id), 'link', /^View or edit /)).evaluate(a => a.href)
     await options.close()
 
-    tab = await openTab(browser, { seed: SEED, route })
+    tab = await openTab(browser, { hurry: HURRY, seed: SEED, route })
   }, { timeout: 180000 })
 
   after(async () => {
@@ -371,7 +377,7 @@ describe('saved lists: saving a refined search back', { skip }, () => {
     const options = await openOptions(browser, server, { seed: UNTRACKED_SEED, hash: '#saved-lists' })
     link = await (await options.control(await options.savedList('l4tte'), 'link', /^View or edit /)).evaluate(a => a.href)
     await options.close()
-    tab = await openTab(browser, { seed: UNTRACKED_SEED, route: untrackedRoute })
+    tab = await openTab(browser, { hurry: HURRY, seed: UNTRACKED_SEED, route: untrackedRoute })
   }, { timeout: 180000 })
 
   after(async () => {
@@ -519,7 +525,7 @@ describe('saved lists: a list back at the old address before Undo\'s time is up'
   before(async () => {
     ensureBuilt()
     browser = await launch(chromePath)
-    tab = await openTab(browser, { seed: UNTRACKED_SEED, route: untrackedRoute })
+    tab = await openTab(browser, { hurry: HURRY, seed: UNTRACKED_SEED, route: untrackedRoute })
   }, { timeout: 180000 })
 
   after(async () => {
@@ -576,7 +582,7 @@ describe('saved lists: saving back with Tracked lists switched off', { skip }, (
   before(async () => {
     ensureBuilt()
     browser = await launch(chromePath)
-    tab = await openTab(browser, { seed, route: untrackedRoute })
+    tab = await openTab(browser, { hurry: HURRY, seed, route: untrackedRoute })
   }, { timeout: 180000 })
 
   after(async () => {

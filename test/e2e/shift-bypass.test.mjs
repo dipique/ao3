@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, beforeEach, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import { inject, menuGuardOver, openMenu } from './trackedPages.mjs'
 
@@ -68,12 +67,8 @@ describe('Shift bypass', { skip }, () => {
   before(async () => {
     ensureBuilt()
 
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
+    browser = await launch(chromePath, {
       args: [
-        '--no-first-run',
-        '--no-default-browser-check',
         // A modified click opens a real new tab/window, which our per-page
         // request interception doesn't cover. Fail DNS browser-wide so nothing
         // can reach archiveofourown.org for real; the fixture is served from the

@@ -36,8 +36,8 @@ jobs:
         run: pnpm run typecheck
       - name: Lint
         run: pnpm run lint
-      # Unit tests only. The e2e suite is green, but it drives a real Chrome and
-      # leans on 170-odd fixed sleeps, which is a flake risk on a shared runner —
-      # see the `tests:e2e` script to run it locally.
+      # Unit tests only. The e2e suites drive a real Chrome for several minutes
+      # (`test/e2e/globalSetup.mjs` starts one for the whole run) — see the
+      # `tests:e2e` and `tests:e2e:visual` scripts to run them locally.
       - name: Unit tests
         run: pnpm run tests:unit

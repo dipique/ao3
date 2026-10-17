@@ -187,11 +187,17 @@ describe('options UI — the sync panel', { skip }, () => {
 
   after(() => session?.close())
 
-  /** The options page at Sync, its background answering from `replies`. */
+  /**
+   * The options page at Sync, its background answering from `replies`. The
+   * time the page gives the background to say which build it runs is cut to
+   * what a test's own steps need: a background that never answers is a wait,
+   * not a result.
+   */
   const open = (seed, replies = {}, viewport = WIDE) => session.open({
     seed,
     hash: '#sync',
     viewport,
+    hurry: { [BUILD_CHECK_TIMEOUT_MS]: 1500 },
     prepare: page => page.evaluateOnNewDocument(scriptBackground, replies),
   })
 

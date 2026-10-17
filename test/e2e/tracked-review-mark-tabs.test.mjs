@@ -2,10 +2,9 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
 import { formatDay } from '../../src/common/trackedLists.ts'
-import { DIST, ensureBuilt, findChrome, installMock, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch, sleep } from './helpers.mjs'
 import { linkWrites, relayWrites, runs, settled } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, dayOfIso, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
 
@@ -40,11 +39,7 @@ describe('tracked review: marking reviewed with the review open in another tab',
     ensureBuilt()
     css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
   }, { timeout: 180000 })
 
   after(async () => {

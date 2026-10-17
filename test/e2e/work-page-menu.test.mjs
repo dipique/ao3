@@ -2,11 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
 import { createDefaultMarks, moveMark, packIds, packProgress } from '../../src/common/workMarks.ts'
 import { fromEpochDays, todayEpochDays } from '../../src/common/workProgress.ts'
-import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import { openMenu, settled } from './trackedPages.mjs'
 
@@ -97,11 +96,7 @@ describe('the work menu on a work page', { skip }, () => {
     ensureBuilt()
     css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
   }, { timeout: 180000 })
 
   after(async () => {

@@ -39,15 +39,37 @@ export function findChrome() {
 }
 
 /**
- * Start headless Chrome from `chromePath`. Puppeteer hides headless Chrome's
- * scrollbars, so they take no room; `scrollbars` keeps them, for a test of what
- * a scrollbar does to a layout.
+ * A browser for a test file: headless Chrome from `chromePath`, with `newPage`,
+ * `pages`, `close` and target events as a test uses them.
+ *
+ * Under the suite's global setup ({@link file://./globalSetup.mjs}) one Chrome
+ * serves every file, and this hands back a browser context of its own in it:
+ * the file's pages, cookies and storage are apart from every other file's, a
+ * page of one file hides none of another's, and closing it closes the file's
+ * pages and lets go of the Chrome. On its own, with no shared Chrome to join,
+ * a file gets a Chrome of its own.
+ *
+ * A file whose Chrome has to differ from the shared one gets its own either way:
+ * `scrollbars` keeps the scrollbars puppeteer hides, so they take room, for a
+ * test of what a scrollbar does to a layout; `args` are switches of the file's
+ * own, added to the usual ones.
  */
-export function launch(chromePath, { scrollbars = false } = {}) {
+export async function launch(chromePath, { scrollbars = false, args = [] } = {}) {
+  const shared = process.env.AO3E_E2E_BROWSER
+  if (shared && !scrollbars && !args.length) {
+    const browser = await puppeteer.connect({ browserWSEndpoint: shared })
+    const context = await browser.createBrowserContext()
+    const close = context.close.bind(context)
+    context.close = async () => {
+      await close()
+      await browser.disconnect()
+    }
+    return context
+  }
   return puppeteer.launch({
     executablePath: chromePath,
     headless: 'new',
-    args: ['--no-first-run', '--no-default-browser-check'],
+    args: ['--no-first-run', '--no-default-browser-check', ...args],
     ...(scrollbars ? { ignoreDefaultArgs: ['--hide-scrollbars'] } : {}),
   })
 }
@@ -125,9 +147,13 @@ function build() {
  *
  * `node --test a.mjs b.mjs` runs each file in its own process, concurrently, and
  * every one of them calls this — so the build is taken under a lock and the
- * losers wait for it rather than all writing over each other's output.
+ * losers wait for it rather than all writing over each other's output. Under
+ * the suite's global setup the build is already taken, once, before any file
+ * runs, and this has nothing to do.
  */
 export function ensureBuilt() {
+  if (process.env.AO3E_E2E_BUILT)
+    return
   const deadline = Date.now() + BUILD_TIMEOUT
   mkdirSync(dirname(BUILD_LOCK), { recursive: true })
 
@@ -160,6 +186,32 @@ export function ensureBuilt() {
     }
     return
   }
+}
+
+/**
+ * A page in a window of its own in `browser` (a browser, or the browser context
+ * {@link launch} hands a file), where `newPage` would open a tab in front of the
+ * last page and hide it. Two pages of one test that both have work to do go in
+ * windows: in the background the browser slows a page's timers to one a second,
+ * which under load turns a wait of seconds into one of minutes.
+ */
+export async function openWindow(browser) {
+  const context = typeof browser.browser === 'function' ? browser : browser.defaultBrowserContext()
+  const pages = await context.pages()
+  // A context's first page opens in a window of its own as it is.
+  if (!pages.length)
+    return context.newPage()
+  // Asked through a page's own session: attaching to the browser's target over
+  // a shared connection now and then finds no such target.
+  const cdp = await pages[0].createCDPSession()
+  const { targetId } = await cdp.send('Target.createTarget', {
+    url: 'about:blank',
+    newWindow: true,
+    ...(context.id ? { browserContextId: context.id } : {}),
+  })
+  await cdp.detach()
+  const target = await context.waitForTarget(candidate => candidate._targetId === targetId)
+  return target.page()
 }
 
 /** Serve one directory over HTTP. Returns { url, close }. */
@@ -280,6 +332,24 @@ export function installMock(seed) {
 }
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+/**
+ * A page script for `evaluateOnNewDocument`: a timer the page sets for exactly
+ * one of the delays in `delays` (ms) fires after that delay's value instead.
+ * For a wait the page times by one of its constants — an undo window, a
+ * prompt's fade, a background's time to answer — that a test would otherwise
+ * sit out in full. {@link outlast} sets its timer in the page too, so a test
+ * that outlasts the same constant is hurried along with it.
+ *
+ * The delays are matched exactly, so pass the constants the page uses:
+ * `{ [SAVE_BACK_UNDO_TIMEOUT]: 3000 }`. Hurry a wait no further than the test's
+ * own steps leave room for: a window of a few seconds is still a window.
+ */
+export function hurryTimers(delays) {
+  const setTimer = window.setTimeout.bind(window)
+  window.setTimeout = (handler, delay, ...args) =>
+    setTimer(handler, Object.hasOwn(delays, delay) ? delays[delay] : delay, ...args)
+}
 
 /**
  * Let `ms` go by in `page`, timed by the page's own timers: for a wait that

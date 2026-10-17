@@ -2,10 +2,9 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
 import { SEARCH_PROMPT_TIMEOUT } from '../../src/common/constants.ts'
-import { DIST, ensureBuilt, findChrome, installMock, outlast } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, hurryTimers, installMock, launch, outlast } from './helpers.mjs'
 import { menuClosed, openMenu, runs, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -56,12 +55,10 @@ describe('the pending-search prompt', { skip }, () => {
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
-    browser = await puppeteer.launch({
-      executablePath: chromePath,
-      headless: 'new',
-      args: ['--no-first-run', '--no-default-browser-check'],
-    })
+    browser = await launch(chromePath)
     page = await browser.newPage()
+    // The prompt's fade, cut to a second: long enough to read it, short enough to wait out.
+    await page.evaluateOnNewDocument(hurryTimers, { [SEARCH_PROMPT_TIMEOUT]: 1000 })
     await page.goto('about:blank')
     await page.evaluate(installMock, SEED)
     await page.evaluate((html) => {

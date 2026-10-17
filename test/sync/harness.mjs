@@ -12,7 +12,12 @@ import { createDefaultMarks, localMarkIds, markItems, packIds } from '../../src/
 
 const clone = v => (v === undefined ? undefined : structuredClone(v))
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-const tick = () => new Promise(resolve => setTimeout(resolve, 0))
+/**
+ * Let every promise chain and I/O callback already queued run. Not a timer:
+ * nothing here waits on a clock, and Windows fires a zero-delay timer only
+ * every 15 ms, which once made these scenarios take minutes.
+ */
+const tick = () => new Promise(resolve => setImmediate(resolve))
 
 /**
  * The sync server. Each browser keeps its own view of the synced items and an

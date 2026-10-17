@@ -140,6 +140,53 @@ let blindWait = 0
 /** When we were last refused, so a fresh episode starts the ladder over. */
 let lastRefusedAt = 0
 
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    let timer: ReturnType<typeof setTimeout>
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(signal!.reason ?? new DOMException('Aborted', 'AbortError'))
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * The clock the pacing reads and waits on: real time, unless a test stands in
+ * for it ({@link useArchiveClock}). The pauses here run to minutes, and a test
+ * of how they are shared has no business sitting them out.
+ */
+export interface ArchiveClock {
+  /** The time now, in epoch ms. */
+  now: () => number
+  /** Resolves once `ms` have passed, or rejects with `signal.reason` if `signal` aborts first. */
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>
+}
+
+const realClock: ArchiveClock = { now: () => Date.now(), sleep }
+let clock = realClock
+
+/** Read and wait on `next` instead of real time. Returns the way back to real time. */
+export function useArchiveClock(next: ArchiveClock): () => void {
+  clock = next
+  return () => {
+    clock = realClock
+  }
+}
+
+/** The time now by the clock the pacing keeps, in epoch ms: for a caller that measures a wait against it. */
+export function archiveNow(): number {
+  return clock.now()
+}
+
 /** Why everything has stopped: the archive refused us, or we are pacing ourselves. */
 export type WaitReason = 'refused' | 'pacing'
 
@@ -185,7 +232,7 @@ function pausedUntil(): number {
 
 /** How long the current pause has left, in ms; 0 when nothing is waiting. */
 export function archiveWaitRemaining(): number {
-  return Math.max(0, pausedUntil() - Date.now())
+  return Math.max(0, pausedUntil() - clock.now())
 }
 
 /**
@@ -193,7 +240,7 @@ export function archiveWaitRemaining(): number {
  * sat out, the one worth saying out loud is the archive's.
  */
 function waitReason(): WaitReason {
-  return refusedUntil > Date.now() ? 'refused' : 'pacing'
+  return refusedUntil > clock.now() ? 'refused' : 'pacing'
 }
 
 /** A pause in requests to the archive: the epoch ms it runs to, and which kind it is. */
@@ -209,7 +256,7 @@ export interface ArchivePause {
  */
 export function archivePause(): ArchivePause | null {
   const until = pausedUntil()
-  return until > Date.now() ? { until, reason: waitReason() } : null
+  return until > clock.now() ? { until, reason: waitReason() } : null
 }
 
 /** What a reader waiting on a pause is told: which kind it is and how long it has left. Null once it is over. */
@@ -232,7 +279,7 @@ export function watchWaitLine(onLine: (line: string | null) => void): () => void
   let ticker: ReturnType<typeof setInterval> | undefined
 
   const draw = (): void => {
-    const line = waitLine(until, reason, Date.now())
+    const line = waitLine(until, reason, clock.now())
     if (line === null && ticker !== undefined) {
       clearInterval(ticker)
       ticker = undefined
@@ -262,25 +309,6 @@ function announce(until: number, reason: WaitReason): void {
     listener(until, reason)
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
-      return
-    }
-    let timer: ReturnType<typeof setTimeout>
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      reject(signal!.reason ?? new DOMException('Aborted', 'AbortError'))
-    }
-    timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
 /**
  * Sit out whatever pause is in force, re-reading it in case it is extended.
  *
@@ -295,7 +323,7 @@ export async function waitForArchive(signal?: AbortSignal): Promise<void> {
   try {
     let remaining = archiveWaitRemaining()
     while (remaining > 0) {
-      await sleep(remaining, signal)
+      await clock.sleep(remaining, signal)
       remaining = archiveWaitRemaining()
     }
   }
@@ -316,7 +344,7 @@ export async function waitForArchive(signal?: AbortSignal): Promise<void> {
  * first of the next — so the pause it opens is sat out by whoever asks next.
  */
 function paceOne(): void {
-  const now = Date.now()
+  const now = clock.now()
   if (now - lastRequestAt > PACE_IDLE_RESET_MS)
     sinceBreather = 0
   lastRequestAt = now
@@ -339,9 +367,9 @@ function pauseFor(asked: number | null): void {
   // A *refusal* already in force, not any pause at all: a 429 that arrives
   // during a routine breather is still news, and swallowing it would leave the
   // archive's own answer unrecorded.
-  if (refusedUntil > Date.now())
+  if (refusedUntil > clock.now())
     return
-  const now = Date.now()
+  const now = clock.now()
   // Long enough since the last refusal that this is a new episode, not a
   // continuation of one — start the ladder from the bottom.
   if (now - lastRefusedAt > MAX_WAIT_MS)
@@ -377,7 +405,7 @@ export async function fetchWithRetry(
   signal?: AbortSignal,
   patience: number = PATIENCE.interactive,
 ): Promise<Response> {
-  const startedAt = Date.now()
+  const startedAt = clock.now()
   for (;;) {
     await waitForArchive(signal)
     paceOne()
@@ -392,11 +420,11 @@ export async function fetchWithRetry(
     // queue of pages used to fail one at a time, each rediscovering the same
     // wall from scratch; with it written down, everything else holds off, and a
     // job that means to come back knows exactly how long to wait.
-    pauseFor(retryAfterMs(res.headers.get('Retry-After'), Date.now()))
+    pauseFor(retryAfterMs(res.headers.get('Retry-After'), clock.now()))
     // Would sitting this one out spend the budget? Measured from the start
     // rather than accumulated, so a wait this request merely joined still
     // counts against it.
-    if (Date.now() + archiveWaitRemaining() - startedAt >= patience)
+    if (clock.now() + archiveWaitRemaining() - startedAt >= patience)
       return res
   }
 }

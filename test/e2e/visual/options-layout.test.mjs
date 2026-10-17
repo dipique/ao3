@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { storedLists } from './helpers.mjs'
-import { scriptBackground, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { storedLists } from '../helpers.mjs'
+import { scriptBackground, skip, startOptions, stubArchive, until } from '../optionsPage.mjs'
 
 const WIDTHS = [1440, 1024, 768, 390]
 const THEMES = ['light', 'dark']
+/**
+ * The theme the sweeps run in. Boxes don't move with the theme, and
+ * `options-contrast` reads every theme, so each sweep runs in one and the
+ * layout is checked in the other once, at one width, for the tokens it reads.
+ */
+const THEME = 'light'
+const OTHER_THEME = 'dark'
 
 /** A plain switch row, outside any group. */
 const PLAIN_ROW = 'page-controls-reveal-filtered-works'
@@ -137,9 +144,10 @@ function token(name) {
 }
 
 /**
- * The page's frame at the widths it is drawn for, in both themes: one category
- * in the pane, the rail beside it or, below 768 px, a row of chips over it, the
- * foot's wrapping text spaced to be read, and nothing wider than the window.
+ * The page's frame at the widths it is drawn for, and once in the other theme:
+ * one category in the pane, the rail beside it or, below 768 px, a row of chips
+ * over it, the foot's wrapping text spaced to be read, and nothing wider than
+ * the window.
  *
  * And the settings row: from 1024 px its title, description and control side
  * by side, in a 264 px title column and, from 1280 px, a control column of at
@@ -161,136 +169,134 @@ describe('options UI — layout', { skip }, () => {
 
   after(() => session?.close())
 
-  for (const theme of THEMES) {
-    for (const width of WIDTHS) {
-      test(`${width} px, ${theme}`, async () => {
-        const options = await session.open({ viewport: { width, height: 900 }, theme, seed: WITH_MARKS })
-        const noSidewaysScroll = async () => {
-          const { scrollWidth, innerWidth } = await options.page.evaluate(() => ({
-            scrollWidth: document.documentElement.scrollWidth,
-            innerWidth: window.innerWidth,
+  for (const [width, theme] of [...WIDTHS.map(width => [width, THEME]), [WIDTHS[0], OTHER_THEME]]) {
+    test(`${width} px, ${theme}`, async () => {
+      const options = await session.open({ viewport: { width, height: 900 }, theme, seed: WITH_MARKS })
+      const noSidewaysScroll = async () => {
+        const { scrollWidth, innerWidth } = await options.page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          innerWidth: window.innerWidth,
+        }))
+        assert.ok(scrollWidth <= innerWidth, `the page is ${scrollWidth} px wide in a ${innerWidth} px window`)
+      }
+      try {
+        assert.equal(await options.page.evaluate(() => document.body.classList.contains('dark') ? 'dark' : 'light'), theme)
+
+        assert.equal((await options.shownCategories()).length, 1, 'one category in the pane')
+
+        const links = await (await options.rail()).$$eval('[data-rail-item="category"]', els => els
+          .filter(el => el.checkVisibility())
+          .map((el) => {
+            const { top, left } = el.getBoundingClientRect()
+            return { top: Math.round(top), left: Math.round(left) }
           }))
-          assert.ok(scrollWidth <= innerWidth, `the page is ${scrollWidth} px wide in a ${innerWidth} px window`)
+        assert.equal(links.length, 6, 'every category is on the rail')
+        const tops = new Set(links.map(link => link.top))
+        const lefts = new Set(links.map(link => link.left))
+        if (width < 768) {
+          assert.equal(tops.size, 1, `a single row of chips: ${JSON.stringify(links)}`)
         }
-        try {
-          assert.equal(await options.page.evaluate(() => document.body.classList.contains('dark') ? 'dark' : 'light'), theme)
-
-          assert.equal((await options.shownCategories()).length, 1, 'one category in the pane')
-
-          const links = await (await options.rail()).$$eval('[data-rail-item="category"]', els => els
-            .filter(el => el.checkVisibility())
-            .map((el) => {
-              const { top, left } = el.getBoundingClientRect()
-              return { top: Math.round(top), left: Math.round(left) }
-            }))
-          assert.equal(links.length, 6, 'every category is on the rail')
-          const tops = new Set(links.map(link => link.top))
-          const lefts = new Set(links.map(link => link.left))
-          if (width < 768) {
-            assert.equal(tops.size, 1, `a single row of chips: ${JSON.stringify(links)}`)
-          }
-          else {
-            assert.equal(lefts.size, 1, `a column down the rail: ${JSON.stringify(links)}`)
-            assert.equal(tops.size, links.length, `a column down the rail: ${JSON.stringify(links)}`)
-          }
-
-          const foot = await options.page.$$eval('footer p', els => els
-            .filter(el => el.checkVisibility())
-            .map((el) => {
-              const style = getComputedStyle(el)
-              return { size: Number.parseFloat(style.fontSize), leading: Number.parseFloat(style.lineHeight) }
-            }))
-          assert.ok(foot.length, 'the foot is on the page')
-          for (const { size, leading } of foot)
-            assert.ok(leading >= size * 1.3, `the foot's lines are ${leading} px apart for ${size} px text`)
-
-          await noSidewaysScroll()
-
-          const { title, description, control } = await options.page.evaluate(rowBoxes, PLAIN_ROW)
-          const layout = JSON.stringify({ title, description, control })
-          assert.ok(title && description && control, `the row's parts: ${layout}`)
-          if (width >= 1024) {
-            assert.equal(title.width, 264, `a 264 px title column: ${layout}`)
-            if (width >= 1280)
-              assert.ok(control.width >= 180, `a control column of at least 180 px: ${layout}`)
-            else
-              assert.ok(description.width >= 20 * 16, `the description takes the room its switch doesn't need: ${layout}`)
-            assert.ok(title.right < description.left && description.right < control.left, `title, description and control side by side: ${layout}`)
-            assert.ok(Math.abs(title.top - description.top) <= 2, `the description beside the title: ${layout}`)
-
-            const grouped = await options.page.evaluate(rowBoxes, GROUPED_ROW)
-            assert.equal(grouped.description.left, description.left, 'a grouped row\'s description lines up with the rows outside the group')
-            assert.equal(grouped.control.right, control.right, 'and so does its control')
-          }
-          else {
-            assert.equal(description.left, title.left, `the description under the title: ${layout}`)
-            assert.ok(description.top >= title.bottom - 1, `the description under the title: ${layout}`)
-            assert.ok(control.left >= Math.max(title.right, description.right), `the control beside both: ${layout}`)
-          }
-
-          const separator = await options.page.evaluate((id) => {
-            const style = getComputedStyle(document.getElementById(id))
-            return { width: style.borderTopWidth, style: style.borderTopStyle, color: style.borderTopColor }
-          }, PLAIN_ROW)
-          assert.deepEqual(separator, { width: '1px', style: 'solid', color: await options.page.evaluate(token, 'hair') }, 'a hair line between rows')
-
-          await options.goTo('#filter-defaults')
-          const revealed = await options.page.evaluate(rowBoxes, INSET_ROW)
-          assert.ok(revealed.inset, `the inset shows: ${JSON.stringify(revealed)}`)
-          assert.equal(revealed.inset.left, revealed.title.left, `the inset starts at the row's left edge: ${JSON.stringify(revealed)}`)
-          assert.equal(revealed.inset.right, revealed.control.right, `and ends at its right edge: ${JSON.stringify(revealed)}`)
-          assert.ok(revealed.inset.top >= Math.max(revealed.description.bottom, revealed.control.bottom), `below the row: ${JSON.stringify(revealed)}`)
-          const insetColour = await options.page.evaluate(id => getComputedStyle(document.getElementById(id).querySelector('[data-row-inset]')).backgroundColor, INSET_ROW)
-          assert.equal(insetColour, await options.page.evaluate(token, 'sunken'), 'the inset is sunken')
-
-          await noSidewaysScroll()
-
-          await options.goTo('#advanced')
-          const wide = await options.page.evaluate(rowBoxes, WIDE_CONTROL_ROW)
-          const wideLayout = JSON.stringify(wide)
-          if (width < 768) {
-            assert.ok(wide.control.top >= wide.description.bottom, `a wide control drops under the text: ${wideLayout}`)
-            assert.ok(wide.title.width >= 13 * 16, `leaving the text its width: ${wideLayout}`)
-          }
-          else {
-            assert.ok(wide.control.left >= wide.description.right, `a wide control beside the text: ${wideLayout}`)
-          }
-          if (width >= 1024) {
-            for (const [category, name] of [['advanced', 'Advanced'], ['lists', 'Lists']]) {
-              await options.goTo(`#${category}`)
-              const narrowest = await options.page.$$eval(`[data-category="${category}"] [data-row-part="description"]`, els => Math.min(...els
-                .filter(el => el.checkVisibility())
-                .map(el => el.getBoundingClientRect().width)))
-              assert.ok(narrowest >= 10 * 16, `every description in ${name}, beside its wide controls, keeps 10rem: the narrowest is ${narrowest} px`)
-            }
-          }
-
-          await noSidewaysScroll()
-
-          // The saved lists, with a row's details open: nothing past the frame, and the frame inside the window.
-          await options.goTo('#saved-lists')
-          await until('the rows to be drawn', async () => (await options.savedListIds()).length === 2)
-          await options.savedListDetails(LONG.id)
-          await options.savedListDetails(`copy:${UNDESCRIBED}`)
-          assert.deepEqual(await options.page.evaluate(savedListsOverflow), [])
-          await noSidewaysScroll()
-
-          // Work marks' foot: inside the frame, under the rows rather than among them, whole, its lines spaced to be read.
-          await options.goTo('#marks-status')
-          const marks = await options.page.evaluate(footBoxes, 'work-marks')
-          const marksLayout = JSON.stringify(marks)
-          assert.ok(marks, 'Work marks has a foot')
-          assert.ok(!marks.inBody && marks.foot.top >= marks.body.bottom - 0.5, `under the rows: ${marksLayout}`)
-          assert.ok(marks.foot.left >= marks.frame.left && marks.foot.right <= marks.frame.right && marks.foot.bottom <= marks.frame.bottom + 0.5, `inside the frame: ${marksLayout}`)
-          assert.ok(!marks.cut, `nothing cut off: ${marksLayout}`)
-          assert.ok(marks.leading >= marks.size * 1.3, `its lines are ${marks.leading} px apart for ${marks.size} px text`)
-          await noSidewaysScroll()
+        else {
+          assert.equal(lefts.size, 1, `a column down the rail: ${JSON.stringify(links)}`)
+          assert.equal(tops.size, links.length, `a column down the rail: ${JSON.stringify(links)}`)
         }
-        finally {
-          await options.close()
+
+        const foot = await options.page.$$eval('footer p', els => els
+          .filter(el => el.checkVisibility())
+          .map((el) => {
+            const style = getComputedStyle(el)
+            return { size: Number.parseFloat(style.fontSize), leading: Number.parseFloat(style.lineHeight) }
+          }))
+        assert.ok(foot.length, 'the foot is on the page')
+        for (const { size, leading } of foot)
+          assert.ok(leading >= size * 1.3, `the foot's lines are ${leading} px apart for ${size} px text`)
+
+        await noSidewaysScroll()
+
+        const { title, description, control } = await options.page.evaluate(rowBoxes, PLAIN_ROW)
+        const layout = JSON.stringify({ title, description, control })
+        assert.ok(title && description && control, `the row's parts: ${layout}`)
+        if (width >= 1024) {
+          assert.equal(title.width, 264, `a 264 px title column: ${layout}`)
+          if (width >= 1280)
+            assert.ok(control.width >= 180, `a control column of at least 180 px: ${layout}`)
+          else
+            assert.ok(description.width >= 20 * 16, `the description takes the room its switch doesn't need: ${layout}`)
+          assert.ok(title.right < description.left && description.right < control.left, `title, description and control side by side: ${layout}`)
+          assert.ok(Math.abs(title.top - description.top) <= 2, `the description beside the title: ${layout}`)
+
+          const grouped = await options.page.evaluate(rowBoxes, GROUPED_ROW)
+          assert.equal(grouped.description.left, description.left, 'a grouped row\'s description lines up with the rows outside the group')
+          assert.equal(grouped.control.right, control.right, 'and so does its control')
         }
-      })
-    }
+        else {
+          assert.equal(description.left, title.left, `the description under the title: ${layout}`)
+          assert.ok(description.top >= title.bottom - 1, `the description under the title: ${layout}`)
+          assert.ok(control.left >= Math.max(title.right, description.right), `the control beside both: ${layout}`)
+        }
+
+        const separator = await options.page.evaluate((id) => {
+          const style = getComputedStyle(document.getElementById(id))
+          return { width: style.borderTopWidth, style: style.borderTopStyle, color: style.borderTopColor }
+        }, PLAIN_ROW)
+        assert.deepEqual(separator, { width: '1px', style: 'solid', color: await options.page.evaluate(token, 'hair') }, 'a hair line between rows')
+
+        await options.goTo('#filter-defaults')
+        const revealed = await options.page.evaluate(rowBoxes, INSET_ROW)
+        assert.ok(revealed.inset, `the inset shows: ${JSON.stringify(revealed)}`)
+        assert.equal(revealed.inset.left, revealed.title.left, `the inset starts at the row's left edge: ${JSON.stringify(revealed)}`)
+        assert.equal(revealed.inset.right, revealed.control.right, `and ends at its right edge: ${JSON.stringify(revealed)}`)
+        assert.ok(revealed.inset.top >= Math.max(revealed.description.bottom, revealed.control.bottom), `below the row: ${JSON.stringify(revealed)}`)
+        const insetColour = await options.page.evaluate(id => getComputedStyle(document.getElementById(id).querySelector('[data-row-inset]')).backgroundColor, INSET_ROW)
+        assert.equal(insetColour, await options.page.evaluate(token, 'sunken'), 'the inset is sunken')
+
+        await noSidewaysScroll()
+
+        await options.goTo('#advanced')
+        const wide = await options.page.evaluate(rowBoxes, WIDE_CONTROL_ROW)
+        const wideLayout = JSON.stringify(wide)
+        if (width < 768) {
+          assert.ok(wide.control.top >= wide.description.bottom, `a wide control drops under the text: ${wideLayout}`)
+          assert.ok(wide.title.width >= 13 * 16, `leaving the text its width: ${wideLayout}`)
+        }
+        else {
+          assert.ok(wide.control.left >= wide.description.right, `a wide control beside the text: ${wideLayout}`)
+        }
+        if (width >= 1024) {
+          for (const [category, name] of [['advanced', 'Advanced'], ['lists', 'Lists']]) {
+            await options.goTo(`#${category}`)
+            const narrowest = await options.page.$$eval(`[data-category="${category}"] [data-row-part="description"]`, els => Math.min(...els
+              .filter(el => el.checkVisibility())
+              .map(el => el.getBoundingClientRect().width)))
+            assert.ok(narrowest >= 10 * 16, `every description in ${name}, beside its wide controls, keeps 10rem: the narrowest is ${narrowest} px`)
+          }
+        }
+
+        await noSidewaysScroll()
+
+        // The saved lists, with a row's details open: nothing past the frame, and the frame inside the window.
+        await options.goTo('#saved-lists')
+        await until('the rows to be drawn', async () => (await options.savedListIds()).length === 2)
+        await options.savedListDetails(LONG.id)
+        await options.savedListDetails(`copy:${UNDESCRIBED}`)
+        assert.deepEqual(await options.page.evaluate(savedListsOverflow), [])
+        await noSidewaysScroll()
+
+        // Work marks' foot: inside the frame, under the rows rather than among them, whole, its lines spaced to be read.
+        await options.goTo('#marks-status')
+        const marks = await options.page.evaluate(footBoxes, 'work-marks')
+        const marksLayout = JSON.stringify(marks)
+        assert.ok(marks, 'Work marks has a foot')
+        assert.ok(!marks.inBody && marks.foot.top >= marks.body.bottom - 0.5, `under the rows: ${marksLayout}`)
+        assert.ok(marks.foot.left >= marks.frame.left && marks.foot.right <= marks.frame.right && marks.foot.bottom <= marks.frame.bottom + 0.5, `inside the frame: ${marksLayout}`)
+        assert.ok(!marks.cut, `nothing cut off: ${marksLayout}`)
+        assert.ok(marks.leading >= marks.size * 1.3, `its lines are ${marks.leading} px apart for ${marks.size} px text`)
+        await noSidewaysScroll()
+      }
+      finally {
+        await options.close()
+      }
+    })
   }
 })
 
@@ -479,9 +485,24 @@ function describeFocus(el) {
 }
 
 /**
+ * The ring the focused element, or what holds it, draws: the first box shadow
+ * up from it. Runs in the page.
+ */
+function focusRing() {
+  for (let at = document.activeElement; at; at = at.parentElement) {
+    const { boxShadow } = getComputedStyle(at)
+    if (boxShadow !== 'none')
+      return boxShadow
+  }
+  return null
+}
+
+/**
  * Every place the keyboard reaches shows that it has the focus: tabbed to, the
  * control or what holds it draws something it doesn't draw once the focus has
- * gone.
+ * gone. Whether a ring is drawn doesn't change with the theme, so the sweep
+ * runs in one; what colour it is drawn in is read once, against the `ring`
+ * token, which is what the other theme changes.
  */
 describe('options UI — focus rings', { skip }, () => {
   let session
@@ -492,50 +513,62 @@ describe('options UI — focus rings', { skip }, () => {
 
   after(() => session?.close())
 
-  for (const theme of THEMES) {
-    for (const category of CATEGORIES) {
-      test(`${category}, ${theme}`, async () => {
-        const options = await session.open({
-          viewport: { width: 1440, height: 900 },
-          hash: `#${category}`,
-          theme,
-          seed: SEED,
-          prepare: page => page.evaluateOnNewDocument(scriptBackground, { listBackups: [{ key: 'backup.1', createdAt: Date.now(), date: '2026-09-08', kind: 'daily', label: 'Today' }] }),
-        })
-        const { page } = options
-        try {
-          if (category === 'lists')
-            await until('the rows to be drawn', async () => (await options.savedListIds()).length === 2)
-          if (category === 'sync-backups')
-            await until('the backups to be listed', async () => (await options.listRows('backups')).length === 1)
-          await options.calm()
-          const reached = new Set()
-          const unmarked = []
-          // From the top of the page, as a reader starting out with the keyboard would.
-          await page.keyboard.press('Shift')
-          await page.evaluate(() => document.querySelector('header input').focus())
-          for (let first = true; ; first = false) {
-            if (!first)
-              await page.keyboard.press('Tab')
-            const focused = await page.evaluateHandle(() => document.activeElement)
-            if (await focused.evaluate(el => el === document.body) || reached.has(await focused.evaluate(describeFocus)))
-              break
-            reached.add(await focused.evaluate(describeFocus))
-            const look = await focused.evaluate(focusLook)
-            await focused.evaluate(el => el.blur())
-            if (await focused.evaluate(focusLook) === look)
-              unmarked.push(await focused.evaluate(describeFocus))
-            await focused.evaluate(el => el.focus())
-          }
-          assert.ok(reached.size > 5, `the keyboard reached ${reached.size} places: ${[...reached].join('; ')}`)
-          assert.deepEqual(unmarked, [])
-        }
-        finally {
-          await options.close()
-        }
+  for (const category of CATEGORIES) {
+    test(category, async () => {
+      const options = await session.open({
+        viewport: { width: 1440, height: 900 },
+        hash: `#${category}`,
+        theme: THEME,
+        seed: SEED,
+        prepare: page => page.evaluateOnNewDocument(scriptBackground, { listBackups: [{ key: 'backup.1', createdAt: Date.now(), date: '2026-09-08', kind: 'daily', label: 'Today' }] }),
       })
-    }
+      const { page } = options
+      try {
+        if (category === 'lists')
+          await until('the rows to be drawn', async () => (await options.savedListIds()).length === 2)
+        if (category === 'sync-backups')
+          await until('the backups to be listed', async () => (await options.listRows('backups')).length === 1)
+        await options.calm()
+        const reached = new Set()
+        const unmarked = []
+        // From the top of the page, as a reader starting out with the keyboard would.
+        await page.keyboard.press('Shift')
+        await page.evaluate(() => document.querySelector('header input').focus())
+        for (let first = true; ; first = false) {
+          if (!first)
+            await page.keyboard.press('Tab')
+          const focused = await page.evaluateHandle(() => document.activeElement)
+          if (await focused.evaluate(el => el === document.body) || reached.has(await focused.evaluate(describeFocus)))
+            break
+          reached.add(await focused.evaluate(describeFocus))
+          const look = await focused.evaluate(focusLook)
+          await focused.evaluate(el => el.blur())
+          if (await focused.evaluate(focusLook) === look)
+            unmarked.push(await focused.evaluate(describeFocus))
+          await focused.evaluate(el => el.focus())
+        }
+        assert.ok(reached.size > 5, `the keyboard reached ${reached.size} places: ${[...reached].join('; ')}`)
+        assert.deepEqual(unmarked, [])
+      }
+      finally {
+        await options.close()
+      }
+    })
   }
+
+  test('the ring is the ring token, at half strength', async () => {
+    const options = await session.open({ viewport: { width: 1440, height: 900 }, theme: OTHER_THEME, seed: SEED })
+    try {
+      await options.page.keyboard.press('Shift')
+      await options.page.evaluate(() => document.querySelector('header input').focus())
+      const ring = await options.page.evaluate(focusRing)
+      const [r, g, b] = await options.token('ring')
+      assert.ok(ring?.includes(`rgba(${r}, ${g}, ${b}, 0.5)`), `the search field's ring, ${ring}, is the ring token ${[r, g, b]} at half strength`)
+    }
+    finally {
+      await options.close()
+    }
+  })
 })
 
 /**

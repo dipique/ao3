@@ -35,7 +35,7 @@ const SEEDED = {
 /**
  * The settings row's parts that carry meaning rather than layout: a master
  * switch and the rows it gates, and the badges that stand in for a phrase in a
- * description. The layout itself is checked in `options-layout`.
+ * description. The layout itself is checked in `visual/options-layout`.
  */
 describe('options UI — the settings row', { skip }, () => {
   let session

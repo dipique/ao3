@@ -1,4 +1,4 @@
-import { installMock, storedLists } from './helpers.mjs'
+import { installMock, openWindow, storedLists } from './helpers.mjs'
 import { ARCHIVE, inject, relayWrites } from './trackedPages.mjs'
 
 /**
@@ -62,7 +62,8 @@ export function storedSeed(ageMs = 48 * HOUR, extra = {}) {
  * numbered pages of the list the tab asks for, which only a refresh does.
  */
 export async function archiveTab(browser, seed, answer, asked = []) {
-  const tab = await browser.newPage()
+  // A window of its own: the other tab's work goes on at full speed beside it.
+  const tab = await openWindow(browser)
   await tab.setViewport({ width: 1280, height: 900 })
   await tab.setRequestInterception(true)
   tab.on('request', async (req) => {

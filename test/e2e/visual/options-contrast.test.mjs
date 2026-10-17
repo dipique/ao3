@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { storedLists } from './helpers.mjs'
-import { ARCHIVE, scriptBackground, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { storedLists } from '../helpers.mjs'
+import { ARCHIVE, scriptBackground, skip, startOptions, stubArchive, until } from '../optionsPage.mjs'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.now()

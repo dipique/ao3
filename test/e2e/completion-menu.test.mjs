@@ -2,21 +2,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import puppeteer from 'puppeteer-core'
 
-import { DIST, ensureBuilt, findChrome, installMock } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { menuClosed, menuGuardOver, openMenu, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
-
-function launch() {
-  return puppeteer.launch({
-    executablePath: chromePath,
-    headless: 'new',
-    args: ['--no-first-run', '--no-default-browser-check'],
-  })
-}
 
 /** The open menu's rows. */
 const menuRows = page => page.evaluate(() =>
@@ -106,7 +97,7 @@ describe('completion menu', { skip }, () => {
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
-    browser = await launch()
+    browser = await launch(chromePath)
     page = await browser.newPage()
     await page.goto('about:blank')
     await page.evaluate(installMock, { 'option.completionToolbar': true })
@@ -250,7 +241,7 @@ describe('completion menu in the search view', { skip }, () => {
     const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
     const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
 
-    browser = await launch()
+    browser = await launch(chromePath)
     page = await browser.newPage()
     await page.setRequestInterception(true)
     page.on('request', (req) => {
@@ -289,33 +280,21 @@ describe('completion menu in the search view', { skip }, () => {
 
   const TOTAL = '.AO3E--search-view--results dd.chapters .AO3E--completion'
 
-  test('the view opened with every work', async () => {
-    assert.deepEqual(await visibleTitles(), ['A finished one', 'An ongoing one', 'Another finished one'])
-  })
-
-  test('picking a choice filters the loaded list, not AO3', async () => {
+  test('a pick drives the view\'s own Completion Status facet, not AO3, and clearing it brings the list back', async () => {
+    // What each choice selects, and what the selection reads back as, is the
+    // completion facet's business, tested case by case in
+    // `test/searchView/engine.test.mjs`; here, that the menu reaches the view's
+    // filter and the list and its sidebar show the result.
+    assert.deepEqual(await visibleTitles(), ['A finished one', 'An ongoing one', 'Another finished one'], 'the view opened with every work')
     const rows = await openMenuOn(page, TOTAL)
     assert.deepEqual(rows.map(r => r.label), ['Completed works only', 'Incomplete works only'])
     await pick(page, 'Incomplete works only')
     assert.deepEqual(await visibleTitles(), ['An ongoing one'])
     assert.deepEqual(await included(), ['Work in Progress'], 'the facet sidebar shows the same filter')
     assert.equal(page.url(), READINGS_URL)
-  })
 
-  test('the other choice replaces it rather than adding to it', async () => {
-    const rows = await openMenuOn(page, TOTAL)
-    assert.equal(rows[0].label, 'Clear completion filter (incomplete works only)')
-    await pick(page, 'Completed works only')
-    assert.deepEqual(await visibleTitles(), ['A finished one', 'Another finished one'])
-    assert.deepEqual(await included(), ['Complete'])
-  })
-
-  test('the facet sidebar\'s own selection reads back as the current choice', async () => {
-    const rows = await openMenuOn(page, '.AO3E--search-view--results dt.chapters')
-    assert.equal(rows.find(r => r.label === 'Completed works only').disabled, true)
-  })
-
-  test('clearing restores the full list', async () => {
+    const again = await openMenuOn(page, TOTAL)
+    assert.equal(again[0].label, 'Clear completion filter (incomplete works only)')
     await pick(page, 'Clear')
     assert.deepEqual(await visibleTitles(), ['A finished one', 'An ongoing one', 'Another finished one'])
     assert.deepEqual(await included(), [])
