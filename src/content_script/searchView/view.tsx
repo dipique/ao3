@@ -12,10 +12,12 @@ import { ADDON_CLASS } from '#common'
 import { hasNode } from '#content_script/blurb.js'
 import React from '#dom'
 
-import type { FacetCounts, FacetDir, FacetKey, FacetValueCount, FacetValueRef, FilterState, SortKey, StableDrop } from './engine.ts'
+import type { FacetCounts, FacetDir, FacetKey, FacetSelection, FacetValueCount, FacetValueRef, FilterState, SortKey, StableDrop } from './engine.ts'
+import type { FacetRowFacts } from './facetRows.ts'
 import type { SearchViewPrefs } from './prefs.ts'
 import type { TextSearchPhase, WorkTextSearcher } from './textSearch.ts'
 
+import { planChildren } from './childOrder.ts'
 import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
 import {
   buildFacets,
@@ -35,6 +37,7 @@ import {
   sortWorks,
 } from './engine.ts'
 import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
+import { groupCountText, layoutFacetRows, leftOutNote, nameRanks } from './facetRows.ts'
 import { DEFAULT_STATUS, SIDEBAR_WIDTH } from './prefs.ts'
 import { pristineBlurb } from './pristine.ts'
 import { describeTextSearch, parseTextQuery } from './textSearch.ts'
@@ -346,6 +349,28 @@ function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (.
   }
 }
 
+/**
+ * Make `parent`'s children `desired`, moving only those out of place — or, when
+ * most of them would move or go, swapping them all at once, which the browser
+ * does faster than that many single moves.
+ */
+function placeChildren(parent: Element, desired: readonly Element[]): void {
+  const { remove, insert } = planChildren([...parent.children], desired)
+  if (remove.length + insert.length > desired.length) {
+    parent.replaceChildren(...desired)
+    return
+  }
+  for (const node of remove)
+    node.remove()
+  for (const { node, before } of insert)
+    parent.insertBefore(node, before)
+}
+
+function setText(el: Element, text: string): void {
+  if (el.textContent !== text)
+    el.textContent = text
+}
+
 /** Parse a word-count bound; blank/invalid -> null (unbounded). */
 function parseBound(value: string): number | null {
   const digits = value.replace(/\D/g, '')
@@ -472,21 +497,17 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // Registry of facet rows, rebuilt whenever the facet list changes, so render()
   // can sync toggle state and live drill-down counts against the current filter
   // without re-creating the DOM (which would reset the open/closed groups).
-  interface FacetRowRef {
-    value: string
-    /** Lowercased value, precomputed for the per-group "contains" filter. */
-    lower: string
+  // Every value has its counts here; its elements are built the first time it
+  // shows, since a large list has thousands that never do.
+  interface FacetRowRef extends FacetRowFacts {
+    dom: FacetRowDom | null
+  }
+  interface FacetRowDom {
     row: HTMLElement
-    /** The value's name label — click to sort the group's rows alphabetically. */
-    nameEl: HTMLElement
     /** Drill-down count: results you'd get if you also *included* this value. */
     countEl: HTMLElement
     /** Result count: results remaining if you additionally *required* this value. */
     resultCountEl: HTMLElement
-    /** Latest drill-down count, updated by syncFacets() and read for visibility. */
-    count: number
-    /** Latest result count (works remaining if required), for row sorting. */
-    resultCount: number
     /** The require button, toggled disabled when requiring would empty results. */
     requireBtn: HTMLButtonElement
     buttons: { dir: FacetDir, btn: HTMLButtonElement }[]
@@ -497,7 +518,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     el: HTMLElement
     head: HTMLButtonElement
     countEl: HTMLElement
-    /** Where this direction's selected rows are moved to by applyRowOrder(). */
+    /** Where this direction's selected rows are moved to by layoutGroup(). */
     body: HTMLElement
   }
   interface FacetGroupRef {
@@ -515,15 +536,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     valueSort: 'count' | 'result' | 'name'
     /** Direction of the value sort. */
     valueSortDir: 'asc' | 'desc'
-    /** Last row order applied to the DOM, to skip churn when it's unchanged. */
-    rowOrder: FacetRowRef[]
-    /** The section each row of {@link rowOrder} was put in (`null`: unselected). */
-    rowDirs: (FacetDir | null)[]
     /** The selected values, by direction, above the unselected rows. */
     sections: SelectionSectionRef[]
     /** The reorder arrows, disabled at the ends of the list. */
     upBtn: HTMLButtonElement
     downBtn: HTMLButtonElement
+    /** Under the rows while the cap leaves some out, saying how many. */
+    leftOutEl: HTMLElement
   }
   // Large groups (> this many values) get a "contains" filter box for their values.
   const FACET_FILTER_THRESHOLD = 10
@@ -963,11 +982,6 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
 
   const SECTION_LABELS: Record<FacetDir, string> = { require: 'Required', include: 'Included', exclude: 'Excluded' }
 
-  /** The one direction a value is selected in, if any (they're exclusive). */
-  function selectedDir(key: FacetKey, value: string): FacetDir | null {
-    return FACET_DIRS.find(dir => state.facets[key][dir].has(value)) ?? null
-  }
-
   function isSectionOpen(key: FacetKey, dir: FacetDir): boolean {
     return openSelections.get(`${key}:${dir}`) ?? dir !== 'exclude'
   }
@@ -993,12 +1007,17 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       openSelections.set(`${key}:${dir}`, !isSectionOpen(key, dir))
       const group = facetGroups.find(g => g.key === key)
       if (group)
-        applyGroupVisibility(group)
+        layoutGroup(group)
     })
     return section
   }
 
-  function facetRow(key: FacetKey, { value, count }: FacetValueCount): FacetRowRef {
+  function facetRow({ value, count }: FacetValueCount, nameRank: number): FacetRowRef {
+    return { value, lower: value.toLowerCase(), count, resultCount: count, nameRank, dom: null }
+  }
+
+  function facetRowDom(group: FacetGroupRef, { value }: FacetRowRef): FacetRowDom {
+    const { key } = group
     const require = (
       <button type="button" class={`${cx('toggle')}  ${cx('toggle-require')}`} aria-pressed="false" title={`Require "${value}" — every shown work must have this tag`}>
         <MdiCheckCircle />
@@ -1021,11 +1040,17 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // Two counts: the drill-down count (what including this would surface) and,
     // in parentheses, how many of the *current* results have this value (what
     // requiring it would leave).
-    const countEl = (<span class={cx('row-count')} role="button" title="Results if you include this value — click to sort by this count">{String(count)}</span>) as HTMLElement
-    const resultCountEl = (<span class={cx('row-result-count')} role="button" title="Results remaining if you require this value — click to sort by this count">{`(${count})`}</span>) as HTMLElement
+    const countEl = (<span class={cx('row-count')} role="button" title="Results if you include this value — click to sort by this count" />) as HTMLElement
+    const resultCountEl = (<span class={cx('row-result-count')} role="button" title="Results remaining if you require this value — click to sort by this count" />) as HTMLElement
     // The full value is the tooltip (names truncate); it also acts as a button to
     // sort the group's rows alphabetically, mirroring the click-to-sort counts.
     const nameEl = (<span class={cx('row-name')} role="button" title={`${value} — click to sort by name`}>{value}</span>) as HTMLElement
+    // Clicking either count sorts the group's rows by that number, and clicking
+    // a name sorts them alphabetically (selection still floats to the top);
+    // clicking the active one flips direction.
+    nameEl.addEventListener('click', () => setValueSort(group, 'name'))
+    countEl.addEventListener('click', () => setValueSort(group, 'count'))
+    resultCountEl.addEventListener('click', () => setValueSort(group, 'result'))
     const row = (
       <div class={cx('row')}>
         <span class={cx('row-toggles')}>
@@ -1040,14 +1065,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     ) as HTMLElement
 
     return {
-      value,
-      lower: value.toLowerCase(),
       row,
-      nameEl,
       countEl,
       resultCountEl,
-      count,
-      resultCount: count,
       requireBtn: require,
       buttons: [{ dir: 'require', btn: require }, { dir: 'include', btn: include }, { dir: 'exclude', btn: exclude }],
     }
@@ -1066,8 +1086,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         liveQueries.set(group.key, group.query)
     }
     facetGroups = []
-    // Row identity/order is fixed from the full set; render() updates the live
-    // drill-down counts and hides rows that no longer match the active filter.
+    // Row identity is fixed from the full set; render() updates the live
+    // drill-down counts and puts in the page only the rows that still match.
     const facets = buildFacets(pool)
     // Seed the facet UI: the first build restores from the saved snapshot (an
     // in-memory reopen via initialState wins, else the persisted local prefs);
@@ -1090,8 +1110,9 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         : facets[key]
       if (!values.length)
         continue
-      const rows = values.map(value => facetRow(key, value))
-      const groupCountEl = (<span class={cx('group-count')}>{String(values.length)}</span>) as HTMLElement
+      const ranks = nameRanks(values.map(({ value }) => value), rowCollator.compare)
+      const rows = values.map((value, i) => facetRow(value, ranks[i]!))
+      const groupCountEl = (<span class={cx('group-count')}>{groupCountText(values.length)}</span>) as HTMLElement
       // Long value lists (tags, fandoms, characters…) get a "contains" filter.
       const label = FACET_LABELS[key].toLowerCase()
       const filterInput = values.length > FACET_FILTER_THRESHOLD
@@ -1127,10 +1148,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       upBtn.addEventListener('click', onMove(-1))
       downBtn.addEventListener('click', onMove(1))
       const sections = FACET_DIRS.map(dir => selectionSection(key, dir))
+      const leftOutEl = (<div class={cx('group-capped')} />) as HTMLElement
       const bodyEl = (
         <div class={cx('group-body')}>
           {sections.map(s => s.el)}
-          {rows.map(r => r.row)}
         </div>
       ) as HTMLElement
       const group = (
@@ -1160,23 +1181,14 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         query: savedQuery,
         valueSort: 'count',
         valueSortDir: 'desc',
-        rowOrder: rows,
-        rowDirs: rows.map(() => null),
         sections,
         upBtn,
         downBtn,
-      }
-      // Clicking either count sorts the group's rows by that number, and clicking
-      // a name sorts them alphabetically (selection still floats to the top);
-      // clicking the active one flips direction.
-      for (const r of rows) {
-        r.nameEl.addEventListener('click', () => setValueSort(groupRef, 'name'))
-        r.countEl.addEventListener('click', () => setValueSort(groupRef, 'count'))
-        r.resultCountEl.addEventListener('click', () => setValueSort(groupRef, 'result'))
+        leftOutEl,
       }
       filterInput?.addEventListener('input', () => {
         groupRef.query = filterInput.value
-        applyGroupVisibility(groupRef)
+        layoutGroup(groupRef)
       })
       // Persist collapse/expand as the user toggles the group open or shut.
       group.addEventListener('toggle', () => persist())
@@ -1219,97 +1231,50 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // --- Render ---------------------------------------------------------------
 
   /**
-   * Show/hide a group's value rows from its current drill-down counts and value
-   * filter: a row shows when it still has matching works (or is selected, so it
-   * can be toggled off) *and* contains the filter text. The group count tracks
-   * the visible rows; the whole group hides only when no value passes the
-   * drill-down filter — never merely because the text filter excluded them all,
-   * which would also hide the filter box and trap the user.
+   * Put a group's value rows where {@link layoutFacetRows} says they go: the
+   * selected ones in their direction's section, the rest below, with a line
+   * under them when the cap left some out, and a row that doesn't show out of
+   * the page altogether. Only the rows that change place are moved, and only
+   * the rows that show are drawn (built, the first time), so a render that
+   * shifts a few counts restyles a few rows, not every value a large list has.
+   * Then the counts and which sections are open.
    */
-  function applyGroupVisibility(group: FacetGroupRef): void {
+  function layoutGroup(group: FacetGroupRef): void {
+    group.body.classList.toggle(cx('sort-by-result'), group.valueSort === 'result')
+    group.body.classList.toggle(cx('sort-by-count'), group.valueSort === 'count')
+    group.body.classList.toggle(cx('sort-by-name'), group.valueSort === 'name')
     const sel = state.facets[group.key]
-    const q = group.query.trim().toLowerCase()
-    let relevant = 0
-    let shown = 0
-    for (const row of group.rows) {
-      const selected = sel.include.has(row.value) || sel.exclude.has(row.value) || sel.require.has(row.value)
-      const drillMatch = row.count > 0 || selected
-      if (drillMatch)
-        relevant++
-      const show = drillMatch && (q === '' || row.lower.includes(q))
-      row.row.classList.toggle(HIDDEN_CLASS, !show)
-      if (show)
-        shown++
-    }
-    group.countEl.textContent = String(shown)
-    group.details.classList.toggle(HIDDEN_CLASS, relevant === 0)
-    // A section shows when it has a row to show, and opens when the reader has
-    // it open — or while they're typing in the filter box, so a match isn't
-    // found only to sit inside a shut section.
+    const layout = layoutFacetRows(group.rows, sel, {
+      query: group.query,
+      sort: group.valueSort,
+      dir: group.valueSortDir,
+    })
+    const draw = (row: FacetRowRef): HTMLElement => drawRow(group, row, sel)
+    // While the reader types in the filter box every section opens, so a match
+    // isn't found only to sit inside a shut one.
+    const filtering = group.query.trim() !== ''
+    // Sections first: a row moving out of one is taken from it before the
+    // group body is laid out, and one moving in is taken from the body.
     for (const section of group.sections) {
-      let count = 0
-      for (const row of section.body.children) {
-        if (!row.classList.contains(HIDDEN_CLASS))
-          count++
-      }
-      section.el.classList.toggle(HIDDEN_CLASS, count === 0)
-      section.countEl.textContent = String(count)
-      const open = q !== '' || isSectionOpen(group.key, section.dir)
+      const rows = layout.sections[section.dir]
+      placeChildren(section.body, rows.map(draw))
+      section.el.classList.toggle(HIDDEN_CLASS, rows.length === 0)
+      setText(section.countEl, String(rows.length))
+      const open = filtering || isSectionOpen(group.key, section.dir)
       section.el.classList.toggle(cx('sel-open'), open)
       section.body.classList.toggle(HIDDEN_CLASS, !open)
       section.head.setAttribute('aria-expanded', String(open))
       section.head.title = `${open ? 'Hide' : 'Show'} ${SECTION_LABELS[section.dir].toLowerCase()} ${FACET_LABELS[group.key].toLowerCase()}`
     }
-  }
-
-  /**
-   * The group's rows in display order: values with any selection
-   * (require/include/exclude) float to the top, then the rest sort by the group's
-   * chosen key — a count (drill-down or result), tie-broken by name, or the name
-   * itself — in its current direction. Selection-first is the primary key so the
-   * active tags stay reachable.
-   */
-  function orderedRows(group: FacetGroupRef): FacetRowRef[] {
-    const sel = state.facets[group.key]
-    const sign = group.valueSortDir === 'asc' ? 1 : -1
-    const isSelected = (r: FacetRowRef): boolean =>
-      sel.include.has(r.value) || sel.exclude.has(r.value) || sel.require.has(r.value)
-    const num = (r: FacetRowRef): number => group.valueSort === 'result' ? r.resultCount : r.count
-    return [...group.rows].sort((a, b) => {
-      const selDelta = (isSelected(a) ? 0 : 1) - (isSelected(b) ? 0 : 1)
-      if (selDelta !== 0)
-        return selDelta
-      if (group.valueSort === 'name')
-        return sign * rowCollator.compare(a.value, b.value)
-      return sign * (num(a) - num(b)) || rowCollator.compare(a.value, b.value)
-    })
-  }
-
-  /**
-   * Re-sort a group's value rows in the DOM (selection-first, then by the chosen
-   * count) and mark which count column is active. Selected rows go into their
-   * direction's section, the rest follow the sections. The row nodes are only
-   * moved when the order or a selection actually changed, so a render that
-   * disturbs neither touches no DOM.
-   */
-  function applyRowOrder(group: FacetGroupRef): void {
-    group.body.classList.toggle(cx('sort-by-result'), group.valueSort === 'result')
-    group.body.classList.toggle(cx('sort-by-count'), group.valueSort === 'count')
-    group.body.classList.toggle(cx('sort-by-name'), group.valueSort === 'name')
-    const ordered = orderedRows(group)
-    const dirs = ordered.map(r => selectedDir(group.key, r.value))
-    const unchanged = ordered.length === group.rowOrder.length
-      && ordered.every((r, i) => group.rowOrder[i] === r && group.rowDirs[i] === dirs[i])
-    if (unchanged)
-      return
-    group.rowOrder = ordered
-    group.rowDirs = dirs
-    for (const section of group.sections)
-      section.body.replaceChildren(...ordered.filter((_, i) => dirs[i] === section.dir).map(r => r.row))
-    group.body.replaceChildren(
+    const note = leftOutNote(layout)
+    setText(group.leftOutEl, note ?? '')
+    placeChildren(group.body, [
       ...group.sections.map(s => s.el),
-      ...ordered.filter((_, i) => dirs[i] === null).map(r => r.row),
-    )
+      ...layout.rest.map(draw),
+      ...(note ? [group.leftOutEl] : []),
+    ])
+    setText(group.countEl, groupCountText(layout.matching))
+    group.details.classList.toggle(HIDDEN_CLASS, layout.relevant === 0)
   }
 
   /**
@@ -1326,48 +1291,50 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       group.valueSort = which
       group.valueSortDir = which === 'name' ? 'asc' : 'desc'
     }
-    applyRowOrder(group)
+    layoutGroup(group)
   }
 
   /**
-   * Refresh the facet sidebar from precomputed drill-down counts: each value's
-   * count and toggle state is synced, then {@link applyGroupVisibility} decides
-   * what stays visible. Count writes are guarded so an unchanged row touches no
-   * DOM.
+   * Bring a row's counts and toggles in line with its latest counts and the
+   * group's selection, building its elements if it has none yet, and return
+   * them. Writes are guarded, so an unchanged row touches no DOM.
+   */
+  function drawRow(group: FacetGroupRef, row: FacetRowRef, sel: FacetSelection): HTMLElement {
+    const dom = row.dom ??= facetRowDom(group, row)
+    setText(dom.countEl, String(row.count))
+    setText(dom.resultCountEl, `(${row.resultCount})`)
+    // Requiring a value narrows to the visible works that have it; if that's
+    // zero (and it isn't already the required value), requiring it would wipe
+    // the results — so disable the button to mark it a dead end.
+    const wouldEmpty = row.resultCount === 0 && !sel.require.has(row.value)
+    if (dom.requireBtn.disabled !== wouldEmpty) {
+      dom.requireBtn.disabled = wouldEmpty
+      dom.requireBtn.classList.toggle(cx('toggle-empty'), wouldEmpty)
+    }
+    for (const { dir, btn } of dom.buttons) {
+      const active = sel[dir].has(row.value)
+      if ((btn.getAttribute('aria-pressed') === 'true') !== active) {
+        btn.classList.toggle(ACTIVE_CLASS, active)
+        btn.setAttribute('aria-pressed', String(active))
+      }
+    }
+    return dom.row
+  }
+
+  /**
+   * Refresh the facet sidebar from precomputed drill-down counts: each value
+   * takes its new counts, then {@link layoutGroup} decides what shows and draws
+   * that. A row out of the page is drawn, or built, when it next shows.
    */
   function syncFacets(facetCounts: FacetCounts, resultCounts: FacetCounts): void {
     for (const group of facetGroups) {
-      const sel = state.facets[group.key]
       const groupCounts = facetCounts[group.key]
       const groupResultCounts = resultCounts[group.key]
       for (const row of group.rows) {
         row.count = groupCounts.get(row.value) ?? 0
-        const text = String(row.count)
-        if (row.countEl.textContent !== text)
-          row.countEl.textContent = text
-        const resultCount = groupResultCounts.get(row.value) ?? 0
-        row.resultCount = resultCount
-        const resultText = `(${resultCount})`
-        if (row.resultCountEl.textContent !== resultText)
-          row.resultCountEl.textContent = resultText
-        // Requiring a value narrows to the visible works that have it; if that's
-        // zero (and it isn't already the required value), requiring it would wipe
-        // the results — so disable the button to mark it a dead end.
-        const wouldEmpty = resultCount === 0 && !sel.require.has(row.value)
-        if (row.requireBtn.disabled !== wouldEmpty) {
-          row.requireBtn.disabled = wouldEmpty
-          row.requireBtn.classList.toggle(cx('toggle-empty'), wouldEmpty)
-        }
-        for (const { dir, btn } of row.buttons) {
-          const active = sel[dir].has(row.value)
-          if ((btn.getAttribute('aria-pressed') === 'true') !== active) {
-            btn.classList.toggle(ACTIVE_CLASS, active)
-            btn.setAttribute('aria-pressed', String(active))
-          }
-        }
+        row.resultCount = groupResultCounts.get(row.value) ?? 0
       }
-      applyRowOrder(group)
-      applyGroupVisibility(group)
+      layoutGroup(group)
     }
   }
 

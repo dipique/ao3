@@ -1818,6 +1818,14 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   opacity: 0.6;
 }
 
+/* Under a group the row cap shortened: how many show, and how to find the rest. */
+.AO3E--search-view--group-capped {
+  padding: 0.3em 0 0.1em;
+  font-size: 0.85em;
+  font-style: italic;
+  opacity: 0.6;
+}
+
 .AO3E--search-view--row {
   display: flex;
   align-items: center;
