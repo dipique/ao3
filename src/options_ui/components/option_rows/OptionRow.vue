@@ -18,8 +18,8 @@ const props = defineProps<OptionRowProps>()
 
 const BADGES = {
   'needs-login': { label: 'Needs login', tip: 'Works only while you are logged in to AO3', warn: false },
-  'this-device': { label: 'This device', tip: 'What it remembers stays on this device, and sync doesn\'t carry it', warn: false },
-  'every-click': { label: 'Changes every click', tip: 'Changes what a plain click on a link does', warn: true },
+  'this-device': { label: 'This device', tip: 'This device only - not synced', warn: false },
+  'every-click': { label: 'Changes every click', tip: 'Overrides what happens when a link is clicked', warn: true },
 } as const satisfies Record<RowBadge, { label: string, tip: string, warn: boolean }>
 
 const { id, controlId, visible, titleHtml, subtitleHtml } = useSearchableRow(

@@ -18,7 +18,7 @@ const TO_READ_URL = `${HISTORY_URL}?show=to-read`
  *
  * - a rule that **hides** a tag outright (`Gone`)
  * - a rule that **collapses** one (`HideMe`)
- * - the language filter, set to drop anything but English
+ * - the crossover filter, set to drop anything listing more than one fandom
  * - a `read` mark configured to hide the works carrying it
  *
  * `hideShowReason` is off, so everything that isn't a rule hides outright rather
@@ -37,7 +37,7 @@ const SEED = {
   'option.searchReadWorks': true,
   'option.autoExcludeHidden': true,
   'option.hideShowReason': false,
-  'option.hideLanguages': { enabled: true, show: [{ label: 'English' }] },
+  'option.hideCrossovers': { enabled: true, maxFandoms: 1 },
   'option.rules': {
     enabled: true,
     colors: {},
@@ -57,15 +57,15 @@ const SEED = {
 
 /** The four works, one per reason a listing might take one away. */
 const WORKS = [
-  { title: 'Hidden by a rule', tags: ['Gone'], language: 'English' },
-  { title: 'Collapsed by a rule', tags: ['HideMe'], language: 'English' },
-  { title: 'Wrong language', tags: [], language: 'Français' },
-  { title: 'Nothing wrong with it', tags: [], language: 'English' },
+  { title: 'Hidden by a rule', tags: ['Gone'] },
+  { title: 'Collapsed by a rule', tags: ['HideMe'] },
+  { title: 'A crossover', tags: [], fandoms: ['A Fandom', 'Another Fandom'] },
+  { title: 'Nothing wrong with it', tags: [] },
 ]
 
 const TITLES = WORKS.map(work => work.title)
 
-function blurb(id, { title, tags, language }) {
+function blurb(id, { title, tags, fandoms = ['A Fandom'] }) {
   const tagList = tags
     .map(tag => `<li class="freeforms"><a class="tag" href="/tags/${encodeURIComponent(tag)}/works">${tag}</a></li>`)
     .join('')
@@ -74,11 +74,11 @@ function blurb(id, { title, tags, language }) {
       <div class="header module">
         <h4 class="heading"><a href="/works/${id}">${title}</a>
           by <a rel="author" href="/users/someone/pseuds/someone">someone</a></h4>
-        <h5 class="fandoms heading"><a class="tag" href="/tags/F/works">A Fandom</a></h5>
+        <h5 class="fandoms heading">${fandoms.map(fandom => `<a class="tag" href="/tags/${encodeURIComponent(fandom)}/works">${fandom}</a>`).join(', ')}</h5>
       </div>
       <ul class="tags commas">${tagList}</ul>
       <dl class="stats">
-        <dt class="language">Language:</dt><dd class="language">${language}</dd>
+        <dt class="language">Language:</dt><dd class="language">English</dd>
         <dt class="words">Words:</dt><dd class="words">7,150</dd>
         <dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd>
       </dl>
@@ -117,7 +117,7 @@ function readingsPage({ toRead }) {
  * for it to decide — they already said yes to each of these — and a list that
  * comes back four works long when they put six on it is the list lying about
  * itself. That is `SearchSource.hidesNothing`, and it covers every reason a work
- * can go: rules, marks, language, crossovers alike, plus the exclusions
+ * can go: rules, marks and crossovers alike, plus the exclusions
  * `autoExcludeHidden` would otherwise hand the view's own filter, which take a
  * work off the list just as surely.
  *
@@ -189,7 +189,7 @@ describe('the lists the reader built themselves', { skip }, () => {
     const tab = await load(TO_READ_URL, { ...SEED, 'option.searchMarkedForLater': false })
     const native = await nativeState(tab)
     assert.deepEqual(native.titles, TITLES, 'AO3’s listing is the one on screen')
-    assert.deepEqual(native.hidden, ['Hidden by a rule', 'Wrong language'])
+    assert.deepEqual(native.hidden, ['Hidden by a rule', 'A crossover'])
     assert.deepEqual(native.collapsed, ['Collapsed by a rule'])
     await tab.close()
   })

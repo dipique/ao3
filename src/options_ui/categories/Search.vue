@@ -36,10 +36,9 @@
         <OptionSwitch option-id="autoExcludeHidden" />
       </OptionRow>
       <OptionRowHideCrossovers />
-      <OptionRowHideLanguages />
       <OptionRow
         title="Collapse or hide"
-        subtitle="What to do with a work hidden by the crossover or language filter, or by a mark set to hide it. Collapsing leaves a line saying why, with a button to show the work anyway. Rules choose this for themselves, per rule."
+        subtitle="What to do with a work hidden by the crossover filter, or by a mark set to hide it. Collapsing leaves a line saying why, with a button to show the work anyway. Rules choose this for themselves, per rule."
       >
         <OptionHideReason />
       </OptionRow>

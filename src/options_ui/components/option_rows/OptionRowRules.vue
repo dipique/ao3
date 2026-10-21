@@ -72,9 +72,9 @@ OptionRowRulesContext.provide({
               to see, whatever tags a work carries), or drop an "always show" below 4 to let ordinary hides overrule it.
             </p>
             <p>
-              Hiding that isn't a rule at all — the crossover and language filters, and works you've marked read —
-              weighs 0, so an "always show" overrules it. Those three don't choose between hiding and collapsing per
-              rule either; they all follow the "Collapse or hide" setting above.
+              Hiding that isn't a rule at all — the crossover filter, and works you've marked read — weighs 0, so an
+              "always show" overrules it. Neither chooses between hiding and collapsing per rule either; both follow the
+              "Collapse or hide" setting above.
             </p>
             <h2 mt-6 py-1>
               Limitations

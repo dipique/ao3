@@ -4,7 +4,6 @@ import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
 import type { HideMode, MarkId, Options, ProgressSource, Rule } from '#common'
 import type { FilterTarget } from '#content_script/filterTarget.js'
-import type { FacetKey } from '#content_script/searchView/engine.ts'
 
 import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHideMode, markHidePriority, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb, knownBlurb } from '#content_script/blurb.js'
@@ -44,16 +43,10 @@ export interface ExcludeTarget {
   type?: TagType
   /** The tag's own page, so an unknown fandom's id can be fetched on demand. */
   href?: string
-  /**
-   * For a value that isn't a tag at all — a work's language. Naming the facet
-   * outright is also what says there is no sidebar equivalent, so the button
-   * appears only inside a search view.
-   */
-  facet?: FacetKey
 }
 
 interface ReasonItem {
-  /** The actual matched value (tag/fandom/author/language) to display. */
+  /** The actual matched value (tag/fandom/author) to display. */
   value: string
   /**
    * Human description of the rule that matched, shown on hover (and as the
@@ -74,7 +67,7 @@ type HideReasons = Record<string, ReasonItem[]>
  * (as `data-ao3e-hidden-by`) so the floating filter toolbar can reveal just the
  * works hidden by, say, tag rules.
  */
-type HideKind = 'tags' | 'authors' | 'crossovers' | 'languages' | 'works' | 'series' | 'marks'
+type HideKind = 'tags' | 'authors' | 'crossovers' | 'works' | 'series' | 'marks'
 
 /**
  * One reason a work might be hidden, before the priority contest is settled.
@@ -87,15 +80,15 @@ interface HideCandidate {
   kind: HideKind
   /**
    * The rule that asked for this, when a rule did. Absent for the hides that are
-   * not rules at all (language, crossover, marks), which is how
+   * not rules at all (crossover, marks), which is how
    * {@link HideVerdict.excludes} tells a reason it can hand to a search filter
    * from one it can only apply itself.
    */
   rule?: Rule
   /**
-   * The rule's effective priority. The hides that aren't rules sit at 0 —
-   * language and crossovers, which are settings about the listing rather than
-   * claims about the work — except mark-hiding, which carries
+   * The rule's effective priority. The hides that aren't rules sit at 0 — the
+   * crossover filter, a setting about the listing rather than a claim about the
+   * work — except mark-hiding, which carries
    * {@link WorkMarks.hidePriority} so it can be weighed against the rules.
    */
   priority: number
@@ -115,7 +108,7 @@ interface HideCandidate {
  * `target` is null for a reason no filter can express — an author, work or
  * series rule — so a caller can tell "every reason this work is gone could be
  * handed to the filter" from "some of it could". `rule` is absent for the hides
- * that aren't rules (marks, crossovers, language), which are never handed over:
+ * that aren't rules (marks, crossovers), which are never handed over:
  * they are the reader's own bookkeeping, not a property of the works AO3 would
  * be asked to leave out.
  */
@@ -164,8 +157,6 @@ const excludeButtons: ExcludeButton[] = []
 
 /** What to call the thing being excluded, in the button's hover text. */
 function excludeNoun(target: ExcludeTarget): string {
-  if (target.facet === 'language')
-    return 'language'
   switch (target.type) {
     case TagType.Fandom: return 'fandom'
     case TagType.Rating: return 'rating'
@@ -257,7 +248,6 @@ export class HideWorks extends Unit {
     return (
       this.options.rules.enabled
       || this.options.hideCrossovers.enabled
-      || this.options.hideLanguages.enabled
       || this.marksCanHide
     )
   }
@@ -363,8 +353,8 @@ export class HideWorks extends Unit {
    * (force-show at 4, every other rule at 0), while leaving a hide rule at 5+ able
    * to win, and a force-show dropped below 4 able to lose.
    *
-   * Language and crossover hiding aren't rules at all and weigh 0, so an "always
-   * show" still overrules them. Mark-hiding is weighed too, but at
+   * Crossover hiding isn't a rule at all and weighs 0, so an "always show" still
+   * overrules it. Mark-hiding is weighed too, but at
    * {@link WorkMarks.hidePriority} (9 by default): having read a work already
    * isn't an opinion about it, so a rule saying the work is worth reading has to
    * outrank the mark before it puts one back on the page.
@@ -374,14 +364,14 @@ export class HideWorks extends Unit {
    * tie goes to hiding — the reader who wrote a hide rule that strong asked for
    * the work gone, and a collapse rule of merely equal strength shouldn't quietly
    * put it back on the page. Mark-hiding says so with {@link WorkMarks.hideMode};
-   * language and crossover hiding with {@link Options.hideShowReason}.
+   * crossover hiding with {@link Options.hideShowReason}.
    */
   processBlurb(blurb: Blurb): HideVerdict {
-    const { options: { hideLanguages, hideCrossovers, workMarks, hideShowReason } } = this
+    const { options: { hideCrossovers, workMarks, hideShowReason } } = this
     const { hiddenMarks, progress, today, rules, markMode, markPriority } = this.run
     const reasons: HideReasons = {}
     const kinds = new Set<HideKind>()
-    /** What the language and crossover hides ask for; a rule always says for itself. */
+    /** What the crossover hide asks for; a rule always says for itself. */
     const plainMode: HideMode = hideShowReason ? 'collapse' : 'hide'
 
     const hides: HideCandidate[] = []
@@ -468,27 +458,6 @@ export class HideWorks extends Unit {
           },
         })
       }
-    }
-
-    if (
-      hideLanguages?.enabled
-      && blurb.language
-      && !hideLanguages.show.some(e => e.label === blurb.language)
-    ) {
-      hides.push({
-        label: 'Language',
-        kind: 'languages',
-        priority: 0,
-        mode: plainMode,
-        item: {
-          value: blurb.language,
-          rule: `Language is "${blurb.language}"`,
-          // AO3's sidebar picks one language at a time and can't exclude any, so
-          // this row is the search view's alone — there the language is just
-          // another facet, and dropping it takes these placeholders out too.
-          exclude: { name: blurb.language, facet: 'language' },
-        },
-      })
     }
 
     if (
@@ -633,13 +602,7 @@ export class HideWorks extends Unit {
    * the caller can see which of the two filters it ended up pointing at.
    */
   buildExcludeButton(blurb: Element, target: ExcludeTarget): ExcludeButton | null {
-    const filter = filterTargetFor(
-      blurb,
-      target.facet ?? facetForTagType(target.type),
-      // A named facet means the value is not a tag, so there is nothing in AO3's
-      // sidebar to fall back to.
-      target.facet ? null : nativeTargetForTag(target, target.href),
-    )
+    const filter = filterTargetFor(blurb, facetForTagType(target.type), nativeTargetForTag(target, target.href))
     if (!filter)
       return null
 

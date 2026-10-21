@@ -52,7 +52,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 
 - **Rules**: one list for hiding, collapsing, always-showing or highlighting works by tag (any tag, or one type such as fandom or character), author, work or series, matched exactly, by substring or by regular expression. Rules can also be added straight from the menus above.
   - Each rule has a priority from 0 to 9: when several match a work, the highest wins, and always-show wins a tie. A "hide tag" rule takes just the tag itself out of tag lists and the sidebar. Rules can be disabled without deleting them, and highlight colours can be set per target.
-- **Crossovers** hides works listing more than a set number of fandoms; **Languages** hides works that aren't in a language you read.
+- **Crossovers** hides works listing more than a set number of fandoms. Languages are left to AO3's own Language filter, through **Default language** above.
 - **Collapse or hide** decides whether those works shrink to a line saying why, with a button to show them, or disappear entirely. Rules decide this for themselves.
 - **Show what matched** names the tag, fandom or author behind a collapsed work, with a button to exclude it in the sidebar.
 - **Exclude hidden works from the search** adds whatever hid a work to AO3's own Sort & Filter exclusions, so the next page of results isn't mostly hidden works. Nothing is submitted for you.

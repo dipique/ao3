@@ -32,6 +32,8 @@ export * from './ruleTiming.ts'
 
 export * from './savedLists.ts'
 
+export * from './searchLanguage.ts'
+
 export * from './syncCodec.ts'
 
 export * from './syncConsistency.ts'

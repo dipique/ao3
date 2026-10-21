@@ -51,7 +51,7 @@ import type { Options } from './options.ts'
  * one takes as an update too. It carries no line ({@link Manifest.p}) on
  * either. At 12 it waits, and every copy at 12 carries an ID.
  */
-export const SYNC_SCHEMA_VERSION = 12
+export const SYNC_SCHEMA_VERSION = 13
 
 /** Hard quota of `chrome.storage.sync` (bytes), shared by Chrome and Firefox. */
 export const QUOTA_BYTES = 102_400

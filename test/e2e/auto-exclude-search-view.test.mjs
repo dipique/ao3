@@ -12,17 +12,17 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
 const TAG_URL = 'https://archiveofourown.org/tags/marriage%20problems'
 
 /**
- * A hide rule on one Additional Tag, plus a language filter that no filter can
+ * A hide rule on one Additional Tag, plus a crossover filter that no filter can
  * speak for — the two halves of what "exclude hidden works from the search"
  * has to tell apart inside a view.
  */
 const SEED = {
   'option.searchTagWorks': true,
   'option.autoExcludeHidden': true,
-  // The language filter hides outright rather than collapsing, so it is the
+  // The crossover filter hides outright rather than collapsing, so it is the
   // same kind of decision as the rule and differs only in being unfilterable.
   'option.hideShowReason': false,
-  'option.hideLanguages': { enabled: true, show: [{ label: 'English' }] },
+  'option.hideCrossovers': { enabled: true, maxFandoms: 3 },
   'option.rules': {
     enabled: true,
     colors: {},
@@ -38,7 +38,7 @@ const PAGES = 2
 
 const tagLink = t => `<a class="tag" href="https://archiveofourown.org/tags/${encodeURIComponent(t)}/works">${t}</a>`
 
-function blurb(id, title, tags, { language = 'English', fandoms = ['A Fandom'], characters = [] } = {}) {
+function blurb(id, title, tags, { fandoms = ['A Fandom'], characters = [] } = {}) {
   const tagList = [
     ...characters.map(t => `<li class="characters">${tagLink(t)}</li>`),
     ...['marriage problems', ...tags].map(t => `<li class="freeforms">${tagLink(t)}</li>`),
@@ -51,7 +51,7 @@ function blurb(id, title, tags, { language = 'English', fandoms = ['A Fandom'], 
       </div>
       <ul class="tags commas">${tagList}</ul>
       <dl class="stats">
-        <dt class="language">Language:</dt><dd class="language">${language}</dd>
+        <dt class="language">Language:</dt><dd class="language">English</dd>
         <dt class="words">Words:</dt><dd class="words">1,000</dd>
         <dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd>
       </dl>
@@ -65,7 +65,7 @@ const WORKS = {
   ],
   2: [
     blurb(3, 'A rule-gone one', ['Gone']),
-    blurb(4, 'A Spanish one', [], { language: 'Español' }),
+    blurb(4, 'A sprawling one', [], { fandoms: ['A Fandom', 'Second Fandom', 'Third Fandom', 'Fourth Fandom'] }),
     blurb(5, 'A crossover', [], { fandoms: ['Other Fandom', 'Hide This Fandom'] }),
     blurb(6, 'An ensemble', [], { characters: ['Other Character', 'Hide This Character'] }),
   ],
@@ -102,8 +102,8 @@ function tagPage(page) {
  * The same option, inside a custom search view. There is no sidebar to fill in
  * here — the view *is* the filter — so a hide rule that can be said as a facet
  * exclusion is said that way instead of taking the work away silently, and the
- * reader gets a row they can see and lift. A hide nothing can express (a work in
- * a language they don't read) still just goes.
+ * reader gets a row they can see and lift. A hide nothing can express (a work
+ * listing more fandoms than the reader allows) still just goes.
  */
 describe('auto-excluding what the rules hide, in a search view', { skip }, () => {
   let browser
@@ -208,10 +208,10 @@ describe('auto-excluding what the rules hide, in a search view', { skip }, () =>
 
   test('a hide no filter can express still just takes the work away', async () => {
     const titles = await visibleTitles()
-    assert.ok(!titles.includes('A Spanish one'))
-    // Nothing carries that language into the facets: the work never became a
+    assert.ok(!titles.includes('A sprawling one'))
+    // Nothing carries its fandoms into the facets: the work never became a
     // result, so there is no row for the reader to lift.
-    assert.equal(await facetRow('Español'), null)
+    assert.equal(await facetRow('Fourth Fandom'), null)
   })
 
   test('lifting the exclusion brings the work back collapsed, not as a blank slot', async () => {

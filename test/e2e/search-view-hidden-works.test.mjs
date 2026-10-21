@@ -14,7 +14,7 @@ const TAG_URL = 'https://archiveofourown.org/tags/marriage%20problems'
 const SEED = {
   'option.searchTagWorks': true,
   'option.filterToolbar': true,
-  'option.hideLanguages': { enabled: true, show: [{ label: 'English' }] },
+  'option.hideCrossovers': { enabled: true, maxFandoms: 1 },
   'option.rules': {
     enabled: true,
     colors: {},
@@ -28,7 +28,7 @@ const SEED = {
 const PAGES = 2
 const PER_PAGE = 3
 
-function blurb(id, title, tags, language = 'English') {
+function blurb(id, title, tags, fandoms = ['A Fandom']) {
   const tagList = ['marriage problems', ...tags]
     .map(t => `<li class="freeforms"><a class="tag" href="/tags/${encodeURIComponent(t)}/works">${t}</a></li>`)
     .join('')
@@ -36,11 +36,11 @@ function blurb(id, title, tags, language = 'English') {
     <li class="work blurb group" id="work_${id}">
       <div class="header module">
         <h4 class="heading"><a href="/works/${id}">${title}</a> by <a rel="author" href="/users/s/pseuds/s">s</a></h4>
-        <h5 class="fandoms heading"><a class="tag" href="/tags/F/works">A Fandom</a></h5>
+        <h5 class="fandoms heading">${fandoms.map(fandom => `<a class="tag" href="/tags/${encodeURIComponent(fandom)}/works">${fandom}</a>`).join(', ')}</h5>
       </div>
       <ul class="tags commas">${tagList}</ul>
       <dl class="stats">
-        <dt class="language">Language:</dt><dd class="language">${language}</dd>
+        <dt class="language">Language:</dt><dd class="language">English</dd>
         <dt class="words">Words:</dt><dd class="words">1,000</dd>
         <dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd>
       </dl>
@@ -48,8 +48,8 @@ function blurb(id, title, tags, language = 'English') {
 }
 
 /**
- * Page 1 hides nothing at all; page 2 carries the work a rule collapses, the one
- * in the wrong language, and the one a *hide* rule matches. So when the page
+ * Page 1 hides nothing at all; page 2 carries the work a rule collapses, the
+ * crossover the crossover filter collapses, and the one a *hide* rule matches. So when the page
  * first loads there is nothing to peek at — the state in which the pill used to
  * be left off the toolbar for good.
  *
@@ -65,7 +65,7 @@ const WORKS = {
   ],
   2: [
     blurb(4, 'A rule-hidden one', ['HideMe']),
-    blurb(5, 'A Spanish one', [], 'Español'),
+    blurb(5, 'A crossover', [], ['A Fandom', 'Another Fandom']),
     blurb(6, 'Yet another plain one', []),
     blurb(7, 'A rule-gone one', ['Gone']),
   ],
@@ -180,8 +180,8 @@ describe('hidden works in the search view', { skip }, () => {
   test('the pill appears once the view pulls in the pages that do', async () => {
     await page.click('.AO3E--search-tag-works--link')
     await viewDrawn(page)
-    // Both hidden works are in the view now: the rule-hidden one and the one in
-    // a language the reader doesn't read.
+    // Both hidden works are in the view now: the rule-hidden one and the
+    // crossover.
     assert.equal(await peekPill(), 'Show 2 filtered works')
   })
 
@@ -214,7 +214,7 @@ describe('hidden works in the search view', { skip }, () => {
     assert.equal((await visibleTitles()).length, PAGES * PER_PAGE)
     assert.ok(!(await visibleTitles()).includes('A rule-gone one'))
     assert.match(state.count, new RegExp(`of ${PAGES * PER_PAGE} works`))
-    assert.deepEqual(state.marked.sort(), ['A Spanish one', 'A rule-hidden one'])
+    assert.deepEqual(state.marked.sort(), ['A crossover', 'A rule-hidden one'])
   })
 
   test('peeking reveals the collapsed works and can be turned back off', async () => {
@@ -262,7 +262,7 @@ describe('hidden works in the search view', { skip }, () => {
         })))
     assert.deepEqual(collapsed, [
       { title: 'A rule-hidden one', reasons: 1, wrappers: 1 },
-      { title: 'A Spanish one', reasons: 1, wrappers: 1 },
+      { title: 'A crossover', reasons: 1, wrappers: 1 },
     ])
     assert.equal((await visibleTitles()).length, PAGES * PER_PAGE)
   })
@@ -279,14 +279,11 @@ describe('hidden works in the search view', { skip }, () => {
     assert.equal(await peekPill(), 'Show 1 filtered work')
   })
 
-  test('a language-hidden work offers the same, which AO3 itself cannot', async () => {
-    assert.ok(await clickExclude('Español'), 'the language reason should carry an exclude button too')
+  test('a crossover offers no exclude, its fandom count being no value to filter by', async () => {
+    assert.equal(await clickExclude('2 fandoms'), false)
     const titles = await visibleTitles()
-    assert.ok(!titles.includes('A Spanish one'))
-    assert.equal(titles.length, PAGES * PER_PAGE - 2)
-  })
-
-  test('with nothing hidden left, the pill goes away', async () => {
-    assert.equal(await peekPill(), null)
+    assert.ok(titles.includes('A crossover'))
+    assert.equal(titles.length, PAGES * PER_PAGE - 1)
+    assert.equal(await peekPill(), 'Show 1 filtered work')
   })
 })

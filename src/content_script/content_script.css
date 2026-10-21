@@ -281,7 +281,7 @@ dd.finish-at {
 
 /* ---------------------------------------------------------------------------
    Filter "peek". When the floating filter toolbar turns on peek mode, works
-   hidden (at least partly) by any filter — tag, author, crossover or language —
+   hidden (at least partly) by any filter — tag, author or crossover —
    are revealed in place and faintly outlined so it's clear they were filtered.
    Reverting the toggle re-hides them; none of this touches the saved filters.
    --------------------------------------------------------------------------- */

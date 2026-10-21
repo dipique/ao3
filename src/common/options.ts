@@ -23,30 +23,18 @@ export interface Options {
   showKudosHitsRatio: boolean
 
   /**
-   * How the crossover and language filters take a work out of a listing:
+   * How the crossover filter takes a work out of a listing:
    * `true` collapses it to a reason line with a "Show" button, `false` hides it
    * outright.
    *
    * Rules answer this for themselves, through their `'collapse'` / `'hide'`
    * {@link Rule.behavior}, and work marks through their own `hideMode`; this
    * switch used to speak for all of them, which is why it reads as a general
-   * "collapse or hide" rather than naming the two it still covers.
+   * "collapse or hide" rather than naming the one filter it still covers.
    */
   hideShowReason: boolean
   hideShowMatchedValues: boolean
   hideCrossovers: { enabled: boolean, maxFandoms: number }
-  hideLanguages: {
-    enabled: boolean
-    show: Language[]
-    /**
-     * Also pre-select this language in AO3's own Sort & Filter dropdown, so the
-     * archive filters server-side instead of us hiding the results after they
-     * arrive. Only meaningful when exactly one language is listed — with several
-     * there's no single value the dropdown could take. An explicit
-     * {@link Options.searchLanguage} still wins.
-     */
-    applyToSearch?: boolean
-  }
   /**
    * The Rules list — one list covering tags, fandoms, authors, works and series
    * (it replaces the four separate `hideTags`/`hideAuthors`/`hideWorks`/

@@ -53,8 +53,8 @@ const TYPED_KEY = 'ao3eTyped'
 const PEEK_CLASS = `${ADDON_CLASS}--peek-hidden`
 
 /**
- * Blurbs HideWorks hid (at least partly) — by a tag, author, crossover or
- * language filter. Every hidden work carries `data-ao3e-hidden-by`, so this
+ * Blurbs HideWorks hid (at least partly) — by a tag, author or crossover
+ * filter. Every hidden work carries `data-ao3e-hidden-by`, so this
  * matches them all regardless of which filter kind was responsible.
  */
 const HIDDEN_SELECTOR = 'li[data-ao3e-hidden-by]'
@@ -224,9 +224,9 @@ export class FilterToolbar extends Unit {
 
   /** Whether the peek pill could apply here (the `filterToolbar` option + a hide feature). */
   private get peekAvailable(): boolean {
-    const { filterToolbar, rules, hideCrossovers, hideLanguages, workMarks } = this.options
+    const { filterToolbar, rules, hideCrossovers, workMarks } = this.options
     return filterToolbar && (
-      rules.enabled || hideCrossovers.enabled || hideLanguages.enabled
+      rules.enabled || hideCrossovers.enabled
       || (workMarks.enabled && marksHideAnything(workMarks.marks))
     )
   }

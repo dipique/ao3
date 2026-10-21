@@ -24,16 +24,16 @@ describe('describeRemoval', () => {
 
   test('separates the values in one group with commas and the groups with bars', () => {
     const line = describeRemoval('hide', { work, series: [] }, {
-      Relationship: [
+      'Relationship': [
         { value: 'A/B', rule: 'Relationship contains "A/"' },
         { value: 'A/C', rule: 'Relationship contains "A/"' },
       ],
-      Language: [{ value: 'Deutsch', rule: 'Language is "Deutsch"' }],
+      'Too many fandoms': [{ value: '9 fandoms', rule: 'More than 7 fandoms' }],
     })
     assert.equal(
       line,
       'Work 123 "A Title" hidden — Relationship: "A/B" (Relationship contains "A/"), "A/C" (Relationship contains "A/")'
-      + ' | Language: "Deutsch" (Language is "Deutsch")',
+      + ' | Too many fandoms: "9 fandoms" (More than 7 fandoms)',
     )
   })
 

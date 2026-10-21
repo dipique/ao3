@@ -48,10 +48,9 @@ const handled = new Set<string>()
  *
  * - Only works a rule **hides** count. A collapsed work is still on the page on
  *   purpose, and excluding what it carries would take it away for good.
- * - Only rules count. Marks, the crossover filter and the language filter are the
- *   reader's own bookkeeping (and language has {@link Options.hideLanguages}'s
- *   own "also filter searches" switch), not something to ask AO3 about. A work
- *   they hid can still be excluded by a rule that hid it as well.
+ * - Only rules count. Marks and the crossover filter are the reader's own
+ *   bookkeeping, not something to ask AO3 about. A work they hid can still be
+ *   excluded by a rule that hid it as well.
  * - A value still carried by a work left on screen is never excluded. That is
  *   what an "always show" rule looks like from here: the work is in the listing
  *   because the reader overruled the hide, and an archive-side exclusion would

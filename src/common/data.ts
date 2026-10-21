@@ -203,7 +203,7 @@ export function ruleAffectsWorks(rule: { behavior?: FilterBehavior }): boolean {
  * or kept in place as a collapsed reason line. The two halves of what a `hide`
  * rule used to do under the old global "collapse or hide fully" switch — which
  * survives, rescoped, as {@link Options.hideShowReason}, for the hides that
- * aren't rules at all (marks, crossovers, language).
+ * aren't rules at all (marks, crossovers).
  */
 export type HideMode = 'hide' | 'collapse'
 

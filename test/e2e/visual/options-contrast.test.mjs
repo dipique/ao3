@@ -51,7 +51,6 @@ const SEED = {
   'option.searchWordCount': { enabled: true, from: 5000, to: null },
   'option.searchLanguage': { enabled: true, language: { label: 'English', value: 'en' } },
   'option.hideCrossovers': { enabled: true, maxFandoms: 5 },
-  'option.hideLanguages': { enabled: true, show: [{ label: 'English', value: 'en' }], applyToSearch: true },
   'option.trackedLists': { enabled: true, target: 40, reviewedThrough: TODAY - 9, lists: [{ ...TAG, alias: TAG.title, tracked: true, since: TODAY - 61 }, { ...BROKEN, alias: BROKEN.title, tracked: true, since: TODAY - 40 }] },
   'option.savedLists': { v: 1, lists: { [TAG.id]: TAG, [SERIES.id]: SERIES, [BROKEN.id]: BROKEN } },
   ...storedLists({

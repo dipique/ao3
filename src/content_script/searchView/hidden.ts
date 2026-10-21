@@ -153,7 +153,7 @@ function asExclusions(
 ): FacetValueRef[] | null {
   const refs: FacetValueRef[] = []
   for (const { target, rule } of verdict.excludes) {
-    // No rule means a mark, a crossover or a language — the reader's own
+    // No rule means a mark or a crossover — the reader's own
     // bookkeeping, which is not a property of the work for a filter to act on.
     if (!target || !rule)
       return null

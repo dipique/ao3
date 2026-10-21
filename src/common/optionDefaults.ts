@@ -25,7 +25,6 @@ export const OPTION_DEFAULTS: Options = {
   hideShowReason: true,
   hideShowMatchedValues: true,
   hideCrossovers: { enabled: true, maxFandoms: 7 },
-  hideLanguages: { enabled: false, show: [], applyToSearch: false },
   rules: { enabled: false, filters: [], colors: {} },
   autoExcludeHidden: false,
   workMarks: {

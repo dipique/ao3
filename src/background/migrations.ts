@@ -1,6 +1,6 @@
 import type { BlurbMeta, cache, Language, Rule, RuleColors, RuleTarget, StoredList, TagType as TagTypeT } from '#common'
 
-import { BLURB_INDEX_KEY, blurbDataKey, blurbKey, createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, LEGACY_SNAPSHOTS_KEY, legacyMarkIcon, MARKS_VERSION, migratedBlurbMeta, normalizeMarkOrder, packIds, planLegacyMigration, RULE_TARGETS, TagType, unpackIds } from '#common'
+import { BLURB_INDEX_KEY, blurbDataKey, blurbKey, createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, LEGACY_SNAPSHOTS_KEY, legacyMarkIcon, MARKS_VERSION, migratedBlurbMeta, normalizeMarkOrder, packIds, planLanguageHideRetirement, planLegacyMigration, RULE_TARGETS, TagType, unpackIds } from '#common'
 
 import { reconcileSavedLists, refileListings, splitDateFilters } from './savedLists.ts'
 
@@ -161,6 +161,7 @@ export async function migrate() {
   await migrateRules()
   await migrateWorkMarks()
   await migrateMarkHideMode()
+  await retireLanguageHiding()
   await migrateSearchSnapshots()
   // Last, over the stored lists in their current layout: entries that aren't
   // tracked leave `trackedLists` for saved-list records, and every list gets a
@@ -303,7 +304,7 @@ async function migrateWorkMarks(): Promise<void> {
 /**
  * Mark-hiding grew a `hideMode` of its own. Before it had one, a hiding mark
  * collapsed or hid according to `hideShowReason` — the switch that still covers
- * the crossover and language filters — so a reader who turned that off asked
+ * the crossover filter — so a reader who turned that off asked
  * for marked works to be gone outright, and the new default (collapse) would
  * quietly put them back on the page.
  *
@@ -323,6 +324,26 @@ async function migrateMarkHideMode(): Promise<void> {
   if (stored[showReason] !== false)
     return
   await browser.storage.local.set({ [key]: { ...marks, hideMode: 'hide' } })
+}
+
+/**
+ * Languages are filtered by AO3's own Language dropdown alone, so the setting
+ * that hid works in other languages after they loaded goes, its one language
+ * (when it had exactly one) becoming the default language filter. See
+ * `planLanguageHideRetirement`. Runs after the 0.5.0 reshaping above, which
+ * still turns the oldest stored form into the one read here.
+ */
+async function retireLanguageHiding(): Promise<void> {
+  const stored = await browser.storage.local.get(['option.hideLanguages', 'option.searchLanguage'])
+  const plan = planLanguageHideRetirement({
+    hideLanguages: stored['option.hideLanguages'],
+    searchLanguage: stored['option.searchLanguage'],
+  })
+  if (!plan)
+    return
+  if (plan.searchLanguage)
+    await browser.storage.local.set({ 'option.searchLanguage': plan.searchLanguage })
+  await browser.storage.local.remove('option.hideLanguages')
 }
 
 /**

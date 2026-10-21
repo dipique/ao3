@@ -10,8 +10,8 @@ const options = shallowRef<Language[]>([])
 const open = ref(false)
 
 // Load AO3's canonical language list (label + code) the first time the picker is
-// opened, from the advanced search page's own dropdown — same source the "hide
-// languages" picker uses, so the two stay in sync with the archive.
+// opened, from the advanced search page's own dropdown, so it stays in step with
+// the archive.
 whenever(open, async () => {
   const doc = await fetchAndParseDocument(getArchiveLink('/works/search'))
   const langSelect = doc.getElementById('work_search_language_id') as HTMLSelectElement | null
