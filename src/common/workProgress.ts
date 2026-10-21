@@ -107,6 +107,39 @@ export function addMonths(days: number, months: number): number {
   return date.getTime() / MS_PER_DAY
 }
 
+/** How far one of the editor's wait-until presets moves the date. */
+export interface DateShift {
+  months: number
+  days: number
+}
+
+/**
+ * Presets pressed in a row, kept as a total measured from where the run began
+ * rather than re-applied to the field each time — months don't add one at a
+ * time: 30 Nov + 3 months clamps to 28 Feb, and 3 more from there is 28 May,
+ * where six months from 30 Nov is 30 May.
+ */
+export interface PresetRun extends DateShift {
+  from: number
+  /** The date the run last wrote to the field. */
+  value: number
+}
+
+/**
+ * The wait-until date after pressing one preset, given what the field shows.
+ * Presses stack while the field still holds what the last one wrote; a date
+ * the reader typed, or a cleared field, starts a new run from what is there. A
+ * run never starts in the past: a passed date already means "ready now", so a
+ * week on from it is a week from today.
+ */
+export function applyDatePreset(field: number | null, today: number, shift: DateShift, run: PresetRun | null): PresetRun {
+  const continuing = run !== null && run.value === field
+  const from = continuing ? run.from : Math.max(field ?? today, today)
+  const months = shift.months + (continuing ? run.months : 0)
+  const days = shift.days + (continuing ? run.days : 0)
+  return { from, months, days, value: addMonths(from, months) + days }
+}
+
 /** Short display form of a wait-until date, e.g. `3/14/26`. */
 export function formatEpochDays(days: number): string {
   const date = new Date(days * MS_PER_DAY)

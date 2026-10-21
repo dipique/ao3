@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { createDefaultMarks, moveMark, packIds, packProgress } from '../../src/common/workMarks.ts'
-import { fromEpochDays, todayEpochDays } from '../../src/common/workProgress.ts'
+import { addMonths, fromEpochDays, todayEpochDays } from '../../src/common/workProgress.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import { openMenu, settled } from './trackedPages.mjs'
@@ -176,6 +176,25 @@ describe('the work menu on a work page', { skip }, () => {
     const value = await tab.$eval('.AO3E--progress-editor--date', el => el.value)
     await tab.close()
     assert.equal(value, '')
+  })
+
+  test('pressing a preset twice adds it twice', async () => {
+    const tab = await open(WORK_URL)
+    await openTitleMenu(tab)
+    await tab.evaluate(() => {
+      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
+      rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
+    })
+    await tab.waitForSelector('.AO3E--progress-editor')
+    await tab.evaluate(() => {
+      const quarter = [...document.querySelectorAll('.AO3E--progress-editor--preset')]
+        .find(b => b.textContent === '+3 months')
+      quarter.click()
+      quarter.click()
+    })
+    const value = await tab.$eval('.AO3E--progress-editor--date', el => el.value)
+    await tab.close()
+    assert.equal(value, fromEpochDays(addMonths(todayEpochDays(), 6)))
   })
 
   test('saving the default today stores no date, not today', async () => {

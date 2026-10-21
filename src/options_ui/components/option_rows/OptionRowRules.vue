@@ -10,7 +10,7 @@ OptionRowRulesContext.provide({
   <OptionRowCollapsable
     v-model:open="enabled"
     title="Rules"
-    subtitle="Hide, highlight or always-show works by tag, fandom, author, work or series. When more than one rule matches a work, the highest priority wins — and always-show wins a tie."
+    subtitle="Tag-based rules to hide, collapse, or show works; and rules that hide or highlight specific tags. A 'tag' can be be a tag, fandom, author, warning, character, relationship, or work/series title. Rules have priorities to resolve conflicts. That means you can hide a fandom by default, but have works display if a certain tag is present."
   >
     <OptionRowRulesList />
 
@@ -22,72 +22,54 @@ OptionRowRulesContext.provide({
             How rules work
           </Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent size="lg">
           <DialogTitle>
             Rules notes
           </DialogTitle>
           <DialogDescription class="sr-only">
-            Notes on how rules work and their current limitations.
+            Rules and how to use them
           </DialogDescription>
           <div flex="~ col" class="[&_h2]:text-lg [&_p]:text-sm [&_h2]:font-medium">
             <h2 py-1>
               How to use
             </h2>
             <p>
-              Each rule says what it applies to — a tag (of any type, or one specific type), an author, a work, or a
-              series — what to match, and what to do with the works it matches.
-              Works matched by <Icon i-tabler-eye-off op40 label="Hide" title="Hide" /> leave the listing entirely;
-              works matched by <Icon i-mdi-arrow-collapse-vertical op60 label="Collapse" title="Collapse" /> stay
-              where they are, squeezed down to a line saying why with a button to show them.
-              Works matched by <Icon i-tabler-eye-exclamation op100 label="Show" title="Show" /> are shown even when
-              something else would hide them.
-              Matches marked <Icon i-mdi-star op100 label="Highlight" title="Highlight" /> are instead highlighted in a
-              colour of your choice, without changing what is hidden.
-              Force-shown (<Icon i-tabler-eye-exclamation op100 label="Show" title="Show" />) matches are highlighted
-              too by default so they stand out; you can turn that off per rule or change the default colours.
+              Each rule says what it applies to; a specific type of tag (e.g., character or author), all tags (matches any tag except author), or the title of the work or series. Matches must be exact by default, but can be set to use "contains" instead (matches if the tag contains your text), or using special matching logic using regular expressions. "Additional tags" is the type that refers to a "tag" as most people think of them.
             </p>
+
+            <h2 py-1>
+              Rule Actions
+            </h2>
             <p>
-              Tags marked <Icon i-mdi-tag-off op100 label="Hide tag" title="Hide tag" /> are hidden themselves — taken
-              out of each work's tag list and out of the filter sidebar — without hiding any works.
-              Use it for noise tags that only cost you reading time. You can set it from a tag's context menu ("Hide
-              this filter"), but removing it again has to be done here.
+              Each rule specifies an action to take if it matches a work:
+              <ul>
+                <li><Icon i-tabler-eye-off op40 label="Hide" title="Hide" /> (Hide): hides the listing entirely</li>
+                <li><Icon i-mdi-arrow-collapse-vertical op60 label="Collapse" title="Collapse" /> (Collapse): the work stays, but collapsed so you can look at it if you want</li>
+                <li><Icon i-tabler-eye-exclamation op100 label="Show" title="Show" /> (Show): Works matched by are shown when something else would hide them (based on rule priority)</li>
+                <li><Icon i-mdi-star op100 label="Highlight" title="Highlight" /> (Highlight): Highlights the tag for visibility; each rule can be assigned a different color</li>
+                <li><Icon i-tabler-eye-exclamation op100 label="Show" title="Show" /> (Force Show): Matching tags are highlighted and the work is shown even if another rule hides it unless that rule has a higher priority</li>
+                <li><Icon i-mdi-tag-off op100 label="Hide tag" title="Hide tag" /> (Hide 'Useless' Tag): Hides the tag itself without affecting the visibility of the work</li>
+                <li><Icon i-mdi-cancel op40 label="Disabled" title="Disabled" /> (Disabled): Temporarily stops a rule from applying without deleting it; set by untoggling the "enabled" button at the bottom of the rule dialog</li>
+              </ul>
             </p>
-            <p>
-              A rule marked <Icon i-mdi-cancel op40 label="Disabled" title="Disabled" /> is disabled: it is kept
-              exactly as written — value, matcher, priority and colour — but does nothing at all, and leaves no
-              indicator on the page. Use it to put a rule aside without losing it (or the work of writing its regex)
-              while you see how the site reads without it. Sorting the list by action brings the disabled rules
-              together at the end.
-            </p>
-            <h2 mt-6 py-1>
+            
+            <h2 py-1>
               Priority
             </h2>
             <p>
-              Every rule carries a priority from 0 to 9. When more than one rule matches a work, the highest priority
-              decides whether it is hidden; a tie goes to "always show". The strongest rule left standing also
-              decides <em>how</em> the work goes — hidden or collapsed — and there a tie goes to hiding.
-              Creating a rule sets the priority its behavior
-              implies — 4 for "always show", 0 for everything else — which is why an "always show" beats an ordinary
-              hide by default. Raise a hide rule to 5 or more when it should win anyway (say, a fandom you never want
-              to see, whatever tags a work carries), or drop an "always show" below 4 to let ordinary hides overrule it.
+              Rules carry a priority from 0 to 9. When multiple rules apply that affect visibility, the highest priority decides whether it is hidden. "Always show" wins ties, then "Hide", then "Collapse".
             </p>
+            <br />
             <p>
-              Hiding that isn't a rule at all — the crossover filter, and works you've marked read — weighs 0, so an
-              "always show" overrules it. Neither chooses between hiding and collapsing per rule either; both follow the
-              "Collapse or hide" setting above.
+              When works are hidden for reasons other than rules (like the crossover filter or items already marked as read), that "rule" is given a weight of 0 for the purposes of rule conflicts.
             </p>
-            <h2 mt-6 py-1>
+
+            <h2 py-1>
               Limitations
             </h2>
             <div flex="~ col gap-2">
               <p>
-                Note that AO3 enhancements currently has no way to properly resolve <ArchiveLink path="/faq/tags#canonicalhow">wrangled tags</ArchiveLink>.
-                You may need to add multiple variants of the "same" tag.
-              </p>
-              <p>
-                Tags of the type `Warning` and `Additional Tag` will <em font="medium">not</em> work if your AO3 account has
-                <ArchivePreferenceLink id="hide_warnings" label="Hide warnings" /> and
-                <ArchivePreferenceLink id="hide_freeform" label="Hide additional tags" /> preferences enabled respectively.
+                Tags of the type `Warning` and `Additional Tag` will <em font="medium">not</em> work if your AO3 account has <ArchivePreferenceLink id="hide_warnings" label="Hide warnings" /> and <ArchivePreferenceLink id="hide_freeform" label="Hide additional tags" /> preferences enabled respectively.
               </p>
             </div>
           </div>

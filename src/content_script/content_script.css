@@ -143,6 +143,16 @@
   user-select: none;
 }
 
+/* A press that drifts, or a quick second click, would otherwise select the
+   label under the pointer. Only our own controls: the archive's are its skin's
+   business. The bare `.AO3E` ancestor (never the `AO3E--` state classes put on
+   <body>) catches buttons we draw without a class of their own. */
+:is(button, [role='button'], [role^='menuitem'], [role='option'], [role='tab'], [role='switch'])[class*='AO3E'],
+.AO3E :is(button, [role='button'], [role^='menuitem'], [role='option'], [role='tab'], [role='switch']) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 *[data-ao3e-hidden] {
   display: none !important;
 }

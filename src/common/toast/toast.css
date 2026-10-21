@@ -1,3 +1,10 @@
+/* The page's own stylesheets stop at the shadow root, so the rule keeping
+   button labels out of a selection is restated here. */
+button {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .container {
   --stack-gap: 10px;
   --safe-area-gap: env(safe-area-inset-bottom);

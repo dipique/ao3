@@ -6,6 +6,7 @@ import { createDefaultMarks, packIds, packProgress } from '../../src/common/work
 // the pair loads bare under Node's type stripping, with no build and no DOM.
 import {
   addMonths,
+  applyDatePreset,
   describeProgress,
   describeUnread,
   describeWaitUntil,
@@ -56,6 +57,55 @@ describe('epoch days', () => {
     assert.equal(fromEpochDays(addMonths(toEpochDays('2026-03-14'), 3)), '2026-06-14')
     assert.equal(fromEpochDays(addMonths(toEpochDays('2026-01-31'), 1)), '2026-02-28')
     assert.equal(fromEpochDays(addMonths(toEpochDays('2026-12-15'), 1)), '2027-01-15')
+  })
+})
+
+describe('the wait-until presets', () => {
+  const day = text => toEpochDays(text)
+  const press = (field, ...shifts) => {
+    let run = null
+    let value = field
+    for (const shift of shifts) {
+      run = applyDatePreset(value, TODAY, shift, run)
+      value = run.value
+    }
+    return fromEpochDays(value)
+  }
+  const WEEK = { months: 0, days: 7 }
+  const MONTH = { months: 1, days: 0 }
+  const QUARTER = { months: 3, days: 0 }
+
+  test('one press moves the field on from today', () => {
+    assert.equal(press(TODAY, WEEK), '2026-03-21')
+    assert.equal(press(TODAY, QUARTER), '2026-06-14')
+  })
+
+  test('pressing again adds again', () => {
+    assert.equal(press(TODAY, QUARTER, QUARTER), '2026-09-14')
+    assert.equal(press(TODAY, WEEK, WEEK, WEEK), '2026-04-04')
+    assert.equal(press(TODAY, MONTH, WEEK), '2026-04-21')
+  })
+
+  test('stacked months land where the total would, not where a short month clamped them', () => {
+    // 30 Nov + 3 months clamps to 28 Feb; another 3 from there would be 28 May.
+    const NOV_30 = day('2026-11-30')
+    const run = applyDatePreset(NOV_30, NOV_30, QUARTER, null)
+    assert.equal(fromEpochDays(run.value), '2027-02-28')
+    assert.equal(fromEpochDays(applyDatePreset(run.value, NOV_30, QUARTER, run).value), '2027-05-30')
+  })
+
+  test('a date the reader typed starts a new run from that date', () => {
+    const run = applyDatePreset(TODAY, TODAY, QUARTER, null)
+    assert.equal(fromEpochDays(applyDatePreset(day('2026-07-01'), TODAY, MONTH, run).value), '2026-08-01')
+  })
+
+  test('an existing future date is moved on from, not replaced', () => {
+    assert.equal(press(day('2026-05-02'), MONTH), '2026-06-02')
+  })
+
+  test('an empty or past field starts from today', () => {
+    assert.equal(press(null, WEEK), '2026-03-21')
+    assert.equal(press(day('2025-12-25'), WEEK), '2026-03-21')
   })
 })
 

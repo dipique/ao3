@@ -98,6 +98,18 @@ body {
   line-height: 1;
 }
 
+/* A press that drifts, or a quick second click, would otherwise select the
+   label under the pointer. */
+button,
+[role='button'],
+[role^='menuitem'],
+[role='option'],
+[role='tab'],
+[role='switch'] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 ol,
 ul {
   list-style: none;

@@ -47,15 +47,15 @@ export const PROFILE_LISTS: readonly ProfileList[] = [
   {
     id: 'marked-for-later',
     name: 'Marked for Later',
-    note: 'Your own to-read page. Not part of Review — it only changes when you add to it.',
+    note: 'Works saved to your AO3 Marked for Later list',
     empty: 'None yet. Open your Marked for Later page on AO3, signed in, with Search your Marked for Later list on: a copy is kept from then on, and refreshes from here.',
   },
   {
     id: 'read-works',
     name: 'Read works',
-    note: 'Everything you’ve marked read or given a verdict, Favorites included: a shelf to come back to. Not part of Review — it only changes when you mark something.',
-    empty: 'None yet. Press Search read items on your History page on AO3, signed in, with Search the works you\'ve read on: a copy is kept from then on, and refreshes from here.',
-    needs: 'None yet. This list is made from your marks, so it needs Work marks on, under Reading.',
+    note: `Works you've marked as read or given a mark; not tracked by AO3, but if enabled, the built-in "Mark as Read" button will add it to this list`,
+    empty: 'None yet. Make sure you are signed in and have marked at least one item as read',
+    needs: 'None yet. This list is made from your marks',
   },
 ]
 

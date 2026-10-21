@@ -9,13 +9,24 @@ const props = defineProps<DialogContentProps & {
    * sections can follow its width.
    */
   sections?: boolean
+  /**
+   * The widest the dialog grows: `sm` (32 rem) suits a short prompt, `md`
+   * (600 px) a form, `lg` (64 rem) reading text. Sectioned dialogs default to
+   * `md`, the rest to `sm`.
+   */
+  size?: 'sm' | 'md' | 'lg'
 }>()
 const emits = defineEmits<DialogContentEmits>()
 const forwarded = useForwardPropsEmits(props, emits)
 const forward = computed(() => {
-  const { sections: _, ...rest } = forwarded.value
+  const { sections: _, size: __, ...rest } = forwarded.value
   return rest
 })
+const maxWidth = {
+  sm: 'max-w-lg',
+  md: 'max-w-[600px]',
+  lg: 'max-w-5xl',
+}
 </script>
 
 <template>
@@ -32,7 +43,10 @@ const forward = computed(() => {
       rounded="sm:[12px]"
       w-full border
       class="animate-dialog popover shadow-[var(--dlg-shadow)]"
-      :class="sections ? 'max-w-[600px] max-h-[calc(100dvh-2rem)] [container-type:inline-size]' : 'max-w-lg p-6'"
+      :class="[
+        maxWidth[size ?? (sections ? 'md' : 'sm')],
+        sections ? 'max-h-[calc(100dvh-2rem)] [container-type:inline-size]' : 'p-6',
+      ]"
     >
       <slot />
 

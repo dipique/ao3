@@ -1,6 +1,6 @@
-import type { WorkProgress } from '#common'
+import type { DateShift, PresetRun, WorkProgress } from '#common'
 
-import { addMonths, ADDON_CLASS, fromEpochDays, todayEpochDays, toEpochDays } from '#common'
+import { ADDON_CLASS, applyDatePreset, fromEpochDays, todayEpochDays, toEpochDays } from '#common'
 import React from '#dom'
 
 import { closeFloating, openPopover } from './contextMenu.tsx'
@@ -52,11 +52,11 @@ export interface ProgressEditorOptions {
   onSave: (progress: WorkProgress) => void
 }
 
-/** One quick way to fill the date field, relative to today. */
-const DATE_PRESETS: { label: string, shift: (today: number) => number }[] = [
-  { label: '+1 week', shift: today => today + 7 },
-  { label: '+1 month', shift: today => addMonths(today, 1) },
-  { label: '+3 months', shift: today => addMonths(today, 3) },
+/** One quick way to move the date field on; pressed again, it adds again. */
+const DATE_PRESETS: { label: string, shift: DateShift }[] = [
+  { label: '+1 week', shift: { months: 0, days: 7 } },
+  { label: '+1 month', shift: { months: 1, days: 0 } },
+  { label: '+3 months', shift: { months: 3, days: 0 } },
 ]
 
 /** Open the chapter/wait-until editor for one work. */
@@ -89,10 +89,12 @@ export function openProgressEditor(opts: ProgressEditorOptions): void {
   // no date meant anyway; Clear puts it back to genuinely unset.
   dateInput.value = fromEpochDays(opts.progress?.waitUntil ?? today)
 
+  let run: PresetRun | null = null
   const presets = DATE_PRESETS.map(({ label, shift }) => {
     const btn = (<button type="button" class={cx('preset')}>{label}</button>) as HTMLElement as HTMLButtonElement
     btn.addEventListener('click', () => {
-      dateInput.value = fromEpochDays(shift(today))
+      run = applyDatePreset(toEpochDays(dateInput.value), today, shift, run)
+      dateInput.value = fromEpochDays(run.value)
     })
     return btn
   })
