@@ -14,7 +14,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 
 - Work statistics: **Reading time** and **Finish reading at**, worked out from your **Reading speed**, plus a **Kudos/hits ratio**, wherever a work's stats line appears.
 - Chapter statistics: **Word count**, **Reading time**, **Finish reading at** and **Last updated** on each chapter as you read.
-- **Show statistics in columns** puts each statistic's label above its value instead of running them together.
+- **Show statistics in columns** puts each statistic's value under a small label instead of running them together, so a work's statistics still fit on one row.
 - **Reader mode**: Ctrl+scroll or a pinch over the work text resizes and reflows it instead of zooming the page, and handles at its edges set the reading width. Remembered per device.
 - **Narrow the work text** and **Force text alignment** for works that are hard to read as posted.
 - **Text replacement**: find-and-replace rules for the displayed text of a work's summary, notes and chapters, with case, whole-word and across-formatting options. The work itself is untouched.
@@ -46,7 +46,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 - A floating button in the corner of AO3 pages holds quick actions: open the options, switch the menus off, toggle reader mode or the text replacement tools, "Track this search", and, with **Reveal filtered works** on, a peek at the works your filters hid.
 - **Collapsible dashboard sidebar** folds away the sidebar on your own user pages.
 - **Extension theme** (follow AO3, light or dark) for the extension's own pages and menus, and **Hide "muted author" notices**.
-- **Dark skin for AO3** recolours AO3 itself in the extension's dark palette, on top of any site skin you chose on AO3.
+- **Dark skin for AO3** restyles AO3 itself to look like the options page in its dark theme — its palette, rounded fields and panels, outlined buttons — on top of any site skin you chose on AO3. The extension's own menus and search view follow it.
 
 ### Customize search results
 

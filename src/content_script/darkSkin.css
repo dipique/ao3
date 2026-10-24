@@ -5,8 +5,13 @@
    new Site Skin with Role "add on to archive skin" and Media "screen" to use it
    without the extension.
 
-   It only recolours: AO3's own layout, fonts and spacing are untouched, so it
-   reads as the same site at night rather than a different one.
+   It recolours AO3 and gives its controls and boxes the options page's shapes:
+   flat outlined buttons with one filled primary, rounded fields, panels and
+   menus, the same focus ring, small uppercase section labels and muted
+   labels beside values. AO3's own layout, fonts and spacing are untouched, so
+   it reads as the same site in the extension's clothes rather than a
+   different one. The extension's own menus, popovers and search view are
+   moved onto the same palette while it is on.
 
    It wins over AO3 by coming later, never by !important or added specificity,
    so it has to stay last in the cascade -- and AO3's skin sanitizer shapes how
@@ -46,6 +51,16 @@
   --skin-success-tint: rgba(74, 222, 128, 0.12);
 
   --skin-shadow: rgba(0, 0, 0, 0.55);
+  --skin-pop-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --skin-dlg-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), 0 4px 14px rgba(0, 0, 0, 0.4);
+  --skin-focus: rgba(59, 130, 246, 0.5);
+  --skin-primary-hover: rgba(153, 0, 0, 0.9);
+
+  /* Controls, panels, menus and dialogs, as the options page rounds them. */
+  --skin-radius: 7px;
+  --skin-radius-panel: 9px;
+  --skin-radius-menu: 10px;
+  --skin-radius-dialog: 12px;
 }
 
 /* ==== Ground, text, links ================================================ */
@@ -88,17 +103,61 @@ a:hover {
 }
 
 a:focus-visible,
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--skin-ring);
   outline-offset: 2px;
 }
 
+/* A control's ring hugs it, following its corners, as on the options page. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.actions a:focus-visible {
+  outline: 3px solid var(--skin-focus);
+  outline-offset: 0;
+}
+
 hr {
   border-bottom-color: var(--skin-border);
+}
+
+/* ==== Headings and labels ================================================ */
+
+/* A page's own title, red and serif like an options category's. */
+#main > h2.heading,
+#main > h2.heading a,
+#main > h2.heading a.tag {
+  color: var(--skin-brand-fg);
+}
+
+/* The options page's section label: small, bold, spaced capitals in the muted
+   colour, over a hairline. */
+.preface .summary h3.heading,
+.preface .notes h3.heading,
+.filters dt.include h4.heading,
+.filters dt.exclude h4.heading,
+.filters dt.heading h4.heading {
+  font-family: 'Lucida Grande', 'Lucida Sans Unicode', Verdana, Helvetica, sans-serif;
+  font-size: 0.6875em;
+  font-weight: 700;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+  color: var(--skin-muted-fg);
+  border-bottom-color: var(--skin-hair);
+}
+
+/* Labels beside values go muted, so the values are what the eye finds. */
+dl.stats dt,
+dl.meta dt,
+dl.work.meta dt,
+.blurb .datetime {
+  color: var(--skin-muted-fg);
+}
+
+dl.stats dd,
+dl.meta dd {
+  color: var(--skin-fg);
 }
 
 /* ==== Tables ============================================================= */
@@ -158,10 +217,12 @@ col.name {
   background: var(--skin-secondary);
 }
 
-/* An open menu's toggle shares the menu's colour, so the two read as one tab. */
+/* An open menu's toggle is a raised chip, as the options page's top-bar
+   buttons are, and the menu hangs below it as a card of its own. */
 #header .dropdown:hover a,
 #header .open a {
-  background: var(--skin-popover);
+  background: var(--skin-secondary);
+  border-radius: var(--skin-radius);
 }
 
 #header .heading a {
@@ -178,15 +239,18 @@ col.name {
 #small_login {
   background: var(--skin-popover);
   border: 1px solid var(--skin-border);
-  box-shadow: 0 8px 24px var(--skin-shadow);
+  border-radius: var(--skin-radius-menu);
+  box-shadow: var(--skin-pop-shadow);
+  padding: 5px;
 }
 
 #header .menu li {
-  border-bottom-color: var(--skin-hair);
+  border-bottom-color: transparent;
 }
 
 #header .dropdown .menu a {
   background: transparent;
+  border-radius: var(--skin-radius);
 }
 
 #header .dropdown .menu a:hover,
@@ -205,7 +269,16 @@ col.name {
 }
 
 #greeting .menu {
-  box-shadow: 0 8px 24px var(--skin-shadow);
+  box-shadow: var(--skin-pop-shadow);
+}
+
+#greeting .open a,
+#greeting .dropdown:hover a {
+  border-radius: var(--skin-radius);
+}
+
+#greeting .dropdown .menu a {
+  border-radius: var(--skin-radius);
 }
 
 #header .primary {
@@ -228,7 +301,9 @@ col.name {
 #header #search .text {
   background: var(--skin-default);
   color: var(--skin-default-fg);
-  box-shadow: inset 0 0 0 1px var(--skin-border);
+  border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius);
+  box-shadow: none;
 }
 
 #header #search input:focus {
@@ -249,7 +324,7 @@ col.name {
 }
 
 #header .open a:focus {
-  background: var(--skin-popover);
+  background: var(--skin-secondary);
 }
 
 #header .user .open a:focus {
@@ -263,6 +338,11 @@ col.name {
   color: var(--skin-default-fg);
 }
 
+#dashboard a,
+#dashboard span {
+  border-radius: var(--skin-radius);
+}
+
 #dashboard a:hover {
   background: var(--skin-secondary);
   color: var(--skin-brand-fg);
@@ -272,9 +352,12 @@ col.name {
   border-top-color: var(--skin-border);
 }
 
+/* The page you are on, as the options rail marks its category. */
 #dashboard .current {
   background: var(--skin-on-tint);
   color: var(--skin-brand-fg);
+  border-color: transparent;
+  font-weight: 600;
 }
 
 /* The bars that mark your own dashboard stay AO3 red: they are a fill. */
@@ -322,6 +405,7 @@ dd.hideme,
 form blockquote.userstuff {
   background: var(--skin-card);
   border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius-panel);
   box-shadow: none;
 }
 
@@ -341,6 +425,7 @@ form blockquote.userstuff {
 
 li.blurb {
   border-color: var(--skin-border);
+  border-radius: var(--skin-radius-panel);
 }
 
 input,
@@ -349,14 +434,50 @@ select {
   background: var(--skin-default);
   color: var(--skin-default-fg);
   border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius);
   box-shadow: none;
+}
+
+/* AO3 sizes neither a select's text nor any field's padding, so the browser's
+   own leave a select short of the field beside it and both short of the
+   buttons. They take the buttons' line and padding, as every control on the
+   options page shares one height. AO3's fields are full-width content boxes,
+   which that padding would push out of their column. */
+select,
+input[type='text'],
+input[type='search'],
+input[type='email'],
+input[type='password'],
+input[type='number'],
+input[type='url'],
+input:not([type]) {
+  box-sizing: border-box;
+  line-height: 1.286;
+  padding: 0.25em 0.5em;
+}
+
+/* A select draws its text at the font's own line height, whatever the line
+   says, and Lucida Sans Unicode's is tall: its height is set outright, a
+   field's line and padding plus about two pixels of border. */
+select {
+  font-family: inherit;
+  font-size: 100%;
+  height: 1.929em;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--skin-line);
 }
 
 input:focus,
 select:focus,
 textarea:focus {
   background: var(--skin-default);
-  border-color: var(--skin-ring);
+  border-color: var(--skin-border);
 }
 
 input[type='checkbox'],
@@ -417,16 +538,22 @@ form.single fieldset,
 .autocomplete div.dropdown ul {
   background: var(--skin-popover);
   border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius-menu);
   color: var(--skin-fg);
-  box-shadow: 0 8px 24px var(--skin-shadow);
+  box-shadow: var(--skin-pop-shadow);
+  padding: 5px;
 }
 
+.autocomplete .dropdown ul li {
+  border-radius: var(--skin-radius);
+}
+
+/* Highlighted as a menu item is on the options page, not filled red. */
 .autocomplete .dropdown ul li:hover,
 .autocomplete .dropdown li.selected {
-  background: var(--skin-primary);
-  color: var(--skin-primary-fg);
+  background: var(--skin-secondary);
+  color: var(--skin-default-fg);
 }
-
 .required .autocomplete,
 .autocomplete .notice {
   color: var(--skin-fg);
@@ -443,13 +570,19 @@ form.single fieldset,
   box-shadow: none;
 }
 
+.ui-sortable li {
+  border-radius: var(--skin-radius);
+}
+
 .ui-draggable form {
-  box-shadow: 0 8px 24px var(--skin-shadow);
+  box-shadow: var(--skin-pop-shadow);
 }
 
 #ui-datepicker-div {
   background: var(--skin-popover);
-  box-shadow: 0 8px 24px var(--skin-shadow);
+  border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius-menu);
+  box-shadow: var(--skin-pop-shadow);
 }
 
 .ui-datepicker table {
@@ -472,6 +605,7 @@ form.single fieldset,
 .search [role='tooltip'] {
   background: var(--skin-popover);
   border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius);
   color: var(--skin-fg);
 }
 
@@ -479,8 +613,9 @@ form.single fieldset,
 
 #modal {
   background: var(--skin-popover);
-  border-color: var(--skin-card);
-  box-shadow: 0 16px 48px var(--skin-shadow);
+  border-color: var(--skin-border);
+  border-radius: var(--skin-radius-dialog);
+  box-shadow: var(--skin-dlg-shadow);
 }
 
 #modal .content {
@@ -497,7 +632,8 @@ div.dynamic {
   background: var(--skin-popover);
   color: var(--skin-fg);
   border: 1px solid var(--skin-border);
-  box-shadow: 0 8px 24px var(--skin-shadow);
+  border-radius: var(--skin-radius-menu);
+  box-shadow: var(--skin-pop-shadow);
 }
 
 .dynamic form fieldset,
@@ -514,7 +650,8 @@ div.dynamic {
 .javascript .work.navigation .download .secondary {
   background: var(--skin-popover);
   border: 1px solid var(--skin-border);
-  box-shadow: 0 8px 24px var(--skin-shadow);
+  border-radius: var(--skin-radius-menu);
+  box-shadow: var(--skin-pop-shadow);
 }
 
 .work.navigation .download .secondary,
@@ -526,6 +663,8 @@ div.dynamic {
 
 /* ==== Buttons ============================================================ */
 
+/* The options page's outline button: framed on the page's ground, the frame
+   lighting up on hover. */
 .actions a,
 .actions a:link,
 .action,
@@ -536,9 +675,10 @@ input[type='submit'],
 button,
 .current,
 .actions label {
-  background: var(--skin-secondary);
-  color: var(--skin-fg);
+  background: var(--skin-default);
+  color: var(--skin-default-fg);
   border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius);
   box-shadow: none;
 }
 
@@ -546,7 +686,7 @@ button,
 .action:visited,
 .action a:link,
 .action a:visited {
-  color: var(--skin-fg);
+  color: var(--skin-default-fg);
 }
 
 .actions a:hover,
@@ -557,11 +697,30 @@ button,
 .actions input:focus,
 label.action:hover,
 .action:hover,
-.action:focus {
-  background: var(--skin-border);
+.action:focus,
+button:not([class*='AO3E--']):hover,
+input[type='submit']:hover {
+  background: var(--skin-secondary);
   color: var(--skin-default-fg);
-  border-color: var(--skin-line);
+  border-color: var(--skin-muted-fg);
   box-shadow: none;
+}
+
+/* The one thing a place most wants pressed is filled, as the options page's
+   primary button is: Sort and Filter. */
+.filters .submit input,
+.filters .submit input[type='submit'] {
+  background: var(--skin-primary);
+  color: var(--skin-primary-fg);
+  border-color: var(--skin-primary);
+  font-weight: 600;
+}
+
+.filters .submit input:hover,
+.filters .submit input:focus {
+  background: var(--skin-primary-hover);
+  color: var(--skin-primary-fg);
+  border-color: var(--skin-primary);
 }
 
 /* The page you are on, the tab that is open: the extension's "on" chip. */
@@ -574,6 +733,7 @@ a:link.current,
   color: var(--skin-brand-fg);
   border-color: var(--skin-on-edge);
   box-shadow: none;
+  font-weight: 600;
 }
 
 .actions label.disabled {
@@ -613,6 +773,7 @@ span.delete {
 
 .draft {
   border-color: var(--skin-line);
+  border-radius: var(--skin-radius-panel);
 }
 
 span.unread,
@@ -622,6 +783,7 @@ span.claimed,
   background: var(--skin-secondary);
   color: var(--skin-brand-fg);
   border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius);
 }
 
 .actions span.defaulted {
@@ -697,6 +859,7 @@ a.cloud8 {
    on a dark ground; the box's own 1px border is frame enough. */
 .wrapper {
   box-shadow: none;
+  border-radius: var(--skin-radius-panel);
 }
 
 dl.index dd {
@@ -729,6 +892,7 @@ span.series .divider {
 fieldset fieldset.listbox {
   background: var(--skin-card);
   border: 1px solid var(--skin-border);
+  border-radius: var(--skin-radius-panel);
   box-shadow: none;
 }
 
@@ -742,8 +906,11 @@ fieldset fieldset.listbox {
   box-shadow: none;
 }
 
+/* A work's tags and stats: a card, as an options inset panel is. */
 dl.meta {
+  background: var(--skin-card);
   border-color: var(--skin-border);
+  border-radius: var(--skin-radius-panel);
 }
 
 dl.meta .wrapper {
@@ -788,14 +955,18 @@ dl.meta .wrapper {
 div.comment,
 li.comment {
   border-color: var(--skin-border);
+  border-radius: var(--skin-radius-panel);
 }
 
 .comment div.icon {
   border-bottom-color: var(--skin-border);
 }
 
+/* The byline is the comment's header row, as a list's header row is on the
+   options page: the comment's top corners are its corners. */
 .comment h4.byline {
   background: var(--skin-secondary);
+  border-radius: var(--skin-radius-panel) var(--skin-radius-panel) 0 0;
 }
 
 .thread .even {
@@ -842,6 +1013,7 @@ ul.notes,
 .alert.flash {
   background: var(--skin-info-tint);
   border: 1px solid var(--skin-info-edge);
+  border-radius: var(--skin-radius-panel);
   box-shadow: none;
 }
 
@@ -937,6 +1109,7 @@ span.question {
 
 form.search input[type='text'] {
   border-top-color: var(--skin-border);
+  border-radius: var(--skin-radius);
 }
 
 .filters .expander,
@@ -980,9 +1153,23 @@ form.search input[type='text'] {
   border-color: var(--skin-line);
 }
 
+/* A ticked box is framed in its own colour, as an "on" control is on the
+   options page, so what is chosen reads at a glance down a long list. */
 .filters [type='checkbox']:checked + .indicator:before {
   background: var(--skin-success-tint);
   color: var(--skin-success);
+  border-color: var(--skin-success);
+}
+
+/* The box stands in for the input AO3 hides, so it carries the focus ring,
+   in place of the dotted outline AO3 draws round the label. */
+.filters input:focus-visible + .indicator:before {
+  outline: 3px solid var(--skin-focus);
+  outline-offset: 0;
+}
+
+.filters input:focus + .indicator + span {
+  outline: none;
 }
 
 .filters [type='radio']:checked + .indicator:before {
@@ -993,6 +1180,7 @@ form.search input[type='text'] {
 .filters .exclude [type='checkbox']:checked + .indicator:before {
   background: var(--skin-danger-tint);
   color: var(--skin-brand-fg);
+  border-color: var(--skin-brand-fg);
 }
 
 /* ==== Front page ========================================================= */
@@ -1027,4 +1215,157 @@ form.search input[type='text'] {
 
 .home .header h2 {
   border-bottom-color: var(--skin-border);
+}
+
+/* ==== The extension's own surfaces ======================================= */
+
+/* Its menus, popovers and toast take the options page's popover rather than
+   their own dark palette, so the two read as one product while this is on. */
+:root[data-ao3e-theme='dark'] {
+  --ao3e-surface-bg: var(--skin-popover);
+  --ao3e-surface-fg: var(--skin-default-fg);
+  --ao3e-surface-border: var(--skin-border);
+  --ao3e-surface-divider: var(--skin-hair);
+  --ao3e-surface-hover: var(--skin-secondary);
+  --ao3e-surface-shadow: var(--skin-pop-shadow);
+  --ao3e-surface-accent: var(--skin-ring);
+  --ao3e-surface-accent-fg: #ffffff;
+  --ao3e-surface-danger: var(--skin-brand-fg);
+  --ao3e-field-bg: var(--skin-default);
+  --ao3e-field-fg: var(--skin-default-fg);
+  --ao3e-field-border: var(--skin-border);
+}
+
+.AO3E--menu {
+  border-radius: var(--skin-radius-menu);
+  padding: 5px;
+}
+
+/* The extension's stylesheet squares these off to beat AO3's own buttons. */
+.AO3E--menu--item {
+  border-radius: var(--skin-radius) !important;
+}
+
+.AO3E--popover {
+  border-radius: var(--skin-radius-menu);
+}
+
+.AO3E--progress-editor--input,
+.AO3E--replace-editor--input,
+.AO3E--progress-editor--cancel,
+.AO3E--replace-editor--cancel,
+.AO3E--replace-editor--delete {
+  border-radius: var(--skin-radius) !important;
+}
+
+/* A popover's Save is the options page's primary button. */
+.AO3E--progress-editor--save,
+.AO3E--replace-editor--save {
+  background: var(--skin-primary);
+  color: var(--skin-primary-fg);
+  border-radius: var(--skin-radius);
+}
+
+.AO3E--progress-editor--save:hover,
+.AO3E--replace-editor--save:hover {
+  background: var(--skin-primary-hover);
+}
+
+/* The marks beside a tag, in colours that read on the dark ground. */
+.AO3E--indicator--require {
+  color: var(--skin-ring);
+}
+
+.AO3E--indicator--include,
+.AO3E--indicator--invert {
+  color: var(--skin-success);
+}
+
+.AO3E--hide-works--reason-icon {
+  color: var(--skin-muted-fg);
+}
+
+.AO3E--tracked-review--bar {
+  background: var(--skin-card);
+  border-color: var(--skin-border);
+  border-radius: var(--skin-radius-panel);
+}
+
+.AO3E--tracked-review--bar--prompt-row {
+  border-top-color: var(--skin-hair);
+}
+
+/* ==== The search view ==================================================== */
+
+.AO3E--search-view--label {
+  font-size: 0.6875em;
+  font-weight: 700;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+  color: var(--skin-muted-fg);
+}
+
+/* Reset filters clears the whole sidebar, not the word count above it, so it
+   isn't drawn as that field's full-width button: it is the options page's
+   ghost button, at the end of the column, over the filters it resets. */
+.AO3E--search-view--reset {
+  align-self: flex-end;
+  width: auto;
+  margin-top: 0.35em;
+  background: transparent;
+  border-color: transparent;
+  color: var(--skin-muted-fg);
+}
+
+.AO3E--search-view--reset:hover,
+.AO3E--search-view--reset:focus {
+  background: var(--skin-secondary);
+  border-color: transparent;
+  color: var(--skin-default-fg);
+}
+
+.AO3E--search-view--group,
+.AO3E--search-view--sel {
+  border-color: var(--skin-hair);
+}
+
+.AO3E--search-view--group-count,
+.AO3E--search-view--sel-count,
+.AO3E--search-view--row-count,
+.AO3E--search-view--row-result-count {
+  color: var(--skin-muted-fg);
+  opacity: 1;
+}
+
+/* Require, include and exclude, in colours that read on the dark ground. */
+.AO3E--search-view--sel-require .AO3E--search-view--sel-label,
+.AO3E--search-view--toggle-require.AO3E--search-view--active {
+  color: var(--skin-ring);
+}
+
+.AO3E--search-view--sel-include .AO3E--search-view--sel-label,
+.AO3E--search-view--toggle-include.AO3E--search-view--active {
+  color: var(--skin-success);
+}
+
+.AO3E--search-view--page.AO3E--search-view--active {
+  background: var(--skin-on-tint);
+  color: var(--skin-brand-fg);
+  border-color: var(--skin-on-edge);
+  font-weight: 600;
+  opacity: 1;
+}
+
+.AO3E--search-host--gate {
+  background: var(--skin-card);
+  border-color: var(--skin-border);
+  border-radius: var(--skin-radius-panel);
+}
+
+.AO3E--search-host--progress-track {
+  background: var(--skin-secondary);
+}
+
+.AO3E--search-host--progress-fill {
+  background: var(--skin-brand-fg);
 }

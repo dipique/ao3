@@ -29,6 +29,8 @@ import { Unit } from '#content_script/Unit.js'
 const RAIL_CLASS = `${ADDON_CLASS}--dashboard-rail`
 /** Set on `<html>` (not `<body>`) so the rules apply before the body is styled. */
 const COLLAPSED_CLASS = `${ADDON_CLASS}--dashboard-collapsed`
+/** Set on `<html>` while the band folds the sidebar, which is what draws its hint. */
+const FOLDABLE_CLASS = `${ADDON_CLASS}--dashboard-foldable`
 
 /** localStorage key. Namespaced so it doesn't collide with AO3's own storage. */
 const LS_COLLAPSED = 'ao3e:dashboard:collapsed'
@@ -64,7 +66,7 @@ function teardown(): void {
   // Always leave the sidebar showing. This also runs when the option is switched
   // off, and a hidden sidebar with no rail left to reopen it would be a trap.
   const root = document.documentElement
-  root.classList.remove(COLLAPSED_CLASS)
+  root.classList.remove(COLLAPSED_CLASS, FOLDABLE_CLASS)
   root.style.removeProperty('--ao3e-dashboard-rail-width')
   root.style.removeProperty('--ao3e-dashboard-rail-color')
 }
@@ -115,6 +117,7 @@ export class CollapsibleDashboard extends Unit {
       localStorage.setItem(LS_COLLAPSED, collapsed ? '1' : '0')
     }
     setCollapsed(localStorage.getItem(LS_COLLAPSED) === '1')
+    root.classList.add(FOLDABLE_CLASS)
 
     const onBorderClick = (e: MouseEvent): void => {
       // Nothing folds in the stacked layout, so don't let a click there record a

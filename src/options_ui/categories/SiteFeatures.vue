@@ -107,13 +107,13 @@
       </OptionRow>
       <OptionRow
         title="Dark skin for AO3"
-        subtitle="Recolours AO3 itself to match the extension's dark theme. If you already use a site skin chosen on AO3, this one goes on top of it."
+        subtitle="Restyles AO3 itself to look like this page in its dark theme: the same colours, rounded fields and outlined buttons. If you already use a site skin chosen on AO3, this one goes on top of it."
       >
         <OptionSwitch option-id="darkSkin" />
       </OptionRow>
       <OptionRow
         title="Show statistics in columns"
-        subtitle="Lays each statistic out as a label above its value instead of a run-on line. Applies to work and chapter statistics alike."
+        subtitle="Lays each statistic out as a small label above its value instead of a run-on line, so a work's statistics still fit on one row. Applies to work and chapter statistics alike."
       >
         <OptionSwitch option-id="showStatsColumns" />
       </OptionRow>

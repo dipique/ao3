@@ -35,15 +35,51 @@ export class StyleTweaks extends Unit {
       )
     }
 
+    // Each value under a small label: a column as wide as its value rather than
+    // its label, so a work's whole line of statistics keeps to one row.
     if (this.options.showStatsColumns) {
+      this.insertRule(
+        sheet,
+        `dl.stats {
+          align-items: flex-start;
+          column-gap: 0.8em;
+          row-gap: 0.45em;
+        }`,
+      )
       this.insertRule(
         sheet,
         `dl.stats > div {
           display: flex !important;
           flex-direction: column !important;
           align-items: flex-start;
-          margin-right: 1em;
-          margin-bottom: 0.25em;
+          margin: 0;
+        }`,
+      )
+      this.insertRule(
+        sheet,
+        `dl.stats > div > dt, dl.stats > div > dd {
+          margin: 0;
+          line-height: 1.35;
+        }`,
+      )
+      this.insertRule(
+        sheet,
+        `dl.stats > div > dt {
+          font-size: 0.75em;
+        }`,
+      )
+      this.insertRule(
+        sheet,
+        `dl.stats > div > dd {
+          font-variant-numeric: tabular-nums;
+        }`,
+      )
+      // Greyed from whatever colour the skin gives the text, and as weakly as a
+      // rule can be, so a skin that colours labels itself is left to.
+      this.insertRule(
+        sheet,
+        `:where(dl.stats > div) > dt {
+          color: color-mix(in srgb, currentColor 70%, transparent);
         }`,
       )
     }

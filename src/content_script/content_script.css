@@ -2029,6 +2029,45 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   opacity: 1;
 }
 
+/* The band that folds the sidebar is a border, which can't take a cursor or a
+   mark of its own. Laid over it: a pointer, and the rail's chevron turned to
+   point the way the sidebar goes. A click on either is still a click on the
+   band. Only where the fold works. */
+@media only screen and (min-width: 62.01em) {
+  html.AO3E--dashboard-foldable #dashboard.own {
+    position: relative;
+  }
+
+  html.AO3E--dashboard-foldable #dashboard.own::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(-1 * var(--ao3e-dashboard-rail-width, 15px));
+    height: var(--ao3e-dashboard-rail-width, 15px);
+    cursor: pointer;
+  }
+
+  html.AO3E--dashboard-foldable #dashboard.own::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: calc(-0.5 * var(--ao3e-dashboard-rail-width, 15px));
+    width: 6px;
+    height: 6px;
+    transform: translate(-40%, -50%) rotate(-135deg);
+    border-top: 2px solid rgba(255, 255, 255, 0.85);
+    border-right: 2px solid rgba(255, 255, 255, 0.85);
+    opacity: 0.55;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+
+  html.AO3E--dashboard-foldable #dashboard.own:hover::after {
+    opacity: 1;
+  }
+}
+
 /* ---------------------------------------------------------------------------
    The tracked-lists review. A subnav item on the reader's own readings pages
    opens the search view over a window of days gathered from their tracked

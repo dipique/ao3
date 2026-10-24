@@ -300,8 +300,9 @@ export interface Options {
 
   theme: ThemeOption
   /**
-   * Recolour AO3 itself in the extension's dark palette: a site skin laid over
-   * whichever one the reader chose on AO3 (see `content_script/darkSkin.ts`).
+   * Restyle AO3 itself in the options page's dark palette and shapes: a site
+   * skin laid over whichever one the reader chose on AO3 (see
+   * `content_script/darkSkin.ts`).
    */
   darkSkin: boolean
   user: { userId?: string }

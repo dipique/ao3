@@ -1,8 +1,8 @@
 import css from './darkSkin.css?inline'
 
 /**
- * The opt-in dark skin (the `darkSkin` option): AO3 itself, recoloured in the
- * extension's dark palette.
+ * The opt-in dark skin (the `darkSkin` option): AO3 itself, restyled in the
+ * options page's dark palette and shapes.
  *
  * It wins its ties with AO3's own stylesheets by coming after them, the way a
  * site skin chosen on AO3 does. CSS declared in the manifest can't promise that
