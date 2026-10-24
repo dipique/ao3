@@ -1,19 +1,16 @@
-import type { Work } from '#content_script/blurb.js'
 import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
-import { getArchiveLink, parseUser, readWorkIds, toast } from '#common'
+import { getArchiveLink, readWorkIds } from '#common'
 import { linkedTo } from '#content_script/lists/openLink.ts'
-import { markedForLaterKey } from '#content_script/markedForLaterCopy.ts'
-import { loadMarkedForLaterIndex, noteMarkedForLater, saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
-import { submitMark } from '#content_script/markForLater.js'
+import { markedForLaterKey, ownMarkedForLaterPage } from '#content_script/markedForLaterCopy.ts'
+import { loadMarkedForLaterIndex, saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, resumeSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
-import { seedMarkedForLater } from '#content_script/units/FilterEntityToolbars.tsx'
-import { applyMarkGroup } from '#content_script/workMarks.js'
+import { onTakenOffMarkedForLater, seedMarkedForLater } from '#content_script/units/FilterEntityToolbars.tsx'
 
 /**
  * Identifies this use of the search view for local layout prefs (collapsed
@@ -49,17 +46,8 @@ export class SearchMarkedForLater extends Unit {
   }
 
   override async ready(): Promise<void> {
-    // Only your own Marked for Later page, and only when logged in.
-    const match = location.pathname.match(/^\/users\/([^/]+)\/readings\/?$/)
-    if (!match)
-      return
-    if (new URLSearchParams(location.search).get('show') !== 'to-read')
-      return
-    if (!document.body.classList.contains('logged-in'))
-      return
-    const pageUser = match[1]!
-    const currentUser = parseUser(document)?.userId
-    if (!currentUser || currentUser.toLowerCase() !== pageUser.toLowerCase())
+    const pageUser = ownMarkedForLaterPage()
+    if (!pageUser)
       return
 
     // Clearing the reader's whole history is History's business, not this list's.
@@ -74,7 +62,7 @@ export class SearchMarkedForLater extends Unit {
   }
 
   async openView(userId: string, opts: OpenOptions = {}): Promise<void> {
-    // Loaded up front so a "Mark as Read" here can take the work out of it
+    // Loaded up front so marking a work read here can take it out of the index
     // straight away (`noteMarkedForLater` does nothing to an index it hasn't
     // read), rather than waiting for the next scrape to rewrite it.
     await loadMarkedForLaterIndex(userId).catch(err => this.logger.error('Could not read the saved-work index', err))
@@ -113,8 +101,9 @@ export class SearchMarkedForLater extends Unit {
       },
       prepare: (works) => {
         // Every work here is marked for later — keep the work menu's saved state
-        // in step with the set before it decorates the blurbs.
-        seedMarkedForLater(works.map(work => work.workId))
+        // in step with the set before it decorates the blurbs, as the list's own
+        // works, which draws their clocks.
+        seedMarkedForLater(works.map(work => work.workId), { listed: true })
         applyStatus(works, this.options)
       },
       // This page is the only place that sees the whole list, so the id index
@@ -122,37 +111,9 @@ export class SearchMarkedForLater extends Unit {
       // is written with the snapshot — an index that lagged it would show the
       // clock on works already triaged away.
       onPersist: works => saveMarkedForLaterIndex(userId, works.map(work => work.workId)),
-      viewConfig: {
-        // Each blurb gets a "Mark as Read" button; on success the view drops the
-        // work and reports the reduced set, which the host persists so the
-        // snapshot (and a reopen from cache) stays in sync with the server.
-        blurbAction: {
-          label: 'Mark as Read',
-          title: 'Mark as read — remove this work from your Marked for Later list',
-          run: async (work: Work) => {
-            try {
-              // save: false ⇒ POST /works/:id/mark_as_read (leaves reading history).
-              await submitMark(work.workId, false)
-              // The saved-work index is kept by scrapes and by the actions that
-              // change it, not by this list's snapshot, which leaves out works
-              // it has pruned (see `belongs`) and so can't be what it's rebuilt
-              // from.
-              noteMarkedForLater(work.workId, false)
-            }
-            catch (err) {
-              this.logger.error('Mark as read failed', err)
-              toast('Could not mark this work as read.', { type: 'error' })
-              throw err
-            }
-            // Record it locally too, so a work triaged from here stops resurfacing
-            // in listings. Only after the server call succeeded — a failed unsave
-            // would otherwise leave the work read *and* still on the list. Same
-            // call our work menu and AO3's own button make, so all three agree.
-            if (this.options.workMarks.enabled)
-              applyMarkGroup(this.options.workMarks, work.workId, true)
-          },
-        },
-      },
+      // Its works are marked read from their own menus: the clock on each title
+      // opens one. A work taken off the list there leaves the view at once.
+      leaving: drop => onTakenOffMarkedForLater(drop),
       emptyMessage: 'No works found in your Marked for Later list.',
       errorMessage: 'Could not load your Marked for Later list.',
     }

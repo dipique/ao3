@@ -69,7 +69,7 @@
       -->
       <OptionRow
         title="Mark a work for later"
-        subtitle="Adds “Mark for later” and “Mark as read” to a work's menu, so you can update your Marked for Later list without opening the work."
+        subtitle="Adds “Mark for later” and “Mark as read” to a work's menu, so you can update your Marked for Later list without opening the work. Your Marked for Later list's own search view has them either way."
         :badges="['needs-login']"
       >
         <OptionSwitch option-id="markForLaterToolbar" />

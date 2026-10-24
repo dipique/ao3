@@ -19,7 +19,8 @@ import {
   markIndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
-import { putOnMarkedForLater } from '#content_script/markedForLaterCopy.ts'
+import { linkedTo } from '#content_script/lists/openLink.ts'
+import { ownMarkedForLaterPage, putOnMarkedForLater } from '#content_script/markedForLaterCopy.ts'
 import { loadMarkedForLaterIndex, noteMarkedForLater, onSavedChange } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
 import { markIcon } from '#content_script/markIcons.js'
@@ -86,6 +87,13 @@ interface MarkState {
    * re-checks a cached state against the archive before acting on it.
    */
   cached: boolean
+  /**
+   * The work is on the Marked for Later search view this page shows. The view
+   * is the list itself, so its clock, and its menu's row to take it off, are
+   * drawn there even where "Mark a work for later" leaves them off elsewhere:
+   * that row is how a work is marked read from the view.
+   */
+  listed?: boolean
 }
 const savedState = new Map<string, MarkState>()
 
@@ -93,6 +101,21 @@ const savedState = new Map<string, MarkState>()
 interface SeedOptions {
   /** The ids come from the cached index — see {@link MarkState.cached}. */
   cached?: boolean
+  /** The ids are the Marked for Later view's works — see {@link MarkState.listed}. */
+  listed?: boolean
+}
+
+/** Told of each work this page takes off Marked for Later from a work's menu. */
+const takenOffListeners = new Set<(workId: string) => void>()
+
+/**
+ * Hear of every work taken off Marked for Later from a work's menu on this
+ * page, whether or not the cached index held it — so the list's own view can
+ * let it go. Returns the way to stop.
+ */
+export function onTakenOffMarkedForLater(listener: (workId: string) => void): () => void {
+  takenOffListeners.add(listener)
+  return () => takenOffListeners.delete(listener)
 }
 
 /**
@@ -111,13 +134,16 @@ interface SeedOptions {
 export function seedMarkedForLater(workIds: Iterable<string>, opts: SeedOptions = {}): void {
   for (const id of workIds) {
     const state = savedState.get(id)
+    const listed = !!opts.listed || !!state?.listed
     // A toggle in flight, or one we already made, is fresher than the listing.
-    if (state?.busy || state?.acted)
+    if (state?.busy || state?.acted) {
+      state.listed = listed
       continue
+    }
     // Anything read off this page (or fetched) beats a possibly-stale cache.
     if (opts.cached && state?.known && !state.cached)
       continue
-    savedState.set(id, { saved: true, busy: false, known: true, acted: false, cached: !!opts.cached })
+    savedState.set(id, { saved: true, busy: false, known: true, acted: false, cached: !!opts.cached, listed })
   }
 }
 
@@ -278,6 +304,8 @@ abstract class FilterEntityToolbar extends Unit {
   protected abstract get entries(): EntityEntry[]
   /** Works fold in mark-for-later; series don't. */
   protected markEnabled(): boolean { return false }
+  /** Whether this work's clock and mark-for-later row are drawn: where marking is on, and on the list's own view. */
+  protected markShown(_id: string): boolean { return this.markEnabled() }
   /** Works fold in the per-work marks; series don't. */
   protected marksEnabled(): boolean { return false }
 
@@ -335,7 +363,7 @@ abstract class FilterEntityToolbar extends Unit {
     if (this.marksEnabled())
       items.push(...this.markSetItems(id, link))
 
-    if (this.markEnabled())
+    if (this.markShown(id))
       items.push(this.markItem(id))
 
     // The work-page title isn't a link, so the copy/open-link rows don't apply.
@@ -516,7 +544,7 @@ abstract class FilterEntityToolbar extends Unit {
    * reordering a list the reader may be working through.
    */
   private async ensureSaved(id: string): Promise<void> {
-    if (!this.markEnabled())
+    if (!this.markShown(id))
       return
     const state = savedState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
     if (state.busy || (state.known && state.saved))
@@ -567,7 +595,7 @@ abstract class FilterEntityToolbar extends Unit {
     // means — an ongoing work is precisely one you're *not* done with — so it
     // must not take the work off the list the way its neighbours do.
     const done = on && markRoot(marks, markId) === READ_MARK && !markTracksProgress(marks, markId)
-    if (done && this.markEnabled() && state?.saved && !state.busy) {
+    if (done && this.markShown(id) && state?.saved && !state.busy) {
       // onMark toasts the "removed from your Marked for Later list" message.
       await this.onMark(id)
       return
@@ -756,7 +784,7 @@ abstract class FilterEntityToolbar extends Unit {
     // something the calendar already implies. Drop it and let the mark speak.
     const ongoing = this.marksEnabled()
       && progressMarkIds(this.options.workMarks.marks).some(markId => markSets.get(markId)?.has(id))
-    if (this.markEnabled() && !ongoing && savedState.get(id)?.saved)
+    if (this.markShown(id) && !ongoing && savedState.get(id)?.saved)
       states.push(markIndicatorState(SAVED_MARK))
     if (this.marksEnabled()) {
       for (const [markId, ids] of markSets) {
@@ -877,6 +905,8 @@ abstract class FilterEntityToolbar extends Unit {
         this.setReadLocally(id, !save)
       if (save)
         await this.keepSaved(id)
+      else
+        takenOffListeners.forEach(listener => listener(id))
       toast(
         save ? 'Saved for later.' : 'Marked as read — removed from your Marked for Later list.',
         { type: 'success' },
@@ -913,9 +943,12 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   static override get name() { return 'FilterWorkToolbar' }
 
   // The work menu appears wherever its actions are useful: when rules are on
-  // (hide/highlight/always-show), mark-for-later is on, or per-work marks are on.
+  // (hide/highlight/always-show), mark-for-later is on, or per-work marks are on
+  // — and on the Marked for Later search view whatever else is, since a work is
+  // marked read there from its menu.
   override get enabled() {
     return this.options.rules.enabled || this.options.markForLaterToolbar || this.options.workMarks.enabled
+      || ((this.options.searchMarkedForLater || linkedTo('marked-for-later')) && ownMarkedForLaterPage() !== null)
   }
 
   protected override get noun() { return 'work' as const }
@@ -925,6 +958,10 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   protected override markEnabled(): boolean {
     // Marking needs a logged-in session, and only when the feature is enabled.
     return this.options.markForLaterToolbar && document.body.classList.contains('logged-in')
+  }
+
+  protected override markShown(id: string): boolean {
+    return this.markEnabled() || (!!savedState.get(id)?.listed && document.body.classList.contains('logged-in'))
   }
 
   // The per-work marks are ours alone — no AO3 session needed.

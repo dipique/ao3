@@ -18,9 +18,9 @@ const STYLE_PREFIX = '--ao3e-'
  *
  * A snapshot is the blurbs *before* decoration, because opening one decorates
  * it: store a decorated blurb and the next open adds a second star after every
- * highlighted tag, a second clock after the title, a second "Mark as Read". And
- * a list is not always written before its blurbs are decorated — a blurb action
- * writes the list it is showing, a top-up keeps the stored works it already
+ * highlighted tag and a second clock after the title. And a list is not always
+ * written before its blurbs are decorated — a work marked read from its menu
+ * comes off the list it is showing, a top-up keeps the stored works it already
  * put on screen — so the write can't simply be timed to miss it.
  *
  * Nearly everything the units add is marked with {@link ADDON_CLASS}: nodes

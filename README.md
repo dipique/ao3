@@ -40,7 +40,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
   - **Menu on tags**: include or exclude the tag in Sort & Filter, or hide, always-show or highlight it everywhere. It also covers the rating, warning, category and completion symbols on each work.
   - **Menu on fandoms**: the same for fandoms, filtered by tag id from a bundled list, so it works for any fandom rather than only those the sidebar lists.
   - **Hide or highlight an author**, **Subscribe to an author** and **Mute an author** (the last two need you logged in to AO3).
-  - **Mark a work for later** adds "Mark for later" and "Mark as read" to a work's menu (needs you logged in).
+  - **Mark a work for later** adds "Mark for later" and "Mark as read" to a work's menu (needs you logged in). On your Marked for Later list's search view every work carries the Marked for Later clock whether this is on or not, and you mark a work read there from its menu.
 - **Open menus with a left-click** makes a plain click open the menu instead of following the link; Shift+click still follows it.
 - The browser's own right-click menu also gets entries to hide or always-show a tag, an author or one of an author's pseuds.
 - A floating button in the corner of AO3 pages holds quick actions: open the options, switch the menus off, toggle reader mode or the text replacement tools, "Track this search", and, with **Reveal filtered works** on, a peek at the works your filters hid.

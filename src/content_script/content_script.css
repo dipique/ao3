@@ -1937,16 +1937,6 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: var(--ao3e-surface-danger);
 }
 
-/* Per-blurb action button (e.g. "Mark as Read"), added to the blurb's actions. */
-.AO3E--search-view--blurb-action {
-  cursor: pointer;
-}
-
-.AO3E--search-view--blurb-action-busy {
-  opacity: 0.5;
-  cursor: progress;
-}
-
 /* A work, facet row, or facet group filtered out by the in-memory search. */
 .AO3E--search-view--hidden {
   display: none !important;

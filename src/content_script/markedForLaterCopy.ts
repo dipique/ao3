@@ -1,12 +1,27 @@
 import type { BlurbSource } from '#common'
 
-import { cache } from '#common'
+import { cache, parseUser } from '#common'
 import { parseWork } from '#content_script/blurb.js'
 import { pristineBlurb, putOnSnapshot } from '#content_script/searchView/cache.ts'
 
 /** Where the Marked for Later list of `userId` is stored, as the list's own page names them. */
 export function markedForLaterKey(userId: string): string {
   return `marked-for-later:${userId}`
+}
+
+/**
+ * Whose Marked for Later list this page is, when it is the signed-in reader's
+ * own — the one page the list's search view opens on, and every work on it is
+ * marked for later. Null on any other page, someone else's included.
+ */
+export function ownMarkedForLaterPage(): string | null {
+  const pageUser = location.pathname.match(/^\/users\/([^/]+)\/readings\/?$/)?.[1]
+  if (!pageUser || new URLSearchParams(location.search).get('show') !== 'to-read')
+    return null
+  if (!document.body.classList.contains('logged-in'))
+    return null
+  const currentUser = parseUser(document)?.userId
+  return currentUser?.toLowerCase() === pageUser.toLowerCase() ? pageUser : null
 }
 
 /**

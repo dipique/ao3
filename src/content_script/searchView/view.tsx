@@ -153,24 +153,18 @@ export interface SearchView {
    */
   getReaderFilter: () => FilterState
   /**
-   * The works the view holds right now — what it was given, less any a
-   * {@link BlurbAction} has since removed. Their blurbs are still decorated, and
+   * The works the view holds right now — what it was given, less any
+   * {@link remove} has since taken out. Their blurbs are still decorated, and
    * still the view's own nodes.
    */
   getWorks: () => Work[]
-}
-
-/**
- * An optional per-blurb action button (e.g. "Mark as Read"). `run` performs the
- * side effect for one work; if it resolves, the view drops that work from the
- * list (and reports it via {@link SearchViewConfig.onWorkRemoved}). A
- * rejection leaves the work in place — the action is assumed to have surfaced its
- * own error. The button is disabled while `run` is pending.
- */
-export interface BlurbAction {
-  label: string
-  title?: string
-  run: (work: Work) => Promise<void>
+  /**
+   * Take the work with this id out of the view: its blurb goes, and the view
+   * re-renders over the rest with the reader's filters as they were. Reported
+   * through {@link SearchViewConfig.onWorkRemoved}. A work the view doesn't hold
+   * is ignored.
+   */
+  remove: (workId: string) => void
 }
 
 export interface SearchViewConfig {
@@ -187,8 +181,6 @@ export interface SearchViewConfig {
    * toolbars) over the results list. Called once per (re-)mount.
    */
   decorateContainer?: (resultsRoot: HTMLElement) => void
-  /** A per-work action button added to every blurb (see {@link BlurbAction}). */
-  blurbAction?: BlurbAction
   /**
    * Whether a facet value should be left out of the sidebar entirely — the
    * in-memory counterpart of the native filter rows HideFilters hides. A hidden
@@ -205,7 +197,7 @@ export interface SearchViewConfig {
    * say "show me those after all".
    */
   autoExcludes?: FacetValueRef[]
-  /** Called after a {@link BlurbAction} removes a work, so the host can take it off the stored copy too. */
+  /** Called after {@link SearchView.remove} takes a work out, so the host can take it off the stored copy too. */
   onWorkRemoved?: (work: Work) => void
   /**
    * Called whenever the view has finished re-rendering — a filter, a sort, a page
@@ -1353,46 +1345,17 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   let shown: Work[] = []
 
   /**
-   * Add the per-blurb action button to one blurb. On click it disables itself,
-   * runs the action, and — only if that resolves — removes the work from the
-   * view. A rejection re-enables the button (the action surfaced its own error).
-   * The button goes into the blurb's native `ul.actions` list when present, so it
-   * sits with AO3's own per-work controls; otherwise it's appended to the blurb.
+   * Drop a work from the view, detach its node, and re-render over the reduced
+   * set. Facet rows aren't rebuilt — a value that hit zero just hides via the
+   * normal drill-down visibility — so the user's facet UI state (filter boxes,
+   * collapsed groups) is preserved. Reports the work so the host can take it off
+   * the stored copy.
    */
-  function injectBlurbAction(work: Work, action: BlurbAction): void {
-    const btn = (
-      <button type="button" class={cx('blurb-action')} title={action.title ?? action.label}>{action.label}</button>
-    ) as HTMLElement as HTMLButtonElement
-    btn.addEventListener('click', () => {
-      if (btn.disabled)
-        return
-      btn.disabled = true
-      btn.classList.add(cx('blurb-action-busy'))
-      void action.run(work)
-        .then(() => removeWork(work))
-        .catch(() => {
-          btn.disabled = false
-          btn.classList.remove(cx('blurb-action-busy'))
-        })
-    })
-    const actions = work.el.querySelector('ul.actions')
-    if (actions)
-      actions.prepend((<li class={ADDON_CLASS}>{btn}</li>) as HTMLElement)
-    else
-      work.el.append((<div class={`${ADDON_CLASS}  ${cx('blurb-actions')}`}>{btn}</div>) as HTMLElement)
-  }
-
-  /**
-   * Drop a work from the view (a blurbAction removed it), detach its node, and
-   * re-render over the reduced set. Facet rows aren't rebuilt — a value that hit
-   * zero just hides via the normal drill-down visibility — so the user's facet UI
-   * state (filter boxes, collapsed groups) is preserved. Reports the work so the
-   * host can take it off the stored copy.
-   */
-  function removeWork(work: Work): void {
-    const next = works.filter(w => w !== work)
-    if (next.length === works.length)
+  function removeWork(workId: string): void {
+    const work = works.find(w => w.workId === workId)
+    if (!work)
       return
+    const next = works.filter(w => w !== work)
     works = next
     pool = results(works)
     if (mounted.delete(work)) {
@@ -1568,8 +1531,6 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         // stopped admitting the work, and a rule while hiding is switched off.
         config.collapseWork?.(work.el, DROP_REASONS[drop])
       }
-      if (config.blurbAction)
-        injectBlurbAction(work, config.blurbAction)
     }
     syncSnippets(page)
 
@@ -1809,5 +1770,6 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     getState,
     getReaderFilter: () => readerFilter(state, autoKeys, released),
     getWorks: () => works,
+    remove: removeWork,
   }
 }

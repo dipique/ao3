@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { rerun, settled, viewDrawn } from './trackedPages.mjs'
+import { openMenu, rerun, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -63,13 +63,13 @@ const READINGS_HTML = `<!doctype html>
 
 /**
  * A stored list is the blurbs as AO3 served them, never as the view drew them.
- * Opening a list decorates it, so a decorated copy opens with every star, clock
- * and "Mark as Read" button twice — and a list does get written while its
- * blurbs are on screen (a blurb action, a top-up), so the copy has to be
- * stripped rather than timed.
+ * Opening a list decorates it, so a decorated copy opens with every star and
+ * clock twice — and a list does get written while its blurbs are on screen (a
+ * work marked read from its menu, a top-up), so the copy has to be stripped
+ * rather than timed.
  *
- * Staged on a readings list, which is the one place a blurb action writes a list
- * back while its blurbs are being looked at. Nothing is hidden on such a list, so
+ * Staged on a readings list, which is the one place a work marked read writes
+ * the list back while its blurbs are being looked at. Nothing is hidden on such a list, so
  * the one decoration that *rewrites* a blurb rather than adding to it — the
  * wrapper HideWorks puts round a collapsed work — is checked for the same thing
  * over a tag's works instead, in `search-view-hidden-works.test.mjs`.
@@ -112,7 +112,7 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
     await browser?.close()
   })
 
-  /** Per work in the view: stars after its tags, and "Mark as Read" buttons. */
+  /** Per work in the view: stars after its tags, and Marked for Later clocks on its title. */
   const decorations = (tab = page) => tab.evaluate(() => {
     const out = {}
     for (const li of document.querySelectorAll('.AO3E--search-view--results > li.blurb')) {
@@ -124,7 +124,7 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
       }
       out[li.querySelector('h4.heading a').textContent] = {
         tags: [...li.querySelectorAll('ul.tags a.tag')].map(indicatorsAfter),
-        actions: li.querySelectorAll('.AO3E--search-view--blurb-action').length,
+        clocks: li.querySelectorAll('h4.heading .AO3E--indicator--mark-saved').length,
       }
     }
     return out
@@ -141,24 +141,30 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
   })
 
   const EXPECTED = {
-    'Fluffy one': { tags: [1], actions: 1 },
-    'Both at once': { tags: [1, 0], actions: 1 },
-    'A slow one': { tags: [0], actions: 1 },
+    'Fluffy one': { tags: [1], clocks: 1 },
+    'Both at once': { tags: [1, 0], clocks: 1 },
+    'A slow one': { tags: [0], clocks: 1 },
   }
 
   test('the view opens decorated once', async () => {
-    assert.deepEqual(await decorations(), { ...EXPECTED, 'Angsty one': { tags: [0], actions: 1 } })
+    assert.deepEqual(await decorations(), { ...EXPECTED, 'Angsty one': { tags: [0], clocks: 1 } })
   })
 
   test('a list written while its blurbs are on screen is stored undecorated', async () => {
-    await page.evaluate(() => {
+    await openMenu(page, () => page.evaluate(() => {
       const li = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
         .find(el => el.querySelector('h4.heading a').textContent === 'Angsty one')
-      li.querySelector('.AO3E--search-view--blurb-action').click()
-    })
+      li.querySelector('h4.heading .AO3E--indicator--mark-saved').click()
+    }))
+    await until('the menu to offer to mark it read', () => page.evaluate(() => {
+      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
+        .find(el => !el.disabled && el.textContent.trim().startsWith('Mark as read'))
+      row?.click()
+      return !!row
+    }))
     await until('the stored list to be rewritten', async () => (await storedBlurbs()).length !== 4)
     const stored = await storedBlurbs()
-    assert.equal(stored.length, 3, 'Mark as Read should have taken the work off the stored list')
+    assert.equal(stored.length, 3, 'marking it read should have taken the work off the stored list')
     for (const html of stored) {
       assert.doesNotMatch(html, /ao3e/i)
       assert.doesNotMatch(html, /<dl class="stats"><div|\bhidden\b|\u2009/)

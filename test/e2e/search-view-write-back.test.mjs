@@ -5,7 +5,7 @@ import { createDefaultMarks, packIds } from '../../src/common/workMarks.ts'
 import { isFresh, refreshIntervalMs } from '../../src/content_script/searchView/freshness.ts'
 import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { ARCHIVE, blurb, keptStore, launch, openTab, rerun, stored, viewDrawn, visit } from './trackedPages.mjs'
+import { ARCHIVE, blurb, keptStore, launch, openMenu, openTab, rerun, stored, viewDrawn, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -13,7 +13,6 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
 const TO_READ = `${ARCHIVE}/users/me/readings?show=to-read`
 const KEY = 'marked-for-later:me'
 const RESULTS = '.AO3E--search-view--results > li.blurb'
-const MARK_AS_READ = '.AO3E--search-view--blurb-action'
 
 const HOURS = 1
 const INTERVAL = refreshIntervalMs(HOURS)
@@ -107,9 +106,19 @@ describe('a kept copy written back while the read behind it is unfinished', { sk
 
   const takings = [
     {
-      name: 'Mark as Read on the work',
+      name: 'the work marked read from its menu',
       marks: { enabled: false, marks: createDefaultMarks() },
-      take: tab => tab.$$eval(MARK_AS_READ, (buttons, id) => buttons.find(button => button.closest('li.blurb')?.id === `work_${id}`).click(), TAKEN),
+      take: async (tab) => {
+        await openMenu(tab, () => tab.evaluate((id) => {
+          document.querySelector(`#work_${id} h4.heading .AO3E--indicator--mark-saved`).click()
+        }, TAKEN))
+        await until('the menu to offer to mark it read', () => tab.evaluate(() => {
+          const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
+            .find(el => !el.disabled && el.textContent.trim().startsWith('Mark as read'))
+          row?.click()
+          return !!row
+        }))
+      },
     },
     {
       name: 'the work marked read elsewhere',

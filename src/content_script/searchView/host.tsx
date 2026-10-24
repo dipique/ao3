@@ -129,6 +129,14 @@ export interface SearchSource {
    */
   belongs?: (work: Work) => boolean
   /**
+   * Hear of works leaving the list while its view is on screen, so the view
+   * lets each one go the moment it leaves rather than at the next reload — the
+   * Marked for Later list's works, marked read from their own menus. Handed
+   * how to drop one; returns how to stop, which the host does when the view
+   * goes.
+   */
+  leaving?: (drop: (workId: string) => void) => () => void
+  /**
    * Fetch, some other way, the works the list should hold that its listing
    * didn't turn up — given every work the list does hold. Runs after each scrape
    * that isn't refused; what it returns goes on the end of the list.
@@ -465,6 +473,8 @@ let active: { source: SearchSource, view: SearchView, scrapedAt: number, prefs: 
  * at any point can hand it {@link SearchSource.unmount}.
  */
 let mounted: SearchSource | null = null
+/** How to stop hearing the {@link active} source's {@link SearchSource.leaving}. */
+let stopLeaving: (() => void) | null = null
 /**
  * Bumped by every open and every close. An open awaits several times — prefs,
  * the snapshot, the page count, the scrape — and another view can replace it
@@ -614,6 +624,8 @@ export function closeSearchView(): void {
   shared?.watching.abort()
   shared = null
   active = null
+  stopLeaving?.()
+  stopLeaving = null
   busy = false
   // A close means "don't come back" unless the caller re-arms a reopen after,
   // and an opening a re-run took down is over with it.
@@ -1392,7 +1404,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
           active.prefs = next
         void savePrefs(source.id, next).catch(err => log.error('Failed to save search-view prefs', err))
       },
-      // Fires when a blurb action drops a work; keep the snapshot in step.
+      // Fires when a work is taken out of the view; keep the snapshot in step.
       onWorkRemoved: work => takeOff(source, [work]),
     }
     const handlers = {
@@ -1432,6 +1444,11 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       const autoExcludes = prepare(source, works, options, fresh)
       const view = createSearchView(works, handlers, { ...config, autoExcludes, refreshedAt })
       active = { source, view, scrapedAt: refreshedAt, prefs }
+      stopLeaving?.()
+      stopLeaving = source.leaving?.((workId) => {
+        if (active?.view === view)
+          view.remove(workId)
+      }) ?? null
       // After `active`, so a strip that starts work the moment it is built can
       // already reach the view. Built once per open and kept, since nothing in
       // an open shows twice and a rebuild would throw away whatever the reader
