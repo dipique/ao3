@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { sentence } from '../../src/options_ui/model/phrases.ts'
-import { REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
+import { PROFILE_LISTS, REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
 import { blurbsOnRemove } from '../../src/options_ui/model/savedListRows.ts'
 import { storedListIds, storedLists } from './helpers.mjs'
 import { ARCHIVE, captureDownloads, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
@@ -19,6 +19,11 @@ const copyRow = key => `copy:${key}`
 const HOURS_AGO = Date.now() - 3 * 60 * 60 * 1000
 const MARKED_PAGE = `${ARCHIVE}/users/tester/readings?show=to-read`
 const READ_PAGE = `${ARCHIVE}/users/tester/readings`
+
+/** A profile list's own wording, by id: the page is checked for which of it the tile shows, not for how it reads. */
+const list = id => PROFILE_LISTS.find(entry => entry.id === id)
+/** `text` to match as it stands, not as a pattern. */
+const literally = text => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
 const blurb = id => `<li class="work blurb group" id="work_${id}" role="article">
   <div class="header module"><h4 class="heading"><a href="/works/${id}">Work ${id}</a>
@@ -165,13 +170,14 @@ describe('options UI — User profile lists', { skip }, () => {
     assert.equal(await marked.evaluate(el => el.id), 'user-profile-lists-marked-for-later')
     assert.equal(await marked.evaluate(el => el.getAttribute('aria-label')), 'Marked for Later')
     const text = await options.text(marked)
-    assert.match(text, /^Marked for Later Needs login Your own to-read page\. Not part of Review — it only changes when you add to it\./)
+    assert.ok(text.startsWith(`Marked for Later Needs login ${list('marked-for-later').note}`), text)
     assert.doesNotMatch(text, /tester/)
     assert.equal(await (await marked.$('[data-badge="needs-login"]')).evaluate(el => el.title), 'Only visible to your own account, so it is fetched only while you are signed in to AO3')
 
     const read = await tile('read-works')
     assert.equal(await read.evaluate(el => el.id), 'user-profile-lists-read-works')
-    assert.match(await options.text(read), /^Read works Needs login Everything you’ve marked read or given a verdict, Favorites included: a shelf to come back to\. Not part of Review — it only changes when you mark something\./)
+    const readText = await options.text(read)
+    assert.ok(readText.startsWith(`Read works Needs login ${list('read-works').note}`), readText)
   })
 
   test('each tile counts its works, says how old its copy is, and draws what is cached of it', async () => {
@@ -419,7 +425,7 @@ describe('options UI — User profile lists, with Work marks off', { skip }, () 
       [MARKED]: { scrapedAt: HOURS_AGO, blurbsHtml: [blurb(11), blurb(12), blurb(13)], descriptor: described('marked-for-later', 'Marked for Later — tester', MARKED_PAGE) },
     }),
   }
-  const NEEDS_MARKS = /None yet\. This list is made from your marks, so it needs Work marks on, under Reading\./
+  const NEEDS_MARKS = literally(list('read-works').needs)
   const KEEP_BY_VIEW = /None yet\. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here\./
 
   let session
@@ -436,7 +442,7 @@ describe('options UI — User profile lists, with Work marks off', { skip }, () 
   const readText = async () => options.text(await tile('read-works'))
   const readLinks = async () => options.controls(await tile('read-works'), 'link')
 
-  test('Read works offers no View on AO3, and its note says the list needs Work marks on; Marked for Later keeps its own', async () => {
+  test('Read works offers no View on AO3, and gives its note on needing marks; Marked for Later keeps its own', async () => {
     await until('the tiles to read their copies', async () => (await options.lines(await tile('marked-for-later'))).includes('3 works · as of 3 hours ago'))
     assert.match(await readText(), NEEDS_MARKS)
     assert.deepEqual(await readLinks(), [])
@@ -744,11 +750,12 @@ describe('options UI — User profile lists, laid out', { skip }, () => {
     const options = await session.open({ seed: TILES_ONLY, hash: '#lists', viewport: { width: 1440, height: 900 } })
     try {
       const box = await options.control(options.page, 'textbox', 'Search settings by name or description')
-      await box.type('to-read page')
+      // Words from Marked for Later's note that Read works' note doesn't have all of.
+      await box.type('saved to your')
       const shown = async id => (await options.tile(id)).evaluate(el => el.checkVisibility())
       await until('the search to hide the tile it doesn\'t find', async () => !(await shown('read-works')))
       assert.equal(await shown('marked-for-later'), true)
-      assert.deepEqual(await (await options.tile('marked-for-later')).$$eval('mark', els => els.map(el => el.textContent)), ['to-read', 'page'])
+      assert.deepEqual(await (await options.tile('marked-for-later')).$$eval('mark', els => els.map(el => el.textContent)), ['saved', 'to', 'your'])
       assert.deepEqual(options.problems(), [])
     }
     finally {

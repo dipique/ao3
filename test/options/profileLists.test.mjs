@@ -73,13 +73,17 @@ const MARKS_OFF = { ...MARKS_ON, workMarks: { enabled: false } }
 const tiles = (input = {}) => profileTiles({ copies: { 'marked-for-later': markedCopy(), 'read-works': readCopy }, userId: 'tester', settings: MARKS_ON, job: IDLE, now: NOW, ...input })
 const marked = input => tiles(input)[0]
 const read = input => tiles(input)[1]
+/** A profile list's own wording, by id: the tiles are checked for which of it they show, not for how it reads. */
+const list = id => PROFILE_LISTS.find(entry => entry.id === id)
 
 describe('the profile lists', () => {
   test('Marked for Later, then Read works, each with its note and no account name', () => {
     assert.deepEqual(tiles().map(tile => [tile.id, tile.name, tile.note]), [
-      ['marked-for-later', 'Marked for Later', 'Your own to-read page. Not part of Review — it only changes when you add to it.'],
-      ['read-works', 'Read works', 'Everything you’ve marked read or given a verdict, Favorites included: a shelf to come back to. Not part of Review — it only changes when you mark something.'],
+      ['marked-for-later', 'Marked for Later', list('marked-for-later').note],
+      ['read-works', 'Read works', list('read-works').note],
     ])
+    for (const tile of tiles())
+      assert.doesNotMatch(`${tile.name} ${tile.note}`, /tester/, tile.id)
     assert.deepEqual(PROFILE_LISTS.map(list => list.id), ['marked-for-later', 'read-works'])
   })
 })
@@ -142,10 +146,10 @@ describe('a tile with no copy', () => {
       assert.equal(tile.empty, 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.', tile.id)
   })
 
-  test('with no View on AO3, the reader\'s account not known, it names the page and the switch that keep one', () => {
+  test('with no View on AO3, the reader\'s account not known, it gives the list\'s own advice on keeping one', () => {
     const [mfl, rw] = none({ userId: undefined })
-    assert.equal(mfl.empty, 'None yet. Open your Marked for Later page on AO3, signed in, with Search your Marked for Later list on: a copy is kept from then on, and refreshes from here.')
-    assert.equal(rw.empty, 'None yet. Press Search read items on your History page on AO3, signed in, with Search the works you\'ve read on: a copy is kept from then on, and refreshes from here.')
+    assert.equal(mfl.empty, list('marked-for-later').empty)
+    assert.equal(rw.empty, list('read-works').empty)
   })
 
   test('has nothing to count or fetch', () => {
@@ -171,7 +175,7 @@ describe('a tile with no copy', () => {
 })
 
 describe('Read works with work marks off, when its view opens nothing', () => {
-  const NEEDS_MARKS = 'None yet. This list is made from your marks, so it needs Work marks on, under Reading.'
+  const NEEDS_MARKS = list('read-works').needs
   const none = (input = {}) => tiles({ copies: { 'marked-for-later': null, 'read-works': null }, settings: MARKS_OFF, ...input })
 
   test('has no View on AO3, with its copy or without, whether or not the reader\'s account is known', () => {
@@ -181,7 +185,7 @@ describe('Read works with work marks off, when its view opens nothing', () => {
     assert.equal(none({ userId: undefined })[1].view, null)
   })
 
-  test('with no copy, its note says the list needs Work marks on, whether or not the reader\'s account is known', () => {
+  test('with no copy, it gives the list\'s note on needing marks, whether or not the reader\'s account is known', () => {
     assert.equal(none()[1].empty, NEEDS_MARKS)
     assert.equal(none({ userId: undefined })[1].empty, NEEDS_MARKS)
   })

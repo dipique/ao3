@@ -52,14 +52,14 @@ OptionRowRulesContext.provide({
                 <li><Icon i-mdi-cancel op40 label="Disabled" title="Disabled" /> (Disabled): Temporarily stops a rule from applying without deleting it; set by untoggling the "enabled" button at the bottom of the rule dialog</li>
               </ul>
             </p>
-            
+
             <h2 py-1>
               Priority
             </h2>
             <p>
               Rules carry a priority from 0 to 9. When multiple rules apply that affect visibility, the highest priority decides whether it is hidden. "Always show" wins ties, then "Hide", then "Collapse".
             </p>
-            <br />
+            <br>
             <p>
               When works are hidden for reasons other than rules (like the crossover filter or items already marked as read), that "rule" is given a weight of 0 for the purposes of rule conflicts.
             </p>
