@@ -187,6 +187,9 @@ describe('options UI — the sync panel', { skip }, () => {
 
   after(() => session?.close())
 
+  /** How long these tests let the page wait for the background's build. */
+  const BUILD_CHECK_HURRIED_MS = 1500
+
   /**
    * The options page at Sync, its background answering from `replies`. The
    * time the page gives the background to say which build it runs is cut to
@@ -197,7 +200,7 @@ describe('options UI — the sync panel', { skip }, () => {
     seed,
     hash: '#sync',
     viewport,
-    hurry: { [BUILD_CHECK_TIMEOUT_MS]: 1500 },
+    hurry: { [BUILD_CHECK_TIMEOUT_MS]: BUILD_CHECK_HURRIED_MS },
     prepare: page => page.evaluateOnNewDocument(scriptBackground, replies),
   })
 
@@ -899,7 +902,13 @@ describe('options UI — the sync panel', { skip }, () => {
   test('a background that never answers is called out of date once the wait runs out', async () => {
     const options = await open({ 'sync.enabled': true }, { getBuildInfo: 'never' })
     try {
-      assert.equal(await options.page.$('[data-sync-stale]'), null, 'not before the wait is up')
+      // What shows before the wait is up can only be read off a page that
+      // opened inside it: on a busy machine the wait can run out while the page
+      // is still opening. The wait starts after the page does, so a page open
+      // for less than the wait can't have seen it run out.
+      const early = await options.page.evaluate(() => ({ stale: !!document.querySelector('[data-sync-stale]'), openFor: performance.now() }))
+      if (early.openFor < BUILD_CHECK_HURRIED_MS)
+        assert.equal(early.stale, false, 'not before the wait is up')
       await until('the background to be called out of date', () => options.page.$('[data-sync-stale]'))
       await assertCallout(options, '[data-sync-stale]', 'destructive', /Sync may not work until then\.$/)
     }
