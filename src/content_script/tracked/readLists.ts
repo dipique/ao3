@@ -1,7 +1,7 @@
 import type { Day, NextRead, PageRead, PassState, TrackedList } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
-import { applyPage, dayOf, excludedTagNames, getArchiveLink, nextRead, PAGE_SIZE, pageUrl, recordFor, storedRecordOf, toShortId, unpackRows, utcToday } from '#common'
+import { applyPage, dayOf, excludedTagNames, getArchiveLink, nextRead, PAGE_SIZE, pageUrl, pruneReviewed, recordFor, storedRecordOf, toShortId, unpackRows, utcToday } from '#common'
 import { archiveWaitRemaining, onArchiveWait, waitForArchive } from '#content_script/archiveFetch.js'
 import { storeWorks } from '#content_script/searchView/blurbStore.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
@@ -213,14 +213,17 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
           continue
         }
         refusedRounds = 0
-        // Another page may have taken reviewed days off the record since this
-        // run read it (Mark reviewed); then the stored one is the one to add
-        // to. One that no longer covers the window as it stands now (the
-        // watermark went back) is what this run is reading again, and isn't.
+        // The reader may have marked days reviewed since this run began, and
+        // another page may have taken them off the stored record: the stored
+        // one is the one to add to, and the reviewed days stay off. One that
+        // no longer covers the window as it stands now (the watermark went
+        // back) is what this run is reading again, and isn't.
+        const start = await (opts.currentStart?.() ?? opts.start)
         const raw = (await readStoredRecords([state.listId])).get(state.listId)
         const stored = storedRecordOf(state.list, raw)
-        if (stored && stored.from > state.record.from && recordFor(state.list, raw, await (opts.currentStart?.() ?? opts.start)) === stored)
+        if (stored && stored.from > state.record.from && recordFor(state.list, raw, start) === stored)
           state.record = stored
+        state.record = pruneReviewed(state.record, start - 1).record
         const record = applyPage(state.record, read.page, { readDay: utcToday(), scanned: state.scanned, at: Date.now() })
         // Blurbs first, record second, so a record never names a blurb that
         // isn't there; and only the blurbs of works the record keeps.

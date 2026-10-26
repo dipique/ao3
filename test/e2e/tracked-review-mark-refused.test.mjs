@@ -116,11 +116,12 @@ describe('tracked review: while the archive refuses', { skip }, () => {
     assert.deepEqual(await shownIds(), ids(since + 2, since + 3))
   })
 
-  test('a refusal too long to wait out stops the reading; the review stays as it is, and still says what it is missing', async () => {
+  test('a refusal too long to wait out stops the reading; the review stays as it is, and says what it is missing and how to try again', async () => {
     await open(7200)
     await tab.waitForFunction(() => !document.querySelector('.AO3E--search-view--updating-on'), { timeout: 15_000 })
     assert.deepEqual(await shownIds(), ids(since, since + 1))
-    assert.ok((await status()).startsWith('Still reading 1 of 2 lists for '))
+    await tab.waitForFunction(() => document.querySelector('.AO3E--tracked-review--bar--status')?.textContent?.startsWith('Not yet read: 1 of 2 lists for '), { timeout: 15_000 })
+    assert.match(await status(), /Refresh to try again\.$/)
     await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
     assert.equal(await watermark(), since + 1)
   })

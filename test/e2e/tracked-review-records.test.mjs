@@ -227,4 +227,61 @@ describe('tracked review: from the records', { skip }, () => {
       await follower.tab.close()
     }
   })
+
+  test('a list read later that ends the window earlier collapses the works past its end, and Mark reviewed brings them back', async () => {
+    resetWorkIds(12000)
+    const start = TODAY - 6
+    // Alpha, read first, puts two works on each day; Beta, read after, puts
+    // thirty on the first, which ends the window there. Beta's second page is
+    // held back, so the window is still being read when Beta's first lands.
+    const alpha = listing('alpha', Array.from({ length: 6 }, (_, i) => [start + i, 2]), { entry: { alias: 'Alpha', since: start } })
+    const beta = listing('beta', [[start, 30]], { entry: { alias: 'Beta', since: start } })
+    const lists = [alpha, beta]
+    const store = { ...seed, 'option.trackedLists': trackedOption(lists, { target: 10, reviewedThrough: start - 1 }) }
+    const { tab, release } = await open({ store, lists, hold: url => url.pathname.includes('/beta/') && url.searchParams.get('page') === '2' })
+    const collapsed = () => tab.evaluate(() => [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
+      .filter(li => li.textContent.includes('Moved to a later review'))
+      .map(li => li.id.replace('work_', '')))
+    try {
+      await load(tab)
+      const later = alpha.works.filter(work => work.filed > start).slice(0, 8).map(work => work.id)
+      await tab.waitForFunction(count => [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
+        .filter(li => li.textContent.includes('Moved to a later review'))
+        .length === count, {}, later.length)
+      assert.deepEqual((await collapsed()).sort(), later.sort(), 'Alpha’s works past the new end hold their slots')
+      assert.ok((await status(tab)).startsWith('Still reading 1 of 2 lists for '))
+
+      release()
+      await reviewDrawn(tab)
+      await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
+      await reviewDrawn(tab)
+      const shown = await shownIds(tab)
+      assert.ok(later.slice(0, 2).every(id => shown.includes(id)), 'the next window holds them')
+      assert.deepEqual(await collapsed(), [])
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  test('a window with nothing in it stays open while it is read, and closes with the empty range’s offer once it is', async () => {
+    resetWorkIds(12500)
+    const quiet = listing('quiet', [[TODAY, 3]], { entry: { alias: 'Quiet', since: TODAY - 3 } })
+    const lists = [quiet]
+    const store = { ...seed, 'option.trackedLists': trackedOption(lists, { target: 10, reviewedThrough: TODAY - 4 }) }
+    const { tab, release } = await open({ store, lists, hold: url => url.pathname.includes('/quiet/') })
+    try {
+      await load(tab)
+      await tab.waitForFunction(() => (document.querySelector('.AO3E--tracked-review--bar--status')?.textContent ?? '').startsWith('Still reading'))
+      assert.ok(await tab.$('.AO3E--search-host.AO3E--tracked-review'), 'the view is up, empty, while the list is read')
+
+      release()
+      await tab.waitForFunction(() => !document.querySelector('.AO3E--search-host'))
+      await tab.waitForFunction(() => [...document.querySelectorAll('body > div')]
+        .some(el => [...el.shadowRoot?.querySelectorAll('.toast button.action') ?? []].some(button => button.textContent.trim() === 'Mark reviewed')))
+    }
+    finally {
+      await tab.close()
+    }
+  })
 })

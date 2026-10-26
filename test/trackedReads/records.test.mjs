@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { dayOf } from '../../src/common/trackedLists.ts'
-import { applyPage, nextRead, packRows, pruneReviewed, readQuery, readSummary, recordFor, unpackRows } from '../../src/common/trackedReads.ts'
+import { applyPage, nextRead, packRows, pruneReviewed, readQuery, readSummary, recordFor, recordsBehind, unpackRows } from '../../src/common/trackedReads.ts'
 
 const TODAY = dayOf('20 Sep 2026')
 const START = dayOf('10 Sep 2026')
@@ -326,5 +326,25 @@ describe('readSummary', () => {
       ['b', record(lists[1])],
     ])
     assert.deepEqual(readSummary(lists, records), { through: null, behind: ['a', 'b'] })
+  })
+})
+
+describe('recordsBehind', () => {
+  const read = (entry, through, readAt) => ({ ...record(entry), through, readAt })
+
+  test('records read through yesterday today want nothing', () => {
+    const lists = [list('a'), list('b')]
+    assert.equal(recordsBehind(new Map([['a', read(lists[0], TODAY - 1, AT)], ['b', read(lists[1], TODAY - 1, AT)]]), lists, TODAY), false)
+  })
+
+  test('a list with no record, one short of yesterday, or one not written today wants reading', () => {
+    const a = list('a')
+    assert.equal(recordsBehind(new Map(), [a], TODAY), true)
+    assert.equal(recordsBehind(new Map([['a', read(a, TODAY - 2, AT)]]), [a], TODAY), true)
+    assert.equal(recordsBehind(new Map([['a', read(a, TODAY - 1, AT - 86_400_000)]]), [a], TODAY), true)
+  })
+
+  test('a list that isn’t tracked wants nothing', () => {
+    assert.equal(recordsBehind(new Map(), [list('a', { tracked: false })], TODAY), false)
   })
 })

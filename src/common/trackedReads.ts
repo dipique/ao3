@@ -579,6 +579,19 @@ export function formatRange(start: Day, end: Day): string {
   return `${sameYear ? from.slice(0, -5) : from} – ${to}`
 }
 
+/**
+ * Whether the records want reading: a tracked list's is missing, short of
+ * yesterday, or wasn't written today (which is what reads today's tail).
+ */
+export function recordsBehind(records: ReadonlyMap<string, TrackedRead>, lists: readonly TrackedList[], today: Day): boolean {
+  return lists.some((list) => {
+    if (!list.tracked)
+      return false
+    const record = records.get(list.id)
+    return !record || record.through < today - 1 || Math.floor(record.readAt / 86_400_000) < today
+  })
+}
+
 /** What the review's status line is told. */
 export interface ReviewStatusInput {
   window: Pick<ComputedWindow, 'start' | 'end' | 'complete' | 'pending' | 'failed'>
@@ -588,6 +601,8 @@ export interface ReviewStatusInput {
   wait: string | null
   /** Another page is reading the records, and this one follows what it writes. */
   elsewhere: boolean
+  /** The last reading here stopped because AO3 kept refusing, with lists still unread. */
+  stopped: boolean
   /** When the records were last written, as the reader reads a time; null when none has been. */
   readAt: string | null
 }
@@ -620,12 +635,11 @@ export function reviewStatus(input: ReviewStatusInput): ReviewStatus {
   }
   if (window.pending.length) {
     const total = window.complete.length + window.pending.length
+    const lists = `${window.pending.length} of ${total} ${total === 1 ? 'list' : 'lists'} for ${formatRange(window.start, window.end)}`
+    if (input.stopped && !input.wait && !input.elsewhere)
+      return { kind: 'pending', text: `Not yet read: ${lists} — AO3 asked us to slow down. Refresh to try again.`, lists: named(window.pending) }
     const where = input.wait ? ` — ${input.wait}` : input.elsewhere ? ', in another tab' : ''
-    return {
-      kind: 'pending',
-      text: `Still reading ${window.pending.length} of ${total} ${total === 1 ? 'list' : 'lists'} for ${formatRange(window.start, window.end)}${where}`,
-      lists: named(window.pending),
-    }
+    return { kind: 'pending', text: `Still reading ${lists}${where}`, lists: named(window.pending) }
   }
   return { kind: 'current', text: input.readAt ? `Up to date as of ${input.readAt}` : 'Up to date', lists: [] }
 }

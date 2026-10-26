@@ -13,6 +13,7 @@ function status(window, over = {}) {
     labels,
     wait: null,
     elsewhere: false,
+    stopped: false,
     readAt: '14:02',
     ...over,
   })
@@ -43,6 +44,14 @@ describe('reviewStatus', () => {
     const window = { complete: ['a'], pending: ['b'] }
     assert.equal(status(window, { wait: 'AO3 asked us to slow down — trying again in 1:05' }).text, 'Still reading 1 of 2 lists for 30 Sep – 02 Oct 2026 — AO3 asked us to slow down — trying again in 1:05')
     assert.equal(status(window, { elsewhere: true }).text, 'Still reading 1 of 2 lists for 30 Sep – 02 Oct 2026, in another tab')
+  })
+
+  test('a reading that stopped for AO3 says the lists are not yet read, and how to try again', () => {
+    assert.deepEqual(status({ complete: ['a'], pending: ['b'] }, { stopped: true }), {
+      kind: 'pending',
+      text: 'Not yet read: 1 of 2 lists for 30 Sep – 02 Oct 2026 — AO3 asked us to slow down. Refresh to try again.',
+      lists: ['Beta'],
+    })
   })
 
   test('a list that failed outranks one still being read', () => {

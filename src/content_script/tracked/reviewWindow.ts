@@ -1,4 +1,4 @@
-import type { ComputedWindow, Day, Options, TrackedList, TrackedListsOption, TrackedRead } from '#common'
+import type { ComputedWindow, Day, Options, TrackedListsOption, TrackedRead } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { FilterState } from '#content_script/searchView/engine.ts'
 
@@ -7,7 +7,7 @@ import { recordRuleTiming } from '#content_script/ruleTiming.ts'
 import { readRecords, rewriteStale, worksFromRecords } from '#content_script/searchView/blurbStore.ts'
 import { matches } from '#content_script/searchView/engine.ts'
 import { applyHidden } from '#content_script/searchView/hidden.ts'
-import { readStoredRecords, writeReadRecords } from '#content_script/tracked/readStore.ts'
+import { readStoredRecords } from '#content_script/tracked/readStore.ts'
 import { filterStateOf } from '#content_script/tracked/viewFilter.ts'
 
 /**
@@ -36,7 +36,7 @@ export interface ReviewWindow {
   works: Work[]
   /** Each tracked list's record as the window was computed from it. */
   records: Map<string, TrackedRead>
-  /** Short ids of works the records no longer hold: rows on days now reviewed. */
+  /** Short ids of works on days now reviewed, which the window no longer takes from the records. */
   pruned: string[]
   /** Works in the records on days after the window: what is still to review, roughly. */
   later: number
@@ -46,7 +46,10 @@ export interface ReviewWindow {
  * Compute the review window `option` asks for from the records as stored.
  *
  * Records still holding days the watermark has passed — it moved on another
- * device, or here before the reader got to it — are pruned, and written back.
+ * device, or here while a list was being read — are pruned for the window
+ * only. Writing a record is the reading's: a prune written beside it could put
+ * back a record from before the page it just added, so the reader prunes as it
+ * goes ({@link file://./readLists.ts}).
  *
  * Blurbs are loaded only for the days the window is sized over: a pass counts
  * every work it hasn't loaded as wanted and counting, which can only end the
@@ -62,18 +65,12 @@ export async function computeWindow(request: WindowRequest): Promise<ReviewWindo
 
   const stored = await readStoredRecords(lists.map(list => list.id))
   const records = new Map<string, TrackedRead>()
-  const prunedWrites = new Map<string, TrackedRead>()
   const pruned: string[] = []
   for (const list of lists) {
-    const record = recordFor(list, stored.get(list.id), start)
-    const after = pruneReviewed(record, start - 1)
-    if (after.record !== record && stored.has(list.id)) {
-      prunedWrites.set(list.id, after.record)
-      pruned.push(...after.dropped)
-    }
+    const after = pruneReviewed(recordFor(list, stored.get(list.id), start), start - 1)
+    pruned.push(...after.dropped)
     records.set(list.id, after.record)
   }
-  await writeReadRecords(prunedWrites)
 
   const wants = new Map<string, FilterState | null>(lists.map(list => [list.id, filterStateOf(list.filter)]))
   const missing = new Set<string>()
@@ -152,15 +149,4 @@ async function loadWorks(sids: string[], works: Map<string, Work>, missing: Set<
       missing.add(sid)
   }
   applyHidden(found, options, { timed: recordRuleTiming })
-}
-
-/** Whether the reader should read: a list's record is short of yesterday, or wasn't read today. */
-export function recordsBehind(records: ReadonlyMap<string, TrackedRead>, lists: readonly TrackedList[], now: number = Date.now()): boolean {
-  const today = utcToday(now)
-  return lists.some((list) => {
-    if (!list.tracked)
-      return false
-    const record = records.get(list.id)
-    return !record || record.through < today - 1 || utcToday(record.readAt) < today
-  })
 }

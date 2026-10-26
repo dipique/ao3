@@ -782,7 +782,7 @@ function takeClaimed(source: SearchSource, opts: OpenOptions): Reopen | null {
  * everything the last view and its decorations did to their blurbs taken off, as
  * a stored copy's would be. The new view decorates them under today's options.
  */
-function undecorated(works: Work[]): Work[] {
+export function undecorated(works: Work[]): Work[] {
   // A work whose node was never built was never decorated either.
   for (const work of works) {
     if (hasNode(work))
