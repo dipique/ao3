@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { unpackIds } from '../../src/common/workMarks.ts'
 import { WAIT_BUDGET } from '../../src/content_script/archiveFetch.ts'
 import { ensureBuilt, findChrome, installMock, storedListIds, storedLists } from './helpers.mjs'
 import { archiveTab, blurb, DESCRIPTOR, HOUR, KEY, liveTitles, loadToRead, shownTitles, storedClaim, TO_READ, toReadPage, updatingNote } from './markedForLater.mjs'
@@ -230,6 +231,8 @@ describe('a refresh shows its works as they come', { skip }, () => {
       assert.deepEqual(storedListIds(list), ['9', '1', '2', '3', '4', '5', '6'], 'page 1 as read, then the stored works it lacks')
       assert.equal(list.scrapedAt, scrapedAt, 'and dated as the copy it was read over, so the next open reads the list again')
       assert.deepEqual((await shownTitles(tab)).slice(0, 3), ['New work 9', 'Live work 1', 'Stored work 2'])
+      const index = await tab.evaluate(async () => (await window.browser.storage.local.get('cache.markedForLater'))['cache.markedForLater'])
+      assert.deepEqual([...unpackIds(index.ids)].sort(), ['1', '2', '3', '4', '5', '6', '9'], 'the saved-work index is written from the same merge')
     }
     finally {
       await tab.close()

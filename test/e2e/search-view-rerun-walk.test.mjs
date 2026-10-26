@@ -112,13 +112,18 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
    * page of any list held back until `release()`: a walk of it stands half
    * done, its first page in hand.
    */
-  async function heldListing(seed, pages = listing) {
+  async function heldListing(seed, pages = listing, { holdFirst = false } = {}) {
     const requests = []
     const held = Promise.withResolvers()
+    const first = Promise.withResolvers()
+    if (!holdFirst)
+      first.resolve()
     const failed = []
     const tab = await openTab(browser, {
       seed,
       route: async (url) => {
+        if (url.searchParams.get('page') === '1')
+          await first.promise
         if (url.searchParams.get('page') === '2')
           await held.promise
         return pages(url)
@@ -126,7 +131,7 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
       requests,
     })
     tab.on('requestfailed', req => failed.push(req.url()))
-    return { tab, requests, failed, release: () => held.resolve() }
+    return { tab, requests, failed, release: () => held.resolve(), releaseFirst: () => first.resolve() }
   }
 
   /**
@@ -162,6 +167,36 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
       assert.deepEqual(storedListIds((await stored(tab, 'cache.searchLists'))?.[KEY]), IDS)
     }
     finally {
+      page.release()
+      await tab.close()
+    }
+  })
+
+  test('a re-run before its first page is in carries the walk on, and the view goes up on that page all the same', async () => {
+    const page = await heldListing(ON, listing, { holdFirst: true })
+    const { tab, requests } = page
+    try {
+      await visit(tab, LISTING)
+      await tab.click(BUTTON)
+      await until('the walk to ask for both pages', () => walks(requests).length === 2)
+      await until('the progress to be up', async () => await progressText(tab) === 'Loaded 0 of 2 pages…')
+
+      await writeOption(tab, 'searchPerPage', 25)
+      await until('the progress to be back', async () => await progressText(tab) === 'Loaded 0 of 2 pages…')
+
+      page.releaseFirst()
+      await until('the first page to be on screen', async () => await walkNote(tab) === 'Loaded 1 of 2 pages…')
+      assert.deepEqual(await shownIds(tab), IDS.slice(0, PER_PAGE))
+      assert.equal(await tab.$(PROGRESS), null)
+
+      page.release()
+      await until('the walk to end', async () => await walkNote(tab) === null)
+      assert.deepEqual(await shownIds(tab), IDS.slice(0, 25))
+      assert.deepEqual(walks(requests), EVERY_PAGE_ONCE)
+      assert.deepEqual(storedListIds((await stored(tab, 'cache.searchLists'))?.[KEY]), IDS)
+    }
+    finally {
+      page.releaseFirst()
       page.release()
       await tab.close()
     }

@@ -527,6 +527,8 @@ let shared: SharedRefresh | null = null
  */
 interface LoadJob {
   readonly cacheKey: string
+  /** A refresh of a stored list, or the rest of a first walk. */
+  readonly kind: 'refresh' | 'walk'
   readonly controller: AbortController
   /** The source and options of the open the job last fed: a reopen brings its own, which the rest of the load answers to. */
   source: SearchSource
@@ -539,12 +541,14 @@ interface LoadJob {
   draw: () => void
   /**
    * The works it last gave its view, or would have, with no view attached, and
-   * when they were fetched: what a view put back shows when it carries nothing
-   * newer. Null until it has any.
+   * when they were fetched: what a view put back shows when it carries no works
+   * of its own. Null until it has any.
    */
   latest: { works: Work[], at: number } | null
   /** It finished while no view was attached: {@link latest} is its result, for the view put back to show. */
   ended: boolean
+  /** Works the reader has taken off the view while it runs, which what it shows of the stored list leaves out. */
+  readonly removed: Set<string>
 }
 
 /** The {@link LoadJob}s under way, by list. */
@@ -588,7 +592,7 @@ function feed(job: LoadJob, works: Work[]): void {
 
 /** Give a first walk's view the listing as far as it has landed, chosen and capped as the whole will be. */
 function feedWalk(job: LoadJob, listing: Work[], limit: number): void {
-  feed(job, applyLimit(renumber(selected(job.source, listing)), limit))
+  feed(job, applyLimit(renumber(selected(job.source, listing)), Math.min(limit, limitFor(job.options))))
 }
 
 /**
@@ -1337,13 +1341,15 @@ async function reload(job: LoadJob, full: boolean, force: boolean): Promise<void
 }
 
 /**
- * Re-scrape in the background and feed the result into the live view + cache.
- * With `topUp`, only look for what the stored works lack, and add it to them.
+ * Re-scrape in the background and feed the result into the live view + cache,
+ * the pages read so far going on screen as they land. With `topUp`, only look
+ * for what the stored works lack, and add it to them.
  *
- * `force` says the reader pressed Refresh. It only matters to a view holding
- * its page layout, which otherwise offers a reload rather than swapping it in —
- * right for one that arrives on its own, and wrong for the button the reader is
- * waiting on, which would answer them with a second thing to click.
+ * `force` says the reader pressed Refresh. It only matters to a source's own
+ * load ({@link reload}) for a view holding its page layout, which otherwise
+ * offers a reload rather than swapping it in — right for one that arrives on
+ * its own, and wrong for the button the reader is waiting on, which would
+ * answer them with a second thing to click.
  */
 async function refresh(
   source: SearchSource,
@@ -1353,6 +1359,9 @@ async function refresh(
   force = false,
 ): Promise<void> {
   const previous = jobs.get(source.cacheKey)
+  // A first walk still under way is already reading the whole list.
+  if (previous?.kind === 'walk')
+    return
   if (previous)
     stopJob(previous)
   const own = new AbortController()
@@ -1361,6 +1370,7 @@ async function refresh(
   let line: string | null = null
   const job: LoadJob = {
     cacheKey: source.cacheKey,
+    kind: 'refresh',
     controller: own,
     source,
     options,
@@ -1377,6 +1387,7 @@ async function refresh(
     },
     latest: null,
     ended: false,
+    removed: new Set(),
   }
   jobs.set(source.cacheKey, job)
   const current = (): boolean => jobs.get(source.cacheKey) === job
@@ -1438,8 +1449,11 @@ async function refresh(
     // What is on screen as the refresh begins, and when it was read: each page
     // of the listing read so far goes in front of it, in place of the stored
     // copies of the works it holds, and the rest stay as they were.
-    const stored = topUp ? topUp.stored : view.getWorks()
+    // A work the reader takes off the view meanwhile stays off it.
+    const began = topUp ? topUp.stored : view.getWorks()
+    const stored = (): Work[] => began.filter(work => !job.removed.has(work.workId))
     const storedAt = active?.view === view ? active.scrapedAt : Date.now()
+    job.latest = { works: began, at: storedAt }
     /** The listing read so far over the stored works, as the view has it, and as the source's side records would. */
     let merged = null as { works: Work[], listing: Work[] } | null
     const result = await scrapeListing({
@@ -1452,9 +1466,13 @@ async function refresh(
       onProgress: job.hold ? job.hold.progress : undefined,
       onPartial: (listing) => {
         const found = topUp ? topUp.plan.select(listing) : selected(job.source, listing)
-        const works = applyLimit(renumber(belonging(job.source, mergeRefresh(found, stored))), limitFor(job.options))
-        merged = { works, listing: mergeRefresh(listing, stored) }
-        putBack ??= () => feed(job, applyLimit(renumber(belonging(job.source, [...stored])), limitFor(job.options)))
+        const works = applyLimit(renumber(belonging(job.source, mergeRefresh(found, stored()))), limitFor(job.options))
+        merged = { works, listing: mergeRefresh(listing, stored()) }
+        putBack ??= () => {
+          const works = applyLimit(renumber(belonging(job.source, stored())), limitFor(job.options))
+          feed(job, works)
+          job.latest = { works, at: storedAt }
+        }
         feed(job, works)
       },
     })
@@ -1532,9 +1550,14 @@ async function refresh(
     // A newer refresh has the note now, or the view has gone with the page's.
     // What landed with no view to show it on waits for the view put back.
     if (current()) {
+      if (putBack) {
+        putBack()
+        // For the view put back, which carries the works this refresh showed.
+        if (!job.view)
+          job.ended = true
+      }
       if (!job.ended)
         jobs.delete(source.cacheKey)
-      putBack?.()
       job.view?.setUpdating(false)
     }
   }
@@ -1720,7 +1743,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         void savePrefs(source.id, next).catch(err => log.error('Failed to save search-view prefs', err))
       },
       // Fires when a work is taken out of the view; keep the snapshot in step.
-      onWorkRemoved: work => takeOff(source, [work]),
+      onWorkRemoved: (work) => {
+        jobs.get(source.cacheKey)?.removed.add(work.workId)
+        takeOff(source, [work])
+      },
     }
     const handlers = {
       onBack: source.replacesListing ? undefined : () => closeSearchView(),
@@ -1835,7 +1861,9 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         // Render instantly, then refresh in the background (unless the caller
         // knows the works are fresh, e.g. a reopen right after a re-run).
         const view = show(stored, cached.scrapedAt)
-        followShared(source, view, options, Date.now())
+        // A first walk's view follows the list's refresh once the walk is done.
+        if (jobs.get(source.cacheKey)?.kind !== 'walk')
+          followShared(source, view, options, Date.now())
         // Taking the old view down can shorten the page for as long as a layout
         // lasts, and a shorter page pulls the scroll position up with it.
         if (carried && window.scrollY !== carried.scrollY)
@@ -1864,8 +1892,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         return
       }
 
-      // No cache: walk the listing behind a progress bar before showing the
-      // view. Its controller is registered before the count and the gate so a
+      // No cache: walk the listing behind a progress bar until there is
+      // something to show. Its controller is registered before the count and the gate so a
       // "Back", or a re-run's stop, which aborts the live controller, releases
       // either of them rather than leaving one running behind a page that has
       // moved on. A load of the list under way whose works have all stopped
@@ -1873,7 +1901,8 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       const running = jobs.get(source.cacheKey)
       if (running) {
         const view = show([], running.latest?.at ?? Date.now())
-        followShared(source, view, options, Date.now())
+        if (running.kind !== 'walk')
+          followShared(source, view, options, Date.now())
         adopt(running, view)
         return
       }
@@ -1897,6 +1926,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       const view = show(works, now)
       const job: LoadJob = {
         cacheKey: source.cacheKey,
+        kind: 'walk',
         controller: walked.controller,
         source,
         options,
@@ -1906,6 +1936,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         draw: () => job.view?.setUpdating(true, { text: walked.progress.text(), onStop: () => closeSearchView() }),
         latest: { works, at: now },
         ended: false,
+        removed: new Set(),
       }
       jobs.set(source.cacheKey, job)
       walked.job = job
