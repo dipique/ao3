@@ -266,7 +266,11 @@ export interface SearchSource {
 
 /** What the host tells a {@link SearchSource.load} about the load it wants. */
 export interface LoadOptions {
-  /** Aborted when the view is replaced, closed, or refreshed again. */
+  /**
+   * Aborted when the view is closed, another list is opened in its place, or
+   * the list is refreshed again. A global re-run that takes the view down and
+   * puts it back leaves it going.
+   */
   signal: AbortSignal
   /**
    * Say what is being done and how far along it is. The text is the whole
@@ -1219,17 +1223,21 @@ async function refresh(
       },
       onChange: () => job.draw(),
     })
+    // A re-run may have put another view in this one's place while the claim
+    // was being made: what is known of the refresh is that view's now.
+    const sharing = sharedOf(job)
     if (acquired.kind === 'follow' || own.signal.aborted) {
       if (acquired.kind === 'hold')
         await acquired.hold.release('dropped')
-      else if (!own.signal.aborted)
-        share.waiting = { force }
+      else if (!own.signal.aborted && sharing)
+        sharing.waiting = { force }
       if (current())
         jobs.delete(source.cacheKey)
       return
     }
     job.hold = acquired.hold
-    share.hold = job.hold
+    if (sharing)
+      sharing.hold = job.hold
   }
   /** How the refresh ended, for a page following it; a refresh stopped short of any end was dropped. */
   let outcome: RefreshOutcome = 'dropped'
@@ -1278,7 +1286,9 @@ async function refresh(
     const completed = await complete(job.source, kept, { signal: own.signal, full: !topUp })
     if (own.signal.aborted)
       return
-    const works = applyLimit(renumber(completed.works), budget.limit)
+    // The ceiling as the view now on screen was opened with: a re-run may have
+    // brought a new one.
+    const works = applyLimit(renumber(completed.works), limitFor(job.options))
     // The same refusal the options-page refresh makes — see `NotWritten` in
     // {@link file://./refresh.ts} for the reasoning and for why it is the
     // *listing* being empty that counts, not the finished list. Writing an
@@ -1563,10 +1573,12 @@ export async function openSearchView(source: SearchSource, options: Options, opt
     // a walk is never started twice, and its works don't wait on the copy.
     if (!opening.walk) {
       // A load that finished while a re-run had the view down has newer works
-      // than the view it took down carried.
+      // than the view it took down carried. This open is what it waited for.
       const landed = jobs.get(source.cacheKey)?.landed
-      if (landed)
+      if (landed) {
+        jobs.delete(source.cacheKey)
         fresh = true
+      }
       const cached = landed
         ? { works: landed.works, scrapedAt: landed.at, missing: 0, descriptor: source.descriptor() }
         : carried && reusingWorks
@@ -1613,11 +1625,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         if (job) {
           const since = job.landed
           attach(job, source, view, options)
+          // Landed while the stored copy was being read.
           if (since) {
             jobs.delete(source.cacheKey)
-            // Landed while the stored copy was being read.
-            if (since !== landed)
-              land(job, applyLimit(selected(source, since.works), limitFor(options)), true)
+            land(job, applyLimit(selected(source, since.works), limitFor(options)), true)
           }
           return
         }
@@ -1640,7 +1651,11 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       // view. Its controller is registered before the count and the gate so a
       // "Back", or a re-run's stop, which aborts the live controller, releases
       // either of them rather than leaving one running behind a page that has
-      // moved on.
+      // moved on. A load of the list left over from a view that showed no
+      // works is no use to the walk.
+      const stray = jobs.get(source.cacheKey)
+      if (stray)
+        stopJob(stray)
       opening.walk = startWalk(source, options, container)
       controller = opening.walk.controller
     }

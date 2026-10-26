@@ -129,6 +129,7 @@ describe('a kept copy written back while the read behind it is unfinished', { sk
         await rerun(tab, () => tab.evaluate(value => window.browser.storage.local.set({ 'option.workMarks': value }), { enabled: true, marks }))
         // Put back with the read behind it still held, and still going.
         await tab.waitForSelector(RESULTS)
+        assert.ok(await tab.$('.AO3E--search-view--updating-on'), 'the read goes on behind the view put back')
       },
     },
   ]
