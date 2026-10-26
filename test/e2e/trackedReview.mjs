@@ -188,6 +188,22 @@ export function dayOfIso(iso) {
   return iso ? Math.floor(Date.parse(`${iso}T00:00:00Z`) / MS_PER_DAY) : null
 }
 
+/**
+ * The list requests {@link archiveRoutes} collected in `fetched`, as what each
+ * asked for: which fixture (its key), from which day (null for none) and which
+ * page — so a test can count requests per list and day.
+ */
+export function readsOf(fetched) {
+  return fetched.map((path) => {
+    const url = new URL(path, 'https://archiveofourown.org')
+    return {
+      list: keyOf(url),
+      from: dayOfIso(url.searchParams.get('work_search[date_from]')),
+      page: Number(url.searchParams.get('page') || '1'),
+    }
+  })
+}
+
 /** One listing page, rendered as the kind of page that query would be served from. */
 function listingPage(list, url) {
   const page = Number(url.searchParams.get('page') || '1')

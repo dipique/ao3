@@ -1,6 +1,7 @@
 import type { Day, TrackedList } from './trackedLists.ts'
 
-import { excludedTagNames, wholeNumber } from './trackedLists.ts'
+import { claimLive } from './claim.ts'
+import { CLAIM_TTL_MS, excludedTagNames, wholeNumber } from './trackedLists.ts'
 import { fromShortId } from './workId.ts'
 
 /**
@@ -518,4 +519,36 @@ export function recordedWorkIds(records: Iterable<unknown>): Set<string> {
     }
   }
   return ids
+}
+
+/**
+ * A page's word that it is reading the tracked lists: one reader across the
+ * browser. Every review tab and the options page would otherwise ask the
+ * archive for the same pages against a rate limit they share; the records
+ * land the same way whoever reads them, so the rest watch the records instead.
+ *
+ * The holder renews it every {@link CLAIM_RENEW_MS}. One left unrenewed for
+ * {@link CLAIM_TTL_MS} is a page that went away mid-read, and holds nobody.
+ */
+export interface ReadClaim {
+  /** The page run reading: a token of its own, made when it loaded. */
+  by: string
+  /** Epoch ms the claim was made or last renewed; 0 once it is withdrawn. */
+  at: number
+}
+
+/** A claim by page run `by` at `now`. */
+export function readClaim(by: string, now: number): ReadClaim {
+  return { by, at: now }
+}
+
+/**
+ * Who holds the read claim as page run `self` sees it at `now`: `free` when
+ * nobody does (never claimed, withdrawn, or left to lapse), `self` when this
+ * page run does, `other` while another page run's claim is live.
+ */
+export function claimHolder(claim: Partial<ReadClaim> | null | undefined, self: string, now: number): 'free' | 'self' | 'other' {
+  if (!claim || !claimLive(claim.at, now, CLAIM_TTL_MS))
+    return 'free'
+  return claim.by === self ? 'self' : 'other'
 }
