@@ -25,6 +25,10 @@ export async function readClaimHolder(self: string): Promise<'free' | 'self' | '
  * Null when another page's claim is live, or when one written at the same
  * moment won: the claim is read back after it is written, and the later write
  * is the one that holds.
+ *
+ * A renewal that finds the claim lapsed takes it again: a tab in the
+ * background has its timers slowed, and can renew late without anyone else
+ * having wanted the claim. Only another page holding it means it is lost.
  */
 export async function claimReads(self: string): Promise<HeldClaim | null> {
   if (await readClaimHolder(self) === 'other')
@@ -34,30 +38,50 @@ export async function claimReads(self: string): Promise<HeldClaim | null> {
     return null
 
   const lost = new AbortController()
-  const renew = setInterval(() => {
-    void (async () => {
-      if (await readClaimHolder(self) === 'self')
-        await cache.set({ trackedReadClaim: readClaim(self, Date.now()) })
-      else
-        lost.abort()
-    })().catch(err => console.error('[tracked] could not renew the read claim', err))
-  }, CLAIM_RENEW_MS)
+  let released = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const check = async (): Promise<void> => {
+    if (released || lost.signal.aborted)
+      return
+    if (await readClaimHolder(self) === 'other')
+      lost.abort()
+    else if (!released)
+      await cache.set({ trackedReadClaim: readClaim(self, Date.now()) })
+  }
+  const renew = (): void => {
+    timer = setTimeout(() => {
+      void check()
+        .catch(err => console.error('[tracked] could not renew the read claim', err))
+        .finally(() => {
+          if (!released && !lost.signal.aborted)
+            renew()
+        })
+    }, CLAIM_RENEW_MS)
+  }
+  renew()
+
   const listener = (change: { trackedReadClaim?: unknown }): void => {
     const claim = change.trackedReadClaim as { by?: unknown } | undefined
-    if (claim && claim.by !== self)
-      lost.abort()
+    if (!claim || claim.by === self || released)
+      return
+    void readClaimHolder(self).then((holder) => {
+      if (holder === 'other')
+        lost.abort()
+    }).catch(() => {})
   }
   cache.addListener(listener)
-  lost.signal.addEventListener('abort', () => {
-    clearInterval(renew)
+  const stop = (): void => {
+    clearTimeout(timer)
     cache.removeListener(listener)
-  })
+  }
+  lost.signal.addEventListener('abort', stop)
 
   return {
     lost: lost.signal,
     release: async () => {
-      clearInterval(renew)
-      cache.removeListener(listener)
+      released = true
+      stop()
       try {
         const claim = await cache.get('trackedReadClaim')
         if (claim.by === self && claim.at > 0)

@@ -1,4 +1,4 @@
-import { READ_RECORD_PREFIX, readRecordKey, recordedWorkIds } from '#common'
+import { isContextInvalidatedError, isExtensionContextValid, READ_RECORD_PREFIX, readRecordKey, recordedWorkIds } from '#common'
 import { localGet, localRemove, localSet } from '#content_script/searchView/blurbStore.ts'
 
 /**
@@ -67,6 +67,21 @@ export function onReadRecordsChanged(listener: (changed: Map<string, unknown>) =
     if (changed.size)
       listener(changed)
   }
-  browser.storage.onChanged.addListener(handle)
-  return () => browser.storage.onChanged.removeListener(handle)
+  // A page the extension was reloaded under has no storage to hear.
+  if (!isExtensionContextValid())
+    return () => {}
+  try {
+    browser.storage.onChanged.addListener(handle)
+  }
+  catch (error) {
+    if (isContextInvalidatedError(error))
+      return () => {}
+    throw error
+  }
+  return () => {
+    try {
+      browser.storage.onChanged.removeListener(handle)
+    }
+    catch {}
+  }
 }

@@ -1,7 +1,7 @@
 import type { Day, NextRead, PageRead, PassState, TrackedList } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
-import { applyPage, dayOf, excludedTagNames, getArchiveLink, nextRead, PAGE_SIZE, pageUrl, recordFor, toShortId, utcToday } from '#common'
+import { applyPage, dayOf, excludedTagNames, getArchiveLink, nextRead, PAGE_SIZE, pageUrl, recordFor, storedRecordOf, toShortId, unpackRows, utcToday } from '#common'
 import { archiveWaitRemaining, onArchiveWait, waitForArchive } from '#content_script/archiveFetch.js'
 import { storeWorks } from '#content_script/searchView/blurbStore.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
@@ -41,10 +41,12 @@ const SCAN_PAGE_CAP = 5
 const MAX_REQUEST_ATTEMPTS = 3
 
 /**
- * How often the archive may call the run off before it stops coming back,
- * however much of its waiting budget is left. A short `Retry-After` spends none
- * of the budget, so without a count a run refused a page at a time could go
- * round for ever having never actually waited.
+ * How often in a row the archive may call the run off before it stops coming
+ * back, however much of its waiting budget is left. A short `Retry-After`
+ * spends none of the budget, so without a count a run refused a page at a time
+ * could go round for ever having never actually waited. A page that lands
+ * starts the count again: a run reads every list to its end, which can be
+ * hundreds of pages.
  */
 const MAX_REFUSED_ROUNDS = 6
 
@@ -204,8 +206,18 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
           await giveUp(state)
           continue
         }
-        await storeWorks(read.works)
-        state.record = applyPage(state.record, read.page, { readDay: utcToday(), scanned: state.scanned, at: Date.now() })
+        refusedRounds = 0
+        // Another page may have taken reviewed days off the record since this
+        // run read it (Mark reviewed); the stored one is the one to add to.
+        const stored = storedRecordOf(state.list, (await readStoredRecords([state.listId])).get(state.listId))
+        if (stored && stored.from >= state.record.from)
+          state.record = stored
+        const record = applyPage(state.record, read.page, { readDay: utcToday(), scanned: state.scanned, at: Date.now() })
+        // Blurbs first, record second, so a record never names a blurb that
+        // isn't there; and only the blurbs of works the record keeps.
+        const kept = new Set(unpackRows(record.rows).map(row => row.sid))
+        await storeWorks(read.works.filter(work => kept.has(toShortId(work.workId)!)))
+        state.record = record
         await writeReadRecord(state.listId, state.record)
         state.pass = { from: next.from, page: next.page }
         if (read.page.reachedEnd)
@@ -247,7 +259,9 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
 
 /**
  * Read the page `next` names, and hand back its works and what it says. Null
- * when the archive answered as though nobody were signed in.
+ * when the archive answered as though nobody were signed in. Throws for a page
+ * with no listing on it at all — neither a work nor a heading count — which is
+ * an error page served as a page, and no evidence the query has ended.
  *
  * A **scanned** list is read whole instead, as one page that reaches the end:
  * every page up to the cap, and past the cap the last few, since a series
@@ -265,17 +279,16 @@ async function readPage(
       throw new Error(`Not a page on the archive: ${state.list.url}`)
     return url
   }
-  const docs: Document[] = []
-  const first = await get(urlFor(next.page))
-  if (signedOut(first))
-    return null
-  docs.push(first)
+  const docs: Document[] = [await get(urlFor(next.page))]
   if (state.scanned) {
-    const pages = Math.max(1, detectPageCount(first))
+    const pages = Math.max(1, detectPageCount(docs[0]!))
     const from = pages <= SCAN_PAGE_CAP ? 2 : pages - SCAN_PAGE_CAP + 1
     for (let p = Math.max(2, from); p <= pages; p++)
       docs.push(await get(urlFor(p)))
   }
+  if (docs.some(signedOut))
+    return null
+  const first = docs[0]!
 
   const seenAt = Date.now()
   const selector = blurbSelectorFor(state.list)
@@ -296,6 +309,8 @@ async function readPage(
   let reachedEnd = true
   if (!state.scanned) {
     const count = detectResultCount(first)
+    if (count === null && listed === 0)
+      throw new Error(`No listing on the page: ${urlFor(next.page)}`)
     reachedEnd = listed < PAGE_SIZE || (count !== null && next.page * PAGE_SIZE >= count)
   }
   return { works, page: { from: next.from, page: next.page, rows, reachedEnd } }

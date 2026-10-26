@@ -114,6 +114,17 @@ export function search(id, rows, over = {}) {
   }
 }
 
+/** A series: read whole, in series order, whatever day it is asked from. */
+export function series(id, rows, over = {}) {
+  return {
+    entry: { id, kind: 'series-works', url: `/series/${id}`, alias: `Series ${id}`, tracked: true, since: 0, ...over.entry },
+    key: `/series/${id}`,
+    layout: 'series',
+    works: worksFrom(rows),
+    ...over.list,
+  }
+}
+
 /** The `option.trackedLists` value a set of fixtures describes. */
 export function trackedOption(fixtures, over = {}) {
   return {
@@ -204,24 +215,35 @@ export function readsOf(fetched) {
   })
 }
 
-/** One listing page, rendered as the kind of page that query would be served from. */
+/**
+ * One listing page, rendered as the kind of page that query would be served
+ * from. A fixture marked `signedOut` answers as though nobody were signed in,
+ * and one marked `blank` with a page that holds no listing at all.
+ */
 function listingPage(list, url) {
+  if (list.blank)
+    return '<!DOCTYPE html><html><head><title>t</title></head><body class="logged-in"><div id="main"><p>Something went wrong.</p></div></body></html>'
   const page = Number(url.searchParams.get('page') || '1')
   const from = dayOfIso(url.searchParams.get('work_search[date_from]'))
-  const query = from === null ? list.works.slice() : list.works.filter(work => work.filed >= from)
-  query.sort((a, b) => a.filed - b.filed || Number(a.id) - Number(b.id))
+  const scanned = list.layout === 'series'
+  const query = from === null || scanned ? list.works.slice() : list.works.filter(work => work.filed >= from)
+  if (!scanned)
+    query.sort((a, b) => a.filed - b.filed || Number(a.id) - Number(b.id))
   const total = query.length
   const pages = Math.max(1, Math.ceil(total / PER_PAGE))
   const rows = query.slice((page - 1) * PER_PAGE, page * PER_PAGE)
   const blurbs = rows.map(blurbHtml).join('')
 
-  const main = list.layout === 'search'
-    ? `<div id="main" class="works-search region"><h3 class="heading">${total} Found</h3>`
-    + `<ol class="work index group">${blurbs}</ol>${pagination(pages)}</div>`
-    : `<div id="main" class="works-index region">`
-      + `<h2 class="heading">${total ? `${(page - 1) * PER_PAGE + 1} - ${(page - 1) * PER_PAGE + rows.length} of ${total}` : '0'} Works in <a class="tag" href="/tags/x">X</a></h2>`
+  const main = list.layout === 'series'
+    ? `<div id="main" class="series-show region"><h2 class="heading">A Series</h2>`
+    + `<ul class="series work index group">${blurbs}</ul>${pagination(pages)}</div>`
+    : list.layout === 'search'
+      ? `<div id="main" class="works-search region"><h3 class="heading">${total} Found</h3>`
       + `<ol class="work index group">${blurbs}</ol>${pagination(pages)}</div>`
-  return `<!DOCTYPE html><html><head><title>t</title></head><body class="logged-in">${main}</body></html>`
+      : `<div id="main" class="works-index region">`
+        + `<h2 class="heading">${total ? `${(page - 1) * PER_PAGE + 1} - ${(page - 1) * PER_PAGE + rows.length} of ${total}` : '0'} Works in <a class="tag" href="/tags/x">X</a></h2>`
+        + `<ol class="work index group">${blurbs}</ol>${pagination(pages)}</div>`
+  return `<!DOCTYPE html><html><head><title>t</title></head><body class="${list.signedOut ? 'logged-out' : 'logged-in'}">${main}</body></html>`
 }
 
 /**

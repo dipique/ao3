@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { CLAIM_RENEW_MS } from '../../src/common/trackedLists.ts'
 import { unpackRows } from '../../src/common/trackedReads.ts'
 import { bundleForPage } from '../siteExport/helpers.mjs'
-import { findChrome, installMock, launch } from './helpers.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, readsOf, resetWorkIds, TODAY, works } from './trackedReview.mjs'
+import { findChrome, hurryTimers, installMock, launch } from './helpers.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, readsOf, resetWorkIds, series, TODAY, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -33,11 +34,13 @@ describe('tracked lists: the reader', { skip }, () => {
   const START = TODAY - 10
 
   /** A tab on the archive with the reader loaded, a store of its own and the stand-in archive behind it. */
-  async function openTab(fixtures, refuse = () => 0) {
+  async function openTab(fixtures, refuse = () => 0, { hurry } = {}) {
     const fetched = []
     const tab = await browser.newPage()
     await tab.setRequestInterception(true)
     tab.on('request', archiveRoutes({ fixtures, fetched, refuse: url => refuse(url) }))
+    if (hurry)
+      await tab.evaluateOnNewDocument(hurryTimers, hurry)
     await tab.evaluateOnNewDocument(installClock, CLOCK_BASE)
     await tab.evaluateOnNewDocument(installMock, {})
     await tab.goto('https://archiveofourown.org/users/me/readings')
@@ -48,11 +51,11 @@ describe('tracked lists: the reader', { skip }, () => {
   /**
    * One run over `fixtures`' lists. The clock is first wound past the fetch
    * layer's idle reset, so one run's requests never earn the next a breather,
-   * and on by `days` whole days.
+   * and on by `days` whole days and `ms` more.
    */
-  function run(tab, fixtures, { days = 0, patience = 'interactive', budget = 'interactive' } = {}) {
+  function run(tab, fixtures, { days = 0, ms = 0, patience = 'interactive', budget = 'interactive' } = {}) {
     return tab.evaluate(async (input) => {
-      window.__offset += window.RL.PACE_IDLE_RESET_MS * 2 + input.days * input.day
+      window.__offset += window.RL.PACE_IDLE_RESET_MS * 2 + input.days * input.day + input.ms
       const statuses = []
       const outcome = await window.RL.readTrackedLists({
         lists: input.lists,
@@ -62,7 +65,7 @@ describe('tracked lists: the reader', { skip }, () => {
         onProgress: status => statuses.push(status),
       })
       return { ...outcome, statuses }
-    }, { lists: fixtures.map(fixture => fixture.entry), start: START, days, day: MS_PER_DAY, patience, budget })
+    }, { lists: fixtures.map(fixture => fixture.entry), start: START, days, ms, day: MS_PER_DAY, patience, budget })
   }
 
   /** The records the tab's store holds, by list id. */
@@ -143,6 +146,21 @@ describe('tracked lists: the reader', { skip }, () => {
     })
   })
 
+  /**
+   * Stand in for the fetch layer's clock in `tab`: a pause is over the moment
+   * everything is waiting on it, so a test of waiting it out sits out nothing.
+   */
+  const jumpClock = tab => tab.evaluate(() => {
+    window.RL.useArchiveClock({
+      now: () => Date.now(),
+      sleep: async (ms) => {
+        window.__offset += ms
+      },
+    })
+  })
+
+  const RETRY_AFTER_S = 30
+
   test('a rate limit mid-run keeps every page before it, and the next run goes on from there', async () => {
     resetWorkIds(8000)
     const alpha = listing('alpha', Array.from({ length: 10 }, (_, i) => [START + i, 8]))
@@ -153,7 +171,7 @@ describe('tracked lists: the reader', { skip }, () => {
       if (refused || !url.pathname.includes('/alpha/') || url.searchParams.get('page') !== '3')
         return 0
       refused = true
-      return 30
+      return RETRY_AFTER_S
     }
     const { tab, fetched } = await openTab(fixtures, refuse)
     try {
@@ -166,7 +184,7 @@ describe('tracked lists: the reader', { skip }, () => {
       assert.equal(stored.get('beta').through, TODAY - 1, 'beta was read to its end before the refusal')
 
       const before = fetched.length
-      const again = await run(tab, fixtures)
+      const again = await run(tab, fixtures, { ms: RETRY_AFTER_S * 1000 })
       assert.equal(again.blocked, false)
       assert.deepEqual(asked(fetched, fixtures, before)[0], ['alpha', START + 3, 1], 'read on from the day after what it holds')
       stored = await records(tab, fixtures)
@@ -176,6 +194,129 @@ describe('tracked lists: the reader', { skip }, () => {
     finally {
       await tab.close()
     }
+  })
+
+  test('rate limits waited out within the budget, however many, end no run', async () => {
+    resetWorkIds(8500)
+    const alpha = listing('alpha', Array.from({ length: 10 }, (_, i) => [START + i, 8]))
+    const beta = listing('beta', Array.from({ length: 10 }, (_, i) => [START + i, 8]))
+    const fixtures = [alpha, beta]
+    // Every request is refused once before it is answered: eight pages, eight pauses.
+    const seen = new Set()
+    const refuse = (url) => {
+      const key = url.pathname + url.search
+      if (seen.has(key))
+        return 0
+      seen.add(key)
+      return RETRY_AFTER_S
+    }
+    const { tab } = await openTab(fixtures, refuse)
+    try {
+      await jumpClock(tab)
+      const outcome = await run(tab, fixtures, { patience: 'suggestion' })
+      assert.equal(outcome.blocked, false)
+      assert.equal(outcome.requests, 16, 'each page asked for twice')
+      const stored = await records(tab, fixtures)
+      assert.equal(stored.get('alpha').through, TODAY - 1)
+      assert.equal(stored.get('beta').through, TODAY - 1)
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  test('a series is read whole, and only its works from the record’s first day on are kept', async () => {
+    resetWorkIds(8700)
+    const parts = series('91', [[START - 40, 2], [START + 1, 1], [START + 5, 1]])
+    const fixtures = [parts]
+    const { tab, fetched } = await openTab(fixtures)
+    try {
+      await run(tab, fixtures)
+      assert.equal(asked(fetched, fixtures).length, 1)
+      const record = (await records(tab, fixtures)).get('91')
+      assert.deepEqual(unpackRows(record.rows).map(row => row.day), [START + 1, START + 5])
+      assert.equal(record.through, TODAY - 1)
+      const old = Number(parts.works[0].id).toString(36)
+      const blurbs = await tab.evaluate(async key => Object.keys(await window.browser.storage.local.get(key)), `blurbData.${old}`)
+      assert.deepEqual(blurbs, [], 'a work the record doesn’t keep isn’t stored')
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  test('signed out, or a page with no listing on it, the list fails and its record keeps nothing new', async () => {
+    resetWorkIds(8800)
+    const out = listing('out', [[START, 2]], { list: { signedOut: true } })
+    const blank = listing('blank', [[START, 2]], { list: { blank: true } })
+    const fixtures = [out, blank]
+    const { tab, fetched } = await openTab(fixtures)
+    try {
+      const outcome = await run(tab, fixtures)
+      assert.deepEqual(outcome.failed.sort(), ['blank', 'out'])
+      assert.equal(asked(fetched, fixtures).filter(([id]) => id === 'out').length, 1, 'signed out is not tried again')
+      const stored = await records(tab, fixtures)
+      for (const id of ['out', 'blank']) {
+        assert.equal(stored.get(id).failed, true)
+        assert.equal(stored.get(id).through, START - 1, `${id} is trusted no further`)
+        assert.equal(stored.get(id).rows, '')
+      }
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  describe('the read claim', () => {
+    let tab
+
+    before(async () => {
+      ({ tab } = await openTab([], () => 0, { hurry: { [CLAIM_RENEW_MS]: 50 } }))
+    })
+
+    after(async () => tab?.close())
+
+    test('one page holds it; another is refused until it is let go', async () => {
+      const result = await tab.evaluate(async () => {
+        const mine = await window.RL.claimReads('me')
+        const theirs = await window.RL.claimReads('them')
+        const held = await window.RL.readClaimHolder('them')
+        await mine.release()
+        const after = await window.RL.readClaimHolder('them')
+        const next = await window.RL.claimReads('them')
+        await next?.release()
+        return { mine: !!mine, theirs: !!theirs, held, after, next: !!next }
+      })
+      assert.deepEqual(result, { mine: true, theirs: false, held: 'other', after: 'free', next: true })
+    })
+
+    test('a claim that lapsed while its page was slow is taken again, not given up', async () => {
+      const result = await tab.evaluate(async () => {
+        const mine = await window.RL.claimReads('me')
+        await window.browser.storage.local.set({ 'cache.trackedReadClaim': { by: 'me', at: Date.now() - window.RL.CLAIM_TTL_MS - 1 } })
+        // Two renewals' worth, by the page's own (hurried) timers.
+        for (let i = 0; i < 2; i++)
+          await new Promise(resolve => setTimeout(resolve, window.RL.CLAIM_RENEW_MS))
+        const holder = await window.RL.readClaimHolder('me')
+        const lost = mine.lost.aborted
+        await mine.release()
+        return { holder, lost }
+      })
+      assert.deepEqual(result, { holder: 'self', lost: false })
+    })
+
+    test('another page taking it over tells the holder it is lost', async () => {
+      const lost = await tab.evaluate(async () => {
+        const mine = await window.RL.claimReads('me')
+        await window.browser.storage.local.set({ 'cache.trackedReadClaim': { by: 'them', at: Date.now() } })
+        await new Promise(resolve => setTimeout(resolve, window.RL.CLAIM_RENEW_MS))
+        const aborted = mine.lost.aborted
+        await mine.release()
+        return aborted
+      })
+      assert.equal(lost, true)
+      assert.equal(await tab.evaluate(() => window.RL.readClaimHolder('me')), 'other', 'and letting go leaves the other page’s claim alone')
+    })
   })
 
   test('a list that keeps failing is given up on for the run, and its record says so', async () => {
