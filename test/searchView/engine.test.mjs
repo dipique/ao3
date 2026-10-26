@@ -416,10 +416,55 @@ describe('a frozen page layout', () => {
     assert.deepEqual(ordered.map(w => w.workId), ['1', '2', '3', '4', '5'])
   })
 
-  test('a work the order never heard of goes on the end, in sort order', () => {
-    const { ordered, dropped } = lay(['5', '3'], five, ['1', '2', '3', '4', '5'])
-    assert.deepEqual(ordered.map(w => w.workId), ['5', '3', '1', '2', '4'])
+  test('a work the order never heard of goes where the sort puts it', () => {
+    const { ordered, dropped } = lay(['1', '3', '5'], five, ['1', '2', '3', '4', '5'])
+    assert.deepEqual(ordered.map(w => w.workId), ['1', '2', '3', '4', '5'])
     assert.equal(dropped.size, 0)
+  })
+
+  test('one sorted after every work held goes on the end', () => {
+    const { ordered } = lay(['1', '2'], five, ['1', '2', '3', '4', '5'])
+    assert.deepEqual(ordered.map(w => w.workId), ['1', '2', '3', '4', '5'])
+  })
+
+  describe('with the reader part-way through the pages', () => {
+    const ten = Array.from({ length: 10 }, (_, i) => work({ workId: String(i + 1) }))
+    const all = ten.map(w => w.workId)
+    /** Pages of three, the reader on the third: slots 6 onward. */
+    const layAt = (order, visibleIds, opts = {}) =>
+      layoutStablePages(order, ten, new Set(ten.filter(w => visibleIds.includes(w.workId))), { pageStart: 6, ...opts })
+
+    test('a work sorted onto the page on screen, or a later one, goes in its place', () => {
+      const order = all.filter(id => id !== '8' && id !== '10')
+      assert.deepEqual(layAt(order, all).ordered.map(w => w.workId), all)
+    })
+
+    test('one sorted onto a page already read goes first on the page on screen instead', () => {
+      const order = all.filter(id => id !== '2')
+      const { ordered } = layAt(order, all)
+      assert.deepEqual(ordered.map(w => w.workId), ['1', '3', '4', '5', '6', '7', '2', '8', '9', '10'])
+      assert.deepEqual(ordered.slice(0, 6).map(w => w.workId), order.slice(0, 6), 'no page before the one on screen changes')
+    })
+
+    test('several such works keep their order among themselves', () => {
+      const order = all.filter(id => id !== '2' && id !== '4')
+      const { ordered } = layAt(order, all)
+      assert.deepEqual(ordered.slice(6, 8).map(w => w.workId), ['2', '4'])
+      assert.deepEqual(ordered.slice(0, 6).map(w => w.workId), order.slice(0, 6))
+    })
+  })
+
+  describe('a work marked gone', () => {
+    test('keeps its slot, drawn as gone', () => {
+      const { ordered, dropped } = layoutStablePages(['1', '2', '3'], five.slice(0, 3), new Set([five[0], five[2]]), { gone: new Set(['2']) })
+      assert.deepEqual(ordered.map(w => w.workId), ['1', '2', '3'])
+      assert.equal(dropped.get(five[1]), 'gone')
+    })
+
+    test('is never given a slot it didn’t hold', () => {
+      const { ordered } = layoutStablePages(['1'], five.slice(0, 2), new Set([five[0]]), { gone: new Set(['2']) })
+      assert.deepEqual(ordered.map(w => w.workId), ['1'])
+    })
   })
 
   test('a newcomer that does not pass is not added at all', () => {

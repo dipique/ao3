@@ -320,6 +320,14 @@ export interface SearchHeaderControl {
    * list *is* this now.
    */
   show: (works: Work[]) => void
+  /**
+   * Add works to the view and take others out in place, keeping the reader's
+   * page and everything they have set ({@link SearchView.merge}), and store the
+   * list it then holds, less the works taken out. The works added go through
+   * the host's own preparation with the rest, and carry their place in the
+   * source's order in `markedOrder`.
+   */
+  merge: (added: Work[], goneIds: ReadonlySet<string>) => void
   /** Toggle the view's "updating in the background" indicator. */
   setUpdating: (on: boolean) => void
   /** Reload from the source, exactly as the view's own Refresh button does. */
@@ -1427,6 +1435,19 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         void persist(source, next).catch(err => log.error(`Failed to persist the search-view snapshot for ${source.id}`, err))
         // Forced: the source is not reporting a change, it is making one.
         active.view.update(next, prepare(source, next, options, true), { force: true })
+      },
+      merge: (added, goneIds) => {
+        if (active?.source !== source)
+          return
+        const view = active.view
+        const held = view.getWorks()
+        const heldIds = new Set(held.map(work => work.workId))
+        const fresh = belonging(source, added).filter(work => !heldIds.has(work.workId))
+        prepare(source, [...held, ...fresh], options, true)
+        view.merge([...fresh, ...added.filter(work => heldIds.has(work.workId))], goneIds)
+        const out = new Set(view.getState().gone ?? [])
+        const kept = view.getWorks().filter(work => !out.has(work.workId))
+        void persist(source, kept).catch(err => log.error(`Failed to persist the search-view snapshot for ${source.id}`, err))
       },
       setUpdating: (on) => {
         if (active?.source === source)

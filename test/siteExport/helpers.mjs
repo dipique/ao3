@@ -23,12 +23,19 @@ export const skipWithoutChrome = chromePath
   ? false
   : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
-/** Icons and inlined CSS, resolved to nothing — the real builder has plugins for both. */
+/**
+ * Icons and inlined CSS, resolved to next to nothing — the real builder has
+ * plugins for both. An icon is still a component, an empty `span`, so a module
+ * that draws one in its JSX can run.
+ */
 const stubAssets = {
   name: 'stub-assets',
   setup(build) {
     build.onResolve({ filter: /^~icons\/|\?inline$/ }, args => ({ path: args.path, namespace: 'stub' }))
-    build.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export default ""', loader: 'js' }))
+    build.onLoad({ filter: /.*/, namespace: 'stub' }, args => ({
+      contents: args.path.startsWith('~icons/') ? 'export default () => document.createElement("span")' : 'export default ""',
+      loader: 'js',
+    }))
   },
 }
 

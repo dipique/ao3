@@ -506,6 +506,8 @@ export type StableDrop
   = | 'hidden'
     /** It still is a result, but the filter as it stands no longer passes it. */
     | 'filtered'
+    /** The source has taken it out of the list ({@link StableLayoutOptions.gone}). */
+    | 'gone'
 
 /** Where every work sits, and which of them are only holding their place. */
 export interface StableLayout {
@@ -513,6 +515,18 @@ export interface StableLayout {
   ordered: Work[]
   /** Those of {@link ordered} that are drawn collapsed, and why. */
   dropped: Map<Work, StableDrop>
+}
+
+/** What else {@link layoutStablePages} needs to know. */
+export interface StableLayoutOptions {
+  /**
+   * Ids of works the source has taken out of the list while the reader was in
+   * it. One the order holds keeps its slot, drawn as gone; one it doesn't is
+   * left out.
+   */
+  gone?: ReadonlySet<string>
+  /** The first slot of the page on screen: a newcomer never goes before it. */
+  pageStart?: number
 }
 
 /**
@@ -534,24 +548,33 @@ export interface StableLayout {
  *
  * - a work named by `order` keeps its slot, whether or not it still passes — one
  *   that doesn't is reported in {@link StableLayout.dropped} for the caller to
- *   draw collapsed, with the reason taken from {@link Work.hidden} /
- *   {@link Work.filtered} (a rule or a mark) or, failing those, the filter;
+ *   draw collapsed, with the reason: `gone` for one the source took out
+ *   ({@link StableLayoutOptions.gone}), else {@link Work.hidden} /
+ *   {@link Work.filtered} (a rule or a mark), else the filter;
  * - an id `order` names that no work answers to any more is simply gone: its
  *   slot goes with it, since there is nothing left to hold it;
- * - a work that passes now and `order` has never heard of goes on the end, in
- *   sort order. Nothing should reach here while the order is frozen — fresh
- *   works are held back rather than swapped in — but losing a work outright
- *   would be far worse than showing it late.
+ * - a work that passes now and `order` has never heard of — one the source has
+ *   just added — goes where the sort puts it among the works held, unless that
+ *   is on a page before the one on screen ({@link StableLayoutOptions.pageStart}).
+ *   Then it goes first on the page on screen, so no page the reader has been
+ *   through changes and the work is still seen. Every work after it moves on a
+ *   slot, which at worst shows one again on the next page.
  */
 export function layoutStablePages(
   order: readonly string[],
   sorted: readonly Work[],
   visible: ReadonlySet<Work>,
+  options: StableLayoutOptions = {},
 ): StableLayout {
+  const gone = options.gone
+  const pageStart = Math.max(0, options.pageStart ?? 0)
   const byId = new Map<string, Work>()
+  const rank = new Map<Work, number>()
   for (const work of sorted) {
     if (!byId.has(work.workId))
       byId.set(work.workId, work)
+    if (!rank.has(work))
+      rank.set(work, rank.size)
   }
   const ordered: Work[] = []
   const dropped = new Map<Work, StableDrop>()
@@ -563,14 +586,25 @@ export function layoutStablePages(
       continue
     placed.add(work)
     ordered.push(work)
-    if (!visible.has(work))
+    if (gone?.has(id))
+      dropped.set(work, 'gone')
+    else if (!visible.has(work))
       dropped.set(work, work.hidden || work.filtered ? 'hidden' : 'filtered')
   }
+  // Newcomers that land before the page on screen go first on it, in the order
+  // they arrive, which is sort order.
+  let firstFree = pageStart
   for (const work of sorted) {
-    if (visible.has(work) && !placed.has(work)) {
-      placed.add(work)
-      ordered.push(work)
-    }
+    if (!visible.has(work) || placed.has(work) || gone?.has(work.workId))
+      continue
+    placed.add(work)
+    const after = rank.get(work)!
+    let at = ordered.findIndex(held => rank.get(held)! > after)
+    if (at === -1)
+      at = ordered.length
+    if (at < firstFree)
+      at = Math.min(firstFree++, ordered.length)
+    ordered.splice(at, 0, work)
   }
   return { ordered, dropped }
 }

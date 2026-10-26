@@ -106,6 +106,12 @@ export interface ViewState {
    * run again.
    */
   workText?: { query: string, hits?: string[] }
+  /**
+   * Works the source took out of the list with {@link SearchView.merge}, which
+   * hold their slots drawn as gone: carried across the teardown and rebuild with
+   * {@link order}.
+   */
+  gone?: string[]
 }
 
 /**
@@ -165,6 +171,19 @@ export interface SearchView {
    * is ignored.
    */
   remove: (workId: string) => void
+  /**
+   * Add works to the view and take others out, keeping the page on screen, the
+   * filters, the sort, the text search and the facets' open and closed groups.
+   * The facets are rebuilt, so a new value gets a row, and a text search is run
+   * again over the works it now holds.
+   *
+   * In a {@link SearchViewConfig.stablePages} view no page before the one on
+   * screen changes: a work added goes where the sort puts it, or first on the
+   * page on screen when that would be an earlier page, and a work taken out
+   * keeps its slot, drawn collapsed with {@link SearchViewConfig.goneReason}.
+   * A work added that the view holds as gone is put back.
+   */
+  merge: (added: Work[], goneIds: ReadonlySet<string>) => void
 }
 
 export interface SearchViewConfig {
@@ -285,6 +304,8 @@ export interface SearchViewConfig {
    * a frozen layout is worth less than works that never appear.
    */
   onUpdateDeferred?: (update: DeferredUpdate) => void
+  /** What a work {@link SearchView.merge} took out of a {@link stablePages} view says in its slot. */
+  goneReason?: string
   /**
    * Search inside the works themselves, where the host holds copies of them.
    * Draws a second search box whose results narrow the view like any filter,
@@ -310,6 +331,7 @@ const HIDE_WRAPPER_CLASS = `${ADDON_CLASS}--hide-works--wrapper`
 const DROP_REASONS: Record<StableDrop, string> = {
   hidden: 'Now hidden by your rules or marks',
   filtered: 'No longer matches your filters',
+  gone: 'No longer in this list',
 }
 
 /**
@@ -382,7 +404,11 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // counts for nothing here — no facet count, no total, no slot on a page. That
   // is the whole difference between a hide rule and a collapse rule in a view we
   // page ourselves; see {@link Work.hidden}.
-  let pool = results(works)
+  /** Ids of works {@link SearchView.merge} took out, which hold their slots but are no result. */
+  let gone = new Set<string>(config.initialState?.gone ?? [])
+  /** The results among `works`, less the works taken out. */
+  const resultsOf = (all: Work[]): Work[] => gone.size ? results(all).filter(work => !gone.has(work.workId)) : results(all)
+  let pool = resultsOf(works)
   // The exclusions the reader's hide rules imply over the current set, and the
   // ones they have since lifted by hand. Kept apart from `state` because they
   // are re-derived from the works rather than dialled in: a refresh restates
@@ -1357,7 +1383,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       return
     const next = works.filter(w => w !== work)
     works = next
-    pool = results(works)
+    pool = resultsOf(works)
     if (mounted.delete(work)) {
       work.el.remove()
       decorated.delete(work.el)
@@ -1468,7 +1494,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // its frozen order puts in each slot, some of them only holding the place.
     // Whatever this render lays out is then what the *next* one holds to, so a
     // collapsed work keeps its slot for as long as the reader stays put.
-    const layout = frozenOrder === null ? null : layoutStablePages(frozenOrder, sortedWorks, visible)
+    const layout = frozenOrder === null ? null : layoutStablePages(frozenOrder, sortedWorks, visible, { gone, pageStart: pageIndex * perPage })
     const ordered = layout ? layout.ordered : sortedWorks.filter(w => visible.has(w))
     if (stablePages)
       frozenOrder = ordered.map(work => work.workId)
@@ -1529,7 +1555,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         // A no-op when the hiding decoration has already drawn its own line, so
         // this covers the reasons it has nothing to say about: a filter that
         // stopped admitting the work, and a rule while hiding is switched off.
-        config.collapseWork?.(work.el, DROP_REASONS[drop])
+        config.collapseWork?.(work.el, drop === 'gone' ? config.goneReason ?? DROP_REASONS.gone : DROP_REASONS[drop])
       }
     }
     syncSnippets(page)
@@ -1578,7 +1604,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       return
     }
     works = nextWorks
-    pool = results(works)
+    gone = new Set()
+    pool = resultsOf(works)
     // The same work can be a proper result in the new set, and it brings the
     // blurb this view collapsed along with it. Take it back to the markup the
     // store keeps, so the decoration below runs over it again from scratch.
@@ -1622,6 +1649,51 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       showTextCoverage()
   }
 
+  function merge(added: Work[], goneIds: ReadonlySet<string>): void {
+    const held = new Map(works.map(work => [work.workId, work]))
+    const addedIds = new Set(added.map(work => work.workId))
+    const fresh: Work[] = []
+    const changed: Work[] = []
+    for (const work of added) {
+      const had = held.get(work.workId)
+      if (!had) {
+        held.set(work.workId, work)
+        fresh.push(work)
+      }
+      else if (gone.delete(work.workId)) {
+        changed.push(had)
+      }
+    }
+    for (const id of goneIds) {
+      const work = held.get(id)
+      if (work && !addedIds.has(id) && !gone.has(id)) {
+        gone.add(id)
+        changed.push(work)
+      }
+    }
+    if (!fresh.length && !changed.length)
+      return
+    works = [...works, ...fresh]
+    pool = resultsOf(works)
+    // A work whose slot changes what it says is drawn again from the markup the
+    // store keeps, so the decoration runs over it afresh.
+    for (const work of changed) {
+      if (hasNode(work) && decorated.has(work.el)) {
+        pristineBlurb(work.el, { inPlace: true })
+        decorated.delete(work.el)
+        collapsedInPlace.delete(work)
+      }
+    }
+    sortSig = ''
+    renderFacets()
+    render()
+    const textQuery = textRun?.query ?? textApplied?.query
+    if (textQuery)
+      searchText(textQuery, { restore: true })
+    else
+      showTextCoverage()
+  }
+
   function setUpdating(updating: boolean, opts: { text?: string | null, onStop?: () => void } = {}): void {
     updatingText.textContent = opts.text || 'Updating…'
     onUpdatingStop = updating ? opts.onStop : undefined
@@ -1653,6 +1725,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       // Only a view that holds its layout has one to hand on; for anything else
       // recording it would be an invitation to honour it later.
       ...(frozenOrder ? { order: [...frozenOrder] } : {}),
+      ...(gone.size ? { gone: [...gone] } : {}),
       ...(textInput?.value
         ? { workText: { query: textInput.value, ...(textApplied ? { hits: [...textApplied.hits] } : {}) } }
         : {}),
@@ -1771,5 +1844,6 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     getReaderFilter: () => readerFilter(state, autoKeys, released),
     getWorks: () => works,
     remove: removeWork,
+    merge,
   }
 }
