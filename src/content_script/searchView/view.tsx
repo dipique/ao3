@@ -136,6 +136,16 @@ export interface SearchView {
    */
   update: (works: Work[], autoExcludes?: FacetValueRef[], opts?: { force?: boolean }) => void
   /**
+   * Replace the works without resetting page, layout or selections: for a load
+   * still coming in, which hands the view what it has so far, again and again,
+   * while the reader works in it. The page stays where it was (clamped, should
+   * the works have shrunk), blurbs already drawn stay drawn, and a selection
+   * the works no longer carry is kept for the works still to come. A frozen
+   * layout ({@link SearchViewConfig.stablePages}) takes the new works on at its
+   * end. `autoExcludes` as for {@link update}.
+   */
+  grow: (works: Work[], autoExcludes?: FacetValueRef[]) => void
+  /**
    * Toggle the subtle "updating in the background" indicator. `text` replaces
    * its plain "Updating…" while there is more to say (how far it has got, a
    * pause it is sitting out), and `onStop` puts a Stop button beside it.
@@ -1622,6 +1632,46 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       showTextCoverage()
   }
 
+  function grow(nextWorks: Work[], nextAutoExcludes?: FacetValueRef[]): void {
+    works = nextWorks
+    pool = results(works)
+    const stays = new Set(works)
+    for (const work of [...mounted]) {
+      if (stays.has(work))
+        continue
+      // Still decorated, should a later grow bring it back.
+      mounted.delete(work)
+      work.el.remove()
+    }
+    for (const work of [...collapsedInPlace]) {
+      if (!stays.has(work))
+        collapsedInPlace.delete(work)
+    }
+    for (const [work, el] of snippetEls) {
+      if (!stays.has(work)) {
+        el.remove()
+        snippetEls.delete(work)
+      }
+    }
+    shown = shown.filter(work => stays.has(work))
+    if (frozenOrder) {
+      const held = new Set(frozenOrder)
+      frozenOrder.push(...works.map(work => work.workId).filter(id => !held.has(id)))
+    }
+    if (nextAutoExcludes)
+      setAutoExcludes(nextAutoExcludes)
+    applyAutoExcludes()
+    sortSig = ''
+    renderFacets()
+    render()
+    notifyFacetChange()
+    const textQuery = textRun?.query ?? textApplied?.query
+    if (textQuery)
+      searchText(textQuery, { restore: true })
+    else
+      showTextCoverage()
+  }
+
   function setUpdating(updating: boolean, opts: { text?: string | null, onStop?: () => void } = {}): void {
     updatingText.textContent = opts.text || 'Updating…'
     onUpdatingStop = updating ? opts.onStop : undefined
@@ -1765,6 +1815,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   return {
     el,
     update,
+    grow,
     setUpdating,
     setRefreshedAt,
     getState,
