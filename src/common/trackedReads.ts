@@ -307,3 +307,186 @@ export function readSummary(lists: readonly TrackedList[], records: ReadonlyMap<
   }
   return { through, behind }
 }
+
+/** What {@link windowFromRecords} is given. */
+export interface WindowInput {
+  /** The tracked lists, in the order the review lists them. An entry that isn't tracked takes no part. */
+  lists: readonly TrackedList[]
+  /** Each list's record, by list id. A list with none is pending. */
+  records: ReadonlyMap<string, TrackedRead>
+  /** The window's first day (`reviewStart`). */
+  start: Day
+  /** The current UTC day. */
+  today: Day
+  /** How many counting works a window aims for. */
+  target: number
+  /** The reader moved the window's end by hand: `[start, endOverride]`, within the start and yesterday. */
+  endOverride?: Day
+  /** Whether a list's view filter wants the work. */
+  member: (listId: string, sid: string) => boolean
+  /** Whether a work counts toward the target: not when the rules hide it, nor when the reader has dealt with it. */
+  counts: (sid: string) => boolean
+}
+
+/** One work of a computed window. */
+export interface WindowWork {
+  sid: string
+  /** The day it is reviewed on. */
+  day: Day
+  /** The lists that turned it up and want it, in list order: its List source values. */
+  lists: string[]
+  counts: boolean
+}
+
+/** A review window, computed from the records. */
+export interface ComputedWindow {
+  start: Day
+  /** Inclusive. */
+  end: Day
+  /** Works in review order: day, then list order, then row order. */
+  works: WindowWork[]
+  /** Counting works per day, one entry for every day of the window, empty days included. */
+  days: Map<Day, number>
+  /** Counting works on the day after the window: what one more day would add, as far as the records know. */
+  nextDayCount: number
+  /** Lists complete through `end`. */
+  complete: string[]
+  /** Lists not yet complete through `end`, and still being read. */
+  pending: string[]
+  /** Lists not complete through `end` whose last run gave up on them. */
+  failed: string[]
+  /** Never when `end` reaches today or a list failed. Pending lists don't block it. */
+  reviewable: boolean
+}
+
+/**
+ * The review window the records make, without asking the archive.
+ *
+ * **Merging.** Every tracked list's rows, in list order and each list's rows in
+ * order, merged by work. A row its list's view filter rejects (`member`) takes
+ * no part: it doesn't name that list or move the work. A work two lists hold
+ * goes on the later of their days, which is what it is now. A future day is
+ * reviewed today. Rows on days before `start` are reviewed already.
+ *
+ * **Sizing.** Walking forward from `start`, the first day whose running total
+ * of counting works goes over the target ends the window the day before it, or
+ * at `start`, since a window is never less than a day. If nothing tips it, it
+ * runs to yesterday. `endOverride` replaces the sizing. A reader reviewed
+ * through yesterday gets a preview of today, which can't be marked reviewed.
+ * A partial record only holds fewer works than a full one, so as records fill
+ * in the window can only end earlier.
+ *
+ * `counts` is only asked about works on the days walked — from `start` to the
+ * day after the window — so a caller can load the blurbs it needs a day at a
+ * time.
+ *
+ * **Completeness.** A list is complete through the window's end once its
+ * `through` reaches it, or yesterday for a preview of today. One that isn't is
+ * failed when its last run gave up on it, and pending otherwise.
+ */
+export function windowFromRecords(input: WindowInput): ComputedWindow {
+  const { start, today, target } = input
+  const yesterday = today - 1
+  const lists = input.lists.filter(list => list.tracked)
+
+  const merged = new Map<string, WindowWork & { place: number }>()
+  for (const list of lists) {
+    const record = input.records.get(list.id)
+    if (!record)
+      continue
+    for (const row of unpackRows(record.rows)) {
+      if (!input.member(list.id, row.sid))
+        continue
+      const day = Math.min(row.day, today)
+      const work = merged.get(row.sid)
+      if (!work) {
+        merged.set(row.sid, { sid: row.sid, day, lists: [list.id], counts: false, place: merged.size })
+        continue
+      }
+      if (!work.lists.includes(list.id))
+        work.lists.push(list.id)
+      work.day = Math.max(work.day, day)
+    }
+  }
+
+  const byDay = new Map<Day, (WindowWork & { place: number })[]>()
+  for (const work of merged.values()) {
+    if (work.day < start)
+      continue
+    const day = byDay.get(work.day)
+    if (day)
+      day.push(work)
+    else
+      byDay.set(work.day, [work])
+  }
+  for (const works of byDay.values())
+    works.sort((a, b) => a.place - b.place)
+
+  const counted = new Map<Day, number>()
+  const countOf = (day: Day): number => {
+    let n = counted.get(day)
+    if (n === undefined) {
+      n = 0
+      for (const work of byDay.get(day) ?? []) {
+        work.counts = input.counts(work.sid)
+        if (work.counts)
+          n++
+      }
+      counted.set(day, n)
+    }
+    return n
+  }
+
+  let end: Day
+  if (start > yesterday) {
+    end = start
+  }
+  else if (input.endOverride !== undefined) {
+    end = Math.min(Math.max(input.endOverride, start), yesterday)
+  }
+  else {
+    end = yesterday
+    let total = 0
+    for (let day = start; day <= today; day++) {
+      total += countOf(day)
+      if (total > target) {
+        end = Math.min(yesterday, Math.max(start, day - 1))
+        break
+      }
+    }
+  }
+
+  const works: WindowWork[] = []
+  const days = new Map<Day, number>()
+  for (let day = start; day <= end; day++) {
+    days.set(day, countOf(day))
+    for (const { place: _place, ...work } of byDay.get(day) ?? [])
+      works.push(work)
+  }
+
+  const bound = Math.min(end, yesterday)
+  const complete: string[] = []
+  const pending: string[] = []
+  const failed: string[] = []
+  for (const list of lists) {
+    const record = input.records.get(list.id)
+    if (record && record.through >= bound)
+      complete.push(list.id)
+    else if (record?.failed)
+      failed.push(list.id)
+    else
+      pending.push(list.id)
+  }
+
+  return {
+    start,
+    end,
+    works,
+    days,
+    nextDayCount: countOf(end + 1),
+    complete,
+    pending,
+    failed,
+    reviewable: !failed.length && end < today,
+  }
+}
