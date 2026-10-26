@@ -31,7 +31,9 @@ export type RefreshHolder = 'page' | 'options'
  * How a refresh ended:
  *
  * - `written` — the list was read and stored;
- * - `blocked` — AO3 kept refusing, and nothing was stored;
+ * - `blocked` — AO3 kept refusing before the list was read to its end: nothing
+ *   was stored, or, from an AO3 page, the pages read so far over the stored
+ *   list, with the stored copy's date;
  * - `refused` — what came back was not the list (signed out, or empty over a
  *   list that has works), so nothing was stored;
  * - `failed` — it threw;

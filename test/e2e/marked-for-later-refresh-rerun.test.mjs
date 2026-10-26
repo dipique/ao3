@@ -48,7 +48,7 @@ describe('Marked for Later: a refresh outlives a re-run', { skip }, () => {
     try {
       await openToRead(tab)
       await until('the refresh to be held at page 2', () => held.length > 0)
-      assert.deepEqual(await shownTitles(tab), ['Stored work 1', 'Stored work 2'])
+      await until('page 1 to be on screen', async () => JSON.stringify(await shownTitles(tab)) === JSON.stringify(liveTitles().slice(0, 2)))
 
       // What the work menu's "Mark as read" writes; every options change re-runs the page.
       await rerun(tab, () => tab.evaluate(marks => browser.storage.local.set({ 'option.workMarks': marks }), workMarks('1')))

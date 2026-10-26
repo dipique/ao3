@@ -83,6 +83,9 @@ const hidden = (tab, selectors) => tab.evaluate(list => list.map(selector =>
 
 const progressText = tab => tab.$eval(PROGRESS, el => el.textContent.trim()).catch(() => null)
 
+/** What the view's note says of the walk once the view is up with its first page, or null while it is off. */
+const walkNote = tab => tab.$eval('.AO3E--search-view--updating-on .AO3E--search-view--updating-text', el => el.textContent.trim()).catch(() => null)
+
 /** Write an option, which re-runs the page, and wait for the run to finish. */
 const writeOption = (tab, name, value) => rerun(tab, () => tab.evaluate((key, next) => window.browser.storage.local.set({ [key]: next }), `option.${name}`, value))
 
@@ -126,27 +129,33 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
     return { tab, requests, failed, release: () => held.resolve() }
   }
 
-  /** Wait for a walk to be half done: page 1 in, page 2 asked for and held. */
+  /**
+   * Wait for a walk to be half done: page 1 in, page 2 asked for and held. The
+   * view is up by then, showing page 1, with the walk's progress on its note.
+   */
   const halfWalked = async ({ tab, requests }) => {
     await until('the walk to ask for both pages', () => walks(requests).length === 2)
-    await until('the first page to be in', async () => await progressText(tab) === 'Loaded 1 of 2 pages…')
+    await until('the first page to be on screen', async () => await walkNote(tab) === 'Loaded 1 of 2 pages…')
   }
 
-  test('pressed, its progress comes back after the re-run, then its view, drawn as the options now say, and no page is fetched twice', async () => {
+  test('pressed, its first page is up while it walks on; the re-run puts it back still walking, then the rest, drawn as the options now say, and no page is fetched twice', async () => {
     const page = await heldListing(ON)
     const { tab, requests } = page
     try {
       await visit(tab, LISTING)
       await tab.click(BUTTON)
       await halfWalked(page)
+      assert.deepEqual(await shownIds(tab), IDS.slice(0, PER_PAGE), 'the first page, before the second is in')
+      assert.equal(await stored(tab, 'cache.searchLists'), null, 'and nothing kept yet')
 
       await writeOption(tab, 'searchPerPage', 25)
-      await until('the progress to be back', async () => await progressText(tab) !== null)
-      assert.equal(await progressText(tab), 'Loaded 1 of 2 pages…', 'the same walk, where it had got to')
+      await until('the view to be back', async () => await walkNote(tab) !== null)
+      assert.equal(await walkNote(tab), 'Loaded 1 of 2 pages…', 'the same walk, where it had got to')
+      assert.deepEqual(await shownIds(tab), IDS.slice(0, PER_PAGE))
       assert.deepEqual(await hidden(tab, NATIVE), [true, true, true], 'the listing stays out of the way')
 
       page.release()
-      await until('the view to be up', async () => (await shownIds(tab)).length > 0)
+      await until('the walk to end', async () => await walkNote(tab) === null)
       assert.deepEqual(await shownIds(tab), IDS.slice(0, 25), 'a page as long as the options now ask')
       assert.equal(await tab.$(PROGRESS), null)
       assert.deepEqual(walks(requests), EVERY_PAGE_ONCE)
@@ -223,11 +232,11 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
       await halfWalked(page)
 
       await writeOption(tab, 'searchPerPage', 51)
-      await until('the progress to be back', async () => await progressText(tab) !== null)
-      assert.equal(await progressText(tab), 'Loaded 1 of 2 pages…')
+      await until('the view to be back', async () => await walkNote(tab) !== null)
+      assert.equal(await walkNote(tab), 'Loaded 1 of 2 pages…')
 
       page.release()
-      await until('the view to be up', async () => (await shownIds(tab)).length > 0)
+      await until('the walk to end', async () => await walkNote(tab) === null)
       assert.deepEqual(await shownIds(tab), IDS.filter(id => !DRACO.has(id)), 'the list\'s filter is seeded')
       assert.deepEqual(walks(requests), EVERY_PAGE_ONCE)
       assert.deepEqual(storedListIds((await stored(tab, 'cache.searchLists'))?.[KEY]), IDS)
@@ -251,11 +260,11 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
       await halfWalked(page)
 
       await writeOption(tab, 'searchPerPage', 51)
-      await until('the progress to be back', async () => await progressText(tab) !== null)
-      assert.equal(await progressText(tab), 'Loaded 1 of 2 pages…')
+      await until('the view to be back', async () => await walkNote(tab) !== null)
+      assert.equal(await walkNote(tab), 'Loaded 1 of 2 pages…')
 
       page.release()
-      await until('the view to be up', async () => (await shownIds(tab)).length > 0)
+      await until('the walk to end', async () => await walkNote(tab) === null)
       assert.deepEqual(await shownIds(tab), IDS)
       assert.deepEqual(walks(requests), [`${TO_READ}&page=1`, `${TO_READ}&page=2`])
     }
