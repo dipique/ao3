@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { getArchiveLink, isoDay, utcToday } from '#common'
+import type { Day } from '#common'
+
+import { getArchiveLink, isoDay, readSummary, utcToday } from '#common'
+import { onReadRecordsChanged, readStoredRecords } from '#content_script/tracked/readStore.ts'
 
 import { sentence, withReason } from '../../model/phrases.ts'
-import { latestReviewable, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, WORKS_PER_REVIEW } from '../../model/review.ts'
+import { latestReviewable, recordsLine, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, WORKS_PER_REVIEW } from '../../model/review.ts'
 
 /**
  * Tracked lists, and what shapes the review they are gathered into: how far
@@ -15,7 +18,7 @@ import { latestReviewable, REVIEW_NAME, reviewBlock, reviewedThroughFrom, review
  * what only the review uses is off and says why.
  */
 const { enabled, target, reviewedThrough, lists } = useOption('trackedLists')
-const { review, userId, view: job, cacheWorks, downloadSite, stop, cancel, resume, discard } = useSiteExport()
+const { review, userId, view: job, cacheWorks, downloadSite, preloadReview, stop, cancel, resume, discard } = useSiteExport()
 const now = useNow({ interval: 60_000 })
 
 const block = computed(() => reviewBlock({
@@ -95,6 +98,42 @@ function download(): void {
   if (review.value)
     void downloadSite(review.value)
 }
+
+// ---------------------------------------------------------------------------
+// Pre-load, and how far the lists are read
+// ---------------------------------------------------------------------------
+
+const preloadLabel = 'Read your tracked lists from AO3 now, so the next review opens without waiting on it'
+
+/** Pre-load's reason for being off is said where Start Review's or the offline actions' is. */
+const preloadOffId = computed(() => {
+  const off = block.value.preload.off
+  if (!off)
+    return undefined
+  return off === block.value.offlineOff ? offlineOffId : startOffId
+})
+
+function preload(): void {
+  void preloadReview()
+}
+
+/** What the tracked lists' read records say: refreshed whenever one is written, here or on AO3. */
+const records = ref<{ through: Day | null, behind: number }>({ through: null, behind: 0 })
+const recordsText = computed(() => recordsLine(records.value))
+
+async function readRecordsLine(): Promise<void> {
+  const tracked = lists.value.filter(list => list.tracked)
+  const summary = readSummary(tracked, await readStoredRecords(tracked.map(list => list.id)))
+  records.value = { through: summary.through, behind: summary.behind.length }
+}
+
+let stopRecords: (() => void) | null = null
+onMounted(() => {
+  void readRecordsLine()
+  stopRecords = onReadRecordsChanged(() => void readRecordsLine())
+})
+onBeforeUnmount(() => stopRecords?.())
+watch(lists, () => void readRecordsLine(), { deep: true })
 </script>
 
 <template>
@@ -176,6 +215,9 @@ function download(): void {
               <p v-else class="review__empty">
                 {{ block.empty }}
               </p>
+              <p v-if="recordsText" class="review__detail review__records" data-review-records>
+                {{ recordsText }}
+              </p>
 
               <!-- Said where the reader is looking, beside the buttons it turns off. -->
               <p v-if="block.offlineOff" class="review__note">
@@ -185,6 +227,19 @@ function download(): void {
 
               <SiteExportProgress v-if="block.job" />
 
+              <div v-if="!block.actions" class="review__buttons">
+                <button
+                  type="button"
+                  class="outline-btn small-btn"
+                  :title="withReason(preloadLabel, block.preload.off)"
+                  :disabled="!!block.preload.off"
+                  :aria-describedby="preloadOffId"
+                  @click="preload"
+                >
+                  <span class="i-tabler-refresh" aria-hidden="true" />
+                  Pre-load
+                </button>
+              </div>
               <div v-if="block.actions" class="review__buttons">
                 <template v-if="block.actions === 'offline'">
                   <button
@@ -208,6 +263,17 @@ function download(): void {
                   >
                     <span class="i-tabler-download" aria-hidden="true" />
                     Download Offline Copy
+                  </button>
+                  <button
+                    type="button"
+                    class="outline-btn small-btn"
+                    :title="withReason(preloadLabel, block.preload.off)"
+                    :disabled="!!block.preload.off"
+                    :aria-describedby="preloadOffId"
+                    @click="preload"
+                  >
+                    <span class="i-tabler-refresh" aria-hidden="true" />
+                    Pre-load
                   </button>
                   <span class="review__spacer" />
                   <OfflineMoreMenu
@@ -321,6 +387,9 @@ function download(): void {
 .review__unit {
   color: var(--quiet-fg);
   font-size: 12px;
+}
+.review__records {
+  margin: 0;
 }
 .review__empty {
   margin: 0;

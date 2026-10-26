@@ -5,8 +5,8 @@ import type { FollowState, ListRefresh, RefreshOutcome } from '#content_script/s
 import type { RefreshOptions, RefreshResult } from '#content_script/searchView/refresh.js'
 import type { Hold } from '#content_script/searchView/refreshClaim.ts'
 
-import { createLogger, options, readWorkIds, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
-import { onArchiveWait, PATIENCE } from '#content_script/archiveFetch.js'
+import { createLogger, options, readWorkIds, REVIEW_SOURCE_ID, reviewStart, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
+import { onArchiveWait, PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
@@ -14,6 +14,8 @@ import { readSnapshotData } from '#content_script/searchView/cache.js'
 import { followState, loadingLine, refreshStep, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
 import { acquireRefresh, awaitRefresh, readRefresh, requestCancel } from '#content_script/searchView/refreshClaim.ts'
+import { claimReads } from '#content_script/tracked/readClaim.ts'
+import { readTrackedLists } from '#content_script/tracked/readLists.ts'
 
 import type { WorkFreshness } from './workText.ts'
 
@@ -382,6 +384,10 @@ async function drive(job: ExportJob): Promise<void> {
  * in the same way.
  */
 async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
+  if (job.descriptor.sourceId === REVIEW_SOURCE_ID) {
+    await readReview(job, signal)
+    return
+  }
   if (!sharesRefresh(job.descriptor.sourceId)) {
     await refreshHere(job, signal, null)
     return
@@ -401,6 +407,57 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
     if (ended.kind !== 'free')
       return endFollowed(job, ended)
     signal.throwIfAborted()
+  }
+}
+
+/**
+ * The review's refresh: its window is computed from the tracked lists' read
+ * records, so refreshing it is reading those up to date — what the review does
+ * in the background, here at bulk patience, for nobody watching. Like the
+ * review, it reads under the read claim, and refuses to while another page
+ * holds it. The window's own works change the next time the review is opened.
+ */
+async function readReview(job: ExportJob, signal: AbortSignal): Promise<void> {
+  const claim = await claimReads(PAGE_RUN)
+  if (!claim)
+    throw new Error('Reading in another tab')
+  const either = new AbortController()
+  const stop = (): void => either.abort()
+  signal.addEventListener('abort', stop)
+  claim.lost.addEventListener('abort', stop)
+  if (signal.aborted)
+    stop()
+  try {
+    const option = await options.get('trackedLists')
+    message = 'Reading your tracked lists…'
+    publish()
+    const outcome = await readTrackedLists({
+      lists: option.lists,
+      start: reviewStart(option),
+      currentStart: async () => reviewStart(await options.get('trackedLists')),
+      patience: PATIENCE.bulk,
+      waitBudget: WAIT_BUDGET.bulk,
+      signal: either.signal,
+      onProgress: (status) => {
+        job.done = status.listsDone
+        job.total = status.lists
+        message = `Read ${status.listsDone} of ${status.lists} tracked ${status.lists === 1 ? 'list' : 'lists'}`
+        publish()
+      },
+    }).catch((err: unknown) => {
+      // Another page took the claim over: that is the reason, not the abort.
+      if (claim.lost.aborted && !signal.aborted)
+        throw new Error('Reading in another tab')
+      throw err
+    })
+    if (outcome.blocked)
+      job.blocked = 'rate-limited'
+    job.done = 0
+    job.total = 0
+  }
+  finally {
+    signal.removeEventListener('abort', stop)
+    await claim.release()
   }
 }
 

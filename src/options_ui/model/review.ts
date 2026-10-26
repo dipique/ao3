@@ -21,6 +21,9 @@ import { TRACK_OFF } from './savedListRows.ts'
 /** How many works a review range aims for, at the least and the most. */
 export const WORKS_PER_REVIEW = { min: 10, max: 500 } as const
 
+/** The key the review's window is stored and its job is run under. */
+const REVIEW_KEY = 'tracked-review'
+
 /** What the job and every reason that names the job's list call the review's window. */
 export const REVIEW_NAME = 'this review'
 
@@ -107,18 +110,25 @@ export interface ReviewBlockView {
   retry: number
   /** The cached works; with none, More offers no download without refreshing. */
   cached: number
+  /** Pre-load: why it is off, or null. */
+  preload: { off: string | null }
 }
 
 export function reviewBlock({ enabled, tracking, window, userId, job, now }: ReviewBlockInput): ReviewBlockView {
   const settingsOff = enabled ? null : TRACK_OFF.review
   const open = reviewOpen(window, userId)
   const startOff = settingsOff ?? (!tracking ? START_OFF.noneTracked : !open ? START_OFF.noWindow : null)
+  // Reading the lists ahead is the review's own refresh, so it is a job like
+  // any other: off while another list has the one job.
+  const preload = { off: startOff ?? listJob(job, window?.key ?? REVIEW_KEY).off }
   const start = {
     href: startOff ? null : open,
     label: window ? `Start the review: ${works(window.count)}` : 'Start the review',
     off: startOff,
   }
   if (!window) {
+    // Pre-load is the one job a review with no window yet can run.
+    const { actions, here } = listJob(job, REVIEW_KEY)
     return {
       settingsOff,
       figure: null,
@@ -126,12 +136,13 @@ export function reviewBlock({ enabled, tracking, window, userId, job, now }: Rev
       empty: open
         ? 'Nothing gathered yet.'
         : 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.',
-      actions: null,
+      actions: here ? actions : null,
       offlineOff: null,
-      job: false,
+      job: here,
       start,
       retry: 0,
       cached: 0,
+      preload,
     }
   }
 
@@ -148,7 +159,20 @@ export function reviewBlock({ enabled, tracking, window, userId, job, now }: Rev
     job: here,
     start,
     ...moreCounts(window.buckets),
+    preload,
   }
+}
+/**
+ * The records line under This review: how far the tracked lists have been
+ * read from AO3, as `readSummary` sums the read records up — the day every
+ * list read is read through, and how many lists haven't been read at all.
+ * Null with no list tracked.
+ */
+export function recordsLine(summary: { through: Day | null, behind: number }): string | null {
+  if (summary.through === null)
+    return summary.behind ? 'No list read yet' : null
+  const read = `Lists read through ${formatDay(summary.through)}`
+  return summary.behind ? `${read} · ${summary.behind.toLocaleString()} not yet read` : read
 }
 
 const REVIEW: ListRef = { kind: 'review' }

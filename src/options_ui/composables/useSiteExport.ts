@@ -154,9 +154,8 @@ function profileListOf(row: SiteExportListRow): ProfileList | null {
 }
 
 /**
- * Whether this is the review's own stored window, which is stored like a list,
- * and the one that can't be re-read from here. It is This review, under
- * Lists → Review, rather than a row of its own.
+ * Whether this is the review's own stored window, which is stored like a list.
+ * It is This review, under Lists → Review, rather than a row of its own.
  */
 export function isReviewWindow(row: SiteExportListRow): boolean {
   return row.descriptor?.sourceId === REVIEW_SOURCE_ID
@@ -171,17 +170,13 @@ function rowFor(key: string): SiteExportListRow | null {
 }
 
 /**
- * Whether this list can be read from AO3 again from this page.
- *
- * Every other row is one listing, and refreshing it means walking that
- * listing's pages. The review's window is not: it is gathered from every
- * tracked list at once, by date, and the address it carries is the page the
- * review opens on. Refreshing it from here would scrape the reader's readings
- * list over the window and store an answer the next review discards — so the
- * button is off, and opening the review is what brings the window up to date.
+ * Whether this list can be read from AO3 again from this page: any list whose
+ * stored copy says how. Every row but one is a listing, refreshed by walking
+ * its pages; the review's window is refreshed by reading the tracked lists'
+ * records up to date (the job runner's `runRefresh`), which is its Pre-load.
  */
 export function canRefresh(row: SiteExportListRow): boolean {
-  return !!row.descriptor && !isReviewWindow(row)
+  return !!row.descriptor
 }
 
 /**
@@ -407,12 +402,24 @@ export function useSiteExport() {
     changeReport,
     importingChanges,
 
+    /**
+     * Pre-load: read the tracked lists' records up to date, as the review does
+     * in the background, so the next review opens without asking AO3. A job on
+     * the review's window; before the first review there is no window yet, and
+     * the job runs under the key and address the review will keep it by.
+     */
+    preloadReview() {
+      if (review.value)
+        return startFor(review.value, ['refreshing'])
+      const user = userId.value
+      if (!user)
+        return
+      const descriptor = { sourceId: REVIEW_SOURCE_ID, label: 'Tracked review', listUrl: getArchiveLink(`/users/${encodeURIComponent(user)}/readings#ao3e-tracked`) }
+      return run('start the job', () => startJob({ cacheKey: REVIEW_SOURCE_ID, descriptor, steps: ['refreshing'] }))
+    },
+
     /** Re-scrape a list, without touching the work text. */
     refreshList(row: SiteExportListRow) {
-      if (!canRefresh(row)) {
-        toast('This list isn\'t read from one listing, so there is nothing to refresh.', { type: 'error' })
-        return
-      }
       return startFor(row, ['refreshing'])
     },
 
@@ -428,10 +435,6 @@ export function useSiteExport() {
 
     /** Refresh the list, then cache against it — the two steps as one job. */
     refreshAndCache(row: SiteExportListRow) {
-      if (!canRefresh(row)) {
-        toast('This list isn\'t read from one listing, so there is nothing to refresh.', { type: 'error' })
-        return
-      }
       return startFor(row, ['refreshing', 'caching'])
     },
 

@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 import { formatDay, isoDay } from '../../src/common/trackedLists.ts'
 import { jobView } from '../../src/options_ui/model/jobView.ts'
 import { timeAgo } from '../../src/options_ui/model/moments.ts'
-import { latestReviewable, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
+import { latestReviewable, recordsLine, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 
 const NOW = 1_800_000_000_000
@@ -206,5 +206,41 @@ describe('This review', () => {
   test('the job calls it this review, which reads in the other lists\' reasons', () => {
     assert.equal(job(REVIEW).label, 'Caching this review')
     assert.equal(block({ window: { ...WINDOW, key: OTHER }, job: job(REVIEW) }).offlineOff, 'off for now: one job at a time, and this review is caching')
+  })
+})
+
+describe('Pre-load', () => {
+  test('reads the tracked lists ahead whenever the review could be opened, window or not', () => {
+    assert.deepEqual(block().preload, { off: null })
+    assert.deepEqual(block({ window: null }).preload, { off: null })
+  })
+
+  test('off, and says why, with Tracked lists off, with no list tracked, or with nowhere for the review to open', () => {
+    assert.deepEqual(block({ enabled: false }).preload, { off: TRACK_OFF.review })
+    assert.deepEqual(block({ tracking: false }).preload, { off: START_OFF.noneTracked })
+    assert.deepEqual(block({ window: null, userId: undefined }).preload, { off: START_OFF.noWindow })
+  })
+
+  test('its job with no window yet: the line in the cell, and Stop in place of Pre-load', () => {
+    const view = block({ window: null, job: job(REVIEW) })
+    assert.equal(view.job, true)
+    assert.equal(view.actions, 'stop')
+  })
+
+  test('off while another list has the one job, naming it', () => {
+    assert.equal(block({ job: job(OTHER) }).preload.off, block({ job: job(OTHER) }).offlineOff)
+    assert.notEqual(block({ job: job(OTHER) }).preload.off, null)
+  })
+})
+
+describe('the records line', () => {
+  test('how far every list is read, and how many are not yet', () => {
+    assert.equal(recordsLine({ through: TODAY - 2, behind: 3 }), `Lists read through ${formatDay(TODAY - 2)} · 3 not yet read`)
+    assert.equal(recordsLine({ through: TODAY - 2, behind: 0 }), `Lists read through ${formatDay(TODAY - 2)}`)
+    assert.equal(recordsLine({ through: null, behind: 1 }), 'No list read yet')
+  })
+
+  test('nothing to say with no list tracked', () => {
+    assert.equal(recordsLine({ through: null, behind: 0 }), null)
   })
 })

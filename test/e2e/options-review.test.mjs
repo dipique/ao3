@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { formatDay, isoDay, utcToday } from '../../src/common/trackedLists.ts'
 import { sentence } from '../../src/options_ui/model/phrases.ts'
 import { REVIEW_NAME, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
-import { storedLists } from './helpers.mjs'
+import { DIST, installMock, storedLists } from './helpers.mjs'
 import { ARCHIVE, captureDownloads, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { archiveAnswers, archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, trackedOption } from './trackedReview.mjs'
 
 const TODAY = utcToday()
 const ROW = 'review-tracked-lists'
@@ -94,6 +97,9 @@ describe('options UI — the Review block', { skip }, () => {
       viewport: { width: 1440, height: 900 },
       prepare: async (p) => {
         await stubArchive(p, async (url) => {
+          // The tracked list, read by the review's refresh: nothing new on it.
+          if (new URL(url).pathname === '/works/search')
+            return { body: '<!DOCTYPE html><html><body class="logged-in"><div id="main" class="works-search region"><h3 class="heading">0 Found</h3><ol class="work index group"></ol></div></body></html>' }
           const workId = /^\/works\/(\d+)$/.exec(new URL(url).pathname)?.[1]
           if (!workId)
             return { status: 404 }
@@ -560,5 +566,81 @@ describe('options UI — This review with nothing to start', { skip }, () => {
     assert.equal(await (await options.control(review, 'button', 'Cache works')).evaluate(el => el.disabled), false)
     assert.deepEqual(options.problems(), [])
     await options.close()
+  })
+})
+
+describe('options UI — Pre-load', { skip }, () => {
+  let session
+  let options
+  let page
+
+  resetWorkIds(14000)
+  const since = TODAY - 6
+  const alpha = listing('alpha', Array.from({ length: 6 }, (_, i) => [since + i, 3]), { entry: { alias: 'Alpha', since } })
+  const fixtures = [alpha]
+  const SEED = {
+    'option.user': { userId: 'me' },
+    'option.trackedLists': trackedOption(fixtures, { target: 6, reviewedThrough: since - 1 }),
+    'cache.markedForLater': { userId: 'me', updatedAt: Date.now(), ids: '' },
+  }
+  const fetched = []
+
+  before(async () => {
+    session = await startOptions()
+  }, { timeout: 180000 })
+
+  after(() => session?.close())
+
+  const openWith = seed => session.open({
+    seed,
+    hash: '#review',
+    viewport: { width: 1440, height: 900 },
+    prepare: p => stubArchive(p, async url => archiveAnswers({ fixtures, fetched })(new URL(url))),
+  })
+
+  const cell = () => page.$('[data-review-cell="this-review"]')
+  const records = () => page.evaluate(async () => (await window.browser.storage.local.get('trackedRead.alpha'))['trackedRead.alpha'] ?? null)
+
+  test('Pre-load reads the tracked lists into their records, and the records line says how far', async () => {
+    options = await openWith(SEED)
+    page = options.page
+    assert.equal(await options.text(await page.$('[data-review-records]')), 'No list read yet')
+    await (await options.control(await cell(), 'button', 'Pre-load')).click()
+    await until('the records to be read', async () => (await records())?.through === TODAY - 1)
+    await until('the records line to say so', async () => (await options.text(await page.$('[data-review-records]'))) === `Lists read through ${formatDay(TODAY - 1)}`)
+    assert.ok(fetched.some(path => path.startsWith('/tags/alpha/works')), 'the list was read')
+  })
+
+  test('and the review opened afterwards draws from them, asking AO3 for nothing', async () => {
+    const store = await page.evaluate(async () => window.browser.storage.local.get(null))
+    const asked = []
+    const tab = await session.browser.newPage()
+    try {
+      await tab.setViewport({ width: 1280, height: 900 })
+      await tab.setRequestInterception(true)
+      tab.on('request', archiveRoutes({ fixtures, fetched: asked }))
+      await tab.evaluateOnNewDocument(installClock, CLOCK_BASE)
+      await tab.evaluateOnNewDocument(installMock, store)
+      await tab.goto('https://archiveofourown.org/users/me/readings#ao3e-tracked', { waitUntil: 'domcontentloaded' })
+      await tab.addStyleTag({ content: await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8') })
+      await tab.addScriptTag({ content: await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8') })
+      await reviewDrawn(tab)
+      const shown = await tab.evaluate(() => document.querySelectorAll('.AO3E--search-view--results > li.blurb').length)
+      assert.equal(shown, 6, 'the two days the target fits')
+      assert.deepEqual(asked.filter(path => path.startsWith('/tags/')), [], 'nothing asked of AO3')
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  test('Pre-load refuses while a review tab is reading, and says why', async () => {
+    options = await openWith({ ...SEED, 'cache.trackedReadClaim': { by: 'a review tab', at: Date.now() } })
+    page = options.page
+    const before = fetched.length
+    await (await options.control(await cell(), 'button', 'Pre-load')).click()
+    await until('the refusal to be said', async () => (await options.text(await cell())).includes('Reading in another tab'))
+    assert.equal(fetched.length, before, 'nothing asked of AO3')
+    assert.equal(await records(), null)
   })
 })

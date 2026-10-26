@@ -260,40 +260,46 @@ function listingPage(list, url) {
  * rate-limited archive turns it away: a 429, asking for that wait.
  */
 export function archiveRoutes({ fixtures, user = 'me', fetched = [], refuse = () => 0 }) {
-  const lists = Object.fromEntries(fixtures.map(fixture => [fixture.key, fixture]))
+  const answer = archiveAnswers({ fixtures, user, fetched, refuse })
   return (req) => {
     if (!req.url().startsWith('https://archiveofourown.org/'))
       return void req.abort()
-    const url = new URL(req.url())
-    if (url.pathname === `/users/${user}/readings`) {
-      return void req.respond({
-        status: 200,
-        contentType: 'text/html; charset=utf-8',
-        body: readingsPage({ toRead: url.searchParams.get('show') === 'to-read', user }),
-      })
-    }
+    const { status, body, headers } = answer(new URL(req.url()))
+    void req.respond({ status, contentType: 'text/html; charset=utf-8', ...(headers ? { headers } : {}), body })
+  }
+}
+
+/**
+ * The stand-in archive's answers, as `{ status, body, headers? }` for a URL:
+ * what {@link archiveRoutes} responds with, for a page that answers its
+ * requests some other way (the options page's `stubArchive`).
+ */
+export function archiveAnswers({ fixtures, user = 'me', fetched = [], refuse = () => 0 }) {
+  const lists = Object.fromEntries(fixtures.map(fixture => [fixture.key, fixture]))
+  return (url) => {
+    if (url.pathname === `/users/${user}/readings`)
+      return { status: 200, body: readingsPage({ toRead: url.searchParams.get('show') === 'to-read', user }) }
     // AO3's own "mark for later" action, and the work page whose mark button the
     // menu reads the current state off. The review makes neither request itself,
     // but a reader saving a work from a blurb's menu mid-review makes both.
     if (/^\/works\/\d+\/mark_(?:for_later|as_read)$/.test(url.pathname))
-      return void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: '<html><body class="logged-in"></body></html>' })
+      return { status: 200, body: '<html><body class="logged-in"></body></html>' }
     const work = /^\/works\/(\d+)$/.exec(url.pathname)
     if (work) {
-      return void req.respond({
+      return {
         status: 200,
-        contentType: 'text/html; charset=utf-8',
         body: `<!DOCTYPE html><html><body class="logged-in"><div id="main"><ul class="work navigation actions">`
           + `<li class="mark"><form class="button_to" action="/works/${work[1]}/mark_for_later" method="post">`
           + `<button type="submit">Mark for Later</button></form></li></ul></div></body></html>`,
-      })
+      }
     }
     fetched.push(url.pathname + url.search)
     const wait = refuse(url)
     if (wait)
-      return void req.respond({ status: 429, headers: { 'retry-after': String(wait) }, body: 'slow down' })
+      return { status: 429, headers: { 'retry-after': String(wait) }, body: 'slow down' }
     const list = lists[keyOf(url)]
     if (!list || list.fail)
-      return void req.respond({ status: list ? 500 : 404, body: 'no' })
-    void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body: listingPage(list, url) })
+      return { status: list ? 500 : 404, body: 'no' }
+    return { status: 200, body: listingPage(list, url) }
   }
 }
