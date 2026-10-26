@@ -15,6 +15,7 @@ import {
   resumeSync,
   setSyncEnabled,
 } from './syncEngine.ts'
+import { watchReadRecords } from './trackedRecords.ts'
 
 import './menus.ts'
 
@@ -43,6 +44,8 @@ void current.then(async (isCurrent) => {
 // The saved-list records follow the synced entries and the stored lists, and
 // like the migrations, only on the code that's on disk.
 watchSavedLists(current)
+// A list's read record goes when the list stops being tracked.
+watchReadRecords(current)
 
 browser.runtime.onInstalled.addListener(async () => {
   // Never migrate with code that isn't the code on disk.

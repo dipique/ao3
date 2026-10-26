@@ -512,6 +512,15 @@ export function readRecordKey(listId: string): string {
 }
 
 /**
+ * Of `keys` (storage keys), the records of lists not among `trackedIds`: a
+ * list that stopped being tracked while nothing was there to drop its record.
+ */
+export function strayRecordKeys(keys: readonly string[], trackedIds: readonly string[]): string[] {
+  const tracked = new Set(trackedIds.map(readRecordKey))
+  return keys.filter(key => key.startsWith(READ_RECORD_PREFIX) && !tracked.has(key))
+}
+
+/**
  * Every work the records hold, as decimal work ids. A record keeps its works'
  * blurbs alive: the review draws them from the store, so a pruner must count
  * them as referenced. Anything that isn't a record is passed over.

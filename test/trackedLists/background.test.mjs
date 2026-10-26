@@ -195,3 +195,69 @@ describe('saved lists in the background', { skip }, () => {
     assert.deepEqual(result.again, [], 'a second run writes nothing')
   })
 })
+
+describe('the tracked lists’ read records in the background', { skip }, () => {
+  let page
+  let close
+
+  before(async () => {
+    ({ page, close } = await loadModuleInPage('test/trackedLists/backgroundEntry.ts', 'Background', {
+      prepare: blank => blank.evaluate(installMock, {}),
+    }))
+    await page.evaluate(() => {
+      // Listing keys without their values, as the browsers this runs on can.
+      window.browser.storage.local.getKeys = async () => Object.keys(await window.browser.storage.local.get(null))
+      window.reset = async (seed = {}) => {
+        await window.browser.storage.local.clear()
+        await window.browser.storage.local.set(seed)
+        window.__writes.length = 0
+      }
+      window.recordKeys = async () => Object.keys(await window.browser.storage.local.get(null)).filter(key => key.startsWith('trackedRead.') || key === 'cache.trackedReviewClaim').sort()
+      window.retired = async () => (await window.browser.storage.local.get('cache.trackedReview'))['cache.trackedReview']?.retired ?? ''
+    })
+  }, { timeout: 120000 })
+
+  after(async () => close?.())
+
+  /** A record holding these short ids. */
+  const record = (...sids) => ({ v: 1, query: '', from: 20_000, through: 20_000, readAt: 1, rows: sids.map(sid => `${sid}.fdk`).join(',') })
+
+  const SEED = {
+    'option.trackedLists': { ...TRACKED_LISTS, lists: [HP] },
+    'trackedRead.hp1': record('a'),
+    'trackedRead.gone': record('b', 'c'),
+    'cache.trackedReviewClaim': { reviewedThrough: 0, listsSig: '', target: 0, by: 'someone', at: 1 },
+  }
+
+  test('the migration drops the records of lists no longer tracked, and the old claim, and retires their works; run again, it changes nothing', async () => {
+    const result = await page.evaluate(async (seed) => {
+      await window.reset(seed)
+      await window.Background.migrate()
+      const first = { keys: await window.recordKeys(), retired: await window.retired() }
+      window.__writes.length = 0
+      await window.Background.migrate()
+      const again = window.__writes.flatMap(write => Object.keys(write)).filter(key => key.startsWith('trackedRead.') || key === 'cache.trackedReview')
+      return { first, again }
+    }, SEED)
+    assert.deepEqual(result.first.keys, ['trackedRead.hp1'])
+    // b and c, as packed decimal ids: 11 and 12.
+    assert.notEqual(result.first.retired, '')
+    assert.deepEqual(result.again, [])
+  })
+
+  test('untracking a list drops its record and retires its works', async () => {
+    const result = await page.evaluate(async (seed) => {
+      await window.reset(seed)
+      window.Background.watchReadRecords(Promise.resolve(true))
+      // A turn of the event loop: the watch reads which lists are tracked.
+      await new Promise(resolve => setTimeout(resolve))
+      const option = (await window.browser.storage.local.get('option.trackedLists'))['option.trackedLists']
+      await window.browser.storage.local.set({ 'option.trackedLists': { ...option, lists: [] } })
+      for (let turn = 0; turn < 50 && (await window.recordKeys()).some(key => key.startsWith('trackedRead.')); turn++)
+        await new Promise(resolve => setTimeout(resolve))
+      return { keys: await window.recordKeys(), retired: await window.retired() }
+    }, Object.fromEntries(Object.entries(SEED).filter(([key]) => key !== 'trackedRead.gone')))
+    assert.deepEqual(result.keys.filter(key => key.startsWith('trackedRead.')), [])
+    assert.notEqual(result.retired, '')
+  })
+})

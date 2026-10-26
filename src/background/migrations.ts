@@ -3,6 +3,7 @@ import type { BlurbMeta, cache, Language, Rule, RuleColors, RuleTarget, StoredLi
 import { BLURB_INDEX_KEY, blurbDataKey, blurbKey, createDefaultMarks, DEFAULT_RULE_COLORS, filterFromInvert, isTagTarget, LEGACY_SNAPSHOTS_KEY, legacyMarkIcon, MARKS_VERSION, migratedBlurbMeta, normalizeMarkOrder, packIds, planLanguageHideRetirement, planLegacyMigration, RULE_TARGETS, TagType, unpackIds } from '#common'
 
 import { reconcileSavedLists, refileListings, splitDateFilters } from './savedLists.ts'
+import { cleanReadRecords } from './trackedRecords.ts'
 
 /** The pre-merge `hideAuthors` filter shape. */
 interface LegacyAuthorFilter { userId: string, pseud?: string, behavior?: Rule['behavior'], color?: string }
@@ -172,6 +173,8 @@ export async function migrate() {
   await reconcileSavedLists()
   await refileListings()
   await splitDateFilters()
+  // After the saved lists are in step, so the lists tracked are the ones that stay.
+  await cleanReadRecords()
 }
 
 /**
