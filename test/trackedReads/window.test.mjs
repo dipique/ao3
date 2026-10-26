@@ -249,6 +249,14 @@ describe('windowFromRecords', () => {
     assert.equal(window.reviewable, true)
   })
 
+  test('a list tracked today is pending in the preview of today until it has been read', () => {
+    const a = list('a', { since: TODAY })
+    const fresh = compute([a], [['a', recordFor(a, undefined, TODAY)]], { start: TODAY })
+    assert.deepEqual(fresh.pending, ['a'])
+    const read = compute([a], [['a', { ...recordFor(a, undefined, TODAY), readAt: 1 }]], { start: TODAY })
+    assert.deepEqual(read.complete, ['a'])
+  })
+
   test('caught up, endOverride has nothing to move', () => {
     const a = list('a')
     const window = compute([a], [['a', read(a, TODAY - 1, [])]], { start: TODAY, endOverride: TODAY - 3 })

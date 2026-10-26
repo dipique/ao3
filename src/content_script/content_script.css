@@ -2174,9 +2174,19 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   margin-right: auto;
 }
 
+.AO3E--tracked-review--bar--status,
 .AO3E--tracked-review--bar--notes {
   opacity: 0.75;
   font-size: 0.9em;
+}
+
+/* A list that couldn't be read is a warning, not a note. */
+.AO3E--tracked-review--bar--status[data-kind='failed'] {
+  opacity: 1;
+}
+
+.AO3E--tracked-review--bar--status[data-kind='failed']::before {
+  content: '⚠ ';
 }
 
 .AO3E--tracked-review--bar--warning {

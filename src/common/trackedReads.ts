@@ -1,7 +1,7 @@
 import type { Day, TrackedList } from './trackedLists.ts'
 
 import { claimLive } from './claim.ts'
-import { CLAIM_TTL_MS, excludedTagNames, wholeNumber } from './trackedLists.ts'
+import { excludedTagNames, formatDay, wholeNumber } from './trackedLists.ts'
 import { fromShortId } from './workId.ts'
 
 /**
@@ -386,7 +386,9 @@ export interface ComputedWindow {
  * days can't reach the window whatever it answers.
  *
  * **Completeness.** A list is complete through the window's end once its
- * `through` reaches it, or yesterday for a preview of today. One that isn't is
+ * `through` reaches it, or yesterday for a preview of today — and it has been
+ * read, unless its record starts after the window's end and so has nothing
+ * for it. One that isn't is
  * failed when its last run gave up on it, and pending otherwise.
  */
 export function windowFromRecords(input: WindowInput): ComputedWindow {
@@ -480,7 +482,7 @@ export function windowFromRecords(input: WindowInput): ComputedWindow {
   const failed: string[] = []
   for (const list of lists) {
     const record = input.records.get(list.id)
-    if (record && record.through >= bound)
+    if (record && record.through >= bound && (record.readAt > 0 || record.from > end))
       complete.push(list.id)
     else if (record?.failed)
       failed.push(list.id)
@@ -545,6 +547,12 @@ export interface ReadClaim {
   at: number
 }
 
+/** How long a claim holds without being renewed. */
+export const CLAIM_TTL_MS = 60_000
+
+/** How often a page reading renews its claim: well inside {@link CLAIM_TTL_MS}, since a tab in the background has its timers slowed. */
+export const CLAIM_RENEW_MS = 20_000
+
 /** A claim by page run `by` at `now`. */
 export function readClaim(by: string, now: number): ReadClaim {
   return { by, at: now }
@@ -559,4 +567,65 @@ export function claimHolder(claim: Partial<ReadClaim> | null | undefined, self: 
   if (!claim || !claimLive(claim.at, now, CLAIM_TTL_MS))
     return 'free'
   return claim.by === self ? 'self' : 'other'
+}
+
+/** `12 Sep – 19 Sep 2026`, with the year said once when both ends share it. */
+export function formatRange(start: Day, end: Day): string {
+  const from = formatDay(start)
+  const to = formatDay(end)
+  if (from === to)
+    return from
+  const sameYear = from.slice(-4) === to.slice(-4)
+  return `${sameYear ? from.slice(0, -5) : from} – ${to}`
+}
+
+/** What the review's status line is told. */
+export interface ReviewStatusInput {
+  window: Pick<ComputedWindow, 'start' | 'end' | 'complete' | 'pending' | 'failed'>
+  /** Each list's title, by id. */
+  labels: ReadonlyMap<string, string>
+  /** The pause this page's reading is sitting out, in words with its countdown; null when there is none. */
+  wait: string | null
+  /** Another page is reading the records, and this one follows what it writes. */
+  elsewhere: boolean
+  /** When the records were last written, as the reader reads a time; null when none has been. */
+  readAt: string | null
+}
+
+/** The review's status line: how current the window is. */
+export interface ReviewStatus {
+  /** Which of the three it says, most severe first. */
+  kind: 'failed' | 'pending' | 'current'
+  text: string
+  /** The lists it is about, by title, for hovering. */
+  lists: string[]
+}
+
+/**
+ * How current the window is, in order of severity: that a list couldn't be
+ * read, its works missing; that lists are still being read for the window's
+ * days, with the pause being sat out if there is one; or that it is up to date.
+ */
+export function reviewStatus(input: ReviewStatusInput): ReviewStatus {
+  const { window, labels } = input
+  const named = (ids: readonly string[]): string[] => ids.map(id => labels.get(id) ?? id)
+  if (window.failed.length) {
+    const lists = named(window.failed)
+    const who = lists.map(label => `“${label}”`).join(', ')
+    return {
+      kind: 'failed',
+      text: `${who} couldn’t be loaded, so ${lists.length === 1 ? 'its' : 'their'} works are missing from this range.`,
+      lists,
+    }
+  }
+  if (window.pending.length) {
+    const total = window.complete.length + window.pending.length
+    const where = input.wait ? ` — ${input.wait}` : input.elsewhere ? ', in another tab' : ''
+    return {
+      kind: 'pending',
+      text: `Still reading ${window.pending.length} of ${total} ${total === 1 ? 'list' : 'lists'} for ${formatRange(window.start, window.end)}${where}`,
+      lists: named(window.pending),
+    }
+  }
+  return { kind: 'current', text: input.readAt ? `Up to date as of ${input.readAt}` : 'Up to date', lists: [] }
 }

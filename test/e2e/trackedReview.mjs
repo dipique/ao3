@@ -44,14 +44,17 @@ export function installClock(base) {
 
 /**
  * Wait for the review to be on screen and done: its toolbar drawn, naming the
- * range it gathered and not busy with one, over a search view that has drawn
- * its works and is neither loading nor refreshing them.
+ * range it computed and not busy with one nor still reading for it, over a
+ * search view that has drawn its works and is neither loading nor refreshing
+ * them.
  */
 export function reviewDrawn(tab) {
   return tab.waitForFunction(() => {
     const bar = document.querySelector('.AO3E--tracked-review--bar')
     const range = bar?.querySelector('.AO3E--tracked-review--bar--range')?.textContent ?? ''
+    const status = bar?.querySelector('.AO3E--tracked-review--bar--status')
     return !!bar && !bar.classList.contains('AO3E--tracked-review--bar--busy') && range !== '' && !range.startsWith('Gathering')
+      && !!status && status.dataset.kind !== 'pending'
       && !!document.querySelector('.AO3E--search-host .AO3E--search-view--results')
       && !document.querySelector('.AO3E--search-host--progress, .AO3E--search-view--updating-on')
   })

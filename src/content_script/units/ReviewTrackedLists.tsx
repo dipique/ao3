@@ -3,20 +3,20 @@ import MdiChevronLeft from '~icons/mdi/chevron-left.jsx'
 import MdiChevronRight from '~icons/mdi/chevron-right.jsx'
 import MdiLoading from '~icons/mdi/loading.jsx'
 
-import type { Cache, Day, Options, SnapshotDescriptor, TrackedList, TrackedListsOption, TrackedReviewCache } from '#common'
+import type { Day, Options, SnapshotDescriptor, TrackedList, TrackedListsOption, TrackedRead, TrackedReviewCache } from '#common'
 import type { Work } from '#content_script/blurb.js'
-import type { LoadOptions, LoadResult, SearchHeaderControl, SearchSource } from '#content_script/searchView/host.tsx'
-import type { DeferredUpdate, ViewState } from '#content_script/searchView/view.tsx'
-import type { CappedDay, FetchedWindow } from '#content_script/tracked/fetchWindow.ts'
+import type { LoadResult, SearchHeaderControl, SearchSource } from '#content_script/searchView/host.tsx'
+import type { ViewState } from '#content_script/searchView/view.tsx'
+import type { ReadStatus } from '#content_script/tracked/readLists.ts'
+import type { ReviewWindow } from '#content_script/tracked/reviewWindow.ts'
 
 import {
   ADDON_CLASS,
   builtinOpens,
   cache,
-  CLAIM_RENEW_MS,
   CLAIM_TTL_MS,
-  claimWait,
   formatDay,
+  formatRange,
   fromShortId,
   getArchiveLink,
   markIds,
@@ -24,29 +24,35 @@ import {
   options,
   packIds,
   parseUser,
+  pruneReviewed,
   readWorkIds,
+  recordFor,
   reviewBasis,
-  reviewClaim,
   reviewStart,
+  reviewStatus,
   sameReviewBasis,
   sourceLabel,
+  storedRecordOf,
   toast,
   toShortId,
   unpackIds,
   utcToday,
 } from '#common'
+import { PATIENCE, WAIT_BUDGET, watchWaitLine } from '#content_script/archiveFetch.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { linkedTo, openLinked } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, markedForLaterIds } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
-import { readSnapshot, snapshotWorkIds, writeSnapshot } from '#content_script/searchView/cache.ts'
+import { snapshotWorkIds } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
-import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
-import { isSearchViewOpen, openSearchView, resumeSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
+import { closeSearchView, isSearchViewOpen, openSearchView, resumeSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { applyStatus } from '#content_script/searchView/status.ts'
-import { createTrackedSession, fetchWindow } from '#content_script/tracked/fetchWindow.ts'
+import { claimReads } from '#content_script/tracked/readClaim.ts'
+import { readTrackedLists } from '#content_script/tracked/readLists.ts'
+import { onReadRecordsChanged, readStoredRecords, writeReadRecords } from '#content_script/tracked/readStore.ts'
+import { computeWindow, recordsBehind } from '#content_script/tracked/reviewWindow.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -63,9 +69,9 @@ const LIST_NAME = 'Tracked'
 const SOURCE_ID = 'tracked-review'
 
 /**
- * The stored window's key. One list, not one per reader: a review is gathered
- * from the reader's own options against their own session, and the readings page
- * it opens on has already refused anyone else's.
+ * The stored window's key. One list, not one per reader: a review is computed
+ * from the reader's own options and records, and the readings page it opens on
+ * has already refused anyone else's.
  */
 const CACHE_KEY = 'tracked-review'
 
@@ -78,16 +84,22 @@ const HASH = '#ao3e-tracked'
 /**
  * How long Undo stays on offer after a range is marked reviewed. Longer than an
  * ordinary toast, because the reader can only tell whether they meant it once
- * the next window has drawn itself, which is a request or two away.
+ * the next window has drawn itself.
  */
 const UNDO_TIMEOUT_MS = 20_000
+
+/** What a work that left the window says in the slot it keeps. */
+const GONE_REASON = 'Moved to a later review'
+
+/** Said when a window turns out to hold nothing, and nothing is left to read. */
+const EMPTY_MESSAGE = 'Nothing new from your tracked lists.'
 
 // ---------------------------------------------------------------------------
 // What one page run remembers.
 //
 // All of it outlives a global re-run — which happens on every options change, so
 // on every mark click — and none of it outlives the page. That is exactly the
-// lifetime a review has: the reader's place in it, the pages already fetched,
+// lifetime a review has: the reader's place in it, the works already parsed,
 // and the set of works that counted as reviewed when they started.
 // ---------------------------------------------------------------------------
 
@@ -97,35 +109,45 @@ let facts: TrackedReviewCache | null = null
 let factsStale = true
 /** Works the reader has already dealt with, taken once per fresh open. */
 let reviewed: ReviewedSet | null = null
-/** Pages already read for this window's start, so a ± day costs nothing. */
-let session = createTrackedSession()
 /** The reader's ± day. This visit only: the next one sizes to the target again. */
 let endOverride: Day | undefined
-/** The window before the one in {@link facts} — what the view still holds if a reload is waiting. */
-let carried: string[] = []
-/** Short ids the view is holding when they aren't the stored window's. */
-let heldIds: Set<string> | null = null
-/** How the last gather changed the window, for the "Range updated" offer. */
-let lastDiff = { added: 0, removed: 0 }
-/** What only a gather knows, so a window drawn from the cache simply leaves it out. */
-let extras: { backlog: number, capped: CappedDay[], nextDayCount: number } | null = null
+/**
+ * The window's end once it was up to date, for the start it was computed
+ * from: held for the visit, so a list read later can't take days off a window
+ * the reader has been told is whole.
+ */
+let heldEnd: { start: Day, end: Day } | null = null
+/** Short ids of works on screen that left the window, drawn as gone in their slots. */
+let goneHeld = new Set<string>()
+/** Every work parsed this page run, by archive work id: one object per work. */
+const parsed = new Map<string, Work>()
+/** The window last computed, for the toolbar. */
+let current: ReviewWindow | null = null
 /**
  * Set by Mark reviewed, read by the reopen its option write causes: the works
  * that view held are the range just finished, so the reader's filters come
  * across but the works and their page layout don't.
  */
 let advanced = false
-/**
- * Redraw the toolbar this open built, if it has built one.
- *
- * The toolbar reads {@link facts}, so a load that moves the window has to tell
- * it — but only when those works are going on screen. A background reload is
- * offered rather than applied, and until the reader takes it the toolbar is
- * still describing the works they are looking at.
- */
+/** Redraw the toolbar this open built, if it has built one. */
 let redrawBar: (() => void) | null = null
-/** The window the last load settled on, when it held no works at all. */
+/** The view this open drew, as its toolbar reaches it. */
+let control: SearchHeaderControl | null = null
+/** The window the last load computed, when it held no works at all. */
 let emptyWindow: QuietWindow | null = null
+/** The reading this page is doing, if any. */
+let reading: { controller: AbortController, status: ReadStatus | null } | null = null
+/** Another page holds the read claim: this one follows the records it writes. */
+let readingElsewhere = false
+/** Retries the claim once another page's could have lapsed. */
+let claimRetry: ReturnType<typeof setTimeout> | undefined
+/** Stops hearing record writes: one listener per page run. */
+let stopFollowing: (() => void) | null = null
+/** Stops the last toolbar's countdown of a pause in reading. */
+let stopWaitLine: (() => void) | null = null
+/** A recompute under way, and whether another was asked for while it ran. */
+let recomputing: Promise<void> | null = null
+let recomputeAgain = false
 
 interface QuietWindow {
   start: Day
@@ -158,14 +180,20 @@ interface ReviewedSet {
  * moves the range and marks it reviewed.
  *
  * **What a review is.** Every tracked list is a saved query. Read oldest-first
- * over a span of days and merged by work, they make a stream — and the reader
- * goes through it a *window* of whole days at a time, as many days as fit the
- * works-per-review target. Nothing is ever marked reviewed one work at a time:
- * the only review state is one day number, so finishing a window is one click
- * and there is no per-item bookkeeping to keep in step, to sync, or to lose.
- * Reading the window out of the archive is
- * {@link file://../tracked/fetchWindow.ts}; deciding what a window *is* is
- * {@link file://../../common/trackedLists.ts}. This unit is the page.
+ * and merged by work, they make a stream — and the reader goes through it a
+ * window* of whole days at a time, as many days as fit the works-per-review
+ * target. Nothing is ever marked reviewed one work at a time: the only review
+ * state is one day number, so finishing a window is one click and there is no
+ * per-item bookkeeping to keep in step, to sync, or to lose.
+ *
+ * **Where the works come from.** Each list keeps a read record — the works its
+ * query turned up, by day ({@link file://../../common/trackedReads.ts}) — and
+ * the window is computed from those without asking the archive
+ * ({@link file://../tracked/reviewWindow.ts}), so it draws at once. A reader
+ * ({@link file://../tracked/readLists.ts}) brings the records up to date in the
+ * background, one page at a time, in whichever page holds the read claim; every
+ * page with the review open hears the records land and merges the works they
+ * bring in place, without moving anything on a page the reader has passed.
  *
  * **What it stands on.** The window is shown in the same search view the reader
  * already knows from Marked for Later and the read list — through the source
@@ -228,10 +256,8 @@ export class ReviewTrackedLists extends Unit {
       this.addEntryPoint(host, pageUser)
 
     // A global re-run took the view down: put it back where the reader left
-    // off, or, still loading, as far as it had got. After a Mark reviewed the
-    // window has moved on, so the reader's filters come across but the works
-    // don't — the stored window answers to the old watermark, so the next one
-    // is gathered.
+    // off. After a Mark reviewed the window has moved on, so the reader's
+    // filters come across but the works don't.
     const resumed = resumeSearchView(CACHE_KEY, (opts) => {
       const moved = advanced
       advanced = false
@@ -263,20 +289,20 @@ export class ReviewTrackedLists extends Unit {
     await this.readFacts()
     reviewed ??= await takeReviewed(userId, this.options)
     await openSearchView(this.source(userId), this.options, opts)
-    // A window holding no works at all closes the view: the host has nothing to
-    // put on screen, and no toolbar goes up with it. A quiet range is still a
+    // A window holding no works at all, with nothing left to read, closes the
+    // view: the host has nothing to put on screen. A quiet range is still a
     // range the reader can clear, so the offer it would have carried is made
     // here instead.
     const quiet = takeEmptyWindow()
     if (!isSearchViewOpen() && quiet)
-      this.offerEmptyRange(userId, quiet.start, quiet.end, quiet.reviewable)
+      this.offerEmptyRange(quiet)
   }
 
   /** Everything the shared host needs to know about a review window. */
   source(userId: string): SearchSource {
     const history = onHistoryPage()
     // Where the list lives: the page the review opens on, which This review's
-    // Start Review on the options page falls back on. A review is gathered
+    // Start Review on the options page falls back on. A review is computed
     // from several queries at once, so there is no listing behind it — which
     // is also why `load` replaces the whole scrape.
     const home = getArchiveLink(`/users/${encodeURIComponent(userId)}/readings${HASH}`)
@@ -288,9 +314,14 @@ export class ReviewTrackedLists extends Unit {
       // works: nothing here is ever asked for a page.
       pageUrl: () => home,
       pageCount: () => 1,
-      load: opts => this.load(userId, opts),
-      header: ctl => this.header(ctl, userId),
+      load: () => this.load(userId),
+      header: ctl => this.header(ctl),
       belongs: work => belongsToWindow(work),
+      // The records are read in the background, and land in the view as they
+      // do; the Refresh button only starts that reading again if it stopped.
+      reread: () => this.reread(),
+      // Kept open while lists are still being read, which is what will fill it.
+      keepsEmpty: () => !!current?.window.pending.length,
       // Opened over the to-read page, there is nothing native to go back to —
       // that page is itself a search view. Over History, "Back to list" means
       // History.
@@ -299,11 +330,10 @@ export class ReviewTrackedLists extends Unit {
       // by work, so their rules apply exactly as they would on the pages the
       // works came from.
       hidesNothing: false,
-      // A past day's works barely change, so a window is worth keeping between
-      // visits — but only while it still answers to the reader's options. A
-      // window computed against a watermark, list set or target that has moved
-      // is no longer about anything, and is read again at once.
-      refreshInterval: () => (factsStale ? 0 : refreshIntervalMs(this.options.searchProfileListsRefreshHours)),
+      // A stored window is drawn as it is while it answers to the reader's
+      // options, and the records' own reading brings it up to date; one that
+      // doesn't answer to them is computed again at once.
+      refreshInterval: () => (factsStale ? 0 : Number.POSITIVE_INFINITY),
       nativeElements: () => [
         ...document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
         ...listChrome(),
@@ -320,7 +350,7 @@ export class ReviewTrackedLists extends Unit {
       },
       prepare: works => this.stamp(works),
       viewConfig: {
-        // "marked" is the order the window was gathered in: oldest day first,
+        // "marked" is the order the window was computed in: oldest day first,
         // and within a day the order the lists themselves listed the works in.
         sortLabels: { marked: 'Review order' },
         // Opening on "Ready" would hide most of a review behind a facet the
@@ -329,104 +359,43 @@ export class ReviewTrackedLists extends Unit {
         // See the class comment: a review is walked in order, and a mark click
         // must not move anything.
         stablePages: true,
+        goneReason: GONE_REASON,
       },
-      emptyMessage: 'Nothing new from your tracked lists.',
+      emptyMessage: EMPTY_MESSAGE,
       errorMessage: 'Could not gather your tracked lists.',
     }
   }
 
-  /** Read the review window out of the archive, and write down what it is. */
-  private async load(userId: string, opts: LoadOptions): Promise<LoadResult> {
+  /** Compute the window from the records, and write down what it is. */
+  private async load(userId: string): Promise<LoadResult> {
     // A load is a fresh look at the window, so the already-reviewed set is taken
     // again here — and only here. The reopens a mark click causes reuse it, which
     // is what keeps a work the reader just marked from vanishing from under them.
     reviewed = await takeReviewed(userId, this.options)
-
-    let option = this.options.trackedLists
-    for (;;) {
-      // Every tab with the review open finds the stored window stale on the same
-      // option write. One of them reads the archive for the next; the rest wait
-      // for its window rather than ask for the same pages again.
-      if (factsStale) {
-        const landed = await awaitClaimed(option, opts)
-        if (landed)
-          return this.adopt(landed, opts)
-      }
-      const result = await this.readWindow(userId, option, opts)
-      if (result)
-        return result
-      // The reader moved the review on while it was being read — an Undo, a
-      // list tracked — so what was read answers to nothing, and the window they
-      // are now asking for may already be in the store.
-      option = await options.get('trackedLists')
-      factsStale = true
-    }
+    goneHeld = new Set()
+    const next = await this.compute()
+    await this.commit(next)
+    emptyWindow = next.works.length || next.window.pending.length ? null : quietOf(next)
+    return { works: next.works, blocked: false }
   }
 
-  /**
-   * Read the window `option` asks for, claimed for as long as that takes when
-   * the store doesn't hold it, and keep it. Null when the options have moved off
-   * `option` meanwhile: that window is neither kept nor shown.
-   */
-  private async readWindow(userId: string, option: TrackedListsOption, opts: LoadOptions): Promise<LoadResult | null> {
-    const release = factsStale ? await holdClaim(option) : null
-    let result: FetchedWindow
-    try {
-      result = await fetchWindow({
-        lists: option.lists.filter(list => list.tracked),
-        start: reviewStart(option),
-        today: utcToday(),
-        target: option.target,
-        endOverride,
-        reviewed: (reviewed ??= await takeReviewed(userId, this.options)).ids,
-        options: this.options,
-        signal: opts.signal,
-        onProgress: opts.onProgress,
-        session,
-      })
-      if (!sameReviewBasis(reviewBasis(option), await options.get('trackedLists')))
-        return null
-
-      // The same condition the host writes the snapshot under: a refusal that
-      // brought nothing back is not news about what the lists hold, and the stored
-      // window stays exactly as it was.
-      if (!result.blocked || result.works.length)
-        await this.commit(result, userId, option)
-    }
-    finally {
-      // After the commit, so a tab waiting on the claim hears the window land
-      // before it hears the claim go.
-      await release?.()
-    }
-    // These works are going straight on screen (a first load, or the reader's
-    // own Refresh), so the toolbar has to describe the window they came from.
-    // A reload that is only being offered leaves it alone — see {@link redrawBar}.
-    if (opts.applied)
-      redrawBar?.()
-    emptyWindow = result.works.length ? null : result.window
-    return { works: result.works, blocked: result.blocked }
-  }
-
-  /**
-   * Take up a window another tab gathered: its facts as this page's, and its
-   * works from the store, where that tab wrote them before the facts.
-   */
-  private async adopt(landed: TrackedReviewCache, opts: LoadOptions): Promise<LoadResult> {
-    const stored = await readSnapshot(CACHE_KEY)
-    carried = facts ? Object.keys(facts.sources) : []
-    lastDiff = countDiff(facts?.sources ?? {}, landed.sources)
-    // What only a gather knows stays with the tab that gathered.
-    extras = null
-    facts = landed
-    factsStale = false
-    heldIds = null
-    if (opts.applied)
-      redrawBar?.()
-    const works = stored?.works ?? []
-    emptyWindow = works.length
-      ? null
-      : { start: landed.start, end: landed.end, reviewable: !landed.failed.length && landed.end < utcToday() }
-    return { works, blocked: false }
+  /** The window the records make now, under the reader's options. */
+  private async compute(): Promise<ReviewWindow> {
+    const option = this.options.trackedLists
+    const start = reviewStart(option)
+    const held = heldEnd?.start === start ? heldEnd.end : undefined
+    const next = await computeWindow({
+      option,
+      options: this.options,
+      reviewed: (reviewed ??= { ids: new Set(), savedKnown: false }).ids,
+      endOverride: endOverride ?? held,
+      works: parsed,
+    })
+    // A window the records say is whole keeps its end for the visit.
+    if (endOverride === undefined && !next.window.pending.length && !next.window.failed.length)
+      heldEnd = { start, end: next.window.end }
+    current = next
+    return next
   }
 
   /**
@@ -434,9 +403,8 @@ export class ReviewTrackedLists extends Unit {
    *
    * A window computed against a watermark, a set of lists or a target the reader
    * has moved on from ({@link sameReviewBasis}) is about nothing at all — so it
-   * isn't merely refreshed behind them, it stops belonging (see
-   * {@link belongsToWindow}), which leaves the host with no stored copy to draw
-   * and sends it to gather a new one.
+   * stops belonging (see {@link belongsToWindow}), which leaves the host with no
+   * stored copy to draw and sends it to compute a new one.
    */
   private async readFacts(): Promise<void> {
     const option = this.options.trackedLists
@@ -450,53 +418,47 @@ export class ReviewTrackedLists extends Unit {
     factsStale = !facts
       || facts.computedAt === 0
       || !sameReviewBasis(facts, option)
+    // A window about something else — a moved watermark, other lists, a new
+    // target — holds no end: it is sized again.
     if (factsStale) {
-      // Nothing carried over from a window that no longer describes anything.
-      extras = null
-      heldIds = null
+      goneHeld = new Set()
+      heldEnd = null
     }
   }
 
   /**
-   * Write a freshly gathered window down: its works as the stored list, its
-   * facts as the cache entry, and the works the window before it held — and this
-   * one doesn't — retired.
-   *
-   * The order matters. The list goes down **first**, so that by the time the
-   * blurbs of the outgoing window are weighed as orphans the incoming window is
-   * already holding its own. (The host writes the same list again the moment
-   * `load` returns; a list already in the store costs nothing to write twice.)
+   * Write a computed window down: its facts as the cache entry, and the works
+   * the window before it held — and this one doesn't — retired. The window's
+   * works are the stored list, which the host writes.
    */
-  private async commit(result: FetchedWindow, userId: string, against: TrackedListsOption): Promise<void> {
+  private async commit(next: ReviewWindow): Promise<void> {
     const previous = facts
+    const { window } = next
     const sources: { [sid: string]: string } = {}
-    for (const [sid, ids] of result.sources)
-      sources[sid] = ids.join(',')
+    const shown = new Set(next.works.map(work => toShortId(work.workId)))
+    for (const work of window.works) {
+      if (shown.has(work.sid))
+        sources[work.sid] = work.lists.join(',')
+    }
     const days: { [day: string]: number } = {}
-    for (const [day, count] of result.days)
+    for (const [day, count] of window.days)
       days[String(day)] = count
 
-    await writeSnapshot(CACHE_KEY, result.works, descriptorFor(userId))
-
-    const retired = await this.retire(previous, sources, this.options)
-
-    const next: TrackedReviewCache = {
-      start: result.window.start,
-      end: result.window.end,
+    const retired = await this.retire(previous, sources, next.pruned, this.options)
+    const stored: TrackedReviewCache = {
+      start: window.start,
+      end: window.end,
       computedAt: Date.now(),
-      ...reviewBasis(against),
+      ...reviewBasis(this.options.trackedLists),
       sources,
       days,
-      failed: result.failed,
+      failed: window.failed,
+      pending: window.pending,
       retired: packIds(retired),
     }
-    carried = previous ? Object.keys(previous.sources) : []
-    lastDiff = countDiff(previous?.sources ?? {}, sources)
-    extras = { backlog: result.backlog, capped: result.capped, nextDayCount: result.window.nextDayCount }
-    facts = next
+    facts = stored
     factsStale = false
-    heldIds = null
-    await cache.set({ trackedReview: next })
+    await cache.set({ trackedReview: stored })
   }
 
   /**
@@ -510,14 +472,15 @@ export class ReviewTrackedLists extends Unit {
    * whatever the reader's orphan setting says, which governs the lists they
    * chose to keep rather than a window that exists to be thrown away.
    *
-   * Three kinds of work are kept even so: one another stored list still holds
-   * (the store's own rule), one carrying a mark, and one saved for later. The
-   * read list rebuilds a work from a stored blurb rather than fetching its page,
-   * so a work marked during a review is exactly the one worth keeping.
+   * Four kinds of work are kept even so: one another stored list still holds,
+   * one a read record still holds (the store's own rule), one carrying a mark,
+   * and one saved for later. The read list rebuilds a work from a stored blurb
+   * rather than fetching its page, so a work marked during a review is exactly
+   * the one worth keeping.
    */
-  private async retire(previous: TrackedReviewCache | null, incoming: { [sid: string]: string }, opts: Options): Promise<Set<string>> {
+  private async retire(previous: TrackedReviewCache | null, incoming: { [sid: string]: string }, pruned: readonly string[], opts: Options): Promise<Set<string>> {
     const waiting = unpackIds(previous?.retired ?? '')
-    for (const sid of Object.keys(previous?.sources ?? {})) {
+    for (const sid of [...Object.keys(previous?.sources ?? {}), ...pruned]) {
       if (sid in incoming)
         continue
       const id = fromShortId(sid)
@@ -536,12 +499,12 @@ export class ReviewTrackedLists extends Unit {
       return waiting
 
     try {
-      // Everything every stored list holds, the window just written included —
-      // which is why this runs after the write and not before it.
       const referenced = await snapshotWorkIds()
       const plan = await pruneBlurbs([...waiting], referenced)
-      for (const id of plan.ids)
+      for (const id of plan.ids) {
         waiting.delete(id)
+        parsed.delete(id)
+      }
     }
     catch (err) {
       // Nothing was lost: the ids stay in `retired` and the next window tries
@@ -551,19 +514,162 @@ export class ReviewTrackedLists extends Unit {
     return waiting
   }
 
-  /** Stamp the works with their statuses and their List source facet values. */
+  /** Stamp the works with their statuses, their List source facet values and their place in review order. */
   private stamp(works: Work[]): void {
     applyStatus(works, this.options)
     const lists = this.options.trackedLists.lists
     const labels = new Map(lists.map(list => [list.id, sourceLabel(list, lists)]))
     const sources = facts?.sources ?? {}
+    const place = new Map((current?.works ?? []).map((work, at) => [work.workId, at]))
     for (const work of works) {
       const sid = toShortId(work.workId)
       const ids = sid === null ? undefined : sources[sid]
       // Read from the *current* aliases, so renaming a list relabels the facet
-      // on the next re-run rather than at the next gather.
+      // on the next re-run rather than at the next compute.
       work.sources = ids ? ids.split(',').map(id => labels.get(id)).filter((label): label is string => !!label) : []
+      const at = place.get(work.workId)
+      if (at !== undefined)
+        work.markedOrder = at
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Following the records.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Keep the view in step with the records for as long as it is up: hear every
+   * record write, from this page's reading or another's, and merge what it
+   * changes; and start reading here if the records are behind and nobody else
+   * is reading them.
+   */
+  private follow(ctl: SearchHeaderControl): void {
+    control = ctl
+    stopFollowing?.()
+    stopFollowing = onReadRecordsChanged(() => this.recompute())
+    // The records may have moved on since the stored window was written.
+    this.recompute()
+    void this.startReading()
+  }
+
+  /** Compute the window again and merge the difference, one at a time. */
+  private recompute(): void {
+    if (recomputing) {
+      recomputeAgain = true
+      return
+    }
+    recomputing = (async () => {
+      try {
+        do {
+          recomputeAgain = false
+          await this.applyWindow()
+        } while (recomputeAgain)
+      }
+      catch (err) {
+        this.logger.error('Could not bring the review window up to date', err)
+      }
+      finally {
+        recomputing = null
+      }
+    })()
+  }
+
+  /**
+   * Put the window the records make now on screen, in place: works new to it
+   * merged where they belong, works that left it collapsed in their slots as
+   * the next review's.
+   */
+  private async applyWindow(): Promise<void> {
+    const ctl = control
+    if (!ctl || !isSearchViewOpen() || factsStale)
+      return
+    const before = new Set(Object.keys(facts?.sources ?? {}))
+    const next = await this.compute()
+    if (control !== ctl || !isSearchViewOpen())
+      return
+    const after = new Map(next.works.map(work => [toShortId(work.workId)!, work]))
+    const added = [...after].filter(([sid]) => !before.has(sid) || goneHeld.has(sid)).map(([, work]) => work)
+    const gone = new Set([...before].filter(sid => !after.has(sid)))
+    await this.commit(next)
+    for (const sid of gone)
+      goneHeld.add(sid)
+    for (const sid of after.keys())
+      goneHeld.delete(sid)
+    if (added.length || gone.size)
+      ctl.merge(added, new Set([...gone].map(fromShortId).filter((id): id is string => id !== null)))
+    redrawBar?.()
+    this.closeIfSettledEmpty()
+  }
+
+  /** A window with nothing in it and nothing left to read closes, with the empty range's offer. */
+  private closeIfSettledEmpty(): void {
+    if (!current || current.works.length || current.window.pending.length || reading || goneHeld.size)
+      return
+    if (!isSearchViewOpen())
+      return
+    const quiet = quietOf(current)
+    closeSearchView()
+    toast(EMPTY_MESSAGE, { type: 'error' })
+    this.offerEmptyRange(quiet)
+  }
+
+  /** Start reading the records here, unless they are up to date or another page is reading them. */
+  private async startReading(): Promise<void> {
+    if (reading || !extensionAlive())
+      return
+    const option = this.options.trackedLists
+    const lists = option.lists.filter(list => list.tracked)
+    const records = current?.records ?? await recordsOf(lists, reviewStart(option))
+    if (!recordsBehind(records, lists))
+      return
+    const claim = await claimReads(PAGE_RUN)
+    clearTimeout(claimRetry)
+    if (!claim) {
+      readingElsewhere = true
+      redrawBar?.()
+      // The page reading may go away without letting go; once its claim could
+      // have lapsed, the next page to want a read takes over.
+      claimRetry = setTimeout(() => void this.startReading(), CLAIM_TTL_MS)
+      return
+    }
+    readingElsewhere = false
+    const controller = new AbortController()
+    claim.lost.addEventListener('abort', () => controller.abort())
+    reading = { controller, status: null }
+    control?.setUpdating(true)
+    redrawBar?.()
+    try {
+      await readTrackedLists({
+        lists,
+        start: reviewStart(option),
+        currentStart: async () => reviewStart(await options.get('trackedLists')),
+        patience: PATIENCE.interactive,
+        waitBudget: WAIT_BUDGET.interactive,
+        signal: controller.signal,
+        onProgress: (status) => {
+          if (reading)
+            reading.status = status
+          redrawBar?.()
+        },
+      })
+    }
+    catch (err) {
+      if ((err as Error)?.name !== 'AbortError')
+        this.logger.error('Could not read your tracked lists', err)
+    }
+    finally {
+      await claim.release()
+      reading = null
+      control?.setUpdating(false)
+      redrawBar?.()
+      this.recompute()
+    }
+  }
+
+  /** The view's Refresh: read the records again if no page is reading them. */
+  private reread(): void {
+    this.recompute()
+    void this.startReading()
   }
 
   // -------------------------------------------------------------------------
@@ -571,15 +677,13 @@ export class ReviewTrackedLists extends Unit {
   // -------------------------------------------------------------------------
 
   /**
-   * The strip above the view: what range is being reviewed, how to move its end,
-   * and the one button that finishes it.
+   * The strip above the view: what range is being reviewed, how current it
+   * is, how to move its end, and the one button that finishes it.
    *
    * Built once per open and kept across the renders inside it, so its own
-   * spinner, its confirmations and the "range updated" offer survive a
-   * background reload. The host's progress panel is only up for the first load,
-   * which is why a ± day fetch reports here instead.
+   * spinner and its confirmations survive a merge.
    */
-  private header(ctl: SearchHeaderControl, userId: string): HTMLElement {
+  private header(ctl: SearchHeaderControl): HTMLElement {
     const range = (<span class={`${BAR_CLASS}--range`} />) as HTMLElement
     const meta = (<span class={`${BAR_CLASS}--meta`} />) as HTMLElement
     const spinner = (<span class={`${BAR_CLASS}--spinner`}><MdiLoading /></span>) as HTMLElement
@@ -603,6 +707,7 @@ export class ReviewTrackedLists extends Unit {
         <span>Mark reviewed</span>
       </button>
     ) as HTMLElement as HTMLButtonElement
+    const status = (<div class={`${BAR_CLASS}--status`} />) as HTMLElement
     const notes = (<div class={`${BAR_CLASS}--notes`} />) as HTMLElement
     const warnings = (<div class={`${BAR_CLASS}--warnings`} />) as HTMLElement
     const prompt = (<div class={`${BAR_CLASS}--prompt`} />) as HTMLElement
@@ -623,6 +728,7 @@ export class ReviewTrackedLists extends Unit {
           {spinner}
         </div>
         {controls}
+        {status}
         {notes}
         {warnings}
         {prompt}
@@ -630,48 +736,55 @@ export class ReviewTrackedLists extends Unit {
     ) as HTMLElement
 
     let busy = false
-    /** A reload the view would not spring on the reader, waiting to be offered. */
-    let deferred: DeferredUpdate | null = null
+    let waitText: string | null = null
 
     const redraw = (): void => {
       const option = this.options.trackedLists
       const today = utcToday()
-      const current = facts
-      if (!current || current.computedAt === 0) {
+      const stored = facts
+      if (!stored || stored.computedAt === 0) {
         range.textContent = 'Gathering your tracked lists…'
         meta.textContent = ''
         controls.classList.add(`${BAR_CLASS}--off`)
         return
       }
-      const caughtUp = current.start > today - 1
-      const span = current.end - current.start + 1
-      const count = Object.values(current.days).reduce((sum, n) => sum + n, 0)
+      const caughtUp = stored.start > today - 1
+      const span = stored.end - stored.start + 1
+      const count = Object.values(stored.days).reduce((sum, n) => sum + n, 0)
 
-      range.textContent = caughtUp ? 'You’re caught up.' : `Reviewing ${formatRange(current.start, current.end)}`
+      range.textContent = caughtUp ? 'You’re caught up.' : `Reviewing ${formatRange(stored.start, stored.end)}`
       meta.textContent = caughtUp
         ? 'Today’s works so far are below; they can be reviewed tomorrow.'
         : `${span} ${span === 1 ? 'day' : 'days'} · ${count} ${count === 1 ? 'work' : 'works'} (target ${option.target})`
 
       controls.classList.toggle(`${BAR_CLASS}--off`, caughtUp)
-      setDisabled(back, busy || current.end <= current.start)
-      setDisabled(forward, busy || current.end >= today - 1)
-      drawStrip(strip, current)
-      hint.textContent = extras && extras.nextDayCount > 0 && current.end < today - 1
-        ? `+1 day adds at least ${extras.nextDayCount}`
-        : ''
+      setDisabled(back, busy || stored.end <= stored.start)
+      setDisabled(forward, busy || stored.end >= today - 1)
+      drawStrip(strip, stored)
+      const nextDay = current?.window.nextDayCount ?? 0
+      hint.textContent = nextDay > 0 && stored.end < today - 1 ? `+1 day adds at least ${nextDay}` : ''
 
-      const failed = failedLabels(current.failed, option.lists)
-      setDisabled(mark, busy || current.end >= today)
-      mark.title = current.end >= today
+      const failed = labelsOf(stored.failed, option.lists)
+      setDisabled(mark, busy || stored.end >= today)
+      mark.title = stored.end >= today
         ? 'Today isn’t over yet, so it can’t be marked reviewed.'
         : failed.length
           ? 'One of your lists couldn’t be loaded — you’ll be asked before its works are skipped.'
-          : `Mark ${formatRange(current.start, current.end)} reviewed and move on to the next range.`
+          : `Mark ${formatRange(stored.start, stored.end)} reviewed and move on to the next range.`
 
-      notes.textContent = noteLine(option.lists, extras?.backlog)
-      warnings.replaceChildren(...warningLines(failed, extras?.capped, reviewed, option.lists))
-      if (!deferred)
-        prompt.replaceChildren()
+      const line = reviewStatus({
+        window: { start: stored.start, end: stored.end, failed: stored.failed, pending: stored.pending, complete: current?.window.complete ?? [] },
+        labels: new Map(option.lists.map(list => [list.id, sourceLabel(list, option.lists)])),
+        wait: reading ? waitText : null,
+        elsewhere: readingElsewhere && !reading,
+        readAt: lastReadAt(current?.records),
+      })
+      status.textContent = line.text
+      status.title = line.lists.join(', ')
+      status.dataset.kind = line.kind
+
+      notes.textContent = noteLine(option.lists, current?.later)
+      warnings.replaceChildren(...warningLines(reviewed))
     }
 
     const setBusy = (on: boolean): void => {
@@ -680,143 +793,99 @@ export class ReviewTrackedLists extends Unit {
       redraw()
     }
 
-    const gather = async (override: Day | undefined): Promise<void> => {
-      const option = this.options.trackedLists
-      const start = reviewStart(option)
-      setBusy(true)
-      try {
-        const result = await fetchWindow({
-          lists: option.lists.filter(list => list.tracked),
-          start,
-          today: utcToday(),
-          target: option.target,
-          endOverride: override,
-          reviewed: (reviewed ??= await takeReviewed(userId, this.options)).ids,
-          options: this.options,
-          session,
-        })
-        endOverride = override
-        await this.commit(result, userId, option)
-        deferred = null
-        ctl.show(result.works)
-      }
-      catch (err) {
-        this.logger.error('Could not change the review range', err)
-        toast('Could not change the range. Please try again.', { type: 'error' })
-      }
-      finally {
-        setBusy(false)
-      }
-    }
-
     const step = (delta: number): void => {
-      const current = facts
-      if (busy || !current)
+      const stored = facts
+      if (busy || !stored)
         return
-      const wanted = Math.min(Math.max(current.end + delta, current.start), utcToday() - 1)
-      if (wanted === current.end)
+      const wanted = Math.min(Math.max(stored.end + delta, stored.start), utcToday() - 1)
+      if (wanted === stored.end)
         return
-      void gather(wanted)
+      void (async () => {
+        setBusy(true)
+        try {
+          endOverride = wanted
+          goneHeld = new Set()
+          const next = await this.compute()
+          await this.commit(next)
+          ctl.show(next.works)
+        }
+        catch (err) {
+          this.logger.error('Could not change the review range', err)
+          toast('Could not change the range. Please try again.', { type: 'error' })
+        }
+        finally {
+          setBusy(false)
+        }
+      })()
     }
     back.addEventListener('click', () => step(-1))
     forward.addEventListener('click', () => step(1))
 
     mark.addEventListener('click', () => {
-      const current = facts
-      if (busy || !current)
+      const stored = facts
+      if (busy || !stored)
         return
-      const failed = failedLabels(current.failed, this.options.trackedLists.lists)
-      const capped = extras?.capped ?? []
-      if (!failed.length && !capped.length) {
-        void this.markReviewed(current, setBusy, true)
+      const failed = labelsOf(stored.failed, this.options.trackedLists.lists)
+      if (!failed.length) {
+        void this.markReviewed(stored, setBusy)
         return
       }
       // Skipping a list's works silently is the one way a review can lose a
-      // work, so it always asks.
+      // work, so it always asks. A list still being read doesn't: the status
+      // line has said so, and missing a work then is accepted.
       prompt.replaceChildren(confirmRow(
-        skipWarning(failed, capped, current),
+        skipWarning(failed, stored),
         'Mark reviewed anyway',
         () => {
           prompt.replaceChildren()
-          void this.markReviewed(current, setBusy, true)
+          void this.markReviewed(stored, setBusy)
         },
         () => prompt.replaceChildren(),
       ))
     })
 
-    // Without this the view swaps a background reload straight in, which would
-    // take the reader back to page 1 of a list they are part-way through. With
-    // it, the reload waits here until they say so.
-    ctl.onUpdateDeferred((update) => {
-      deferred = update
-      // The view is still holding the works it had; the store has moved on.
-      heldIds = new Set(carried)
-      const added = lastDiff.added ? `+${lastDiff.added}` : ''
-      const removed = lastDiff.removed ? `−${lastDiff.removed}` : ''
-      const change = [added, removed].filter(Boolean).join(' ')
-      prompt.replaceChildren(confirmRow(
-        change ? `Range updated (${change}).` : 'Range updated.',
-        'Show',
-        () => {
-          deferred = null
-          heldIds = null
-          prompt.replaceChildren()
-          update.apply()
-          redraw()
-        },
-        null,
-      ))
+    // The countdown of a pause this page's reading sits out, a second at a time.
+    stopWaitLine?.()
+    stopWaitLine = watchWaitLine((line) => {
+      waitText = line
+      redraw()
     })
 
-    // This open's toolbar is the one a load writes to. Set last, so a half-built
-    // strip is never the one asked to redraw itself.
+    // This open's toolbar is the one the window writes to. Set last, so a
+    // half-built strip is never the one asked to redraw itself.
     redrawBar = redraw
     redraw()
+    this.follow(ctl)
     return el
   }
 
   /**
-   * Finish the range: move the watermark. The next window isn't read here: it
-   * is gathered the way any window the store doesn't hold is. The option's
-   * broadcast re-runs the page, the reopen finds the stored window answering to
-   * a watermark that has moved ({@link readFacts}), and the host loads the next
-   * one behind its own progress — which waits out a rate limit where the reader
-   * can see it, and leaves the stored window alone if the archive gives it
-   * nothing. So the reader's say-so never waits on the archive, and a range
-   * marked while it is refusing stays marked.
+   * Finish the range: move the watermark, then take the reviewed days off the
+   * records. The next window isn't read here: the option's broadcast re-runs
+   * the page, the reopen finds the stored window answering to a watermark that
+   * has moved ({@link readFacts}), and the host computes the next one from the
+   * records — which the reading has usually filled already.
    *
    * The watermark is read fresh and never lowered, so a tab that has been
-   * sitting open can't rewind another tab's progress. The session can't survive
-   * the window's start moving (every list's query starts a day before it), so
-   * the next window is read from nothing.
-   *
-   * `reopens` says the view is up, so the reopen will gather the next window
-   * here — which this page claims before the write, for the other tabs with
-   * the review open to find it claimed when they re-run, and wait for it.
+   * sitting open can't rewind another tab's progress.
    */
-  private async markReviewed(range: TrackedReviewCache, setBusy: (on: boolean) => void, reopens: boolean): Promise<void> {
+  private async markReviewed(range: TrackedReviewCache, setBusy: (on: boolean) => void): Promise<void> {
     if (!extensionAlive())
       return
     setBusy(true)
     try {
       const option = await options.get('trackedLists')
-      const current = Number.isSafeInteger(option.reviewedThrough) ? option.reviewedThrough : 0
-      const moved = { ...option, reviewedThrough: Math.max(current, range.end) }
-
-      session = createTrackedSession()
+      const before = Number.isSafeInteger(option.reviewedThrough) ? option.reviewedThrough : 0
+      const moved = { ...option, reviewedThrough: Math.max(before, range.end) }
       endOverride = undefined
-      // Not being able to say so costs the other tabs a read of their own, and
-      // is no reason not to mark the range.
-      if (reopens) {
-        await cache.set({ trackedReviewClaim: reviewClaim(moved, PAGE_RUN, Date.now()) })
-          .catch(err => this.logger.error('Could not claim the next review window', err))
-      }
+      heldEnd = null
       advanced = true
       await options.set({ trackedLists: moved })
+      await pruneRecords(moved).catch(err => this.logger.error('Could not take the reviewed days off the records', err))
       toast(`Marked ${formatRange(range.start, range.end)} reviewed.`, {
         type: 'success',
         timeout: UNDO_TIMEOUT_MS,
-        action: { label: 'Undo', onClick: () => void undoReviewed(current, moved.reviewedThrough) },
+        action: { label: 'Undo', onClick: () => void undoReviewed(before, moved.reviewedThrough) },
       })
     }
     catch (err) {
@@ -833,20 +902,19 @@ export class ReviewTrackedLists extends Unit {
    * A range that turned up nothing, offered as a toast: the view closed with it,
    * because a window of no works is nothing for the host to draw.
    */
-  private offerEmptyRange(userId: string, start: Day, end: Day, reviewable: boolean): void {
+  private offerEmptyRange(quiet: QuietWindow): void {
     // A range that can't be marked reviewed has nothing to offer, and the host
     // has already said there was nothing there.
-    if (!reviewable)
+    if (!quiet.reviewable)
       return
-    const where = formatRange(start, end)
-    toast(`Nothing from your tracked lists for ${where}.`, {
+    toast(`Nothing from your tracked lists for ${formatRange(quiet.start, quiet.end)}.`, {
       timeout: 0,
       action: {
         label: 'Mark reviewed',
         onClick: () => {
-          const gathered = facts
-          if (gathered)
-            void this.markReviewed(gathered, () => {}, false)
+          const stored = facts
+          if (stored)
+            void this.markReviewed(stored, () => {})
         },
       },
     })
@@ -879,81 +947,39 @@ async function takeReviewed(userId: string, opts: Options): Promise<ReviewedSet>
   return { ids, savedKnown }
 }
 
-/**
- * Wait for the window another tab is gathering for `option` to land in the
- * store, and hand back its facts. Null when no other tab is gathering it —
- * none was, or the one that was stopped without it — and this page has to.
- */
-async function awaitClaimed(option: TrackedListsOption, opts: LoadOptions): Promise<TrackedReviewCache | null> {
-  let heard = false
-  let wake: (() => void) | null = null
-  const listener = (change: Partial<Cache>): void => {
-    if (!('trackedReview' in change) && !('trackedReviewClaim' in change))
-      return
-    heard = true
-    wake?.()
-  }
-  const aborted = (): void => wake?.()
-  cache.addListener(listener)
-  opts.signal?.addEventListener('abort', aborted)
-  let said = false
-  try {
-    for (;;) {
-      opts.signal?.throwIfAborted()
-      heard = false
-      const { trackedReview, trackedReviewClaim } = await cache.get(['trackedReview', 'trackedReviewClaim'])
-      const now = Date.now()
-      const state = claimWait(trackedReview, trackedReviewClaim, option, PAGE_RUN, now)
-      if (state === 'landed')
-        return trackedReview
-      if (state === 'gather')
-        return null
-      if (!said) {
-        opts.onProgress?.('Waiting for another tab to gather your tracked lists…', 0, 0)
-        said = true
-      }
-      if (heard)
-        continue
-      // Until the store changes, or the claim lapses unrenewed.
-      await new Promise<void>((resolve) => {
-        let timer: ReturnType<typeof setTimeout> | undefined
-        const done = (): void => {
-          clearTimeout(timer)
-          wake = null
-          resolve()
-        }
-        timer = setTimeout(done, trackedReviewClaim.at + CLAIM_TTL_MS - now)
-        wake = done
-      })
-    }
-  }
-  finally {
-    cache.removeListener(listener)
-    opts.signal?.removeEventListener('abort', aborted)
-  }
+/** The tracked lists' records as stored, each as the window starting on `start` takes it. */
+async function recordsOf(lists: readonly TrackedList[], start: Day): Promise<Map<string, TrackedRead>> {
+  const stored = await readStoredRecords(lists.map(list => list.id))
+  return new Map(lists.map(list => [list.id, recordFor(list, stored.get(list.id), start)]))
 }
 
-/**
- * Claim the window `option` asks for while this page gathers it, renewing the
- * claim until the function handed back withdraws it. A claim that can't be
- * written costs only the other tabs' patience: they gather it themselves.
- */
-async function holdClaim(option: TrackedListsOption): Promise<() => Promise<void>> {
-  const write = (): Promise<void> => cache.set({ trackedReviewClaim: reviewClaim(option, PAGE_RUN, Date.now()) })
-    .catch(err => console.error('[tracked] could not claim the review window', err))
-  await write()
-  const renew = setInterval(() => void write(), CLAIM_RENEW_MS)
-  return async () => {
-    clearInterval(renew)
-    try {
-      const claim = await cache.get('trackedReviewClaim')
-      if (claim.by === PAGE_RUN && claim.at > 0)
-        await cache.set({ trackedReviewClaim: { ...claim, at: 0 } })
-    }
-    catch (err) {
-      console.error('[tracked] could not withdraw the claim on the review window', err)
-    }
+/** Take every day `option`'s watermark covers off the tracked lists' records. */
+async function pruneRecords(option: TrackedListsOption): Promise<void> {
+  const lists = option.lists.filter(list => list.tracked)
+  const stored = await readStoredRecords(lists.map(list => list.id))
+  const writes = new Map<string, TrackedRead>()
+  for (const list of lists) {
+    const record = storedRecordOf(list, stored.get(list.id))
+    if (!record)
+      continue
+    const after = pruneReviewed(record, option.reviewedThrough)
+    if (after.record !== record)
+      writes.set(list.id, after.record)
   }
+  await writeReadRecords(writes)
+}
+
+/** The empty range a window stands for, for its toast. */
+function quietOf(next: ReviewWindow): QuietWindow {
+  return { start: next.window.start, end: next.window.end, reviewable: next.window.reviewable }
+}
+
+/** When the records were last written, as the status line says it: `14:02`. Null when none has been. */
+function lastReadAt(records: ReadonlyMap<string, TrackedRead> | undefined): string | null {
+  let at = 0
+  for (const record of records?.values() ?? [])
+    at = Math.max(at, record.readAt)
+  return at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null
 }
 
 /** Every work id any mark holds — the works a retired blurb is kept for. */
@@ -976,15 +1002,11 @@ function keptWorkIds(opts: Options): Set<string> {
 /**
  * Whether a work still belongs in the review.
  *
- * Two questions, and the second is the interesting one. A work outside the
- * stored window is a leftover from a window that has moved on, and can't be
- * shown. A work the reader has dealt with since the window was gathered — marked
- * read on another page, saved from a menu — goes too, which is how a cached
- * window stays honest without being fetched again.
- *
- * The exception is a reload the view declined to swap in: the store has moved on
- * while the reader is still part-way through the window before it, so what they
- * are holding is allowed to stay until they ask for the new one.
+ * A work outside the stored window is a leftover from a window that has moved
+ * on, and can't be shown — unless it left the window while it was on screen,
+ * and holds its slot there as gone. A work the reader has dealt with since the
+ * window was computed — marked read on another page, saved from a menu — goes
+ * too, which is how a stored window stays honest without being computed again.
  */
 function belongsToWindow(work: Work): boolean {
   if (factsStale || !facts)
@@ -992,24 +1014,9 @@ function belongsToWindow(work: Work): boolean {
   const sid = toShortId(work.workId)
   if (sid === null)
     return false
-  if (!(sid in facts.sources) && !heldIds?.has(sid))
+  if (!(sid in facts.sources) && !goneHeld.has(sid))
     return false
   return !reviewed?.ids.has(work.workId)
-}
-
-/** How many works the new window gained and lost against the old one. */
-function countDiff(previous: { [sid: string]: string }, next: { [sid: string]: string }): { added: number, removed: number } {
-  let added = 0
-  let removed = 0
-  for (const sid of Object.keys(next)) {
-    if (!(sid in previous))
-      added++
-  }
-  for (const sid of Object.keys(previous)) {
-    if (!(sid in next))
-      removed++
-  }
-  return { added, removed }
 }
 
 /** Put the watermark back, if nothing has moved it since. */
@@ -1022,8 +1029,8 @@ async function undoReviewed(previous: Day, expected: Day): Promise<void> {
       toast('Your review has moved on since, so this can’t be undone.', { type: 'error' })
       return
     }
-    session = createTrackedSession()
     endOverride = undefined
+    heldEnd = null
     await options.set({ trackedLists: { ...option, reviewedThrough: previous } })
     toast('Put the range back.', { type: 'success' })
   }
@@ -1034,7 +1041,7 @@ async function undoReviewed(previous: Day, expected: Day): Promise<void> {
 
 /**
  * Where This review lives, which its Start Review on the options page opens it
- * on when the reader's account isn't known there. A review is gathered from
+ * on when the reader's account isn't known there. A review is computed from
  * several queries at once, so there is no listing address to give it — the page
  * the review itself opens on is the honest answer.
  */
@@ -1054,16 +1061,6 @@ function setDisabled(button: HTMLButtonElement, off: boolean): void {
   button.setAttribute('aria-disabled', String(off))
 }
 
-/** `12 Sep – 19 Sep 2026`, with the year said once when both ends share it. */
-function formatRange(start: Day, end: Day): string {
-  const from = formatDay(start)
-  const to = formatDay(end)
-  if (from === to)
-    return from
-  const sameYear = from.slice(-4) === to.slice(-4)
-  return `${sameYear ? from.slice(0, -5) : from} – ${to}`
-}
-
 /** One bar per day of the window, tallest for the busiest, with the count on hover. */
 function drawStrip(strip: HTMLElement, window: TrackedReviewCache): void {
   const days: [Day, number][] = []
@@ -1081,52 +1078,37 @@ function drawStrip(strip: HTMLElement, window: TrackedReviewCache): void {
 }
 
 /** `5 lists · about 412 more to review`. */
-function noteLine(lists: readonly TrackedList[], backlog: number | undefined): string {
+function noteLine(lists: readonly TrackedList[], later: number | undefined): string {
   const tracked = lists.filter(list => list.tracked).length
   const parts = [`${tracked} ${tracked === 1 ? 'list' : 'lists'}`]
-  if (backlog && backlog > 0)
-    parts.push(`about ${backlog.toLocaleString()} more to review`)
+  if (later && later > 0)
+    parts.push(`about ${later.toLocaleString()} more to review`)
   return parts.join(' · ')
 }
 
-/** The names of the lists a window couldn't be read from. */
-function failedLabels(failed: readonly string[], lists: readonly TrackedList[]): string[] {
-  return failed.map((id) => {
+/** The names of these lists, by id. */
+function labelsOf(ids: readonly string[], lists: readonly TrackedList[]): string[] {
+  return ids.map((id) => {
     const entry = lists.find(list => list.id === id)
     return entry ? sourceLabel(entry, lists) : id
   })
 }
 
-/** The lines under the toolbar that say what this window is missing or cut short. */
-function warningLines(failed: readonly string[], capped: readonly CappedDay[] | undefined, set: ReviewedSet | null, lists: readonly TrackedList[]): HTMLElement[] {
-  const out: HTMLElement[] = []
-  for (const label of failed)
-    out.push(warning(`“${label}” couldn’t be loaded, so its works are missing from this range.`))
-  for (const day of capped ?? []) {
-    const who = failedLabels(day.lists, lists)
-    out.push(warning(
-      `${formatDay(day.day)} holds ${day.count.toLocaleString()} works — only the first ${day.shown.toLocaleString()} were loaded${
-        who.length ? ` (${who.join(', ')})` : ''}.`,
-    ))
-  }
+/** The lines under the toolbar that say what this window may be missing. */
+function warningLines(set: ReviewedSet | null): HTMLElement[] {
   if (set && !set.savedKnown)
-    out.push(warning('Marked for Later not loaded on this browser. Open it once to skip saved works.'))
-  return out
+    return [warning('Marked for Later not loaded on this browser. Open it once to skip saved works.')]
+  return []
 }
 
 function warning(text: string): HTMLElement {
   return (<div class={`${BAR_CLASS}--warning`}>{text}</div>) as HTMLElement
 }
 
-/** What the reader is agreeing to when they mark a range that isn't whole. */
-function skipWarning(failed: readonly string[], capped: readonly CappedDay[], window: TrackedReviewCache): string {
+/** What the reader is agreeing to when they mark a range whose lists couldn't all be read. */
+function skipWarning(failed: readonly string[], window: TrackedReviewCache): string {
   const where = formatRange(window.start, window.end)
-  const parts: string[] = []
-  if (failed.length)
-    parts.push(`${failed.map(label => `“${label}”`).join(', ')} couldn’t be loaded; ${failed.length === 1 ? 'its' : 'their'} works for ${where} will be skipped.`)
-  for (const day of capped)
-    parts.push(`${formatDay(day.day)} holds more works than could be loaded; the rest will be skipped.`)
-  return parts.join(' ')
+  return `${failed.map(label => `“${label}”`).join(', ')} couldn’t be loaded; ${failed.length === 1 ? 'its' : 'their'} works for ${where} will be skipped.`
 }
 
 /** A line of explanation with one or two buttons under it. */

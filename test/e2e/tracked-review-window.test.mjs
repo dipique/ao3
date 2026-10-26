@@ -175,10 +175,10 @@ describe('tracked review: the window', { skip }, () => {
 
   test('the notes line counts the lists and what is still waiting', async () => {
     const bar = await toolbar()
-    // Twenty works across the three lists from the window's start through
-    // today, ten of them in the window.
-    assert.equal(bar.notes, '3 lists · about 10 more to review')
-    assert.deepEqual(bar.warnings, [], 'nothing failed, and nothing hit the ceiling')
+    // Nineteen works across the three lists from the window's start through
+    // today, the one Alpha and Beta share counted once, ten of them in the window.
+    assert.equal(bar.notes, '3 lists · about 9 more to review')
+    assert.deepEqual(bar.warnings, [], 'nothing to warn about')
   })
 
   test('the List source facet names each list the way the reader named it', async () => {

@@ -183,6 +183,18 @@ export interface SearchSource {
    * do its work without the source reaching into the host.
    */
   header?: (ctl: SearchHeaderControl) => HTMLElement
+  /**
+   * What the view's Refresh button does instead of reloading, for a source
+   * that keeps its view up to date itself and only needs telling to look
+   * again. Absent, Refresh reloads through {@link load} or the scrape.
+   */
+  reread?: () => void
+  /**
+   * Whether a load that brought no works should still put the view on screen,
+   * empty, rather than close it with {@link emptyMessage}: for a source whose
+   * works are still on their way, and that will add them to the open view.
+   */
+  keepsEmpty?: () => boolean
   /** The native elements hidden while the view is up, restored when it closes. */
   nativeElements: () => Iterable<Element>
   /**
@@ -1420,6 +1432,10 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       onRefresh: () => {
         if (!active)
           return
+        if (source.reread) {
+          source.reread()
+          return
+        }
         // Forced: this is the reader asking, not a reload arriving.
         void refresh(source, active.view, options, undefined, true)
       },
@@ -1582,7 +1598,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
           await persist(source, works)
         if (stale())
           return
-        if (!works.length) {
+        if (!works.length && !(source.keepsEmpty?.() && !loaded.blocked)) {
           // An empty list is a fact about the reader; a refusal is a fact about
           // this minute. Telling them apart is the whole point of `blocked`.
           toast(loaded.blocked ? RATE_LIMITED : source.emptyMessage, { type: 'error' })

@@ -129,39 +129,20 @@ describe('tracked review: works already dealt with', { skip }, () => {
     assert.equal(shown.length, 5)
   })
 
-  test('and only drops out when the range is reloaded — which the reader asks for', async () => {
-    await tab.click('.AO3E--search-view--refresh')
-    await reviewDrawn(tab)
-    // A review holds its page layout, so a reload that arrives on its own is
-    // offered rather than swapped in. This one is the reader's own Refresh, and
-    // answering the button they pressed with a second button to press isn't an
-    // answer — it goes in at once.
-    assert.equal(await barText('--prompt'), '')
+  test('and only drops out when the review is next opened', async () => {
+    // Everything the page wrote, so the next opens on the stored window.
+    const stored = await tab.evaluate(() => Object.assign({}, ...window.__writes))
+    await tab.close()
+    tab = await open({ ...SEED, ...stored, 'option.workMarks': marks([markedRead.id], [markedFavorite.id, plain.id]) })
     const shown = await shownIds()
     assert.ok(!shown.includes(plain.id))
     assert.equal(shown.length, 4)
-    // And the toolbar describes the window that is now on screen, not the one
-    // it replaced.
     assert.equal(await barText('--meta'), '2 days · 4 works (target 6)')
   })
 
-  test('a reload nobody asked for is offered rather than swapped in', async () => {
-    // Everything the first page wrote, so this one opens on the stored window
-    // instead of gathering one — a cached render is what a background reload
-    // has to interrupt, and a zero refresh interval is what sends one.
-    const stored = await tab.evaluate(() => Object.assign({}, ...window.__writes))
-    await tab.close()
-    tab = await open({ ...SEED, ...stored, 'option.searchProfileListsRefreshHours': 0 })
-
-    assert.equal(await barText('--prompt'), 'Range updated.Show')
-    assert.equal((await shownIds()).length, 4, 'the reader keeps the works they were looking at')
-
-    await tab.evaluate(() => {
-      [...document.querySelectorAll('.AO3E--tracked-review--bar--confirm')]
-        .find(button => button.textContent.trim() === 'Show')
-        .click()
-    })
-    await tab.waitForFunction(() => !document.querySelector('.AO3E--tracked-review--bar--prompt .AO3E--tracked-review--bar--confirm'))
+  test('the Refresh button reads nothing again while the records are whole, and offers nothing', async () => {
+    await tab.click('.AO3E--search-view--refresh')
+    await reviewDrawn(tab)
     assert.equal(await barText('--prompt'), '')
     assert.equal((await shownIds()).length, 4)
     await tab.close()

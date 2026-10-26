@@ -1,5 +1,5 @@
 import type { RuleTiming } from './ruleTiming.ts'
-import type { ReviewBasis, ReviewClaim } from './trackedLists.ts'
+import type { ReviewBasis } from './trackedLists.ts'
 import type { ReadClaim } from './trackedReads.ts'
 
 import { createStorage } from './storage.ts'
@@ -125,11 +125,10 @@ export interface MarkedForLaterIndex {
  * any other ({@link StoredList}).
  *
  * It exists because the works alone don't say what range they are, which lists
- * they came from, or whether the window can still be trusted. A review is
- * recomputed whenever the reader's watermark, their set of tracked lists or
- * their target has moved since it was worked out, and those facts are recorded
- * here ({@link ReviewBasis}) so that question can be answered without fetching
- * anything.
+ * they came from, or whether the window can still be trusted. The window is
+ * computed from the tracked lists' read records again whenever the reader's
+ * watermark, their set of tracked lists or their target has moved since
+ * ({@link ReviewBasis}), and whenever a record changes while it is open.
  *
  * Local, never synced: it's a cache of what the archive said, and every browser
  * works it out for itself from the synced option.
@@ -160,6 +159,11 @@ export interface TrackedReviewCache extends ReviewBasis {
    * doing so would bury works that were never shown.
    */
   failed: string[]
+  /**
+   * Tracked lists not yet read through the window's end, and still being read:
+   * the window may be missing some of their works.
+   */
+  pending: string[]
   /**
    * Works earlier windows held and this one doesn't (`packIds`), waiting for
    * their blurbs to be discarded. A reviewed window is disposable by
@@ -204,10 +208,8 @@ export interface Cache {
    * only — an op's contents are in the file the reader keeps.
    */
   appliedChangeOps: string[]
-  /** The review window the tracked lists were last gathered into (see {@link TrackedReviewCache}). */
+  /** The review window the tracked lists were last computed into (see {@link TrackedReviewCache}). */
   trackedReview: TrackedReviewCache
-  /** Which page is gathering the review window, for the others to wait on (see {@link ReviewClaim}). */
-  trackedReviewClaim: ReviewClaim
   /** Which page is reading the tracked lists' records, so no other reads them at once (see {@link ReadClaim}). */
   trackedReadClaim: ReadClaim
   /** The latest passes of the rules over a set of works, oldest first (see {@link RuleTiming}). */
@@ -227,8 +229,7 @@ export const cache = createStorage<Cache>({
     appliedChangeOps: [],
     // An empty range nothing was computed for: `computedAt: 0` and a start past
     // its end say "no window yet" without a second flag to keep in step.
-    trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', target: 0, sources: {}, days: {}, failed: [], retired: '' },
-    trackedReviewClaim: { reviewedThrough: 0, listsSig: '', target: 0, by: '', at: 0 },
+    trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', target: 0, sources: {}, days: {}, failed: [], pending: [], retired: '' },
     trackedReadClaim: { by: '', at: 0 },
     ruleTimings: [],
   },

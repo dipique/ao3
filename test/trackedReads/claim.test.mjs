@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { CLAIM_RENEW_MS, CLAIM_TTL_MS } from '../../src/common/trackedLists.ts'
-import { claimHolder, readClaim } from '../../src/common/trackedReads.ts'
+import { CLAIM_RENEW_MS, CLAIM_TTL_MS, claimHolder, readClaim } from '../../src/common/trackedReads.ts'
 
 const NOW = Date.UTC(2026, 9, 1, 12)
 

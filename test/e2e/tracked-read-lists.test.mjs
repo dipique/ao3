@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { CLAIM_RENEW_MS } from '../../src/common/trackedLists.ts'
-import { unpackRows } from '../../src/common/trackedReads.ts'
+import { CLAIM_RENEW_MS, unpackRows } from '../../src/common/trackedReads.ts'
 import { bundleForPage } from '../siteExport/helpers.mjs'
 import { findChrome, hurryTimers, installMock, launch } from './helpers.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, readsOf, resetWorkIds, series, TODAY, works } from './trackedReview.mjs'

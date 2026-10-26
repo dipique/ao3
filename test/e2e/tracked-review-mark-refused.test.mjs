@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { settled, toasts } from './trackedPages.mjs'
-import { archiveRoutes, CLOCK_BASE, dayOfIso, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { rerun, settled } from './trackedPages.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -13,18 +13,19 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
 const REVIEW_URL = 'https://archiveofourown.org/users/me/readings#ao3e-tracked'
 
 /**
- * Marking a range reviewed while the archive is turning requests away.
+ * The review while the archive is turning requests away.
  *
- * The watermark is the reader's say-so and nothing else: it moves the moment
- * they click, whatever the archive is doing. Reading the next range is the
- * ordinary gather, which waits out a rate limit behind its own progress and
- * leaves the stored window alone until it has one to put in its place.
+ * What is already read stays usable: the window is drawn from the records, the
+ * status line says which lists are still being read and counts the pause
+ * down, and Mark reviewed moves the watermark the moment it is clicked — with
+ * no confirmation for a list that is only still being read — and draws the
+ * next window from the records at once.
  *
- * Three works a day over eight days, a target of six: the window is two days,
- * and the archive refuses every request for the range after the first — for a
- * minute, which the gather waits out, and then for two hours, which it doesn't.
+ * Two lists. Solo has three works a day over eight days, and a target of six
+ * makes a window two days; the archive answers it. Slow it refuses — for a
+ * minute, which the reading waits out, or for two hours, which it doesn't.
  */
-describe('tracked review: marking reviewed while the archive refuses', { skip }, () => {
+describe('tracked review: while the archive refuses', { skip }, () => {
   let browser
   let css
   let js
@@ -44,35 +45,44 @@ describe('tracked review: marking reviewed while the archive refuses', { skip },
 
   resetWorkIds(7000)
   const since = TODAY - 8
-  const solo = listing('solo', works([...Array.from({ length: 8 }, (_, i) => [since + i, 3])]), { entry: { alias: 'Solo', since } })
+  const solo = listing('solo', works(Array.from({ length: 8 }, (_, i) => [since + i, 3])), { entry: { alias: 'Solo', since } })
+  const slow = listing('slow', works([[since, 2]]), { entry: { alias: 'Slow', since } })
+  const fixtures = [solo, slow]
 
   const SEED = {
     'option.searchReadWorks': false,
-    'option.trackedLists': trackedOption([solo], { target: 6, reviewedThrough: since - 1 }),
+    'option.trackedLists': trackedOption(fixtures, { target: 6, reviewedThrough: since - 1 }),
     'cache.markedForLater': { userId: 'me', updatedAt: CLOCK_BASE, ids: '' },
   }
 
-  /** How long the archive asks the next range's requests to wait, in seconds. */
+  /** How long the archive asks Slow's requests to wait, in seconds. */
   let wait = 0
-  /** Requests for the range after the first: every list's query starts a day before its range. */
   const refused = []
   const refuse = (url) => {
-    const from = dayOfIso(url.searchParams.get('work_search[date_from]'))
-    if (from === null || from < since + 1)
+    if (!url.pathname.includes('/slow/'))
       return 0
     refused.push(url.pathname + url.search)
     return wait
   }
 
-  /** The watermark as storage holds it right now. */
+  const status = () => tab.evaluate(() => document.querySelector('.AO3E--tracked-review--bar--status')?.textContent?.trim() ?? '')
+
+  const shownIds = () => tab.evaluate(() =>
+    [...document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)')]
+      .map(li => li.id.replace('work_', '')))
+
   const watermark = () => tab.evaluate(async () =>
     (await browser.storage.local.get('option.trackedLists'))['option.trackedLists'].reviewedThrough)
 
-  /** The stored window's facts. */
-  const storedWindow = () => tab.evaluate(async () =>
-    (await browser.storage.local.get('cache.trackedReview'))['cache.trackedReview'])
+  const ids = (from, to) => solo.works.filter(work => work.filed >= from && work.filed <= to).map(work => work.id)
 
-  /** A tab with the first range on screen, the archive asking the next range's requests to wait `seconds`. */
+  /** Wait until the toolbar says what it is still reading for the range starting on `start`, with `then` after it. */
+  const stillReading = (start, then) => tab.waitForFunction((want, after) => {
+    const text = document.querySelector('.AO3E--tracked-review--bar--status')?.textContent ?? ''
+    return text.startsWith(want) && text.includes(after)
+  }, { timeout: 15_000 }, `Still reading 1 of 2 lists for `, then)
+
+  /** A tab with the review open, Slow refused for `seconds`, and Solo's works drawn. */
   const open = async (seconds) => {
     await tab?.close()
     wait = seconds
@@ -80,55 +90,38 @@ describe('tracked review: marking reviewed while the archive refuses', { skip },
     tab = await browser.newPage()
     await tab.setViewport({ width: 1280, height: 900 })
     await tab.setRequestInterception(true)
-    tab.on('request', archiveRoutes({ fixtures: [solo], refuse }))
+    tab.on('request', archiveRoutes({ fixtures, refuse }))
     await tab.evaluateOnNewDocument(installClock, CLOCK_BASE)
     await tab.evaluateOnNewDocument(installMock, SEED)
     await tab.goto(REVIEW_URL, { waitUntil: 'domcontentloaded' })
     await tab.addStyleTag({ content: css })
     await tab.addScriptTag({ content: js })
     await settled(tab)
-    await reviewDrawn(tab)
-    assert.equal((await storedWindow()).start, since)
-    assert.deepEqual(refused, [], 'nothing past the first range has been asked for yet')
+    await tab.waitForFunction(count => document.querySelectorAll('.AO3E--search-view--results > li.blurb').length === count, { timeout: 15_000 }, 6)
   }
 
-  /** Click Mark reviewed, and wait for the watermark to move: promptly, or not at all. */
-  const markReviewed = async () => {
-    await tab.click('.AO3E--tracked-review--bar--mark')
-    await tab.waitForFunction(async want =>
-      (await browser.storage.local.get('option.trackedLists'))['option.trackedLists'].reviewedThrough === want, { timeout: 10_000 }, since + 1)
-  }
-
-  test('Mark reviewed moves the watermark at once, without waiting for the archive', async () => {
-    // A minute: a wait the gather sits out. The watermark has to be down long before.
+  test('what is read is drawn, and the status line counts the pause down', async () => {
     await open(60)
-    await markReviewed()
+    assert.deepEqual(await shownIds(), ids(since, since + 1))
+    await stillReading(since, 'trying again in')
+    assert.match(await status(), /AO3 asked us to slow down/)
+    assert.ok(refused.length > 0)
+  })
+
+  test('Mark reviewed moves the watermark at once, with no confirmation, and draws the next window from the records', async () => {
+    await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
+    assert.equal(await tab.$('.AO3E--tracked-review--bar--prompt .AO3E--tracked-review--bar--confirm'), null)
     assert.equal(await watermark(), since + 1)
+    await tab.waitForFunction(id => !!document.querySelector(`.AO3E--search-view--results > li#work_${id}`), { timeout: 15_000 }, ids(since + 2, since + 2)[0])
+    assert.deepEqual(await shownIds(), ids(since + 2, since + 3))
   })
 
-  test('and the next range is gathered behind the view’s own progress, waiting out the refusal', async () => {
-    await tab.waitForFunction(() => /trying again in/.test(document.querySelector('.AO3E--search-host--progress-label')?.textContent ?? ''), { timeout: 10_000 })
-    assert.ok(refused.length > 0, 'the next range was asked for')
-  })
-
-  test('which leaves the stored window as it was until it has one to put in its place', async () => {
-    const stored = await storedWindow()
-    assert.equal(stored.start, since)
-    assert.equal(stored.reviewedThrough, since - 1)
-  })
-
-  test('a refusal too long to wait out ends the gather as any refused load ends, and the range stays marked', async () => {
-    // Two hours: past what a gather the reader is watching will wait.
+  test('a refusal too long to wait out stops the reading; the review stays as it is, and still says what it is missing', async () => {
     await open(7200)
-    await markReviewed()
-    await tab.waitForFunction(() => !document.querySelector('.AO3E--search-host'), { timeout: 10_000 })
-    assert.ok(refused.length > 0, 'the next range was asked for')
+    await tab.waitForFunction(() => !document.querySelector('.AO3E--search-view--updating-on'), { timeout: 15_000 })
+    assert.deepEqual(await shownIds(), ids(since, since + 1))
+    assert.ok((await status()).startsWith('Still reading 1 of 2 lists for '))
+    await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
     assert.equal(await watermark(), since + 1)
-    const said = await toasts(tab)
-    assert.ok(said.includes('AO3 asked us to slow down. Try again in a few minutes.'), `the refusal is said: ${JSON.stringify(said)}`)
-    assert.ok(!said.some(text => /Could not mark/.test(text)), 'and the range is not reported unmarked')
-    const stored = await storedWindow()
-    assert.equal(stored.start, since, 'the stored window is not written over with the refusal')
-    assert.equal(stored.reviewedThrough, since - 1)
   })
 })

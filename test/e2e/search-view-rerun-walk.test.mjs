@@ -270,7 +270,7 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
     const solo = reviewListing('solo', works([[TODAY - 1, 3]]), { entry: { alias: 'Solo', since: TODAY - 1 } })
     const ids = solo.works.map(work => work.id).sort()
 
-    test('carries its first load through a re-run, and reads its list once', async () => {
+    test('goes on reading its list through a re-run, and asks for no page twice', async () => {
       const routes = archiveRoutes({ fixtures: [solo] })
       const held = Promise.withResolvers()
       /** What the review asked of the tracked list. */
@@ -294,16 +294,16 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
         await tab.goto(`${ARCHIVE}/users/me/readings#ao3e-open=tracked-review`, { waitUntil: 'domcontentloaded' })
         await inject(tab)
         await until('the list to be asked for', () => asked.length > 0)
-        const reading = await progressText(tab)
-        assert.ok(reading, 'its progress is up')
+        // The review is up, empty, while its list is read in the background.
+        await until('the review to be up', async () => !!await tab.$('.AO3E--search-host.AO3E--tracked-review'))
 
         await writeOption(tab, 'searchPerPage', 51)
-        await until('the progress to be back', async () => await progressText(tab) !== null)
-        assert.equal(await progressText(tab), reading)
+        await until('the review to be back', async () => !!await tab.$('.AO3E--search-host.AO3E--tracked-review .AO3E--tracked-review--bar'))
 
         held.resolve()
         await until('the review to show its works', async () => JSON.stringify((await shownIds(tab)).sort()) === JSON.stringify(ids))
-        assert.equal(new Set(asked).size, asked.length, `no request made twice: ${asked.join(', ')}`)
+        const reads = asked.filter(path => path.startsWith('/tags/'))
+        assert.equal(new Set(reads).size, reads.length, `no request made twice: ${reads.join(', ')}`)
       }
       finally {
         held.resolve()

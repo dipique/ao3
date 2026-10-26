@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { formatDay } from '../../src/common/trackedLists.ts'
-import { DIST, ensureBuilt, findChrome, installMock, launch, sleep } from './helpers.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { linkWrites, relayWrites, runs, settled } from './trackedPages.mjs'
-import { archiveRoutes, CLOCK_BASE, dayOfIso, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -17,16 +17,12 @@ const REVIEW_URL = 'https://archiveofourown.org/users/me/readings#ao3e-tracked'
  * Two tabs with the review open, and the reader marking the range reviewed in
  * one of them.
  *
- * Both tabs re-run on the watermark's write, and both find the stored window
- * answering to the old watermark. Only the tab the reader clicked in reads the
- * next range from the archive: the other waits for it to land in the store and
- * opens on it, rather than asking the archive for the same pages against a
- * rate limit the two of them share.
+ * Both tabs re-run on the watermark's write, and both compute the next window
+ * from the records the reading has already filled, so neither asks the archive
+ * for anything: the next range is on screen in both at once.
  *
  * The tabs' storage is kept in step the way a browser's is: each write one tab
- * makes reaches the other, with its change event. The archive holds the
- * clicking tab's answers back until the test lets them through, so the other
- * tab's re-run comes while the next range is still being read.
+ * makes reaches the other, with its change event.
  */
 describe('tracked review: marking reviewed with the review open in another tab', { skip }, () => {
   let browser
@@ -58,24 +54,13 @@ describe('tracked review: marking reviewed with the review open in another tab',
     'cache.markedForLater': { userId: 'me', updatedAt: CLOCK_BASE, ids: '' },
   }
 
-  /** Whether a request is for the range after the first: every list's query starts a day before its range. */
-  const nextRange = url => (dayOfIso(url.searchParams.get('work_search[date_from]')) ?? -Infinity) >= since + 1
-
   const asked = { clicking: [], other: [] }
-  let holding = false
-  const held = []
 
   const open = async (name) => {
     const tab = await browser.newPage()
     await tab.setViewport({ width: 1280, height: 900 })
     await tab.setRequestInterception(true)
-    const route = archiveRoutes({ fixtures: [solo], fetched: asked[name] })
-    tab.on('request', (req) => {
-      if (name === 'clicking' && holding && req.url().startsWith('https://archiveofourown.org/') && nextRange(new URL(req.url())))
-        held.push(() => route(req))
-      else
-        route(req)
-    })
+    tab.on('request', archiveRoutes({ fixtures: [solo], fetched: asked[name] }))
     await tab.evaluateOnNewDocument(installClock, CLOCK_BASE)
     await tab.evaluateOnNewDocument(installMock, SEED)
     await tab.evaluateOnNewDocument(relayWrites)
@@ -93,7 +78,7 @@ describe('tracked review: marking reviewed with the review open in another tab',
   const watermark = tab => tab.evaluate(async () =>
     (await browser.storage.local.get('option.trackedLists'))['option.trackedLists'].reviewedThrough)
 
-  const nextRangeAsked = name => asked[name].filter(path => nextRange(new URL(path, 'https://archiveofourown.org')))
+  const listAsked = name => asked[name].filter(path => path.includes('/tags/'))
 
   test('both tabs show the first range', async () => {
     clicking = await open('clicking')
@@ -104,30 +89,13 @@ describe('tracked review: marking reviewed with the review open in another tab',
     await linkWrites([clicking, other])
   })
 
-  test('only the tab Mark reviewed was clicked in reads the next range', async () => {
-    holding = true
-    const before = await runs(other)
+  test('Mark reviewed in one puts the next range in both, asking the archive for nothing', async () => {
+    const before = { clicking: listAsked('clicking').length, other: listAsked('other').length }
+    const otherRuns = await runs(other)
     await clicking.$eval('.AO3E--tracked-review--bar--mark', button => button.click())
     // The other tab hears the watermark move and re-runs on it.
-    await settled(other, before)
+    await settled(other, otherRuns)
     assert.equal(await watermark(other), since + 1)
-    // Polled: the clicking tab is behind the other, and draws no frames to check on.
-    await clicking.waitForFunction(() => !!document.querySelector('.AO3E--search-host--progress'), { polling: 100 })
-    // Long enough for a gather of its own to have asked for its first page.
-    await sleep(1500)
-    assert.ok(held.length > 0, 'the clicking tab is reading the next range')
-    assert.deepEqual(nextRangeAsked('other'), [], 'the other tab is not')
-  })
-
-  test('the other tab says what it is waiting for', async () => {
-    const label = await other.evaluate(() => document.querySelector('.AO3E--search-host--progress-label')?.textContent?.trim() ?? null)
-    assert.match(label ?? '', /another tab/)
-  })
-
-  test('and opens on the range the clicking tab gathered, once it lands', async () => {
-    holding = false
-    for (const answer of held.splice(0))
-      answer()
     const next = `Reviewing ${formatDay(since + 2).slice(0, -5)} – ${formatDay(since + 3)}`
     await other.waitForFunction(want =>
       document.querySelector('.AO3E--tracked-review--bar--range')?.textContent?.trim() === want, {}, next)
@@ -139,6 +107,7 @@ describe('tracked review: marking reviewed with the review open in another tab',
     await clicking.bringToFront()
     await reviewDrawn(clicking)
     assert.equal(await rangeText(clicking), next)
-    assert.deepEqual(nextRangeAsked('other'), [], 'without asking the archive for any of it')
+    assert.equal(listAsked('clicking').length, before.clicking, 'the clicking tab asked for nothing')
+    assert.equal(listAsked('other').length, before.other, 'nor did the other')
   })
 })

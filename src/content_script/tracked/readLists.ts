@@ -71,6 +71,12 @@ export interface ReadOptions {
   lists: readonly TrackedList[]
   /** The review window's first day (`reviewStart`): where a list never read is read from. */
   start: Day
+  /**
+   * The window's first day as it stands now, asked before each page is added:
+   * the reader may mark a range reviewed while the run goes on, and the records
+   * then lose those days. Absent, `start` throughout.
+   */
+  currentStart?: () => Promise<Day>
   /** How long one request may wait out refusals: `PATIENCE.interactive` in the review, `.bulk` from the options page. */
   patience: number
   /** How long the run may spend waiting out refusals in all before it stops. */
@@ -208,9 +214,12 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
         }
         refusedRounds = 0
         // Another page may have taken reviewed days off the record since this
-        // run read it (Mark reviewed); the stored one is the one to add to.
-        const stored = storedRecordOf(state.list, (await readStoredRecords([state.listId])).get(state.listId))
-        if (stored && stored.from >= state.record.from)
+        // run read it (Mark reviewed); then the stored one is the one to add
+        // to. One that no longer covers the window as it stands now (the
+        // watermark went back) is what this run is reading again, and isn't.
+        const raw = (await readStoredRecords([state.listId])).get(state.listId)
+        const stored = storedRecordOf(state.list, raw)
+        if (stored && stored.from > state.record.from && recordFor(state.list, raw, await (opts.currentStart?.() ?? opts.start)) === stored)
           state.record = stored
         const record = applyPage(state.record, read.page, { readDay: utcToday(), scanned: state.scanned, at: Date.now() })
         // Blurbs first, record second, so a record never names a blurb that

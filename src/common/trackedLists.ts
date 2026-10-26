@@ -1,5 +1,3 @@
-import { claimLive } from './claim.ts'
-
 /**
  * Tracked lists — saved queries (a works search, a filtered works listing, an
  * uncommon tag's works, a series) whose new and updated works are gathered into
@@ -8,12 +6,12 @@ import { claimLive } from './claim.ts'
  * is ever marked reviewed one work at a time: the only review state is one day
  * number, {@link TrackedListsOption.reviewedThrough}.
  *
- * This module is the decidable half — days, URL normalization, what a list is
- * (its root, its type, its title and its view filter), what it filters by in a
- * line, what an update to one changes, the URLs a review fetches, and the
- * planner that says which page to read next and when a review window is
- * settled. The fetcher that runs the planner against the archive lives with the
- * content script.
+ * This module is the decidable half of the lists themselves — days, URL
+ * normalization, what a list is (its root, its type, its title and its view
+ * filter), what it filters by in a line, what an update to one changes, the
+ * URLs a review reads and the window's start. What the review keeps of each
+ * list, and the window that makes, are `trackedReads.ts`; the reading itself
+ * lives with the content script.
  *
  * ## Two days per work
  *
@@ -29,19 +27,7 @@ import { claimLive } from './claim.ts'
  *
  * The review groups works by the **blurb day**, because that's the date the
  * reader sees — a range labelled 12–19 Sep shouldn't hold a work dated 11 Sep.
- * The archive day is only ever a query bound, never stored. The one-day drift is
- * absorbed by reading one archive day further on each side of a window:
- *
- * - **below**, a list's query starts at its `base`, the day before the window
- *   (or before the list's own tracking start), so a work filed the day before
- *   but dated the first day is still read;
- * - **above**, a window ending on day E is only settled once every work filed up
- *   to E + 1 has been read, so a work filed on E + 1 but dated E lands in this
- *   window, and can't fall into the gap between it and the next one.
- *
- * Together those make a reviewed range airtight for any drift of one day.
- * Larger drifts are clamped by {@link assignDay} into the range the query
- * covered, which at worst shows a work twice and never loses one.
+ * The archive day is only ever a query bound, never stored.
  *
  * Import-free, so it loads under a plain `node --test`.
  */
@@ -220,8 +206,8 @@ export interface TrackedList {
   /**
    * The day tracking last started: set whenever the entry is made, so a
    * stretch the list spent untracked is never backfilled. It's only ever a
-   * **floor** on this list's fetch ({@link reviewStart}, {@link listBase}) —
-   * never a second review cursor.
+   * **floor** on this list's reading ({@link reviewStart}, and the first day
+   * its read record covers) — never a second review cursor.
    */
   since: Day
   /**
@@ -1907,7 +1893,7 @@ export function entrySignature(entry: object): string {
 }
 
 // ---------------------------------------------------------------------------
-// The review window's start, and each list's query floor
+// The review window's start
 // ---------------------------------------------------------------------------
 
 /**
@@ -1968,54 +1954,6 @@ export function sameReviewBasis(stored: Partial<ReviewBasis>, option: Pick<Track
     && stored.target === current.target
 }
 
-/**
- * A page's word that it is gathering the review window for a basis.
- *
- * Every tab with the review open re-runs on the same option write, and finds
- * the same stored window stale at the same moment; left to themselves, each
- * would ask the archive for the same pages, against a rate limit they share.
- * So the page gathering says so here, and the others wait for its window to
- * land in the store ({@link claimWait}). It renews the claim while it gathers;
- * one left unrenewed for {@link CLAIM_TTL_MS} is a page that went away
- * mid-gather, and holds nobody.
- */
-export interface ReviewClaim extends ReviewBasis {
-  /** The page run gathering: a token of its own, made when it loaded. */
-  by: string
-  /** Epoch ms the claim was made or last renewed; 0 once it is withdrawn. */
-  at: number
-}
-
-/** How long a claim holds without being renewed. */
-export const CLAIM_TTL_MS = 60_000
-
-/** How often a page gathering renews its claim: well inside {@link CLAIM_TTL_MS}. */
-export const CLAIM_RENEW_MS = 20_000
-
-/** A claim, by page run `by` at `now`, on the window `option` asks for. */
-export function reviewClaim(option: Pick<TrackedListsOption, 'reviewedThrough' | 'lists' | 'target'>, by: string, now: number): ReviewClaim {
-  return { ...reviewBasis(option), by, at: now }
-}
-
-/**
- * What page run `self` should do about a review window `option` asks for and
- * the store doesn't hold: `landed` once the store does hold it, `waiting`
- * while another page run's live claim is on it, and `gather` — read it itself —
- * when nobody else is, the page that claimed it having stopped without it
- * included.
- */
-export function claimWait(
-  window: Partial<ReviewBasis> & { computedAt: number },
-  claim: Partial<ReviewClaim>,
-  option: Pick<TrackedListsOption, 'reviewedThrough' | 'lists' | 'target'>,
-  self: string,
-  now: number,
-): 'landed' | 'waiting' | 'gather' {
-  if (window.computedAt > 0 && sameReviewBasis(window, option))
-    return 'landed'
-  return claimLive(claim.at, now, CLAIM_TTL_MS) && claim.by !== self && sameReviewBasis(claim, option) ? 'waiting' : 'gather'
-}
-
 function listsSig(lists: readonly TrackedList[]): string {
   // Serialized rather than joined on a separator: a URL can hold very nearly
   // any character, and two lists must never be able to spell one signature
@@ -2028,20 +1966,6 @@ function listsSig(lists: readonly TrackedList[]): string {
       const filter = canonicalFilter(list.filter)
       return filter ? [...sig, filter] : sig
     }))
-}
-
-/**
- * The day a list's query starts from: the later of its tracking start and the
- * window's start, less one day — the margin that catches a work the archive
- * filed the day before but whose blurb is dated the first day. This is
- * {@link ListProgress.base}, and the `from` a list's pages are fetched with.
- *
- * A list whose tracking began after the window starts adds nothing before that:
- * its query starts later, and the days in between are already complete for it
- * without reading a page.
- */
-export function listBase(entry: Pick<TrackedList, 'since'>, start: Day): Day {
-  return Math.max(wholeNumber(entry.since) ?? start, start) - 1
 }
 
 // ---------------------------------------------------------------------------
@@ -2065,8 +1989,7 @@ export const PAGE_SIZE = 20
  * `work_search[sort_direction]=asc` and `work_search[date_from]=from`, whatever
  * sort its URL had. There is never a `date_to`. The archive's date bounds are
  * inclusive whole UTC days, so a query from day X is everything filed on X or
- * later, and page 1's heading count is exactly how many that is — which is all
- * the planner needs to find where a day begins ({@link ListProgress.bounds}).
+ * later, and page 1's heading count is exactly how many that is.
  *
  * A `tag-works` entry becomes a works search by the tag's name
  * (`/works/search?work_search[other_tag_names]=NAME`): the tag page lists by
@@ -2236,441 +2159,4 @@ function decodeSegment(segment: string): string {
   catch {
     return segment
   }
-}
-
-// ---------------------------------------------------------------------------
-// Which day a work is reviewed on
-// ---------------------------------------------------------------------------
-
-/** What {@link assignDay} needs to know about the query a work was read from. */
-export interface DayContext {
-  /** The list's query floor, {@link listBase}: it read works filed on or after this day. */
-  base: Day
-  /** The window's first day, {@link reviewStart}. */
-  start: Day
-  /** The current UTC day. */
-  today: Day
-  /**
-   * The list was scanned rather than read by date (a series, or a tag marked
-   * {@link TrackedList.scan}), so it returned old works as well as new ones.
-   */
-  scanned?: boolean
-}
-
-/**
- * The day a work read from one list is reviewed on, given its blurb day — or
- * null when it doesn't belong in the stream at all.
- *
- * A work within a day of its archive day is reviewed on its blurb day. Anything
- * further off than that was hand-set, and is clamped into the range the query
- * covered, because a date outside it can't be trusted to have been shown, and
- * showing a work twice beats never showing it:
- *
- * - a blurb day of `base − 1` or `base` is **dropped**. For a list read from the
- *   window's start, that's the two days before the window, which were reviewed
- *   already. For a list whose tracking began inside the window, it's the two
- *   days before tracking began, which were never part of the stream. (The query
- *   reads from `base` only to catch works dated a day later.)
- * - a blurb day before `base − 1` counts on **`start`**. The query only returned
- *   the work because it was filed on or after `base`, so its date is hand-set,
- *   and it can't have been shown before.
- * - a blurb day after today counts on **today**.
- *
- * A **scanned** list returns old works as well as new, so a date before the
- * window is just an old work, not a suspicious one: anything up to `base` is
- * dropped, and only the future is clamped.
- *
- * A work with no readable date counts on `start` — except from a scanned list,
- * which would otherwise show it in every window.
- */
-export function assignDay(blurbDay: Day, context: DayContext): Day | null {
-  const { base, start, scanned } = context
-  const top = Math.max(base, start - 1)
-  if (!Number.isFinite(blurbDay))
-    return scanned ? null : start
-  const day = Math.min(blurbDay, context.today)
-  if (scanned)
-    return day > top ? day : null
-  if (day > top)
-    return day
-  return day >= base - 1 ? null : start
-}
-
-// ---------------------------------------------------------------------------
-// The planner
-//
-// A review window is whole days from `start`, as many as fit the target. Every
-// tracked list is read oldest first from its `base`, one page at a time, and
-// after each page the planner decides whether the window is settled or what to
-// read next. It never reads further than the window needs: a reader three months
-// behind costs about what a reader one day behind does.
-// ---------------------------------------------------------------------------
-
-/** One work read from a list's query. */
-export interface ListItem {
-  /** Short work id. The same work read from two lists is one work. */
-  sid: string
-  /** Its blurb day ({@link dayOf}) as read — {@link assignDay} is applied by the planner. */
-  day: Day
-  /**
-   * Whether it counts toward the target: false for a work the rules hide, and
-   * for one the reader has already dealt with (Read, or Marked for Later).
-   */
-  counts: boolean
-  /**
-   * Whether the list wants it: false when the list's view filter
-   * ({@link TrackedList.filter}) rejects the work. Absent means it does, as it
-   * always does for a list with no view filter.
-   *
-   * A work that isn't a member still holds its row, because the completeness
-   * rules count positions in the query ({@link ListProgress.items}); it's only
-   * {@link mergeItems} that passes it over.
-   */
-  member?: boolean
-}
-
-/** How far one list's query has been read. */
-export interface ListProgress {
-  /** The {@link TrackedList.id}. */
-  id: string
-  /** The query's `date_from`, {@link listBase}. */
-  base: Day
-  /**
-   * Works read so far, in the query's order — a contiguous prefix of it,
-   * starting at its first work. **Every** work the query returned is here, the
-   * ones that don't count and the ones the list doesn't want included, and a
-   * work read twice is here twice: the
-   * completeness rules compare positions in the query, so a missing row would
-   * make every later one look a place early.
-   */
-  items: ListItem[]
-  /** Page 1's heading count: how many works the query matches. Refreshed by every page. */
-  total: number
-  /**
-   * Boundaries learned from a page-1 request at a later `date_from`: day X →
-   * how many of the query's works were filed before X, i.e. `total` less that
-   * request's count. Where day X begins in the query.
-   */
-  bounds: Map<Day, number>
-  /** Every work in the query has been read (a page came back short, or `items` reached `total`). */
-  exhausted: boolean
-  /** A page stopped coming. Its works so far still show, but the window can't be marked reviewed. */
-  failed: boolean
-  /**
-   * Scanned whole rather than read by date: a series, or a tag marked
-   * {@link TrackedList.scan}. Its first fetch reads all of it and marks it
-   * exhausted, and its old works are dropped rather than clamped ({@link assignDay}).
-   */
-  scanned?: boolean
-}
-
-/** A settled review window. */
-export interface PlannedWindow {
-  start: Day
-  /** Inclusive. */
-  end: Day
-  /** Counting works on the window's days. */
-  count: number
-  /**
-   * Whether the range may be marked reviewed: not when it reaches today, which
-   * isn't over yet, and not when a list failed, whose works would be skipped.
-   */
-  reviewable: boolean
-  /** Counting works per day, one entry for every day of the window, empty days included. */
-  days: Map<Day, number>
-  /**
-   * Counting works read so far for the day after the window: what one more day
-   * would add, at least. A lower bound — that day may not have been read in full.
-   */
-  nextDayCount: number
-}
-
-/**
- * What to do next:
- *
- * - `fetch` — read this page of the list's query;
- * - `boundary` — read page 1 of the list's query at `date_from = day`, and
- *   record where that day begins in {@link ListProgress.bounds};
- * - `window` — nothing: it's settled.
- */
-export type Plan
-  = | { fetch: string, page: number }
-    | { boundary: string, day: Day }
-    | { window: PlannedWindow }
-
-export interface PlanOptions {
-  /** The window's first day, {@link reviewStart}. */
-  start: Day
-  /** The current UTC day. */
-  today: Day
-  /** How many counting works a window aims for. */
-  target: number
-  /**
-   * The reader moved the window's end by hand: plan exactly `[start, endOverride]`
-   * instead of sizing it to the target. Kept within `start` and yesterday.
-   */
-  endOverride?: Day
-}
-
-/** One work of the merged stream. */
-export interface MergedWork {
-  /** The day it's reviewed on. */
-  day: Day
-  /** Whether it counts toward the target. */
-  counts: boolean
-  /**
-   * Every list that returned it and wants it ({@link ListItem.member}), in list
-   * order: its List source facet values.
-   */
-  lists: string[]
-}
-
-/**
- * The lists' works as one stream, by short id, each on the day it's reviewed on
- * ({@link assignDay}, with the base of the list it was read from). Works no list
- * assigns a day are left out.
- *
- * A work read from two lists is one work. If the two reads disagree about its
- * day — it was updated in between — it goes on the **later** day, which is what
- * it is now; the earlier day would have it reviewed as a version it no longer
- * is. It counts if a read on that day says it does.
- *
- * Only reads by lists that want the work take part. A read whose list's view
- * filter rejects it ({@link ListItem.member} false) is passed over entirely: it
- * doesn't name that list as a source, count, or move the work to its day. So a
- * work no list wants is left out, whichever lists returned it.
- *
- * The planner counts with this; the fetcher should build the window's works
- * and their facet values from it too, so the two can't disagree.
- */
-export function mergeItems(lists: readonly ListProgress[], context: Pick<PlanOptions, 'start' | 'today'>): Map<string, MergedWork> {
-  const seen = new Map<string, { day: Day | null, counts: boolean, lists: string[] }>()
-  for (const list of lists) {
-    const dayContext: DayContext = { base: list.base, start: context.start, today: context.today, scanned: list.scanned }
-    for (const item of list.items) {
-      if (item.member === false)
-        continue
-      let work = seen.get(item.sid)
-      if (!work) {
-        work = { day: null, counts: false, lists: [] }
-        seen.set(item.sid, work)
-      }
-      if (!work.lists.includes(list.id))
-        work.lists.push(list.id)
-      const day = assignDay(item.day, dayContext)
-      if (day === null)
-        continue
-      if (work.day === null || day > work.day) {
-        work.day = day
-        work.counts = item.counts
-      }
-      else if (day === work.day) {
-        work.counts ||= item.counts
-      }
-    }
-  }
-
-  const merged = new Map<string, MergedWork>()
-  for (const [sid, work] of seen) {
-    if (work.day !== null)
-      merged.set(sid, { day: work.day, counts: work.counts, lists: work.lists })
-  }
-  return merged
-}
-
-/**
- * Plan the next step of computing a review window: a page to read, a boundary
- * to learn, or the settled window. The fetcher calls this in a loop, applying
- * each request's result to the list's {@link ListProgress} before asking again.
- * Every request it's given changes that progress — rows are added, a bound is
- * recorded, or the list is marked exhausted or failed — which is what makes the
- * loop end.
- *
- * **When a day is complete for a list.** Blurb day `d` is complete once every
- * work filed up to `d + 1` has been read: a work filed later can't carry a
- * blurb day of `d` or earlier. That's known when
- *
- * - the list is exhausted;
- * - a boundary at `d + 2` is at or behind the rows read so far;
- * - `d` is at most the last row's blurb day less three. The rows after it were
- *   filed no earlier than it, so on the day before its blurb day at the
- *   earliest, and their own blurb days are at most a day before that;
- * - or `d` is at most the list's `base`, since the list adds nothing to those
- *   days ({@link assignDay}).
- *
- * The window is complete through `C`, the lowest of those over the lists that
- * haven't failed, and never later than yesterday.
- *
- * **Sizing it.** Works are counted per day across all the lists
- * ({@link mergeItems}). A day not yet complete has a partial count, but a
- * partial count is a lower bound, and that's all sizing needs: walking forward
- * from `start`, the first day `d` whose running total goes over the target
- * ends the window at `d − 1` (or at `start`, since a window is never less than
- * a day). That's settled once the window's own days are complete. The day that
- * tips it over only has to be *seen* tipping it — its count can only grow. If
- * nothing tips it, the window runs to yesterday once everything is complete
- * through yesterday, and the reader is caught up.
- *
- * **What to read next.** The window's tentative end `E` is where the counts so
- * far put it. The list with the lowest complete day is read further. When it has
- * already read a work dated after `E + 1`, it's probably near the point in its
- * query where `E + 2` begins, and one page-1 request at `date_from = E + 2` —
- * a boundary — says exactly where that is, which usually confirms `E` without
- * reading another page. Otherwise, or when a boundary it already has says more
- * rows are needed, it reads its next page.
- *
- * **Today** is never part of a reviewable window, because it isn't over:
- * marking it reviewed would bury every work posted later today. A reader
- * reviewed through yesterday (`start` past yesterday) gets a preview of
- * today instead, which can't be marked reviewed. So does a window whose lists
- * failed.
- *
- * **`endOverride`** replaces the sizing: the window is `[start, endOverride]`
- * once it's complete that far.
- */
-export function planWindow(lists: readonly ListProgress[], options: PlanOptions): Plan {
-  const { start, target } = options
-  const now = options.today
-  const yesterday = now - 1
-  const perDay = countByDay(mergeItems(lists, { start, today: now }))
-  const anyFailed = lists.some(list => list.failed)
-  const active = lists.filter(list => !list.failed)
-  const completeThrough = new Map(active.map(list => [list, lastCompleteDay(list)]))
-
-  const settled = (end: Day): Plan => {
-    const days = new Map<Day, number>()
-    let count = 0
-    for (let day = start; day <= end; day++) {
-      const n = perDay.get(day) ?? 0
-      days.set(day, n)
-      count += n
-    }
-    return {
-      window: {
-        start,
-        end,
-        count,
-        reviewable: !anyFailed && end < now,
-        days,
-        nextDayCount: perDay.get(end + 1) ?? 0,
-      },
-    }
-  }
-
-  const readFurther = (end: Day): Plan => {
-    let pick: ListProgress | undefined
-    let pickAt = Number.POSITIVE_INFINITY
-    for (const [list, at] of completeThrough) {
-      if (at < end && at < pickAt) {
-        pick = list
-        pickAt = at
-      }
-    }
-    // Only reached when some list is short of `end`; if none is, it's settled.
-    if (!pick)
-      return settled(end)
-    if (pick.items.length === 0)
-      return { fetch: pick.id, page: 1 }
-    // A boundary past today is known without asking (everything was filed
-    // before it), and only exhaustion answers it. A scanned list has no dates
-    // to ask about.
-    const boundary = end + 2
-    const latest = latestDay(pick.items)
-    if (!pick.scanned && boundary <= now && latest !== null && latest > end + 1 && !boundaryPending(pick, boundary))
-      return { boundary: pick.id, day: boundary }
-    return { fetch: pick.id, page: Math.floor(pick.items.length / PAGE_SIZE) + 1 }
-  }
-
-  const lowest = Math.min(Number.POSITIVE_INFINITY, ...completeThrough.values())
-
-  // Reviewed through yesterday: preview today (or, if a clock ahead of this
-  // one set the watermark, an empty window at `start`), complete to the end.
-  if (start > yesterday)
-    return lowest >= start ? settled(start) : readFurther(start)
-
-  const reached = Math.min(yesterday, lowest)
-
-  if (options.endOverride !== undefined) {
-    const end = Math.min(Math.max(options.endOverride, start), yesterday)
-    return end <= reached ? settled(end) : readFurther(end)
-  }
-
-  const tip = tippingDay(perDay, start, now, target)
-  const end = tip === null ? yesterday : Math.min(yesterday, Math.max(start, tip - 1))
-  return end <= reached ? settled(end) : readFurther(end)
-}
-
-/** Counting works per day. */
-function countByDay(merged: Map<string, MergedWork>): Map<Day, number> {
-  const perDay = new Map<Day, number>()
-  for (const work of merged.values()) {
-    if (work.counts)
-      perDay.set(work.day, (perDay.get(work.day) ?? 0) + 1)
-  }
-  return perDay
-}
-
-/** The first day from `start` whose running total goes over `target`, or null. */
-function tippingDay(perDay: Map<Day, number>, start: Day, last: Day, target: number): Day | null {
-  const days = [...perDay.keys()].filter(day => day >= start && day <= last).sort((a, b) => a - b)
-  let total = 0
-  for (const day of days) {
-    total += perDay.get(day)!
-    if (total > target)
-      return day
-  }
-  return null
-}
-
-/** Whether every work in the list's query has been read. */
-function isExhausted(list: ListProgress): boolean {
-  return list.exhausted || (list.items.length > 0 && list.items.length >= list.total)
-}
-
-/** The last blurb day this list is complete through, by the rules on {@link planWindow}. */
-function lastCompleteDay(list: ListProgress): Day {
-  if (isExhausted(list))
-    return Number.POSITIVE_INFINITY
-  let through = list.base
-  for (const [day, before] of list.bounds) {
-    if (before <= list.items.length)
-      through = Math.max(through, day - 2)
-  }
-  const last = lastDay(list.items)
-  if (last !== null)
-    through = Math.max(through, last - 3)
-  return through
-}
-
-/** The blurb day of the last row read that has one. */
-function lastDay(items: readonly ListItem[]): Day | null {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const day = items[i]!.day
-    if (Number.isFinite(day))
-      return day
-  }
-  return null
-}
-
-/** The latest blurb day among the rows read. */
-function latestDay(items: readonly ListItem[]): Day | null {
-  let latest: Day | null = null
-  for (const item of items) {
-    if (Number.isFinite(item.day) && (latest === null || item.day > latest))
-      latest = item.day
-  }
-  return latest
-}
-
-/**
- * Whether a boundary at `day` is already known to be ahead of the rows read:
- * a recorded boundary at or before it is, and a day begins no earlier in the
- * query than any day before it. Asking would only say "read more" again.
- */
-function boundaryPending(list: ListProgress, day: Day): boolean {
-  for (const [at, before] of list.bounds) {
-    if (at <= day && before > list.items.length)
-      return true
-  }
-  return false
 }
