@@ -446,6 +446,19 @@ describe('a frozen page layout', () => {
       assert.deepEqual(ordered.slice(0, 6).map(w => w.workId), order.slice(0, 6), 'no page before the one on screen changes')
     })
 
+    test('a page on screen past the end takes a newcomer on the end', () => {
+      const order = all.filter(id => id !== '2')
+      const { ordered } = layAt(order, all, { pageStart: 30 })
+      assert.deepEqual(ordered.map(w => w.workId), [...order, '2'])
+    })
+
+    test('a newcomer beside a gone slot goes where the sort puts it, the slot kept', () => {
+      const order = all.filter(id => id !== '8')
+      const { ordered, dropped } = layAt(order, all.filter(id => id !== '9'), { gone: new Set(['9']) })
+      assert.deepEqual(ordered.map(w => w.workId), all)
+      assert.equal(dropped.get(ten[8]), 'gone')
+    })
+
     test('several such works keep their order among themselves', () => {
       const order = all.filter(id => id !== '2' && id !== '4')
       const { ordered } = layAt(order, all)

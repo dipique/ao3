@@ -181,9 +181,11 @@ export interface SearchView {
    * screen changes: a work added goes where the sort puts it, or first on the
    * page on screen when that would be an earlier page, and a work taken out
    * keeps its slot, drawn collapsed with {@link SearchViewConfig.goneReason}.
-   * A work added that the view holds as gone is put back.
+   * A work added that the view holds as gone is put back. `autoExcludes`
+   * re-states the exclusions the reader's hide rules imply over the works it
+   * now holds, as for {@link update}.
    */
-  merge: (added: Work[], goneIds: ReadonlySet<string>) => void
+  merge: (added: Work[], goneIds: ReadonlySet<string>, autoExcludes?: FacetValueRef[]) => void
 }
 
 export interface SearchViewConfig {
@@ -1383,6 +1385,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       return
     const next = works.filter(w => w !== work)
     works = next
+    gone.delete(workId)
     pool = resultsOf(works)
     if (mounted.delete(work)) {
       work.el.remove()
@@ -1649,19 +1652,24 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       showTextCoverage()
   }
 
-  function merge(added: Work[], goneIds: ReadonlySet<string>): void {
+  function merge(added: Work[], goneIds: ReadonlySet<string>, nextAutoExcludes?: FacetValueRef[]): void {
     const held = new Map(works.map(work => [work.workId, work]))
     const addedIds = new Set(added.map(work => work.workId))
     const fresh: Work[] = []
     const changed: Work[] = []
+    /** Works newly among the results: the text search has yet to look at them. */
+    const unsearched: Work[] = []
     for (const work of added) {
       const had = held.get(work.workId)
       if (!had) {
         held.set(work.workId, work)
+        gone.delete(work.workId)
         fresh.push(work)
+        unsearched.push(work)
       }
       else if (gone.delete(work.workId)) {
         changed.push(had)
+        unsearched.push(had)
       }
     }
     for (const id of goneIds) {
@@ -1675,6 +1683,10 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       return
     works = [...works, ...fresh]
     pool = resultsOf(works)
+    if (nextAutoExcludes) {
+      setAutoExcludes(nextAutoExcludes)
+      applyAutoExcludes()
+    }
     // A work whose slot changes what it says is drawn again from the markup the
     // store keeps, so the decoration runs over it afresh.
     for (const work of changed) {
@@ -1687,11 +1699,42 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     sortSig = ''
     renderFacets()
     render()
-    const textQuery = textRun?.query ?? textApplied?.query
-    if (textQuery)
-      searchText(textQuery, { restore: true })
-    else
+    searchAdded(unsearched)
+  }
+
+  /**
+   * Run the applied work-text search over works just added, and add what it
+   * finds to its hits: the works it has already searched answer as before. A
+   * search still under way starts again over everything, the added works
+   * included.
+   */
+  function searchAdded(added: Work[]): void {
+    if (textRun) {
+      searchText(textRun.query, { restore: true })
+      return
+    }
+    const applied = textApplied
+    if (!textSearch || !applied || !added.length) {
       showTextCoverage()
+      return
+    }
+    void textSearch.search(added.map(work => work.workId), applied.query).then(({ hits }) => {
+      if (textApplied !== applied || textRun || !hits.size)
+        return
+      for (const work of added) {
+        if (!hits.has(work.workId))
+          continue
+        applied.hits.add(work.workId)
+        // Drawn collapsed while the search hadn't looked at it yet.
+        if (collapsedInPlace.delete(work) && hasNode(work)) {
+          pristineBlurb(work.el, { inPlace: true })
+          decorated.delete(work.el)
+        }
+      }
+      render()
+    }, (error: unknown) => {
+      console.error('[searchView] could not search the works added', error)
+    })
   }
 
   function setUpdating(updating: boolean, opts: { text?: string | null, onStop?: () => void } = {}): void {

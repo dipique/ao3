@@ -1392,7 +1392,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       ...source.viewConfig,
       initialState: reusingWorks || !opts.initialState
         ? opts.initialState
-        : { ...opts.initialState, order: undefined },
+        : { ...opts.initialState, order: undefined, gone: undefined },
       seed: opts.seed,
       // How a work that has to keep a slot it no longer earns is drawn. Only a
       // view holding its page layout ever asks.
@@ -1443,10 +1443,11 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         const held = view.getWorks()
         const heldIds = new Set(held.map(work => work.workId))
         const fresh = belonging(source, added).filter(work => !heldIds.has(work.workId))
-        prepare(source, [...held, ...fresh], options, true)
-        view.merge([...fresh, ...added.filter(work => heldIds.has(work.workId))], goneIds)
+        const autoExcludes = prepare(source, [...held, ...fresh], options, true)
+        view.merge([...fresh, ...added.filter(work => heldIds.has(work.workId))], goneIds, autoExcludes)
         const out = new Set(view.getState().gone ?? [])
-        const kept = view.getWorks().filter(work => !out.has(work.workId))
+        // Stored in the source's order, which is what a reopen from storage numbers them by.
+        const kept = view.getWorks().filter(work => !out.has(work.workId)).sort((a, b) => a.markedOrder - b.markedOrder)
         void persist(source, kept).catch(err => log.error(`Failed to persist the search-view snapshot for ${source.id}`, err))
       },
       setUpdating: (on) => {
