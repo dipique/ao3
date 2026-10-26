@@ -11,14 +11,12 @@ function list(id, extra = {}) {
   return { id, kind: 'works-filter', url: `/tags/${id}/works`, alias: id, tracked: true, since: START - 30, ...extra }
 }
 
-/**
- * A record of `entry` read through `through`, holding `rows`: `[sid, day]`
- * pairs, or `[day, n]` rows making `n` works with ids from `prefix`.
- */
+/** A record of `entry` read through `through`, holding `rows`: `[sid, day]` pairs. */
 function read(entry, through, rows, extra = {}) {
   return { ...recordFor(entry, undefined, START), through, readAt: 1, rows: packRows(rows.map(([sid, day]) => ({ sid, day }))), ...extra }
 }
 
+/** `[sid, day]` pairs from `[day, n]` rows, making `n` works a day with ids from `prefix`. */
 function many(prefix, perDay) {
   const out = []
   for (const [day, n] of perDay) {
@@ -116,6 +114,16 @@ describe('windowFromRecords', () => {
       assert.deepEqual(window.works.find(work => work.sid === 's').lists, ['a', 'b'])
     })
 
+    test('a work a later list moves to a later day takes its place there from that list', () => {
+      const a = list('a')
+      const b = list('b')
+      const window = compute([a, b], [
+        ['a', read(a, TODAY - 1, [['s', START + 1]])],
+        ['b', read(b, TODAY - 1, [['b1', START + 3], ['s', START + 3]])],
+      ])
+      assert.deepEqual(sids(window), ['b1', 's'])
+    })
+
     test('two lists disagreeing on a day: the later wins, and both name it', () => {
       const a = list('a')
       const b = list('b')
@@ -144,6 +152,16 @@ describe('windowFromRecords', () => {
       assert.deepEqual(sids(compute([a], [['a', rec]])), [])
       const preview = compute([a], [['a', rec]], { start: TODAY })
       assert.deepEqual(preview.works.map(work => [work.sid, work.day]), [['ahead', TODAY]])
+    })
+
+    test('a future-dated row in one list and an earlier one in another: reviewed today', () => {
+      const a = list('a')
+      const b = list('b')
+      const preview = compute([a, b], [
+        ['a', read(a, TODAY - 1, [['s', TODAY + 3]])],
+        ['b', read(b, TODAY - 1, [['s', TODAY - 2]])],
+      ], { start: TODAY })
+      assert.deepEqual(preview.works.map(work => [work.sid, work.day]), [['s', TODAY]])
     })
 
     test('rows on reviewed days are left out', () => {
@@ -214,6 +232,14 @@ describe('windowFromRecords', () => {
     })
   })
 
+  test('an empty window while lists are still being read says so', () => {
+    const a = list('a')
+    const window = compute([a], [['a', read(a, START + 1, [])]])
+    assert.deepEqual(window.works, [])
+    assert.deepEqual(window.pending, ['a'])
+    assert.equal(window.reviewable, true)
+  })
+
   test('an empty window still has its days', () => {
     const a = list('a')
     const window = compute([a], [['a', read(a, TODAY - 1, [])]])
@@ -221,6 +247,12 @@ describe('windowFromRecords', () => {
     assert.deepEqual(window.works, [])
     assert.equal(window.days.size, TODAY - START)
     assert.equal(window.reviewable, true)
+  })
+
+  test('caught up, endOverride has nothing to move', () => {
+    const a = list('a')
+    const window = compute([a], [['a', read(a, TODAY - 1, [])]], { start: TODAY, endOverride: TODAY - 3 })
+    assert.equal(window.end, TODAY)
   })
 
   test('caught up: a preview of today, never reviewable, complete once read through yesterday', () => {

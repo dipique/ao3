@@ -30,7 +30,7 @@ import { fromShortId } from './workId.ts'
  * page into one, which list to read next, pruning reviewed days, and the window
  * the records make. The archive half lives with the content script.
  *
- * Imports only other import-free modules, so it loads under a plain
+ * Imports only other pure modules of `src/common`, so it loads under a plain
  * `node --test`.
  */
 
@@ -133,7 +133,7 @@ function firstDay(list: Pick<TrackedList, 'since'>, start: Day): Day {
 }
 
 /** `stored` as a record of `list`'s current query, or null when it isn't one. */
-function usableRecord(list: Pick<TrackedList, 'kind' | 'url' | 'scan' | 'filter'>, stored: unknown): TrackedRead | null {
+export function storedRecordOf(list: Pick<TrackedList, 'kind' | 'url' | 'scan' | 'filter'>, stored: unknown): TrackedRead | null {
   if (typeof stored !== 'object' || stored === null)
     return null
   const record = stored as Partial<TrackedRead>
@@ -157,7 +157,7 @@ function usableRecord(list: Pick<TrackedList, 'kind' | 'url' | 'scan' | 'filter'
  */
 export function recordFor(list: TrackedList, stored: unknown, start: Day): TrackedRead {
   const from = firstDay(list, start)
-  const record = usableRecord(list, stored)
+  const record = storedRecordOf(list, stored)
   const since = wholeNumber(list.since)
   if (record && record.from <= from && (since === null || record.from >= since))
     return record
@@ -300,7 +300,7 @@ export function readSummary(lists: readonly TrackedList[], records: ReadonlyMap<
   for (const list of lists) {
     if (!list.tracked)
       continue
-    const record = usableRecord(list, records.get(list.id))
+    const record = storedRecordOf(list, records.get(list.id))
     if (!record || record.readAt === 0) {
       behind.push(list.id)
       continue
@@ -322,11 +322,11 @@ export interface WindowInput {
   today: Day
   /** How many counting works a window aims for. */
   target: number
-  /** The reader moved the window's end by hand: `[start, endOverride]`, within the start and yesterday. */
+  /** The window's end, set by hand: `[start, endOverride]`, within the start and yesterday. */
   endOverride?: Day
   /** Whether a list's view filter wants the work. */
   member: (listId: string, sid: string) => boolean
-  /** Whether a work counts toward the target: not when the rules hide it, nor when the reader has dealt with it. */
+  /** Whether a work counts toward the target: not when the rules hide it, nor when it is already marked read or saved for later. */
   counts: (sid: string) => boolean
 }
 
@@ -357,7 +357,7 @@ export interface ComputedWindow {
   pending: string[]
   /** Lists not complete through `end` whose last run gave up on them. */
   failed: string[]
-  /** Never when `end` reaches today or a list failed. Pending lists don't block it. */
+  /** Never when `end` reaches today or a list failed short of it. Pending lists don't block it. */
   reviewable: boolean
 }
 
@@ -367,8 +367,10 @@ export interface ComputedWindow {
  * **Merging.** Every tracked list's rows, in list order and each list's rows in
  * order, merged by work. A row its list's view filter rejects (`member`) takes
  * no part: it doesn't name that list or move the work. A work two lists hold
- * goes on the later of their days, which is what it is now. A future day is
- * reviewed today. Rows on days before `start` are reviewed already.
+ * goes on the later of their days, which is what it is now, in the place the
+ * row that put it there had. A future day is reviewed today. Rows on days
+ * before `start` are reviewed already. The records are taken as given: a
+ * caller passes each list's through `recordFor`.
  *
  * **Sizing.** Walking forward from `start`, the first day whose running total
  * of counting works goes over the target ends the window the day before it, or
@@ -380,7 +382,8 @@ export interface ComputedWindow {
  *
  * `counts` is only asked about works on the days walked — from `start` to the
  * day after the window — so a caller can load the blurbs it needs a day at a
- * time.
+ * time. `member` is asked about every row, but a work with no row on those
+ * days can't reach the window whatever it answers.
  *
  * **Completeness.** A list is complete through the window's end once its
  * `through` reaches it, or yesterday for a preview of today. One that isn't is
@@ -392,6 +395,7 @@ export function windowFromRecords(input: WindowInput): ComputedWindow {
   const lists = input.lists.filter(list => list.tracked)
 
   const merged = new Map<string, WindowWork & { place: number }>()
+  let place = 0
   for (const list of lists) {
     const record = input.records.get(list.id)
     if (!record)
@@ -400,14 +404,18 @@ export function windowFromRecords(input: WindowInput): ComputedWindow {
       if (!input.member(list.id, row.sid))
         continue
       const day = Math.min(row.day, today)
+      const at = place++
       const work = merged.get(row.sid)
       if (!work) {
-        merged.set(row.sid, { sid: row.sid, day, lists: [list.id], counts: false, place: merged.size })
+        merged.set(row.sid, { sid: row.sid, day, lists: [list.id], counts: false, place: at })
         continue
       }
       if (!work.lists.includes(list.id))
         work.lists.push(list.id)
-      work.day = Math.max(work.day, day)
+      if (day > work.day) {
+        work.day = day
+        work.place = at
+      }
     }
   }
 
