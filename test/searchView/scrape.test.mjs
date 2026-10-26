@@ -269,6 +269,16 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
     assert.ok(result.loadedPages < result.totalPages)
   })
 
+  test('a listing being searched stops on page 1 when that is where the works are, reported or not', async () => {
+    // Page 1 is reported as it lands; the report must not cost `satisfied`
+    // the ids it reads off the same page.
+    const result = await scrape({ pageCount: 50, waitBudget: 60_000, want: ['1', '2'] })
+
+    assert.equal(result.satisfied, true)
+    assert.ok(result.asked.length <= 6, `read ${result.asked.length} pages looking for two works on page 1`)
+    assert.deepEqual(result.reports[0].titles, ['Work 1', 'Work 2'])
+  })
+
   test('a page that is broken on its own account is given up on, and only it', async () => {
     // A 404 says something about *this* page, so it earns its own strikes and
     // costs the rest of the listing nothing.

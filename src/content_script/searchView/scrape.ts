@@ -397,11 +397,15 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
         }
         settled++
         onProgress?.(settled, pageCount)
-        if (index === 0 || archiveWaitRemaining() > 0)
-          report()
+        // Read off the page before a report parses it, which moves its blurbs
+        // into the live document.
         if (satisfied) {
           for (const el of docs[index]!.querySelectorAll(selector))
             seenIds.add(el.id.replace(/^work_/, ''))
+        }
+        if (index === 0 || archiveWaitRemaining() > 0)
+          report()
+        if (satisfied) {
           if (satisfied(seenIds)) {
             // Everything wanted has been found. Stop the pool where it stands —
             // the pages nobody has reached hold nothing we came for.
