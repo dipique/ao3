@@ -8,6 +8,8 @@ import type { FacetKey, FilterState } from '../searchView/engine.ts'
 import { canonicalFilter } from '../../common/trackedLists.ts'
 import { emptyFilterState, FACET_KEYS, VIEW_ONLY_KEYS } from '../searchView/engine.ts'
 
+export { excludedTagNames } from '../../common/trackedLists.ts'
+
 /**
  * A custom search view's filter as a tracked list keeps it, and back.
  *
@@ -77,33 +79,4 @@ export function filterStateOf(filter: unknown): FilterState | null {
   state.wordsMin = canonical.words?.[0] ?? null
   state.wordsMax = canonical.words?.[1] ?? null
   return state
-}
-
-/**
- * The facet groups whose values are the archive's own tags, by the name the
- * archive gives them. Language and completion aren't tags: the archive filters
- * them through fields of their own.
- */
-const TAG_KEYS: readonly FacetKey[] = ['rating', 'warnings', 'categories', 'fandoms', 'relationships', 'characters', 'freeforms']
-
-/**
- * The tag names a stored filter excludes, in code-unit order: every excluded
- * value of a tag group. A works search can be asked to leave these out itself
- * (`work_search[excluded_tag_names]`), which the archive does for every kind of
- * tag, ratings, warnings and categories included — so a list whose view filter
- * excludes a common tag costs no more pages to read than one that doesn't.
- *
- * Only exclusions. What a filter includes or requires is still one tag among a
- * work's many, and the free text and word count are matched against the blurb,
- * so all of that stays on this side, where it is matched exactly as the view
- * matched it.
- */
-export function excludedTagNames(filter: unknown): string[] {
-  const facets = canonicalFilter(filter)?.facets
-  const names = new Set<string>()
-  for (const key of TAG_KEYS) {
-    for (const name of facets?.[key]?.ex ?? [])
-      names.add(name)
-  }
-  return [...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 }
