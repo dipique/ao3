@@ -346,6 +346,28 @@ describe('searchView/blurbStore', { skip }, () => {
     assert.deepEqual(result.deleted, ['blurb.1'], 'and goes with list b')
   })
 
+  test('a work a tracked list’s read record holds is referenced, and pruning spares it', async () => {
+    const result = await page.evaluate(async ({ descriptor, HOUR }) => {
+      const { writeSnapshot, snapshotWorkIds } = window.Store
+      const old = Date.now() - HOUR
+      const blurbKeys = async () => Object.keys(await window.store()).filter(key => key.startsWith('blurb.')).sort()
+      const tracked = { enabled: true, target: 40, reviewedThrough: 0, lists: [{ id: 'l1', kind: 'series-works', url: '/series/1', alias: 'S', tracked: true, since: 0 }] }
+      await window.reset({
+        'option.pruneOrphanedBlurbs': true,
+        'option.trackedLists': tracked,
+        // Work 2 is "2" in base 36 too; a record of a list no longer tracked counts for nothing.
+        'trackedRead.l1': { v: 1, query: '', from: 0, through: 0, readAt: 1, rows: '2.0' },
+        'trackedRead.gone': { v: 1, query: '', from: 0, through: 0, readAt: 1, rows: '3.0' },
+      })
+      await writeSnapshot('a', [window.scraped('1', { seenAt: old }), window.scraped('2', { seenAt: old }), window.scraped('3', { seenAt: old })], descriptor)
+      await writeSnapshot('a', [window.scraped('1', { seenAt: old })], descriptor)
+      return { listed: [...await snapshotWorkIds()].sort(), kept: await blurbKeys() }
+    }, { descriptor: DESCRIPTOR, HOUR })
+
+    assert.deepEqual(result.listed, ['1', '2'])
+    assert.deepEqual(result.kept, ['blurb.1', 'blurb.2'], '3 went; 2 is in a record')
+  })
+
   test('a detached list comes out whole, with what it missed, pruning nothing; restored, the store is as it was', async () => {
     const result = await page.evaluate(async ({ descriptor, HOUR }) => {
       const { writeSnapshot, writeMisses, detachSnapshot, restoreSnapshot } = window.Store

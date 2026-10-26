@@ -1,6 +1,7 @@
 import type { Day, TrackedList } from './trackedLists.ts'
 
 import { excludedTagNames, wholeNumber } from './trackedLists.ts'
+import { fromShortId } from './workId.ts'
 
 /**
  * What the review keeps of each tracked list between visits: the works its
@@ -28,7 +29,7 @@ import { excludedTagNames, wholeNumber } from './trackedLists.ts'
  * page into one, which list to read next, pruning reviewed days, and the window
  * the records make. The archive half lives with the content script.
  *
- * Imports only the tracked lists' own pure module, so it loads under a plain
+ * Imports only other import-free modules, so it loads under a plain
  * `node --test`.
  */
 
@@ -489,4 +490,32 @@ export function windowFromRecords(input: WindowInput): ComputedWindow {
     failed,
     reviewable: !failed.length && end < today,
   }
+}
+
+/** What every record's `storage.local` key starts with. */
+export const READ_RECORD_PREFIX = 'trackedRead.'
+
+/** The `storage.local` key a list's record is kept under. */
+export function readRecordKey(listId: string): string {
+  return `${READ_RECORD_PREFIX}${listId}`
+}
+
+/**
+ * Every work the records hold, as decimal work ids. A record keeps its works'
+ * blurbs alive: the review draws them from the store, so a pruner must count
+ * them as referenced. Anything that isn't a record is passed over.
+ */
+export function recordedWorkIds(records: Iterable<unknown>): Set<string> {
+  const ids = new Set<string>()
+  for (const record of records) {
+    const rows = (record as Partial<TrackedRead> | null)?.rows
+    if (typeof rows !== 'string')
+      continue
+    for (const { sid } of unpackRows(rows)) {
+      const id = fromShortId(sid)
+      if (id !== null)
+        ids.add(id)
+    }
+  }
+  return ids
 }

@@ -109,10 +109,11 @@ const ARCHIVE_ORIGIN = 'https://archiveofourown.org'
 
 // ---------------------------------------------------------------------------
 // storage.local, the way `createStorage` treats it: an orphaned page reads
-// nothing and writes nothing, rather than throwing from every call.
+// nothing and writes nothing, rather than throwing from every call. Exported
+// for the other stores kept beside this one.
 // ---------------------------------------------------------------------------
 
-async function localGet(keys: string | string[] | null): Promise<Record<string, unknown>> {
+export async function localGet(keys: string | string[] | null): Promise<Record<string, unknown>> {
   if (!isExtensionContextValid())
     return {}
   try {
@@ -125,7 +126,7 @@ async function localGet(keys: string | string[] | null): Promise<Record<string, 
   }
 }
 
-async function localSet(items: Record<string, unknown>): Promise<void> {
+export async function localSet(items: Record<string, unknown>): Promise<void> {
   if (!isExtensionContextValid())
     return
   try {
@@ -137,7 +138,7 @@ async function localSet(items: Record<string, unknown>): Promise<void> {
   }
 }
 
-async function localRemove(keys: string[]): Promise<void> {
+export async function localRemove(keys: string[]): Promise<void> {
   if (!keys.length || !isExtensionContextValid())
     return
   try {

@@ -19,6 +19,7 @@ import {
   unpackOrderedIds,
 } from '#common'
 import { parseWork } from '#content_script/blurb.js'
+import { readRecordWorkIds } from '#content_script/tracked/readStore.ts'
 
 import type { ParsedWork } from './blurbStore.ts'
 
@@ -200,10 +201,21 @@ export async function listSnapshots(): Promise<SnapshotSummary[]> {
  * decides whether its blurb and its cached text are orphans. A list written by a
  * newer build is one the reader kept, and discarding what it holds because this
  * build cannot draw it would be the worst kind of tidying.
+ *
+ * The tracked lists' read records count too: the review draws their works from
+ * the store, so a work a record holds is referenced as long as it does.
  */
 export async function snapshotWorkIds(): Promise<Set<string>> {
   const [lists, legacy] = await Promise.all([cache.get('searchLists'), readLegacy()])
-  return listedIds(lists, legacy)
+  return withRecorded(listedIds(lists, legacy))
+}
+
+/** `ids`, and every work a tracked list's read record holds. */
+async function withRecorded(ids: Set<string>): Promise<Set<string>> {
+  const tracked = (await options.get('trackedLists')).lists.map(list => list.id)
+  for (const id of await readRecordWorkIds(tracked))
+    ids.add(id)
+  return ids
 }
 
 /**
@@ -415,7 +427,7 @@ async function pruneIfWanted(key: string, before: string[], after: string[], lis
   const candidates = droppedIds(before, after, others)
   if (!candidates.length)
     return
-  const referenced = listedIds(lists, await readLegacy())
+  const referenced = await withRecorded(listedIds(lists, await readLegacy()))
   await pruneBlurbs(candidates, referenced)
 }
 
