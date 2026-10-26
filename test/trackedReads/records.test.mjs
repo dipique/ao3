@@ -193,6 +193,12 @@ describe('applyPage', () => {
       assert.equal(next.through, START + 4)
     })
 
+    test('a scanned pass cut short trusts nothing more: its pages aren’t in date order', () => {
+      const rec = record(list('s', { kind: 'series-works', url: '/series/1' }), { through: START + 2 })
+      const next = applyPage(rec, page(START + 3, [['a', TODAY - 1]]), { ...at, scanned: true })
+      assert.equal(next.through, START + 2)
+    })
+
     test('a cut-short pass never trusts today', () => {
       const next = applyPage(record(list('a')), page(START, [['a', TODAY + 5]]), at)
       assert.equal(next.through, TODAY - 1)
@@ -287,6 +293,14 @@ describe('pruneReviewed', () => {
     const { record: next, dropped } = pruneReviewed(rec, START - 1)
     assert.equal(next, rec)
     assert.deepEqual(dropped, [])
+  })
+
+  test('a watermark put back after a prune finds the record no longer covers the window', () => {
+    const { record: pruned } = pruneReviewed(record(list('a'), { through: START + 5, rows: packRows(rows) }), START + 2)
+    const fresh = recordFor(list('a'), pruned, START)
+    assert.equal(fresh.from, START)
+    assert.equal(fresh.through, START - 1)
+    assert.equal(fresh.rows, '')
   })
 
   test('a list tracked after the reviewed days keeps its start', () => {

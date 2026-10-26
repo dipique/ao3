@@ -227,7 +227,8 @@ function storedDay(blurbDay: Day, from: Day, scanned: boolean): Day | null {
  * - **`through`** moves to yesterday once a pass reaches its end. A pass cut
  *   short trusts everything filed two days before its last dated row, since the
  *   query is sorted by filing day and a blurb day can be a day off it; never
- *   past yesterday, and never back.
+ *   past yesterday, and never back. A scanned list isn't sorted by date at all,
+ *   so a scanned pass cut short trusts nothing more.
  */
 export function applyPage(record: TrackedRead, page: PageRead, context: PageContext): TrackedRead {
   const rows = unpackRows(record.rows)
@@ -251,7 +252,7 @@ export function applyPage(record: TrackedRead, page: PageRead, context: PageCont
   if (page.reachedEnd) {
     through = Math.max(through, yesterday)
   }
-  else {
+  else if (!context.scanned) {
     const last = page.rows.findLast(row => Number.isFinite(row.blurbDay))
     if (last)
       through = Math.max(through, Math.min(yesterday, last.blurbDay - 2))
