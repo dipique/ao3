@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { PACE_EVERY, PACE_IDLE_RESET_MS } from '../../src/content_script/archiveFetch.ts'
 import { loadModuleInPage, skipWithoutChrome } from '../siteExport/helpers.mjs'
 
 /**
@@ -37,6 +38,9 @@ function installClock() {
   }
   globalThis.__clock = {
     now: () => now,
+    advance: (ms) => {
+      now += ms
+    },
     sleep: (ms, signal) => new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(signal.reason)
@@ -101,10 +105,48 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
    * Returns what the scrape produced plus a log of every request, which is the
    * half that says whether we were polite about it.
    */
-  const scrape = opts => page.evaluate(async ({ script = {}, pageCount, waitBudget, refuseFirst = 0, want }) => {
+  const scrape = opts => page.evaluate(async ({ script = {}, pageCount, waitBudget, refuseFirst = 0, want, order, firstPage = false, abortAtPause = false, idleReset }) => {
     const asked = []
     const answers = new Map(Object.entries(script).map(([n, steps]) => [n, [...steps]]))
     let refusals = refuseFirst
+    // Long enough idle that the pacing starts its count of requests afresh,
+    // whatever an earlier scrape on this page left it at.
+    globalThis.__clock.advance(idleReset)
+
+    // `order` lands the pages in the order it lists them: each page's answer
+    // waits until as many pages as come before it in `order` have landed.
+    let landed = 0
+    const landing = []
+    const landedAtLeast = n => new Promise((resolve) => {
+      if (landed >= n)
+        resolve()
+      else
+        landing.push({ n, resolve })
+    })
+    const onProgress = (done) => {
+      landed = done
+      for (const waiter of landing.splice(0)) {
+        if (waiter.n <= landed)
+          waiter.resolve()
+        else
+          landing.push(waiter)
+      }
+    }
+
+    const listingPage = (n) => {
+      const blurbs = Array.from({ length: 2 }, (_, i) => {
+        const id = (Number(n) - 1) * 2 + i + 1
+        return `<li class="work blurb group" id="work_${id}">
+          <div class="header module"><h4 class="heading">
+            <a href="https://archiveofourown.org/works/${id}">Work ${id}</a>
+            by <a rel="author" href="https://archiveofourown.org/users/someone/pseuds/someone">someone</a>
+          </h4></div>
+          <dl class="stats"><dt class="words">Words:</dt><dd class="words">100</dd>
+          <dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd></dl>
+        </li>`
+      }).join('')
+      return `<ol class="work index group">${blurbs}</ol>`
+    }
 
     const refused = (retryAfter) => {
       const headers = new Headers()
@@ -125,23 +167,17 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
         return refused(step.retryAfter ?? 1)
       if (step.status !== 200)
         return new Response('', { status: step.status })
-      const blurbs = Array.from({ length: 2 }, (_, i) => {
-        const id = (Number(n) - 1) * 2 + i + 1
-        return `<li class="work blurb group" id="work_${id}">
-          <div class="header module"><h4 class="heading">
-            <a href="https://archiveofourown.org/works/${id}">Work ${id}</a>
-            by <a rel="author" href="https://archiveofourown.org/users/someone/pseuds/someone">someone</a>
-          </h4></div>
-          <dl class="stats"><dt class="words">Words:</dt><dd class="words">100</dd>
-          <dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd></dl>
-        </li>`
-      }).join('')
-      return new Response(`<ol class="work index group">${blurbs}</ol>`, { status: 200 })
+      if (order)
+        await landedAtLeast(order.indexOf(Number(n)) + (firstPage ? 1 : 0))
+      return new Response(listingPage(n), { status: 200 })
     }
 
+    const reports = []
+    const controller = new AbortController()
     const result = await globalThis.Scrape.scrapeListing({
       pageCount,
       pageUrl: p => `https://archiveofourown.org/list?page=${p}`,
+      firstPageDoc: firstPage ? new DOMParser().parseFromString(listingPage(1), 'text/html') : undefined,
       // A listing being searched rather than shown: stop once every wanted work
       // has turned up. Two works per page, so work n is on page ceil(n / 2).
       satisfied: want ? ids => want.every(id => ids.has(id)) : undefined,
@@ -150,16 +186,26 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
       patience: 0,
       waitBudget,
       concurrency: 3,
-    })
+      signal: controller.signal,
+      onProgress,
+      onPartial: (works, loadedPages) => {
+        const paused = globalThis.Scrape.archiveWaitRemaining() > 0
+        reports.push({ titles: works.map(w => w.title), loadedPages, paused, asked: asked.length })
+        if (paused && abortAtPause)
+          controller.abort()
+      },
+    }).catch(err => ({ error: err.name }))
     return {
-      titles: result.works.map(w => w.title),
+      error: result.error,
+      titles: result.works?.map(w => w.title),
       loadedPages: result.loadedPages,
       totalPages: result.totalPages,
       blocked: !!result.blocked,
       satisfied: !!result.satisfied,
       asked,
+      reports,
     }
-  }, opts)
+  }, { idleReset: PACE_IDLE_RESET_MS + 1, ...opts })
 
   /** Gaps between consecutive requests long enough to be a pause, not a fetch. */
   const pauses = asked => asked.slice(1)
@@ -223,6 +269,16 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
     assert.ok(result.loadedPages < result.totalPages)
   })
 
+  test('a listing being searched stops on page 1 when that is where the works are, reported or not', async () => {
+    // Page 1 is reported as it lands; the report must not cost `satisfied`
+    // the ids it reads off the same page.
+    const result = await scrape({ pageCount: 50, waitBudget: 60_000, want: ['1', '2'] })
+
+    assert.equal(result.satisfied, true)
+    assert.ok(result.asked.length <= 6, `read ${result.asked.length} pages looking for two works on page 1`)
+    assert.deepEqual(result.reports[0].titles, ['Work 1', 'Work 2'])
+  })
+
   test('a page that is broken on its own account is given up on, and only it', async () => {
     // A 404 says something about *this* page, so it earns its own strikes and
     // costs the rest of the listing nothing.
@@ -240,5 +296,60 @@ describe('scrapeListing under a rate limit', { skip: skipWithoutChrome }, () => 
       3,
       'tried three times, then left alone',
     )
+  })
+
+  /** Work 1 … Work n, the titles of a listing's first `pages` pages. */
+  const titlesOf = pages => Array.from({ length: pages * 2 }, (_, i) => `Work ${i + 1}`)
+
+  describe('partial results', () => {
+    test('each report is the pages landed from page 1 on, whatever landed beyond a gap', async () => {
+      // Page 3 lands first, then page 1, then page 2: when page 1 lands the run
+      // from page 1 is one page long, page 3 notwithstanding.
+      const result = await scrape({ pageCount: 3, waitBudget: 60_000, order: [3, 1, 2] })
+
+      assert.deepEqual(result.reports.map(r => r.loadedPages), [1, 3])
+      assert.deepEqual(result.reports[0].titles, titlesOf(1))
+      assert.deepEqual(result.reports[1].titles, titlesOf(3))
+      assert.deepEqual(result.titles, titlesOf(3))
+    })
+
+    test('reports after page 1, as the pool pauses, and at the end', async () => {
+      // Enough pages that the pool takes a breather part-way through.
+      const pageCount = PACE_EVERY + 5
+      const result = await scrape({ pageCount, waitBudget: 60_000 })
+
+      assert.equal(result.reports[0].loadedPages, 1)
+      assert.ok(result.reports.some(r => r.paused && r.loadedPages > 1 && r.loadedPages < pageCount), 'one as the pool sits out its breather')
+      assert.equal(result.reports.at(-1).loadedPages, pageCount)
+      assert.deepEqual(result.reports.at(-1).titles, titlesOf(pageCount))
+      const sizes = result.reports.map(r => r.loadedPages)
+      assert.deepEqual(sizes, [...new Set(sizes)].sort((a, b) => a - b), 'only when the run grows')
+      assert.ok(result.reports.length < pageCount, 'not on every page')
+    })
+
+    test('reports before sitting out a refused round', async () => {
+      const result = await scrape({ pageCount: 4, waitBudget: 60_000, script: { 3: [{ status: 429 }, { status: 200 }] } })
+
+      assert.equal(result.blocked, false)
+      assert.ok(result.reports.some(r => r.paused && r.loadedPages === 2), 'pages 1–2 reported as the pool stops for the refusal')
+      assert.equal(result.reports.at(-1).loadedPages, 4)
+    })
+
+    test('nothing is reported once the scrape is aborted, the pause it was in included', async () => {
+      const result = await scrape({ pageCount: PACE_EVERY + 5, waitBudget: 60_000, abortAtPause: true })
+
+      assert.equal(result.error, 'AbortError')
+      const paused = result.reports.findIndex(r => r.paused)
+      assert.ok(paused >= 0)
+      assert.equal(result.reports.length, paused + 1, 'the report the abort came from is the last')
+    })
+
+    test('a page 1 already in hand is reported before anything is asked', async () => {
+      const result = await scrape({ pageCount: 3, waitBudget: 60_000, firstPage: true, order: [3, 2] })
+
+      assert.deepEqual(result.reports[0], { titles: titlesOf(1), loadedPages: 1, paused: false, asked: 0 })
+      assert.ok(!result.asked.some(call => call.page === 1), 'and page 1 is not asked for again')
+      assert.deepEqual(result.reports.at(-1).titles, titlesOf(3))
+    })
   })
 })

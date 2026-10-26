@@ -1,6 +1,8 @@
 import { archiveNow, archiveWaitRemaining, fetchWithRetry, PATIENCE, WAIT_BUDGET, waitForArchive } from '#content_script/archiveFetch.js'
 import { parseWork, type Work } from '#content_script/blurb.js'
 
+import { contiguousPrefix } from './partials.ts'
+
 /**
  * Generic, polite scraper for a paginated AO3 works listing (search results,
  * a fandom page, a user's Marked for Later, etc.). It fetches every page,
@@ -217,6 +219,17 @@ export interface ScrapeOptions {
    * not a shortfall: see {@link ScrapeResult.satisfied}.
    */
   satisfied?: (ids: ReadonlySet<string>) => boolean
+  /**
+   * The works of pages 1..`loadedPages`, all landed; called only when that run
+   * grows. A listing takes minutes to read, and its first pages are worth
+   * showing while the rest come in.
+   *
+   * Reported after page 1 lands, as the pool goes into a pause (a breather, or
+   * a refusal sat out), and at the end: the moments the screen has time to
+   * draw them, rather than on every page, which would redraw it for little
+   * gain. Never once {@link signal} has aborted.
+   */
+  onPartial?: (works: Work[], loadedPages: number) => void
 }
 
 export interface ScrapeResult {
@@ -246,24 +259,38 @@ export interface ScrapeResult {
  * decides, between this copy of a blurb and a stored one, which is newer.
  */
 export function collectWorks(docs: Document[], blurbSelector: string = DEFAULT_BLURB_SELECTOR, seenAt: number = Date.now()): Work[] {
+  return joinPages(docs.map(doc => parsePage(doc, blurbSelector, seenAt)))
+}
+
+/** The blurbs of one fetched listing page, parsed, in page order. */
+function parsePage(doc: Document, blurbSelector: string, seenAt: number): Work[] {
+  const works: Work[] = []
+  for (const li of doc.querySelectorAll(blurbSelector)) {
+    if (!(li instanceof HTMLLIElement))
+      continue
+    // Adopt into the live document so the node can be mounted in the view.
+    document.adoptNode(li)
+    const work = parseWork(li, works.length)
+    work.seenAt = seenAt
+    works.push(work)
+  }
+  return works
+}
+
+/**
+ * Pages' works as one listing, numbered in order: a work listed twice (the
+ * listing moved under us between pages) counts where it was first seen.
+ */
+function joinPages(pages: Work[][]): Work[] {
   const works: Work[] = []
   const seen = new Set<string>()
-  let order = 0
-  for (const doc of docs) {
-    for (const li of doc.querySelectorAll(blurbSelector)) {
-      if (!(li instanceof HTMLLIElement))
-        continue
-      // Adopt into the live document so the node can be mounted in the view.
-      document.adoptNode(li)
-      const work = parseWork(li, order)
-      work.seenAt = seenAt
-      if (work.workId && seen.has(work.workId))
-        continue
-      if (work.workId)
-        seen.add(work.workId)
-      work.markedOrder = order++
-      works.push(work)
-    }
+  for (const work of pages.flat()) {
+    if (work.workId && seen.has(work.workId))
+      continue
+    if (work.workId)
+      seen.add(work.workId)
+    work.markedOrder = works.length
+    works.push(work)
   }
   return works
 }
@@ -287,6 +314,7 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
     patience,
     waitBudget = WAIT_BUDGET.interactive,
     satisfied,
+    onPartial,
   } = opts
   const selector = blurbSelector ?? DEFAULT_BLURB_SELECTOR
   // A scrape that began before another tab's finished holds the older blurbs,
@@ -318,7 +346,21 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
   // it runs for.
   let waited = 0
   let refusedRounds = 0
+  // Each page's works, parsed once: every report, and the result, joins them.
+  const parsed: Work[][] = []
+  const worksOf = (index: number): Work[] => (parsed[index] ??= parsePage(docs[index]!, selector, startedAt))
+  let reported = 0
+  const report = (): void => {
+    if (!onPartial || signal?.aborted)
+      return
+    const run = contiguousPrefix(docs).length
+    if (run <= reported)
+      return
+    reported = run
+    onPartial(joinPages(Array.from({ length: run }, (_, i) => worksOf(i))), run)
+  }
   onProgress?.(settled, pageCount)
+  report()
 
   while (wanted.length) {
     if (signal?.aborted)
@@ -355,9 +397,15 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
         }
         settled++
         onProgress?.(settled, pageCount)
+        // Read off the page before a report parses it, which moves its blurbs
+        // into the live document.
         if (satisfied) {
           for (const el of docs[index]!.querySelectorAll(selector))
             seenIds.add(el.id.replace(/^work_/, ''))
+        }
+        if (index === 0 || archiveWaitRemaining() > 0)
+          report()
+        if (satisfied) {
           if (satisfied(seenIds)) {
             // Everything wanted has been found. Stop the pool where it stands —
             // the pages nobody has reached hold nothing we came for.
@@ -405,6 +453,7 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
         blocked = true
         break
       }
+      report()
       const before = archiveNow()
       await waitForArchive(signal)
       // Measured rather than assumed: the pause may have been extended while we
@@ -416,9 +465,10 @@ export async function scrapeListing(opts: ScrapeOptions): Promise<ScrapeResult> 
   if (signal?.aborted)
     throw new DOMException('Scrape aborted', 'AbortError')
 
-  const landed = docs.filter((d): d is Document => d !== undefined)
+  report()
+  const landed = docs.flatMap((doc, index) => (doc ? [index] : []))
   return {
-    works: collectWorks(landed, selector, startedAt),
+    works: joinPages(landed.map(worksOf)),
     loadedPages: landed.length,
     totalPages: pageCount,
     satisfied: enough,

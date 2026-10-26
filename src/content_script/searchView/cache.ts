@@ -249,8 +249,12 @@ export async function snapshotSize(key: string): Promise<number> {
  *
  * Works the store already holds cost nothing to write again, so a read that
  * found what was stored rewrites one small list of ids and nothing else.
+ *
+ * `scrapedAt` dates the read otherwise than now: a read cut short, whose list
+ * still holds works it never reached, is trusted no longer than the copy it
+ * was read over.
  */
-export async function writeSnapshot(key: string, works: Work[], descriptor: SnapshotDescriptor): Promise<void> {
+export async function writeSnapshot(key: string, works: Work[], descriptor: SnapshotDescriptor, opts: { scrapedAt?: number } = {}): Promise<void> {
   await storeWorks(works)
 
   // Read after the blurbs are down, so a list another tab wrote meanwhile is kept.
@@ -267,7 +271,7 @@ export async function writeSnapshot(key: string, works: Work[], descriptor: Snap
   }
   const list: StoredList = {
     v: LIST_VERSION,
-    scrapedAt: Date.now(),
+    scrapedAt: opts.scrapedAt ?? Date.now(),
     ids: packOrderedIds(ids),
     descriptor,
   }

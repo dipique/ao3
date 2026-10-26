@@ -148,12 +148,12 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
       await runToRead(b)
       await until('tab B to follow it', async () => (await updatingNote(b) ?? '').startsWith('Updating…'))
 
-      // An option written in tab A alone re-runs it, which takes its view
-      // down mid-refresh and puts it back without refreshing again.
+      // The view switched off in tab A alone: the re-run takes its view down
+      // mid-refresh and nothing puts it back, so the refresh stops with it.
       // In front, for the frames the wait for its re-run checks on.
       await a.bringToFront()
       const runs = await a.evaluate(() => Number(document.documentElement.dataset.ao3eRuns ?? 0))
-      await a.evaluate(() => window.__relayed({ 'option.searchPerPage': 25 }))
+      await a.evaluate(() => window.__relayed({ 'option.searchMarkedForLater': false }))
       await settled(a, runs)
 
       await until('tab B to refresh the list itself', async () =>

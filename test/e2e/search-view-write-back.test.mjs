@@ -5,7 +5,7 @@ import { createDefaultMarks, packIds } from '../../src/common/workMarks.ts'
 import { isFresh, refreshIntervalMs } from '../../src/content_script/searchView/freshness.ts'
 import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { ARCHIVE, blurb, keptStore, launch, openMenu, openTab, rerun, stored, viewDrawn, visit } from './trackedPages.mjs'
+import { ARCHIVE, blurb, keptStore, launch, openMenu, openTab, rerun, stored, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -127,7 +127,9 @@ describe('a kept copy written back while the read behind it is unfinished', { sk
         const marks = createDefaultMarks()
         marks.read.items = packIds([TAKEN])
         await rerun(tab, () => tab.evaluate(value => window.browser.storage.local.set({ 'option.workMarks': value }), { enabled: true, marks }))
-        await viewDrawn(tab)
+        // Put back with the read behind it still held, and still going.
+        await tab.waitForSelector(RESULTS)
+        assert.ok(await tab.$('.AO3E--search-view--updating-on'), 'the read goes on behind the view put back')
       },
     },
   ]
