@@ -258,6 +258,13 @@ dd.finish-at {
   cursor: help;
 }
 
+/* The reason that outranked the others on the line, and so decided how the work goes. */
+.AO3E--hide-works--reason-value--decisive {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
+}
+
 /* Inline "exclude from filter" button shown after each matched value. */
 .AO3E--hide-works--exclude {
   display: inline-flex !important;
@@ -718,6 +725,19 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.AO3E--menu--chevron {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-left: 0.5em;
+  opacity: 0.7;
+}
+
+/* The row whose submenu is open stays lit while the pointer is in the submenu. */
+.AO3E--menu--item[aria-expanded='true'] {
+  background: var(--ao3e-surface-hover) !important;
 }
 
 .AO3E--menu--separator {

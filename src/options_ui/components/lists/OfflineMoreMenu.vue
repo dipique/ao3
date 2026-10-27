@@ -119,16 +119,14 @@ const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
         >
           <span :class="NAME">{{ JOBS[item.kind].name }}</span>
           <span v-if="item.kind === 'refresh-first'" :class="NOTE">
-            Re-scrape the list, then cache against it. Slower, and the only way the
-            &ldquo;has this work changed?&rdquo; check can be accurate.
+            Update the list, then cache all the items. Detects changes &amp; updates.
           </span>
           <span v-else-if="item.kind === 'retry'" :class="NOTE">
-            Don't wait out the retry delay on the {{ retry.toLocaleString() }}
-            {{ retry === 1 ? 'work' : 'works' }} that failed &mdash; for after signing back in to AO3.
+            Skip the retry delay on the {{ retry.toLocaleString() }}
+            {{ retry === 1 ? 'work' : 'works' }} that failed to cache.
           </span>
           <span v-else :class="NOTE">
-            Package exactly what is saved here now, without asking AO3 for anything. Quick, and as up to date as
-            the {{ cached.toLocaleString() }} saved {{ cached === 1 ? 'work' : 'works' }} are.
+            Download already-cached works without checking for updates. Fastest option.
           </span>
         </DropdownMenuItem>
       </template>

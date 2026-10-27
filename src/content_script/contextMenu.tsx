@@ -1,3 +1,5 @@
+import MdiChevronRight from '~icons/mdi/chevron-right.jsx'
+
 import { ADDON_CLASS } from '#common'
 import React from '#dom'
 
@@ -23,6 +25,8 @@ const DANGER_CLASS = `${ADDON_CLASS}--menu--danger`
 const SEPARATOR_CLASS = `${ADDON_CLASS}--menu--separator`
 const GROUP_CLASS = `${ADDON_CLASS}--menu--group`
 const HEADING_CLASS = `${ADDON_CLASS}--menu--heading`
+const SUBMENU_CLASS = `${ADDON_CLASS}--menu--submenu`
+const CHEVRON_CLASS = `${ADDON_CLASS}--menu--chevron`
 const POPOVER_CLASS = `${ADDON_CLASS}--popover`
 
 /** Gap kept between the floating element and the viewport edge when clamping. */
@@ -82,6 +86,13 @@ export interface MenuItem {
   /** Run when the row is chosen. The menu closes first. */
   onSelect?: () => void | Promise<void>
   /**
+   * Rows for a submenu this row opens instead of acting itself: beside the menu
+   * on hover with a mouse, or when the row is chosen (a tap, a click, Enter).
+   * Its rows are not grouped under headings — they belong to this row's — and
+   * choosing one closes the whole menu like any other row. One level deep.
+   */
+  submenu?: MenuItem[]
+  /**
    * Optional async resolver. When present, the row is rendered as given (a
    * "Checking…" placeholder), then `resolve()` is awaited and the row patched in
    * place with whatever it returns — or removed if it returns `null`. Used by the
@@ -98,6 +109,8 @@ let detach: (() => void) | null = null
 let restoreFocus: HTMLElement | null = null
 /** The point the last floating element was asked to open at. */
 let lastPoint = { x: 0, y: 0 }
+/** The open submenu, inside {@link current}, and the row that opened it. */
+let openSub: { row: HTMLElement, panel: HTMLElement } | null = null
 
 /**
  * Where the reader last opened a menu or popover — the gesture's own viewport
@@ -111,6 +124,7 @@ export function lastFloatingPoint(): { x: number, y: number } {
 
 /** Remove whichever floating element (menu or popover) is open. */
 export function closeFloating(): void {
+  openSub = null
   if (detach) {
     detach()
     detach = null
@@ -144,18 +158,45 @@ function makeRow(): { el: HTMLButtonElement, set: (item: MenuItem) => void } {
   ) as HTMLElement as HTMLButtonElement
 
   const set = (item: MenuItem): void => {
+    const submenu = item.submenu
     el.classList.toggle(ACTIVE_CLASS, !!item.active)
     el.classList.toggle(DANGER_CLASS, !!item.danger)
     el.disabled = !!item.disabled
     el.replaceChildren(
       <span class={ICON_CLASS}>{resolveIcon(item.icon)}</span>,
       <span class={LABEL_CLASS}>{item.label}</span>,
+      ...submenu ? [<span class={CHEVRON_CLASS} aria-hidden="true"><MdiChevronRight /></span>] : [],
     )
+    if (submenu) {
+      el.setAttribute('aria-haspopup', 'menu')
+      el.setAttribute('aria-expanded', 'false')
+    }
+    else {
+      el.removeAttribute('aria-haspopup')
+      el.removeAttribute('aria-expanded')
+    }
+    // Pointing at a row of the menu itself shows its submenu, or puts away the
+    // one another row opened. Only for a mouse: a touch "hover" is the tap that
+    // chooses the row, which opens the submenu anyway.
+    el.onpointerenter = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || el.closest(`.${SUBMENU_CLASS}`))
+        return
+      if (submenu && !item.disabled)
+        openSubmenu(el, submenu, false)
+      else
+        closeSubmenu()
+    }
     el.onclick = (e: MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
       if (item.disabled)
         return
+      if (submenu) {
+        // A click with no pointer behind it (`detail` 0) is Enter or Space,
+        // and a keyboard has no other way into the submenu.
+        openSubmenu(el, submenu, e.detail === 0)
+        return
+      }
       closeFloating()
       // A `settings` row's whole effect is a write to our own storage, which an
       // orphaned page cannot make — so it is refused here, once, for every menu
@@ -177,15 +218,22 @@ export function openMenu(items: MenuItem[], at: { x: number, y: number }): void 
   const menu = (
     <div class={`${ADDON_CLASS}  ${MENU_CLASS}`} role="menu" />
   ) as HTMLElement
+  renderRows(menu, items, true)
+  mount(menu, at)
+}
 
-  // Each run of rows sharing a scope *and* a heading override becomes a labelled
-  // group — an ARIA one, so the heading is announced rather than just seen.
-  // Unscoped rows (copy, open) go straight into the menu.
+/**
+ * Fill `menu` with a row per item. `grouped` gathers each run of rows sharing a
+ * scope *and* a heading override under a labelled group — an ARIA one, so the
+ * heading is announced rather than just seen. Unscoped rows (copy, open), and
+ * every row of a submenu, go straight into the menu.
+ */
+function renderRows(menu: HTMLElement, items: MenuItem[], grouped: boolean): void {
   let scope: MenuScope | undefined
   let heading: string | undefined
   let container: HTMLElement = menu
   for (const item of items) {
-    const opensGroup = item.scope !== scope || item.heading !== heading
+    const opensGroup = grouped && (item.scope !== scope || item.heading !== heading)
     if (opensGroup) {
       scope = item.scope
       heading = item.heading
@@ -208,7 +256,7 @@ export function openMenu(items: MenuItem[], at: { x: number, y: number }): void 
     set(item)
     // On the row itself rather than in `set`, so a `resolve`d replacement (which
     // carries no scope of its own) stays in the group it was rendered under.
-    if (item.scope)
+    if (item.scope && grouped)
       el.classList.add(`${ITEM_CLASS}--${item.scope}`)
     container.append(el)
 
@@ -228,8 +276,54 @@ export function openMenu(items: MenuItem[], at: { x: number, y: number }): void 
         })
     }
   }
+}
 
-  mount(menu, at)
+/**
+ * Show `items` as the submenu of `row`, replacing any other. It opens beside the
+ * menu, on whichever side has room — over the menu itself where neither does,
+ * which on a phone is most of the time — level with the row, clamped into the
+ * viewport. It lives inside the menu, so a click in it isn't a click outside,
+ * and it goes when the menu does.
+ */
+function openSubmenu(row: HTMLElement, items: MenuItem[], focusFirst: boolean): void {
+  const menu = current
+  if (!menu || !menu.contains(row))
+    return
+  if (openSub?.row !== row) {
+    closeSubmenu()
+    const panel = (
+      <div class={`${MENU_CLASS}  ${SUBMENU_CLASS}`} role="menu" aria-label={row.textContent ?? ''} />
+    ) as HTMLElement
+    renderRows(panel, items, false)
+    panel.style.visibility = 'hidden'
+    menu.append(panel)
+
+    const menuRect = menu.getBoundingClientRect()
+    const rowRect = row.getBoundingClientRect()
+    const { width, height } = panel.getBoundingClientRect()
+    const fitsRight = menuRect.right + width <= window.innerWidth - VIEWPORT_MARGIN
+    const fitsLeft = menuRect.left - width >= VIEWPORT_MARGIN
+    const left = fitsRight || !fitsLeft ? menuRect.right : menuRect.left - width
+    const maxLeft = window.innerWidth - width - VIEWPORT_MARGIN
+    const maxTop = window.innerHeight - height - VIEWPORT_MARGIN
+    panel.style.left = `${Math.max(VIEWPORT_MARGIN, Math.min(left, maxLeft))}px`
+    panel.style.top = `${Math.max(VIEWPORT_MARGIN, Math.min(rowRect.top, maxTop))}px`
+    panel.style.visibility = ''
+
+    row.setAttribute('aria-expanded', 'true')
+    openSub = { row, panel }
+  }
+  if (focusFirst)
+    openSub.panel.querySelector<HTMLButtonElement>(`.${ITEM_CLASS}:not(:disabled)`)?.focus()
+}
+
+/** Put away the open submenu, leaving the menu that opened it. */
+function closeSubmenu(): void {
+  if (!openSub)
+    return
+  openSub.row.setAttribute('aria-expanded', 'false')
+  openSub.panel.remove()
+  openSub = null
 }
 
 /**

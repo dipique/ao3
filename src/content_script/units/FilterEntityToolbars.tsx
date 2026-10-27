@@ -7,7 +7,7 @@ import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, fetchAndParseDocument, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markIsOffered, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markIsOffered, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -356,9 +356,7 @@ abstract class FilterEntityToolbar extends Unit {
     // Read the freshest rules so the checked state is current.
     const { filters } = await options.get('rules')
     const key = entityKey(this.noun, id)
-    const behavior = ruleBehavior(filters, key)
-
-    const items: MenuItem[] = ruleBehaviorItems(key, behavior, { noun: this.noun })
+    const items: MenuItem[] = ruleBehaviorItems(key, findExactRule(filters, key), { noun: this.noun })
 
     if (this.marksEnabled())
       items.push(...this.markSetItems(id, link))

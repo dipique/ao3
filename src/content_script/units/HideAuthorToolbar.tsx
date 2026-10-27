@@ -7,7 +7,7 @@ import MdiBell from '~icons/mdi/bell.jsx'
 
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { options, ruleTargetColor, toast } from '#common'
+import { findExactRule, options, ruleTargetColor, toast } from '#common'
 import { parseMuteState, parseSubscription, submitMuteForm, submitSubscription, type Subscription } from '#content_script/authorActions.js'
 import { getAuthorPage, isOrphanAccount, resetAuthorPageCache } from '#content_script/authorPage.js'
 import {
@@ -115,9 +115,8 @@ export class HideAuthorToolbar extends Unit {
     if (caps.hide) {
       const { filters } = await options.get('rules')
       const key = authorKey(author.userId)
-      const behavior = ruleBehavior(filters, key)
       // An author byline hides behind a person rather than the generic eye.
-      items.push(...ruleBehaviorItems(key, behavior, {
+      items.push(...ruleBehaviorItems(key, findExactRule(filters, key), {
         noun: 'author',
         icons: { hide: () => <MdiAccountOff /> },
       }))

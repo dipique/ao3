@@ -500,6 +500,92 @@ export function ruleMatchesEntity(rule: Rule, kind: 'work' | 'series', entity: F
   return ruleValueMatches({ ...rule, value }, entity.name)
 }
 
+// ---------------------------------------------------------------------------
+// Exact rules — the one rule a menu on a tag, author, work or series link
+// reads and writes. Everything a menu can act on reduces to a {@link RuleKey}.
+// ---------------------------------------------------------------------------
+
+/** What an exact-match rule points at: its target and value, and for an author, optionally one pseud. */
+export interface RuleKey {
+  target: RuleTarget
+  value: string
+  /** Author rules only — a rule for one pseud is distinct from one for the account. */
+  pseud?: string
+}
+
+/** Whether `rule` is the exact-match rule on this key. */
+export function ruleHasKey(rule: Rule, key: RuleKey): boolean {
+  return rule.matcher === 'exact'
+    && rule.target === key.target
+    && rule.value === key.value
+    && (rule.pseud ?? undefined) === (key.pseud ?? undefined)
+}
+
+/** The exact-match rule on this key, if there is one. */
+export function findExactRule(rules: Rule[], key: RuleKey): Rule | undefined {
+  return rules.find(rule => ruleHasKey(rule, key))
+}
+
+/**
+ * `priority` as a rule doing `behavior` stores it: clamped to the 0-9 range,
+ * and left out when it is the behaviour's default, which {@link rulePriority}
+ * supplies anyway.
+ */
+function storedPriority(behavior: FilterBehavior, priority: number | undefined): number | undefined {
+  if (priority === undefined)
+    return undefined
+  const clamped = rulePriority({ priority })
+  return clamped === DEFAULT_BEHAVIOR_PRIORITY[behavior] ? undefined : clamped
+}
+
+/**
+ * `rules` with the key's exact rule replaced by one doing `behavior`, moved to
+ * the end of the list, or removed when `behavior` is null.
+ *
+ * A priority the old rule set for itself is kept, so switching a hide raised to
+ * 7 over to a collapse leaves a collapse at 7. A rule at its behaviour's default
+ * takes the new behaviour's default instead: it never asked for a strength of
+ * its own.
+ */
+export function replaceExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior | null): Rule[] {
+  const old = findExactRule(rules, key)
+  const next = rules.filter(rule => rule !== old)
+  if (behavior === null)
+    return next
+  const priority = storedPriority(behavior, old?.priority)
+  next.push({
+    target: key.target,
+    value: key.value,
+    ...key.pseud !== undefined ? { pseud: key.pseud } : {},
+    matcher: 'exact',
+    behavior,
+    ...priority !== undefined ? { priority } : {},
+  })
+  return next
+}
+
+/**
+ * Choosing `behavior` for a key from a menu: the behaviour the rule already has
+ * clears it, and anything else replaces it (see {@link replaceExactRule}).
+ */
+export function toggleExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior): Rule[] {
+  const current = findExactRule(rules, key)
+  const chosenAgain = current !== undefined && (current.behavior ?? 'hide') === behavior
+  return replaceExactRule(rules, key, chosenAgain ? null : behavior)
+}
+
+/** `rules` with the key's exact rule set to `priority`, in place. Unchanged when the key has no rule. */
+export function setExactRulePriority(rules: Rule[], key: RuleKey, priority: number): Rule[] {
+  const target = findExactRule(rules, key)
+  return rules.map((rule) => {
+    if (rule !== target)
+      return rule
+    const { priority: _old, ...rest } = rule
+    const stored = storedPriority(rule.behavior ?? 'hide', priority)
+    return stored === undefined ? rest : { ...rest, priority: stored }
+  })
+}
+
 /**
  * Map a legacy boolean `invert` flag onto {@link FilterBehavior} for filters
  * imported from (or shared by) the upstream extension, returning the filter with

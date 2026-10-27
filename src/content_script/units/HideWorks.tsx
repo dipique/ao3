@@ -29,6 +29,7 @@ const REASONS_CLASS = `${ADDON_CLASS}--hide-works--reasons`
 const LABEL_CLASS = `${ADDON_CLASS}--hide-works--reason-label`
 const REASON_ICON_CLASS = `${ADDON_CLASS}--hide-works--reason-icon`
 const VALUE_CLASS = `${ADDON_CLASS}--hide-works--reason-value`
+const DECISIVE_CLASS = `${VALUE_CLASS}--decisive`
 const EXCLUDE_CLASS = `${ADDON_CLASS}--hide-works--exclude`
 const EXCLUDE_ACTIVE_CLASS = `${ADDON_CLASS}--hide-works--exclude-active`
 
@@ -57,6 +58,12 @@ interface ReasonItem {
   exclude?: ExcludeTarget
   /** Icon shown before this reason's group label. */
   icon?: () => Node
+  /**
+   * This reason outranked another the line lists: it is the strongest of them,
+   * the one that settled how the work goes. Never set when every listed reason
+   * ties, including when there is only one.
+   */
+  decisive?: boolean
 }
 
 /** Reason items grouped by display label, e.g. `Relationship` -> [items]. */
@@ -510,10 +517,8 @@ export class HideWorks extends Unit {
     let mode: HideMode | null = null
     let winner = -1
     const excludes: HideExclusion[] = []
-    for (const candidate of hides) {
-      if (candidate.priority <= bar)
-        continue
-      addReason(reasons, candidate.label, candidate.item)
+    const survivors = hides.filter(candidate => candidate.priority > bar)
+    for (const candidate of survivors) {
       kinds.add(candidate.kind)
       if (candidate.mode === 'hide')
         excludes.push({ target: candidate.item.exclude ?? null, rule: candidate.rule })
@@ -521,6 +526,12 @@ export class HideWorks extends Unit {
         winner = candidate.priority
         mode = candidate.mode
       }
+    }
+    const decides = (candidate: HideCandidate) => candidate.priority === winner && candidate.mode === mode
+    const contested = survivors.some(candidate => !decides(candidate))
+    for (const candidate of survivors) {
+      const item = contested && decides(candidate) ? { ...candidate.item, decisive: true } : candidate.item
+      addReason(reasons, candidate.label, item)
     }
 
     // Only a work that is actually gone has anything to hand a filter; on one
@@ -574,10 +585,11 @@ export class HideWorks extends Unit {
           container.append(document.createTextNode(', '))
 
         const text = showValues ? item.value : item.rule
-        const title = showValues ? item.rule : item.value
+        const title = (showValues ? item.rule : item.value)
+          + (item.decisive ? '\nTook precedence over the other reasons.' : '')
         // The rule stays in `title` for desktop hover; tap/click/long-press (and
         // right-click) opens it as a popover so it's reachable without a pointer.
-        const valueSpan = <span class={VALUE_CLASS} title={title}>{text}</span>
+        const valueSpan = <span class={item.decisive ? `${VALUE_CLASS}  ${DECISIVE_CLASS}` : VALUE_CLASS} title={title}>{text}</span>
         attachPopoverTrigger(valueSpan, () => hintNode(title))
         container.append(valueSpan)
 

@@ -2,23 +2,23 @@ import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
+import MdiFormatListNumbered from '~icons/mdi/format-list-numbered.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
-import type { FilterBehavior } from '#common'
+import type { FilterBehavior, Rule, RuleKey } from '#common'
 
-import { isTagTarget } from '#common'
+import { isTagTarget, MAX_PRIORITY, MIN_PRIORITY, ruleAffectsWorks, rulePriority } from '#common'
 import React from '#dom'
 
 import type { MenuItem } from './contextMenu.tsx'
-import type { RuleTargetKey } from './persistentFilters.js'
 
-import { clearRule, toggleRuleBehavior } from './persistentFilters.js'
+import { behaviorOf, clearRule, setRulePriority, toggleRuleBehavior } from './persistentFilters.js'
 
 /**
  * The rows every menu that can write a rule offers — hide, collapse, always
- * show, highlight, and (for tags) hide the tag itself, plus the "Clear" row that
- * appears once one of them is in force.
+ * show, highlight, and (for tags) hide the tag itself, plus the "Update
+ * Priority" and "Clear" rows that appear once one of them is in force.
  *
  * The companion to `persistentFilters.ts`, which owns the other half of the same
  * concern: that module reads and writes the rule, this one draws it. Every
@@ -37,7 +37,7 @@ interface BehaviorRow {
   /** Rendered in the destructive accent. */
   danger?: boolean
   /** Left out for targets the behaviour means nothing for. Always offered when absent. */
-  applies?: (key: RuleTargetKey) => boolean
+  applies?: (key: RuleKey) => boolean
 }
 
 const BEHAVIOR_ROWS: BehaviorRow[] = [
@@ -70,19 +70,20 @@ export interface RuleMenuOptions {
 }
 
 /**
- * The rule rows for one target. `behavior` is what the key currently carries
- * (see `ruleBehavior`) — the caller reads it, since a menu that offers more than
- * these rows usually needs the rules list anyway, and reading it twice on one
- * menu open could show two different answers.
+ * The rule rows for one target. `rule` is the key's exact rule, if it has one
+ * (see `findExactRule`) — the caller reads it, since a menu that offers more
+ * than these rows usually needs the rules list anyway, and reading it twice on
+ * one menu open could show two different answers.
  *
  * The active behaviour is shown disabled (it's the current state, not an action);
  * "Clear" is how you get back to no rule at all.
  */
 export function ruleBehaviorItems(
-  key: RuleTargetKey,
-  behavior: FilterBehavior | null,
+  key: RuleKey,
+  rule: Rule | undefined,
   { noun, icons }: RuleMenuOptions,
 ): MenuItem[] {
+  const behavior = behaviorOf(rule)
   const items: MenuItem[] = []
   for (const row of BEHAVIOR_ROWS) {
     if (row.applies && !row.applies(key))
@@ -97,6 +98,10 @@ export function ruleBehaviorItems(
       onSelect: () => toggleRuleBehavior(key, row.behavior),
     })
   }
+  // Priority only weighs in the contest over whether a work shows, which
+  // highlighting, hiding the tag and a disabled rule never enter.
+  if (rule && ruleAffectsWorks(rule))
+    items.push(priorityItem(key, rulePriority(rule)))
   if (behavior) {
     items.push({
       icon: () => <MdiCloseCircleOutline />,
@@ -106,4 +111,24 @@ export function ruleBehaviorItems(
     })
   }
   return items
+}
+
+/** The "Update Priority" row: a submenu of every priority, the current one marked and not offered. */
+function priorityItem(key: RuleKey, current: number): MenuItem {
+  const submenu: MenuItem[] = []
+  for (let priority = MIN_PRIORITY; priority <= MAX_PRIORITY; priority++) {
+    submenu.push({
+      label: `Priority ${priority}`,
+      scope: 'settings',
+      active: priority === current,
+      disabled: priority === current,
+      onSelect: () => setRulePriority(key, priority),
+    })
+  }
+  return {
+    icon: () => <MdiFormatListNumbered />,
+    label: 'Update Priority',
+    scope: 'settings',
+    submenu,
+  }
 }

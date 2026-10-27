@@ -1,6 +1,6 @@
-import type { Rule, RuleTarget } from '#common'
+import type { RuleKey } from '#common'
 
-import { api, createLogger, options } from '#common'
+import { api, createLogger, findExactRule, options, replaceExactRule } from '#common'
 
 let lastMenuInstanceId = 0
 let nextMenuInstanceId = 1
@@ -22,25 +22,10 @@ function onCreated() {
     logger.error('Error creating menu item:', browser.runtime.lastError)
 }
 
-/**
- * The exact rule a menu item points at: what it targets, the value, and (for a
- * pseud) which pseud. The same shape the in-page menus use — see
- * `content_script/persistentFilters.ts` — kept separate only because the
- * background can't import the content script.
- */
-interface RuleKey {
-  target: RuleTarget
-  value: string
-  pseud?: string
-  /** How the toast names it, e.g. `tag "Fluff"`. */
+/** The exact rule a menu item points at, and how the toast names it. */
+interface MenuRuleKey extends RuleKey {
+  /** E.g. `tag "Fluff"`. */
   describe: string
-}
-
-function ruleMatches(rule: Rule, key: RuleKey): boolean {
-  return rule.matcher === 'exact'
-    && rule.target === key.target
-    && rule.value === key.value
-    && (rule.pseud ?? undefined) === (key.pseud ?? undefined)
 }
 
 if (browser.contextMenus) {
@@ -83,7 +68,7 @@ if (browser.contextMenus) {
     {
       hide: menus.tag.hide,
       show: menus.tag.show,
-      async key(linkUrl: string, _parts: string[], tabId: number): Promise<RuleKey> {
+      async key(linkUrl: string, _parts: string[], tabId: number): Promise<MenuRuleKey> {
         const tag = await api.getTag.sendToTab(tabId, linkUrl)
         return { target: tag.type ?? 'tag', value: tag.name, describe: `tag "${tag.name}"` }
       },
@@ -91,14 +76,14 @@ if (browser.contextMenus) {
     {
       hide: menus.author.hide,
       show: menus.author.show,
-      async key(_linkUrl: string, parts: string[]): Promise<RuleKey> {
+      async key(_linkUrl: string, parts: string[]): Promise<MenuRuleKey> {
         return { target: 'author', value: parts[1]!, describe: `author "${parts[1]}"` }
       },
     },
     {
       hide: menus.author.hidePseud,
       show: menus.author.showPseud,
-      async key(_linkUrl: string, parts: string[]): Promise<RuleKey> {
+      async key(_linkUrl: string, parts: string[]): Promise<MenuRuleKey> {
         return {
           target: 'author',
           value: parts[1]!,
@@ -118,40 +103,26 @@ if (browser.contextMenus) {
   }
 
   /**
-   * Apply one menu click: find the rule this link already has (if any), drop it,
-   * and add the chosen behaviour back unless the click was undoing what was
-   * already there. Priority is left off, so the rule takes its behaviour's
-   * default — the same thing the in-page menus write.
+   * Apply one menu click: replace the rule this link already has (if any) with
+   * the chosen behaviour, or remove it when the click was undoing what was
+   * already there. Written the way the in-page menus write it, so a priority
+   * the old rule set for itself carries over (see `replaceExactRule`).
    */
-  async function applyMenuClick(hiding: boolean, key: RuleKey, tab: browser.tabs.Tab) {
+  async function applyMenuClick(hiding: boolean, key: MenuRuleKey, tab: browser.tabs.Tab) {
     const rules = await options.get('rules')
-    const filters = rules.filters
-    const index = filters.findIndex(f => ruleMatches(f, key))
-    const old = index !== -1 ? filters[index] : undefined
+    const old = findExactRule(rules.filters, key)
     // A disabled rule stands for nothing, so a click sets a behaviour rather
     // than toggling against one — otherwise "Hide" on a disabled rule would read
-    // as undoing a hide and delete it. It's still spliced out below, so the
-    // click replaces it instead of leaving a duplicate key behind.
+    // as undoing a hide and delete it.
     const active = old && old.behavior !== 'none' ? old : undefined
     const wasShown = active ? active.behavior === 'invert' : undefined
-
-    if (old)
-      filters.splice(index, 1)
 
     sendHideToast(tab, hiding ? 'hide' : 'show', key.describe, !!active, wasShown)
 
     // Clicking the behaviour it already had removes the rule; anything else replaces it.
-    if (!active || wasShown === hiding) {
-      filters.push({
-        target: key.target,
-        value: key.value,
-        ...(key.pseud !== undefined ? { pseud: key.pseud } : {}),
-        matcher: 'exact',
-        ...(hiding ? {} : { behavior: 'invert' as const }),
-      })
-    }
-
-    await options.set({ rules: { ...rules, enabled: true, filters } })
+    const undoing = active !== undefined && wasShown !== hiding
+    const behavior = undoing ? null : hiding ? 'hide' : 'invert'
+    await options.set({ rules: { ...rules, enabled: true, filters: replaceExactRule(rules.filters, key, behavior) } })
   }
 
   async function onMenuClick(info: browser.contextMenus.OnClickData, tab: browser.tabs.Tab) {
@@ -185,7 +156,8 @@ if (browser.contextMenus) {
         const { filters } = await options.get('rules')
         // A disabled rule leaves both boxes clear — nothing is in force, which
         // is exactly what the checkmarks report.
-        const rule = filters.find(f => ruleMatches(f, key) && f.behavior !== 'none')
+        const found = findExactRule(filters, key)
+        const rule = found?.behavior !== 'none' ? found : undefined
         const shown = rule ? rule.behavior === 'invert' : false
 
         await browser.contextMenus.update(pair.hide!, { checked: !!rule && !shown })

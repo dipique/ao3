@@ -1,6 +1,6 @@
 import type { FilterBehavior, Tag } from '#common'
 
-import { options, ruleTargetColor } from '#common'
+import { findExactRule, options, ruleTargetColor } from '#common'
 
 import type { MenuItem } from './contextMenu.tsx'
 import type { IndicatorState } from './contextTrigger.tsx'
@@ -66,7 +66,7 @@ export async function buildTagLinkMenu(entry: TagLinkEntry): Promise<MenuItem[]>
 
   const { filters } = await options.get('rules')
   const key = tagKey(entry.tag)
-  items.push(...ruleBehaviorItems(key, ruleBehavior(filters, key), { noun: entry.noun }))
+  items.push(...ruleBehaviorItems(key, findExactRule(filters, key), { noun: entry.noun }))
 
   items.push(...standardLinkItems(entry.link))
   return items

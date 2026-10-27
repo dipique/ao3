@@ -29,6 +29,8 @@ const SEED = {
       // For the hide-vs-collapse contest below: an ordinary hide rule, at the
       // same strength as the "Soft Fandom" collapse it ties with on b8.
       { target: 'F', value: 'Banished', matcher: 'exact', behavior: 'hide' },
+      // Collapses at 0 like "Soft Fandom", so b10's two reasons tie.
+      { target: 'F', value: 'Gentle', matcher: 'exact', behavior: 'collapse' },
     ],
   },
 }
@@ -62,6 +64,7 @@ const PAGE = `
     ${blurb('b7', ['A Fandom'], ['Banished'])}
     ${blurb('b8', ['Soft Fandom'], ['Banished'])}
     ${blurb('b9', ['Tied Fandom'], ['Banished'])}
+    ${blurb('b10', ['Soft Fandom'], ['Gentle'])}
   </ol>
 </div>
 `
@@ -108,6 +111,13 @@ describe('rule priority', { skip }, () => {
   /** The reason line the collapsed work shows. Null on a work hidden outright. */
   const reason = id => page.evaluate(
     sel => document.getElementById(sel)?.querySelector('.AO3E--hide-works--reasons')?.textContent ?? null,
+    id,
+  )
+
+  /** The reasons a collapsed work's line marks as the one that took precedence. */
+  const decisive = id => page.evaluate(
+    sel => [...document.getElementById(sel).querySelectorAll('.AO3E--hide-works--reason-value--decisive')]
+      .map(el => el.textContent),
     id,
   )
 
@@ -168,5 +178,17 @@ describe('rule priority', { skip }, () => {
     const text = await reason('b9')
     assert.match(text, /Tied Fandom/)
     assert.match(text, /Banished/)
+  })
+
+  test('the reason that took precedence is marked on a line listing several', async () => {
+    // "Tied Fandom" at 4 decided b9 collapses; "Banished" at 0 only rode along.
+    const marked = await decisive('b9')
+    assert.equal(marked.length, 1)
+    assert.match(marked[0], /Tied Fandom/)
+  })
+
+  test('nothing is marked when no reason outranks another', async () => {
+    assert.deepEqual(await decisive('b2'), [], 'a single reason has nothing to win over')
+    assert.deepEqual(await decisive('b10'), [], 'two collapses at 0 tie')
   })
 })
