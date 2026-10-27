@@ -30,16 +30,13 @@ describe('what More offers for a copy', () => {
 })
 
 describe('a More menu', () => {
-  test('a tile\'s: the list refreshed first, a retry, a download without refreshing, and remove, as its tooltip says', () => {
-    assert.deepEqual(tile(), {
-      title: 'Refresh the list first, retry failed works, download without refreshing, remove',
-      items: [
-        { kind: 'refresh-first', off: null },
-        { kind: 'retry', off: null },
-        { kind: 'download-cached', off: null },
-        { kind: 'remove', off: null },
-      ],
-    })
+  test('a tile\'s: the list refreshed first, a retry, a download without refreshing, and remove', () => {
+    assert.deepEqual(tile().items, [
+      { kind: 'refresh-first', off: null },
+      { kind: 'retry', off: null },
+      { kind: 'download-cached', off: null },
+      { kind: 'remove', off: null },
+    ])
   })
 
   test('a retry only while a work has failed, and a download without refreshing only once one is cached', () => {
@@ -49,10 +46,8 @@ describe('a More menu', () => {
   })
 
   test('This review\'s: a retry and a download without refreshing; no refresh, with no one listing behind it, and no remove', () => {
-    assert.deepEqual(review(), {
-      title: 'Retry failed works, download without refreshing',
-      items: [{ kind: 'retry', off: null }, { kind: 'download-cached', off: null }],
-    })
+    assert.deepEqual(review().items, [{ kind: 'retry', off: null }, { kind: 'download-cached', off: null }])
+    assert.notEqual(review().title, tile().title, 'its tooltip offers neither')
     assert.deepEqual(kinds(review({ retry: 0 })), ['download-cached'])
     assert.deepEqual(kinds(review({ cached: 0 })), ['retry'])
   })

@@ -117,6 +117,14 @@ export const SORT_LABELS: Record<SortKey, string> = {
 export const COMPLETE_VALUE = 'Complete'
 export const WIP_VALUE = 'Work in Progress'
 
+/**
+ * The `status` facet's value for a work carrying no verdict — nothing in the
+ * `read` trigger group. Its own value rather than an absence, so it can be
+ * included ("only what I haven't read") and excluded ("only what I have") like
+ * any other.
+ */
+export const UNREAD = 'Unread'
+
 export function facetValues(work: Work, key: FacetKey): string[] {
   switch (key) {
     // Precomputed by the host, not derived here: a work's statuses depend on the

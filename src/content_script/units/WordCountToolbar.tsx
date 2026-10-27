@@ -6,7 +6,7 @@ import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import type { WordCountBound, WordCountRange } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { ADDON_CLASS, formatBoundPick, formatWordCountRange, isValidRange, sameRange, uniqueBounds, withBound } from '#common'
+import { ADDON_CLASS, formatBoundPick, formatWordCountRange, isValidRange, sameRange, serializeWordCountQuery, uniqueBounds, withBound } from '#common'
 import { attachMenuTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import { searchFilterChanged } from '#content_script/pendingSearch.js'
 import { findFacetBridge } from '#content_script/searchView/facetBridge.ts'
@@ -93,6 +93,8 @@ function boundItems(
     return {
       icon,
       label: formatBoundPick(current, side, value),
+      action: side,
+      value: String(value),
       scope: 'search',
       heading,
       active,
@@ -113,6 +115,7 @@ function buildWordCountMenu(target: WordCountTarget, ranges: WordCountRange[]): 
     items.push({
       icon: () => <MdiCloseCircleOutline />,
       label: `Clear word count filter (${formatWordCountRange(current)})`,
+      action: 'clear',
       scope: 'search',
       onSelect: () => target.apply(null),
     })
@@ -127,6 +130,8 @@ function buildWordCountMenu(target: WordCountTarget, ranges: WordCountRange[]): 
     items.push({
       icon: () => <MdiArrowExpandHorizontal />,
       label: `${formatWordCountRange(range)} words`,
+      action: 'range',
+      value: serializeWordCountQuery(range),
       scope: 'search',
       active,
       // Re-applying the range that's already on would just re-run the same

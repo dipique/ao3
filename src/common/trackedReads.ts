@@ -562,6 +562,9 @@ export const CLAIM_TTL_MS = 60_000
 /** How often a page reading renews its claim: well inside {@link CLAIM_TTL_MS}, since a tab in the background has its timers slowed. */
 export const CLAIM_RENEW_MS = 20_000
 
+/** Why a read refuses to start, or stops, while another page holds the claim. */
+export const READING_ELSEWHERE = 'Reading in another tab'
+
 /** A claim by page run `by` at `now`. */
 export function readClaim(by: string, now: number): ReadClaim {
   return { by, at: now }
@@ -623,6 +626,11 @@ export interface ReviewStatus {
   text: string
   /** The lists it is about, by title, for hovering. */
   lists: string[]
+  /**
+   * Where a `pending` window's lists are being read: here, here but sitting out
+   * a pause, by another page, or nowhere since AO3 stopped the reading here.
+   */
+  reading?: 'here' | 'waiting' | 'elsewhere' | 'stopped'
 }
 
 /**
@@ -646,9 +654,10 @@ export function reviewStatus(input: ReviewStatusInput): ReviewStatus {
     const total = window.complete.length + window.pending.length
     const lists = `${window.pending.length} of ${total} ${total === 1 ? 'list' : 'lists'} for ${formatRange(window.start, window.end)}`
     if (input.stopped && !input.wait && !input.elsewhere)
-      return { kind: 'pending', text: `Not yet read: ${lists} — AO3 asked us to slow down. Refresh to try again.`, lists: named(window.pending) }
+      return { kind: 'pending', text: `Not yet read: ${lists} — AO3 asked us to slow down. Refresh to try again.`, lists: named(window.pending), reading: 'stopped' }
     const where = input.wait ? ` — ${input.wait}` : input.elsewhere ? ', in another tab' : ''
-    return { kind: 'pending', text: `Still reading ${lists}${where}`, lists: named(window.pending) }
+    const reading = input.wait ? 'waiting' : input.elsewhere ? 'elsewhere' : 'here'
+    return { kind: 'pending', text: `Still reading ${lists}${where}`, lists: named(window.pending), reading }
   }
   return { kind: 'current', text: input.readAt ? `Up to date as of ${input.readAt}` : 'Up to date', lists: [] }
 }

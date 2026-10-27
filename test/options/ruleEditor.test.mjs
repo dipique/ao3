@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 
-import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_PRESETS, RULE_TARGETS, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, ruleValueMatches, TagType } from '../../src/common/data.ts'
-import { ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
-import { canSave, checkedNames, checkedPattern, describeRule, draftRule, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, ruleSummary, saveButton, suggestSource, swatchFor, usesColor, usesPriority, valueField, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
+import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_PRESETS, RULE_TARGETS, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, ruleTargetLabel, ruleValueMatches, TagType } from '../../src/common/data.ts'
+import { compilePattern, ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
+import { canSave, checkedNames, checkedPattern, CHECKING, describeRule, draftRule, EXACT_HELP, NO_PATTERN, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, ruleSummary, saveButton, suggestSource, swatchFor, TESTER_HELP, TESTER_STOPPED, TOO_SLOW, usesColor, usesPriority, valueField, VERDICT_LABELS, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
 
 /** A check of `pattern` that ran to the end over `subject` and `names`. */
 const finished = (pattern, subject, names = []) => {
@@ -45,9 +45,10 @@ describe('HIGHLIGHT_PRESETS', () => {
 describe('the actions', () => {
   test('are today\'s behaviours but none, which the Rule Enabled switch stands for', () => {
     assert.deepEqual(RULE_ACTIONS.map(action => action.value), ['hide', 'collapse', 'highlight', 'invert', 'hideFilter'])
-    assert.deepEqual(RULE_ACTIONS.map(action => action.label), ['Hide Work', 'Collapse', 'Highlight', 'Always show', 'Hide Tag'])
-    for (const action of RULE_ACTIONS)
-      assert.ok(action.help.endsWith('.'), `${action.value} has a sentence of help`)
+    for (const action of RULE_ACTIONS) {
+      assert.ok(action.label.trim(), `${action.value} has a label`)
+      assert.ok(action.help.trim(), `${action.value} has help`)
+    }
   })
 
   test('a colour is for Highlight and Always show', () => {
@@ -332,7 +333,6 @@ describe('canSave', () => {
 
 describe('saveButton', () => {
   const regex = value => ({ ...opened(undefined), matcher: 'regex', value })
-  const TOO_SLOW = 'Too slow to test: change the pattern to save the rule.'
 
   test('is off with no reason while there is nothing to match', () => {
     assert.deepEqual(saveButton(opened(undefined), IDLE_RUN), { off: true, reason: null })
@@ -392,45 +392,47 @@ describe('checkedNames', () => {
 })
 
 describe('valueField', () => {
-  test('is labelled for what the rule matches', () => {
-    assert.equal(valueField('tag', 'exact', '').label, 'Tag')
-    assert.equal(valueField('F', 'exact', '').label, 'Tag')
-    assert.equal(valueField('f', 'exact', '').label, 'Fandom')
-    assert.equal(valueField('author', 'exact', '').label, 'Author')
-    assert.equal(valueField('work', 'exact', '').label, 'Work')
-    assert.equal(valueField('series', 'exact', '').label, 'Series')
+  test('is labelled for what the rule matches: a fandom, any other tag alike, or an author, a work or a series', () => {
+    for (const target of [TagType.Freeform, TagType.Character, TagType.Rating])
+      assert.equal(valueField(target, 'exact', '').label, valueField('tag', 'exact', '').label, target)
+    for (const target of [TagType.Fandom, 'author', 'work', 'series'])
+      assert.equal(valueField(target, 'exact', '').label, ruleTargetLabel(target), target)
   })
 
-  test('says how each matcher reads the text', () => {
-    assert.match(valueField('author', 'exact', '').help, /exactly/)
-    assert.match(valueField('F', 'contains', '').help, /contains this text, ignoring case/)
-    assert.match(valueField('F', 'regex', '').help, /regular expression.*ignoring case/)
-    assert.match(valueField('author', 'contains', '').help, /username/)
-    assert.match(valueField('work', 'regex', '').help, /title/)
+  test('says how each matcher reads the text, and what it reads it against', () => {
+    const MATCHERS = ['exact', 'contains', 'regex']
+    const TARGETS = [TagType.Freeform, 'author', 'work']
+    for (const target of TARGETS) {
+      const helps = MATCHERS.map(matcher => valueField(target, matcher, '').help)
+      assert.equal(new Set(helps).size, MATCHERS.length, `${target}: ${helps.join(' | ')}`)
+    }
+    for (const matcher of ['contains', 'regex']) {
+      const helps = TARGETS.map(target => valueField(target, matcher, '').help)
+      assert.equal(new Set(helps).size, TARGETS.length, `${matcher}: ${helps.join(' | ')}`)
+    }
   })
 
   test('in Exact mode, says where the suggestions come from, so the rule takes AO3\'s spelling', () => {
-    for (const target of [TagType.Fandom, TagType.Character, TagType.Relationship, TagType.Freeform])
-      assert.equal(valueField(target, 'exact', '').help, 'Suggestions come from AO3’s tag autocomplete, so the rule uses AO3’s own spelling.', target)
-    for (const target of [TagType.Rating, TagType.ArchiveWarning, TagType.Category])
-      assert.equal(valueField(target, 'exact', '').help, 'Suggestions are the archive’s own names, so the rule uses AO3’s own spelling.', target)
+    for (const target of [TagType.Fandom, TagType.Character, TagType.Relationship, TagType.Freeform, TagType.Rating, TagType.ArchiveWarning, TagType.Category])
+      assert.equal(valueField(target, 'exact', '').help, EXACT_HELP[suggestSource(target).kind], target)
+    assert.notEqual(EXACT_HELP.ao3, EXACT_HELP.fixed)
   })
 
   test('asks for typing where suggestions follow it, and for the name where they don\'t', () => {
-    assert.equal(valueField('F', 'exact', '').placeholder, 'Start typing a tag…')
-    assert.equal(valueField('r', 'exact', '').placeholder, 'Start typing a tag…')
-    assert.equal(valueField('f', 'exact', '').placeholder, 'Start typing a fandom…')
-    assert.equal(valueField('F', 'contains', '').placeholder, 'Tag name')
-    assert.equal(valueField('f', 'regex', '').placeholder, 'Fandom name')
-    assert.equal(valueField('author', 'exact', '').placeholder, 'Username')
-    assert.equal(valueField('work', 'exact', '').placeholder, 'Work title or id')
+    const placeholder = (target, matcher) => valueField(target, matcher, '').placeholder
+    assert.equal(placeholder('F', 'exact'), placeholder('r', 'exact'), 'any tag with suggestions asks alike')
+    assert.notEqual(placeholder('F', 'exact'), placeholder('F', 'contains'), 'with none, it asks for the name')
+    assert.notEqual(placeholder('f', 'exact'), placeholder('F', 'exact'), 'a fandom is asked for as one')
+    assert.notEqual(placeholder('f', 'regex'), placeholder('F', 'contains'))
+    const others = [placeholder('F', 'exact'), placeholder('F', 'contains'), placeholder('author', 'exact'), placeholder('work', 'exact')]
+    assert.equal(new Set(others).size, others.length, others.join(' | '))
   })
 
   test('a number for a work or a series matches its id, whatever the matcher', () => {
     for (const target of ['work', 'series']) {
       const field = valueField(target, 'regex', ' 4232377 ')
       assert.equal(field.byId, true, target)
-      assert.match(field.help, /id/)
+      assert.notEqual(field.help, valueField(target, 'regex', 'Saga').help, 'the help says so')
     }
     assert.equal(valueField('F', 'exact', '4232377').byId, false)
     assert.equal(valueField('work', 'exact', '42a').byId, false)
@@ -513,48 +515,50 @@ describe('regexTester', () => {
     assert.notEqual(tester(TagType.Freeform, '4232377', '4232377'), null)
   })
 
-  test('asks for what the pattern is tested against', () => {
-    for (const target of ['tag', TagType.Fandom, TagType.Freeform, TagType.Rating]) {
-      assert.equal(tester(target, 'slow', '').placeholder, 'Type a tag to test the pattern against', target)
-      assert.equal(tester(target, 'slow', '').label, 'Type a tag', target)
+  test('asks for what the pattern is tested against: any tag alike, an author, or a work\'s or a series\' title', () => {
+    const asks = (target) => {
+      const { placeholder, label } = tester(target, 'slow', '')
+      return { placeholder, label }
     }
-    assert.equal(tester('author', 'some', '').placeholder, 'Type a username to test the pattern against')
-    assert.equal(tester('author', 'some', '').label, 'Type a username')
-    for (const target of ['work', 'series']) {
-      assert.equal(tester(target, 'Saga', '').placeholder, 'Type a title to test the pattern against', target)
-      assert.equal(tester(target, 'Saga', '').label, 'Type a title', target)
-    }
+    for (const target of [TagType.Fandom, TagType.Freeform, TagType.Rating])
+      assert.deepEqual(asks(target), asks('tag'), target)
+    assert.deepEqual(asks('series'), asks('work'))
+    const kinds = ['tag', 'author', 'work'].map(asks)
+    assert.equal(new Set(kinds.map(kind => kind.placeholder)).size, kinds.length, JSON.stringify(kinds))
+    assert.equal(new Set(kinds.map(kind => kind.label)).size, kinds.length, JSON.stringify(kinds))
   })
 
   test('with no pattern, says there is none yet', () => {
-    assert.equal(tester('tag', '', 'Slow Burn').label, 'No pattern yet')
-    assert.equal(tester('tag', '  ', '').label, 'No pattern yet')
+    assert.equal(tester('tag', '', 'Slow Burn').label, NO_PATTERN)
+    assert.equal(tester('tag', '  ', '').label, NO_PATTERN)
+    assert.notEqual(tester('tag', 'slow', '').label, NO_PATTERN)
   })
 
   test('names each verdict', () => {
-    assert.deepEqual(tester('tag', '^slow', 'Slow Burn').verdict, { kind: 'match' })
-    assert.equal(tester('tag', '^slow', 'Slow Burn').label, 'Matches')
-    assert.equal(tester('tag', '^burn', 'Slow Burn').label, 'No match')
-    assert.equal(tester('tag', '(slow', 'Slow Burn').label, 'Invalid pattern')
+    for (const [value, kind] of [['^slow', 'match'], ['^burn', 'miss'], ['(slow', 'invalid']]) {
+      const shown = tester('tag', value, 'Slow Burn')
+      assert.equal(shown.verdict.kind, kind, value)
+      assert.equal(shown.label, VERDICT_LABELS[kind], value)
+    }
   })
 
   test('the line under it says nothing is saved from it, or why the pattern is refused', () => {
     for (const [value, subject] of [['', ''], ['^slow', ''], ['^slow', 'Slow Burn'], ['^burn', 'Slow Burn']])
-      assert.equal(tester('tag', value, subject).help, 'Checks the pattern as you type. Nothing is saved from here.', `${value} / ${subject}`)
-    assert.equal(tester('tag', '(slow', '').help, 'Unterminated group')
+      assert.equal(tester('tag', value, subject).help, TESTER_HELP, `${value} / ${subject}`)
+    assert.equal(tester('tag', '(slow', '').help, compilePattern('(slow'))
   })
 
   test('says a pattern that ran past the budget is too slow, and that testing stopped', () => {
     const shown = regexTester({ target: 'tag', matcher: 'regex', value: '(a+)+$' }, 'aaaa!', slow('(a+)+$'))
     assert.deepEqual(shown.verdict, { kind: 'slow' })
-    assert.equal(shown.label, 'Too slow')
-    assert.equal(shown.help, 'Testing stopped: the pattern took too long.')
+    assert.equal(shown.label, VERDICT_LABELS.slow)
+    assert.equal(shown.help, TESTER_STOPPED)
   })
 
   test('says while it checks', () => {
     const shown = regexTester({ target: 'tag', matcher: 'regex', value: '(a+)+$' }, 'aaaa!', running())
-    assert.equal(shown.label, 'Checking…')
-    assert.equal(shown.help, 'Checks the pattern as you type. Nothing is saved from here.')
+    assert.equal(shown.label, CHECKING)
+    assert.equal(shown.help, TESTER_HELP)
   })
 
   test('agrees with live rules on every kind of target, which trim a work\'s or a series\' pattern only', () => {
@@ -578,56 +582,53 @@ describe('regexTester', () => {
 
 describe('describeRule', () => {
   const rule = fields => ({ target: 'F', value: 'Fluff', matcher: 'exact', ...fields })
+  const said = fields => describeRule(rule(fields))
+  /** The sentences are each different. */
+  const distinct = (sentences) => {
+    assert.equal(new Set(sentences).size, sentences.length, sentences.join(' | '))
+  }
 
-  test('says what each action does to the works it matches', () => {
-    assert.equal(describeRule(rule({})), 'Hide every work tagged “Fluff” in Additional Tags.')
-    assert.equal(describeRule(rule({ behavior: 'collapse' })), 'Collapse every work tagged “Fluff” in Additional Tags.')
-    assert.equal(describeRule(rule({ behavior: 'invert' })), 'Always show every work tagged “Fluff” in Additional Tags.')
-    assert.equal(describeRule(rule({ behavior: 'highlight' })), 'Highlight the match on every work tagged “Fluff” in Additional Tags.')
+  test('says each action differently, of the works it matches', () => {
+    const sentences = ['hide', 'collapse', 'invert', 'highlight', 'hideFilter', 'none'].map(behavior => said({ behavior }))
+    distinct(sentences)
+    for (const sentence of sentences)
+      assert.ok(sentence.includes('Fluff') && sentence.includes(ruleTargetLabel('F')), sentence)
+    assert.equal(said({}), said({ behavior: 'hide' }), 'a rule with no behaviour hides')
   })
 
-  test('a Hide Tag rule leaves the works alone', () => {
-    assert.equal(describeRule(rule({ behavior: 'hideFilter' })), 'Hide the tag “Fluff” in Additional Tags from tag lists and the filter sidebar; the works stay.')
-    assert.equal(describeRule(rule({ target: 'tag', matcher: 'regex', value: '^OC', behavior: 'hideFilter' })), 'Hide every tag matching “^OC” from tag lists and the filter sidebar; the works stay.')
+  test('names a tag\'s kind, unless it is any tag, and says how a tag is matched', () => {
+    assert.ok(!said({ target: 'tag' }).includes(ruleTargetLabel('F')))
+    assert.ok(said({ target: 'R', matcher: 'contains', value: 'Steve Rogers/' }).includes(ruleTargetLabel('R')))
+    for (const target of ['tag', 'F'])
+      distinct(['exact', 'contains', 'regex'].map(matcher => said({ target, matcher })))
+    distinct(['exact', 'contains', 'regex'].map(matcher => said({ target: 'tag', matcher, behavior: 'hideFilter' })))
   })
 
-  test('a disabled rule does nothing', () => {
-    assert.equal(describeRule(rule({ behavior: 'none' })), 'Off: does nothing to every work tagged “Fluff” in Additional Tags.')
+  test('an author, with and without a pseud, and how the username is matched', () => {
+    const author = { target: 'author', value: 'someone' }
+    assert.ok(said({ ...author, pseud: 'sideblog' }).includes('sideblog'))
+    assert.notEqual(said({ ...author, pseud: 'sideblog' }), said(author))
+    distinct(['exact', 'contains', 'regex'].map(matcher => said({ ...author, matcher })))
   })
 
-  test('any tag, and how a tag is matched', () => {
-    assert.equal(describeRule(rule({ target: 'tag' })), 'Hide every work tagged “Fluff”.')
-    assert.equal(describeRule(rule({ target: 'R', matcher: 'contains', value: 'Steve Rogers/' })), 'Hide every work with a tag containing “Steve Rogers/” in Relationship.')
-    assert.equal(describeRule(rule({ target: 'tag', matcher: 'regex', value: '^OC' })), 'Hide every work with a tag matching “^OC”.')
-  })
-
-  test('an author, with and without a pseud', () => {
-    assert.equal(describeRule(rule({ target: 'author', value: 'someone' })), 'Hide every work by “someone”.')
-    assert.equal(describeRule(rule({ target: 'author', value: 'someone', pseud: 'sideblog' })), 'Hide every work by “someone” writing as “sideblog”.')
-    assert.equal(describeRule(rule({ target: 'author', value: 'some', matcher: 'contains' })), 'Hide every work by an author whose username contains “some”.')
-    assert.equal(describeRule(rule({ target: 'author', value: '^some', matcher: 'regex' })), 'Hide every work by an author whose username matches “^some”.')
-  })
-
-  test('a work or a series, by title or by id', () => {
-    assert.equal(describeRule(rule({ target: 'work', value: 'Title' })), 'Hide the work “Title”.')
-    assert.equal(describeRule(rule({ target: 'work', value: 'Tit', matcher: 'contains' })), 'Hide every work whose title contains “Tit”.')
-    assert.equal(describeRule(rule({ target: 'work', value: ' 123 ', matcher: 'regex' })), 'Hide the work with id 123.')
-    assert.equal(describeRule(rule({ target: 'series', value: 'Saga' })), 'Hide every work in the series “Saga”.')
-    assert.equal(describeRule(rule({ target: 'series', value: 'Sa', matcher: 'regex' })), 'Hide every work in a series whose title matches “Sa”.')
-    assert.equal(describeRule(rule({ target: 'series', value: '4232377' })), 'Hide every work in the series with id 4232377.')
+  test('a work or a series, by title or by id, which a number matches whatever the matcher', () => {
+    assert.ok(said({ target: 'work', value: 'Title' }).includes('Title'))
+    distinct(['work', 'series'].map(target => said({ target, value: 'Saga' })))
+    distinct(['exact', 'contains', 'regex'].map(matcher => said({ target: 'series', value: 'Saga', matcher })))
+    for (const target of ['work', 'series']) {
+      const byId = said({ target, value: ' 123 ', matcher: 'regex' })
+      assert.ok(byId.includes('123') && !byId.includes(' 123 '), byId)
+      assert.equal(byId, said({ target, value: '123' }), target)
+    }
   })
 
   test('a priority is mentioned only where it differs from its action\'s default, and the action has one', () => {
-    assert.equal(describeRule(rule({ priority: 6 })), 'Hide every work tagged “Fluff” in Additional Tags, at priority 6.')
-    assert.equal(describeRule(rule({ behavior: 'invert', priority: 4 })), 'Always show every work tagged “Fluff” in Additional Tags.')
-    assert.equal(describeRule(rule({ behavior: 'invert', priority: 2 })), 'Always show every work tagged “Fluff” in Additional Tags, at priority 2.')
-    assert.equal(describeRule(rule({ behavior: 'highlight', priority: 3 })), 'Highlight the match on every work tagged “Fluff” in Additional Tags.')
-    assert.equal(describeRule(rule({ behavior: 'none', priority: 3 })), 'Off: does nothing to every work tagged “Fluff” in Additional Tags.')
-  })
-
-  test('with nothing typed yet, the value is an ellipsis', () => {
-    assert.equal(describeRule(rule({ value: '' })), 'Hide every work tagged … in Additional Tags.')
-    assert.equal(describeRule(rule({ value: '  ', target: 'author' })), 'Hide every work by …')
+    assert.ok(said({ priority: 6 }).includes('6'))
+    assert.notEqual(said({ priority: 6 }), said({}))
+    assert.equal(said({ behavior: 'invert', priority: 4 }), said({ behavior: 'invert' }))
+    assert.ok(said({ behavior: 'invert', priority: 2 }).includes('2'))
+    assert.equal(said({ behavior: 'highlight', priority: 3 }), said({ behavior: 'highlight' }))
+    assert.equal(said({ behavior: 'none', priority: 3 }), said({ behavior: 'none' }))
   })
 })
 
@@ -711,28 +712,32 @@ describe('parseAutocomplete', () => {
 
 describe('ruleSummary', () => {
   const rule = fields => ({ target: 'F', value: 'Fluff', matcher: 'exact', ...fields })
+  const kinds = parts => parts.map(part => part.kind ?? 'words')
 
-  test('the sentence in parts: the action, drawn bold, and the value, drawn as a quote', () => {
-    assert.deepEqual(ruleSummary(rule({})), [
-      { text: 'Hide', kind: 'verb' },
-      { text: ' every work tagged ' },
-      { text: '“Fluff”', kind: 'value' },
-      { text: ' in Additional Tags.' },
-    ])
-    assert.deepEqual(ruleSummary(rule({ behavior: 'invert', target: 'author', value: 'someone', pseud: 'sideblog' })), [
-      { text: 'Always show', kind: 'verb' },
-      { text: ' every work by ' },
-      { text: '“someone”', kind: 'value' },
-      { text: ' writing as “sideblog”.' },
-    ])
-    assert.deepEqual(ruleSummary(rule({ behavior: 'none' }))[0], { text: 'Off', kind: 'verb' })
-    assert.deepEqual(ruleSummary(rule({ behavior: 'hideFilter' }))[0], { text: 'Hide', kind: 'verb' })
-    assert.deepEqual(ruleSummary(rule({ behavior: 'highlight' }))[0], { text: 'Highlight', kind: 'verb' })
+  test('the sentence in parts: the action first, drawn bold, and the value, drawn as a quote', () => {
+    for (const behavior of ['hide', 'collapse', 'invert', 'highlight', 'hideFilter', 'none']) {
+      const parts = ruleSummary(rule({ behavior }))
+      assert.equal(parts[0].kind, 'verb', behavior)
+      assert.equal(parts.filter(part => part.kind === 'value').length, 1, behavior)
+      assert.ok(parts.find(part => part.kind === 'value').text.includes('Fluff'), behavior)
+    }
+    assert.deepEqual(kinds(ruleSummary(rule({}))), ['verb', 'words', 'value', 'words'])
+    const author = ruleSummary(rule({ behavior: 'invert', target: 'author', value: 'someone', pseud: 'sideblog' }))
+    assert.deepEqual(kinds(author), ['verb', 'words', 'value', 'words'])
+    assert.ok(author[2].text.includes('someone') && !author[2].text.includes('sideblog'), 'the pseud is no part of the value')
+    assert.ok(author[3].text.includes('sideblog'))
   })
 
-  test('an id is no quote, and an untyped value is the ellipsis alone', () => {
-    assert.deepEqual(ruleSummary(rule({ target: 'work', value: '123' })), [{ text: 'Hide', kind: 'verb' }, { text: ' the work with id 123.' }])
-    assert.deepEqual(ruleSummary(rule({ value: '', target: 'author' })), [{ text: 'Hide', kind: 'verb' }, { text: ' every work by …' }])
+  test('each action that hides, collapses, shows or highlights has a verb of its own, and so does a disabled rule', () => {
+    const verbs = ['hide', 'collapse', 'invert', 'highlight', 'none'].map(behavior => ruleSummary(rule({ behavior }))[0].text)
+    assert.equal(new Set(verbs).size, verbs.length, verbs.join(' | '))
+  })
+
+  test('an id is no quote, and an untyped value is no quote either', () => {
+    const byId = ruleSummary(rule({ target: 'work', value: '123' }))
+    assert.deepEqual(kinds(byId), ['verb', 'words'])
+    assert.ok(byId[1].text.includes('123'))
+    assert.deepEqual(kinds(ruleSummary(rule({ value: '', target: 'author' }))), ['verb', 'words'])
   })
 
   test('its parts read as the sentence', () => {

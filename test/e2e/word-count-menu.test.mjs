@@ -3,22 +3,25 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { serializeWordCountQuery } from '../../src/common/wordCount.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { menuClosed, menuGuardOver, openMenu, settled } from './trackedPages.mjs'
+import { menuClosed, menuGuardOver, menuRows, openMenu, pickRow, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
+const RANGES = [
+  { from: 1000, to: 3000 },
+  { from: 5000, to: 100000 },
+  { from: 50000, to: null },
+]
+
 const SEED = {
-  'option.wordCountToolbar': {
-    enabled: true,
-    ranges: [
-      { from: 1000, to: 3000 },
-      { from: 5000, to: 100000 },
-      { from: 50000, to: null },
-    ],
-  },
+  'option.wordCountToolbar': { enabled: true, ranges: RANGES },
 }
+
+/** How each range's row names the range it applies. */
+const RANGE = RANGES.map(serializeWordCountQuery)
 
 /**
  * A blurb's stats line plus the Sort & Filter sidebar's Word Count fields, in
@@ -100,25 +103,17 @@ describe('word-count range menu', { skip }, () => {
     await page.keyboard.press('Escape')
     await menuClosed(page)
     await openMenu(page, () => page.click('#words'))
-    return page.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
-        label: el.querySelector('.AO3E--menu--label').textContent,
-        disabled: el.disabled,
-        section: el.closest('.AO3E--menu--group')?.getAttribute('aria-label') ?? null,
-      })))
+    return menuRows(page)
   }
 
-  /** Click the row labelled exactly `label` inside the section headed `section`. */
-  const pickInSection = async (section, label) => {
-    await page.evaluate((s, l) => {
-      const group = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--group')]
-        .find(g => g.getAttribute('aria-label') === s)
-      const row = [...group.querySelectorAll('.AO3E--menu--item')]
-        .find(el => el.querySelector('.AO3E--menu--label').textContent === l)
-      row.click()
-    }, section, label)
+  /** Click the row that does `action` — to `value`, when given — and wait for the menu to close behind it. */
+  const pick = async (action, value) => {
+    assert.ok(await pickRow(page, action, value), `no ${action} row ${value ?? ''}`)
     await menuClosed(page)
   }
+
+  /** The values of the rows that do `action`, in order. */
+  const valuesOf = (items, action) => items.filter(i => i.action === action).map(i => i.value)
 
   const bounds = () => page.evaluate(() => ({
     from: document.getElementById('work_search_words_from').value,
@@ -136,39 +131,25 @@ describe('word-count range menu', { skip }, () => {
 
   test('offers every configured range, and no clear row while none is set', async () => {
     const items = await openWordCountMenu()
-    const labels = items.filter(i => i.section === 'Search').map(i => i.label)
-    assert.equal(labels.length, 3, labels.join(' | '))
-    assert.ok(labels[0].startsWith('1,000'), labels[0])
-    assert.ok(labels[1].startsWith('5,000'), labels[1])
-    // An open-ended range reads as "n+".
-    assert.ok(labels[2].startsWith('50,000+'), labels[2])
-    assert.ok(!labels.some(l => l.includes('Clear')), 'nothing to clear yet')
+    assert.deepEqual(valuesOf(items, 'range'), RANGE)
+    assert.ok(!items.some(i => i.action === 'clear'), 'nothing to clear yet')
   })
 
   test('picking a range fills AO3\'s filter without re-running the search', async () => {
-    await page.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.textContent.includes('5,000')).click()
-    })
-    await menuClosed(page)
+    await pick('range', RANGE[1])
     assert.deepEqual(await bounds(), { from: '5000', to: '100000', submits: 0 })
   })
 
   test('the applied range is shown as current, and a clear row appears', async () => {
     const items = await openWordCountMenu()
-    const clear = items.find(i => i.label.startsWith('Clear'))
-    assert.ok(clear, items.map(i => i.label).join(' | '))
-    assert.ok(clear.label.includes('5,000'), clear.label)
-    const applied = items.find(i => i.label.startsWith('5,000'))
+    assert.ok(items.some(i => i.action === 'clear'), items.map(i => i.action).join(' | '))
+    const applied = items.find(i => i.action === 'range' && i.value === RANGE[1])
+    assert.equal(applied.active, true, 'the range already on is shown as current')
     assert.equal(applied.disabled, true, 'the range already on should not be selectable again')
   })
 
   test('clearing empties both bounds without re-running the search', async () => {
-    await page.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.textContent.startsWith('Clear')).click()
-    })
-    await menuClosed(page)
+    await pick('clear')
     assert.deepEqual(await bounds(), { from: '', to: '', submits: 0 })
   })
 
@@ -204,11 +185,7 @@ describe('word-count range menu', { skip }, () => {
 
   test('an open-ended range leaves the other bound empty', async () => {
     await openWordCountMenu()
-    await page.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.textContent.startsWith('50,000+')).click()
-    })
-    await menuClosed(page)
+    await pick('range', RANGE[2])
     assert.deepEqual(await bounds(), { from: '50000', to: '', submits: 0 })
   })
 
@@ -218,14 +195,13 @@ describe('word-count range menu', { skip }, () => {
     // business, tested case by case in `test/wordCount/ranges.test.mjs`; here,
     // that the menu draws their result and a pick reaches AO3's filter.
     const items = await openWordCountMenu()
-    const inSection = name => items.filter(i => i.section === name).map(i => i.label)
-    assert.deepEqual(inSection('Set lower bound'), ['1,000', '5,000', '50,000'])
-    assert.deepEqual(inSection('Set upper bound'), ['0 – 3,000 words', '100,000'])
+    assert.deepEqual(valuesOf(items, 'from'), ['1000', '5000', '50000'])
+    assert.deepEqual(valuesOf(items, 'to'), ['3000', '100000'])
     // 50,000+ is the range currently applied, so its lower bound is the one on.
-    const applied = items.find(i => i.section === 'Set lower bound' && i.label === '50,000')
+    const applied = items.find(i => i.action === 'from' && i.value === '50000')
     assert.equal(applied.disabled, true, 'the bound already on should not be selectable again')
 
-    await pickInSection('Set upper bound', '100,000')
+    await pick('to', '100000')
     assert.deepEqual(await bounds(), { from: '50000', to: '100000', submits: 0 })
   })
 })

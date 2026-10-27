@@ -32,6 +32,7 @@ function clear() {
       type="text"
       :aria-label="label"
       :placeholder="placeholder"
+      data-list-filter
       autocomplete="off"
       spellcheck="false"
       class="list-filter__field"
@@ -42,6 +43,7 @@ function clear() {
       class="list-filter__clear icon-btn"
       :aria-label="clearLabel"
       :title="clearLabel"
+      data-action="clear"
       @click="clear"
     >
       <span class="i-tabler-x" text="[12px]" aria-hidden="true" />

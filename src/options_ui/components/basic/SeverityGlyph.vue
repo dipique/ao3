@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { Severity } from '../../model/severity.ts'
 
+import { SEVERITY_WORDS } from '../../model/severity.ts'
+
 /**
  * A severity's glyph, in the severity's colour, with a word of its own for
  * screen readers. It carries the colour so the words beside it can stay in the
@@ -14,13 +16,13 @@ import type { Severity } from '../../model/severity.ts'
 defineProps<{ severity: Severity, glyph?: string, wordless?: boolean }>()
 
 const GLYPHS = {
-  destructive: { word: 'Error:', icon: 'i-tabler-circle-x', colour: 'text-destructive' },
-  warning: { word: 'Warning:', icon: 'i-tabler-alert-triangle', colour: 'text-warning' },
-  success: { word: 'Success:', icon: 'i-tabler-circle-check', colour: 'text-success' },
-  neutral: { word: 'Note:', icon: 'i-tabler-info-circle', colour: 'text-muted-fg' },
-} as const satisfies Record<Severity, { word: string, icon: string, colour: string }>
+  destructive: { icon: 'i-tabler-circle-x', colour: 'text-destructive' },
+  warning: { icon: 'i-tabler-alert-triangle', colour: 'text-warning' },
+  success: { icon: 'i-tabler-circle-check', colour: 'text-success' },
+  neutral: { icon: 'i-tabler-info-circle', colour: 'text-muted-fg' },
+} as const satisfies Record<Severity, { icon: string, colour: string }>
 </script>
 
 <template>
-  <Icon :class="[glyph ?? GLYPHS[severity].icon, GLYPHS[severity].colour]" :label="wordless ? undefined : GLYPHS[severity].word" data-glyph />
+  <Icon :class="[glyph ?? GLYPHS[severity].icon, GLYPHS[severity].colour]" :label="wordless ? undefined : SEVERITY_WORDS[severity]" data-glyph />
 </template>

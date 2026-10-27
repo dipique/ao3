@@ -111,6 +111,7 @@ export function searchFilterChanged(reason?: string): void {
 
 function showPrompt(): void {
   const handle: ToastHandle = toast(message, {
+    name: 'pending-search',
     timeout: SEARCH_PROMPT_TIMEOUT,
     action: {
       label: `Update results (${RESUBMIT_SHORTCUT_LABEL})`,

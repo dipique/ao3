@@ -89,6 +89,7 @@ function remove(index: number) {
               type="text"
               placeholder="Find"
               aria-label="Find"
+              data-field="find"
               class="h-[22px] w-full px-[7px] text-[12.5px]"
             />
             <span class="list-row__glyph i-tabler-arrow-right justify-self-center text-[13px] text-muted-fg" aria-hidden="true" />
@@ -97,13 +98,14 @@ function remove(index: number) {
               type="text"
               placeholder="Replace with"
               aria-label="Replace with"
+              data-field="replace"
               class="h-[22px] w-full px-[7px] text-[12.5px]"
             />
           </div>
           <template #actions>
             <div class="flex items-center gap-2">
               <div class="flex gap-[2px]">
-                <IconToggle v-model="rule.caseSensitive" label="Case sensitive" icon="i-codicon-case-sensitive" />
+                <IconToggle v-model="rule.caseSensitive" label="Case sensitive" icon="i-codicon-case-sensitive" data-flag="caseSensitive" />
                 <IconToggle
                   v-model="rule.matchCasing"
                   label="Match casing"
@@ -111,21 +113,24 @@ function remove(index: number) {
                   :tip="matchCasingOff(rule) ?? 'Match casing: matches any casing, and capitalises the replacement where the match was capitalised'"
                   :disabled="!!matchCasingOff(rule)"
                   :aria-describedby="matchCasingOff(rule) ? casingOffId : undefined"
+                  data-flag="matchCasing"
                 />
-                <IconToggle v-model="rule.wholeWord" label="Whole word" icon="i-codicon-whole-word" />
+                <IconToggle v-model="rule.wholeWord" label="Whole word" icon="i-codicon-whole-word" data-flag="wholeWord" />
                 <IconToggle
                   v-model="rule.acrossFormatting"
                   label="Match across formatting"
                   tip="Across formatting: matches through italics, links and the like; the replacement takes the formatting of where the match starts"
                   icon="i-tabler-code"
+                  data-flag="acrossFormatting"
                 />
-                <IconToggle v-model="rule.disabled" label="Disable this replacement" tip="Disabled: kept, but not applied" icon="i-tabler-ban" />
+                <IconToggle v-model="rule.disabled" label="Disable this replacement" tip="Disabled: kept, but not applied" icon="i-tabler-ban" data-flag="disabled" />
               </div>
               <button
                 type="button"
                 class="icon-btn"
                 aria-label="Remove replacement"
                 title="Remove replacement"
+                data-action="remove"
                 @click="remove(index)"
               >
                 <span class="i-tabler-trash" text="sm" aria-hidden="true" />

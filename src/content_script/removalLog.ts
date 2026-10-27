@@ -32,7 +32,8 @@ export interface RemovalReason {
   rule: string
 }
 
-const OUTCOMES: Record<Removal, string> = {
+/** How the line says each way a work left the page. */
+export const OUTCOMES: Readonly<Record<Removal, string>> = {
   hide: 'hidden',
   collapse: 'collapsed',
   drop: 'left out of the results',
@@ -47,7 +48,8 @@ export function describeRemoval(removal: Removal, blurb: RemovedBlurb, reasons: 
   return `${describeBlurb(blurb)} ${OUTCOMES[removal]} — ${why}`
 }
 
-function describeBlurb({ work, series }: RemovedBlurb): string {
+/** What the line names a removed blurb by. */
+export function describeBlurb({ work, series }: RemovedBlurb): string {
   if (work)
     return `Work ${work.id} "${work.name}"`
   const [first] = series

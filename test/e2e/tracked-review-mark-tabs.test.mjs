@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { formatDay } from '../../src/common/trackedLists.ts'
+import { formatRange } from '../../src/common/trackedReads.ts'
+import { mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { linkWrites, relayWrites, runs, settled } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
@@ -83,9 +84,9 @@ describe('tracked review: marking reviewed with the review open in another tab',
   test('both tabs show the first range', async () => {
     clicking = await open('clicking')
     other = await open('other')
-    const first = `Reviewing ${formatDay(since).slice(0, -5)} – ${formatDay(since + 1)}`
-    assert.equal(await rangeText(clicking), first)
-    assert.equal(await rangeText(other), first)
+    const first = formatRange(since, since + 1)
+    assert.ok(mentions(await rangeText(clicking), first))
+    assert.ok(mentions(await rangeText(other), first))
     await linkWrites([clicking, other])
   })
 
@@ -96,9 +97,9 @@ describe('tracked review: marking reviewed with the review open in another tab',
     // The other tab hears the watermark move and re-runs on it.
     await settled(other, otherRuns)
     assert.equal(await watermark(other), since + 1)
-    const next = `Reviewing ${formatDay(since + 2).slice(0, -5)} – ${formatDay(since + 3)}`
+    const next = formatRange(since + 2, since + 3)
     await other.waitForFunction(want =>
-      document.querySelector('.AO3E--tracked-review--bar--range')?.textContent?.trim() === want, {}, next)
+      document.querySelector('.AO3E--tracked-review--bar--range')?.textContent?.includes(want), {}, next)
     await reviewDrawn(other)
     const shown = await other.evaluate(() =>
       document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)').length)
@@ -106,7 +107,7 @@ describe('tracked review: marking reviewed with the review open in another tab',
     // In front, for the frames the wait checks on.
     await clicking.bringToFront()
     await reviewDrawn(clicking)
-    assert.equal(await rangeText(clicking), next)
+    assert.ok(mentions(await rangeText(clicking), next))
     assert.equal(listAsked('clicking').length, before.clicking, 'the clicking tab asked for nothing')
     assert.equal(listAsked('other').length, before.other, 'nor did the other')
   })

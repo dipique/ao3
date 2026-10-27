@@ -8,12 +8,14 @@ import {
   DEFAULT_WORD_COUNT_RANGES,
   duplicateOf,
   formatBoundPick,
+  formatWordCount,
   formatWordCountRange,
   isValidRange,
   keepsOtherBound,
   normalizeBound,
   parseBoundInput,
   parseWordCountQuery,
+  RANGE_ERRORS,
   rangeError,
   sameRange,
   serializeWordCountQuery,
@@ -36,8 +38,8 @@ describe('rangeError', () => {
   })
 
   test('rejects negative bounds', () => {
-    assert.match(rangeError({ from: -1, to: 3000 }), /lower bound/)
-    assert.match(rangeError({ from: 1000, to: -5 }), /upper bound/)
+    assert.equal(rangeError({ from: -1, to: 3000 }), RANGE_ERRORS.lower)
+    assert.equal(rangeError({ from: 1000, to: -5 }), RANGE_ERRORS.upper)
   })
 
   test('rejects non-integer bounds', () => {
@@ -45,11 +47,11 @@ describe('rangeError', () => {
   })
 
   test('rejects an upper bound below the lower one', () => {
-    assert.match(rangeError({ from: 3000, to: 1000 }), /not be below/)
+    assert.equal(rangeError({ from: 3000, to: 1000 }), RANGE_ERRORS.inverted)
   })
 
   test('rejects a range with neither bound', () => {
-    assert.match(rangeError({ from: null, to: null }), /at least one/)
+    assert.equal(rangeError({ from: null, to: null }), RANGE_ERRORS.empty)
   })
 
   test('isValidRange agrees', () => {
@@ -133,12 +135,12 @@ describe('formatting', () => {
     assert.ok(label.includes(n(3000)), label)
   })
 
-  test('a lower bound alone reads as "n+"', () => {
-    assert.equal(formatWordCountRange({ from: 5000, to: null }), `${n(5000)}+`)
-  })
-
-  test('an upper bound alone reads as "up to n"', () => {
-    assert.equal(formatWordCountRange({ from: null, to: 2000 }), `up to ${n(2000)}`)
+  test('a bound alone reads as that bound, and which side it is on tells apart', () => {
+    const lower = formatWordCountRange({ from: 5000, to: null })
+    const upper = formatWordCountRange({ from: null, to: 5000 })
+    assert.ok(lower.includes(n(5000)), lower)
+    assert.ok(upper.includes(n(5000)), upper)
+    assert.notEqual(lower, upper)
   })
 })
 
@@ -241,17 +243,19 @@ describe('withBound', () => {
 
 describe('formatBoundPick', () => {
   test('is just the value when the other bound stays put', () => {
-    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'from', 2000), '2,000')
-    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'to', 9000), '9,000')
-    assert.equal(formatBoundPick(null, 'to', 500), '500')
-    assert.equal(formatBoundPick({ from: null, to: 3000 }, 'to', 500), '500')
+    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'from', 2000), formatWordCount(2000))
+    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'to', 9000), formatWordCount(9000))
+    assert.equal(formatBoundPick(null, 'to', 500), formatWordCount(500))
+    assert.equal(formatBoundPick({ from: null, to: 3000 }, 'to', 500), formatWordCount(500))
   })
 
   test('shows the whole resulting range when both bounds have to move', () => {
     // The lower bound has to go, and 0 is what it becomes — not left implicit.
-    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'to', 500), '0 – 500 words')
+    const down = formatBoundPick({ from: 1000, to: 3000 }, 'to', 500)
+    assert.ok(down.includes(formatWordCountRange({ from: 0, to: 500 })), down)
     // Nothing to write above, so the upper bound going reads as open-ended.
-    assert.equal(formatBoundPick({ from: 1000, to: 3000 }, 'from', 5000), '5,000+ words')
+    const up = formatBoundPick({ from: 1000, to: 3000 }, 'from', 5000)
+    assert.ok(up.includes(formatWordCountRange({ from: 5000, to: null })), up)
   })
 
   test('agrees with what picking the bound actually does', () => {
@@ -262,7 +266,7 @@ describe('formatBoundPick', () => {
           const next = withBound(current, side, value)
           const moved = next.from !== (current?.from ?? null) && next.to !== (current?.to ?? null)
           assert.equal(
-            formatBoundPick(current, side, value).includes('words'),
+            formatBoundPick(current, side, value) !== formatWordCount(value),
             moved,
             `${JSON.stringify({ current, side, value })}`,
           )

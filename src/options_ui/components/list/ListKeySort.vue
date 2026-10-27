@@ -36,7 +36,15 @@ function press(event: Event, key: K) {
 <template>
   <DropdownMenu :modal="false">
     <DropdownMenuTrigger>
-      <button type="button" class="icon-btn" :aria-label="name" :title="name">
+      <button
+        type="button"
+        class="icon-btn"
+        :aria-label="name"
+        :title="name"
+        data-action="sort"
+        :data-sort="sort.key ?? undefined"
+        :data-sort-state="sort.key ? sortState(sort, sort.key) : 'none'"
+      >
         <span class="i-tabler-filter-2" text="[15px]" aria-hidden="true" />
       </button>
     </DropdownMenuTrigger>
@@ -46,6 +54,8 @@ function press(event: Event, key: K) {
         :key="choice.value"
         :aria-label="itemName(choice)"
         :title="sortHint(sort, choice.value)"
+        :data-sort="choice.value"
+        :data-sort-state="sortState(sort, choice.value)"
         class="relative flex cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-3 text-[12.5px] input-ring data-[highlighted]:bg-[var(--row-hover)]"
         @select="press($event, choice.value)"
       >

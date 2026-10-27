@@ -5,7 +5,7 @@ import { createDefaultMarks, markItems, markProgress, setMark } from '../../src/
 // Node strips the TS types on import; replay.ts reaches only workMarks.ts, which
 // has no imports at all, so the pair loads with no build, no DOM and no
 // extension APIs — which is the whole reason the merge lives in its own module.
-import { replayChanges } from '../../src/content_script/siteExport/replay.ts'
+import { OFF_THE_LIST, replayChanges } from '../../src/content_script/siteExport/replay.ts'
 
 const AT = Date.UTC(2026, 8, 7, 12)
 
@@ -165,7 +165,7 @@ describe('siteExport/replay', () => {
       ], { marks, ...EMPTY })
       assert.deepEqual(result.applied, [])
       assert.equal(result.skipped.length, 1)
-      assert.match(result.skipped[0].reason, /where you got to/)
+      assert.ok(result.skipped[0].reason.includes(marks.continue.label), 'by name')
     })
   })
 
@@ -200,7 +200,7 @@ describe('siteExport/replay', () => {
       })
       assert.deepEqual(result.archive, [])
       assert.equal(result.skipped.length, 1)
-      assert.match(result.skipped[0].reason, /no longer on your Marked for Later list/)
+      assert.equal(result.skipped[0].reason, OFF_THE_LIST)
       assert.ok(markItems(result.marks, 'boring').has('11'))
     })
 

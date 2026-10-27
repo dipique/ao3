@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch, storedListIds, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { pressFacet, rerun, settled, toasts, viewDrawn } from './trackedPages.mjs'
+import { pressFacet, rerun, settled, toastNamed, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -160,31 +160,32 @@ describe('search read items', { skip }, () => {
       .filter(li => li.style.display !== 'none' && !li.classList.contains('AO3E--search-view--hidden'))
       .map(li => li.querySelector('.header h4.heading a')?.textContent?.trim()))
 
-  /** One facet group's rows, by the group's label. */
-  const facetRows = (tab, group) => tab.evaluate((want) => {
-    const details = Array.from(document.querySelectorAll('.AO3E--search-view--group'))
-      .find(el => el.querySelector('.AO3E--search-view--group-label')?.textContent?.trim().startsWith(want))
+  /** One facet group's rows, by the group's facet key. */
+  const facetRows = (tab, key) => tab.evaluate((want) => {
+    const details = document.querySelector(`.AO3E--search-view--group[data-ao3e-facet="${want}"]`)
     if (!details)
       return null
     return Array.from(details.querySelectorAll('.AO3E--search-view--row')).map(row => ({
       value: row.querySelector('.AO3E--search-view--row-name')?.textContent?.trim(),
       count: Number(row.querySelector('.AO3E--search-view--row-count')?.textContent),
     }))
-  }, group)
+  }, key)
 
   /**
    * What the page says it is showing: the visible heading, the visible subnav
-   * item marked current, and the visible subnav links. AO3 names a list in both
+   * item marked current — each AO3's own by its text, or `read list` where it
+   * is the read list's — and the visible subnav links. AO3 names a list in both
    * places, so a view standing in for one has to rename it in both.
    */
   const pageChrome = tab => tab.evaluate(() => {
     const shown = el => getComputedStyle(el).display !== 'none'
+    const named = el => (el.closest('.AO3E--search-read-works--chrome') ? 'read list' : el.textContent.trim())
     const nav = document.querySelector('#main ul.navigation.actions')
     return {
-      heading: [...document.querySelectorAll('#main > h2.heading')].filter(shown).map(h => h.textContent.trim()),
+      heading: [...document.querySelectorAll('#main > h2.heading')].filter(shown).map(named),
       current: [...nav.querySelectorAll(':scope > li > span.current')]
         .filter(span => shown(span.parentElement))
-        .map(span => span.textContent.trim()),
+        .map(named),
       links: [...nav.querySelectorAll(':scope > li > a')]
         .filter(a => shown(a.parentElement))
         .map(a => ({ text: a.textContent.trim(), href: a.getAttribute('href') })),
@@ -205,7 +206,7 @@ describe('search read items', { skip }, () => {
         nativeList: shown(document.querySelector('#main ol.reading.work.index.group')),
         back: !!document.querySelector('.AO3E--search-view--back'),
         mflButton: !!document.querySelector('.AO3E--search-marked-for-later--button'),
-        readButton: button?.textContent.trim(),
+        readButton: !!button,
         readButtonAfter: items[items.indexOf(button?.closest('li')) - 1]?.textContent.trim(),
       }
     })
@@ -213,7 +214,7 @@ describe('search read items', { skip }, () => {
     assert.equal(page.nativeList, false, 'and AO3\u2019s paged list is not shown alongside it')
     assert.equal(page.back, false, 'no "Back to list" \u2014 the view is the list')
     assert.equal(page.mflButton, false, 'no button to open what is already open')
-    assert.equal(page.readButton, 'Search read items')
+    assert.equal(page.readButton, true)
     assert.equal(page.readButtonAfter, 'Marked for Later')
   })
 
@@ -239,8 +240,8 @@ describe('search read items', { skip }, () => {
     // The page was Marked for Later; what is on screen now is the read list, and
     // the heading and subnav have to stop claiming otherwise.
     assert.deepEqual(await pageChrome(tab), {
-      heading: ['Read'],
-      current: ['Read'],
+      heading: ['read list'],
+      current: ['read list'],
       links: [
         { text: 'History', href: '/users/me/readings' },
         { text: 'Marked for Later', href: '/users/me/readings?show=to-read' },
@@ -265,8 +266,8 @@ describe('search read items', { skip }, () => {
     assert.deepEqual(await shownTitles(tab), ['Work number 1', 'Work number 3'])
 
     const chrome = await pageChrome(tab)
-    assert.deepEqual(chrome.heading, ['Read'])
-    assert.deepEqual(chrome.current, ['Read'], 'History is no longer the current item')
+    assert.deepEqual(chrome.heading, ['read list'])
+    assert.deepEqual(chrome.current, ['read list'], 'History is no longer the current item')
     // And with History off screen, so is its Clear.
     assert.deepEqual(chrome.links.map(link => link.text), ['History', 'Marked for Later'])
   })
@@ -285,7 +286,7 @@ describe('search read items', { skip }, () => {
   test('the Status facet lists the verdicts, and nothing it did not collect', async () => {
     // Every work here has a verdict, so no Unread and no readiness values: just
     // the marks. Anything else turning up would be a desync worth seeing.
-    assert.deepEqual(await facetRows(tab, 'Status'), [
+    assert.deepEqual(await facetRows(tab, 'status'), [
       // Sorted by count, then by name — the engine's own row order.
       { value: 'Read', count: 2 },
       { value: 'Favorite', count: 1 },
@@ -353,7 +354,7 @@ describe('search read items', { skip }, () => {
     })
     const before = fetched.length
     await empty.click('.AO3E--search-read-works--button')
-    await until('the reader to be told nothing is marked', async () => (await toasts(empty)).includes('You haven’t marked any works as read yet.'))
+    await until('the reader to be told nothing is marked', () => toastNamed(empty, 'nothing-marked'))
     assert.equal(await empty.$('.AO3E--search-host'), null, 'no view opens')
     assert.equal(fetched.length, before, 'and AO3 is not asked for a single page')
     await empty.close()

@@ -86,8 +86,7 @@ describe('search view facet rows', { skip }, () => {
 
   /** The values of the Additional Tags rows in the page, in order. */
   const tagRows = () => page.evaluate(() => {
-    const group = [...document.querySelectorAll('.AO3E--search-view--group')]
-      .find(g => g.querySelector('.AO3E--search-view--group-label')?.textContent?.includes('Additional Tags'))
+    const group = document.querySelector('.AO3E--search-view--group[data-ao3e-facet="freeforms"]')
     return [...group.querySelectorAll('.AO3E--search-view--row-name')].map(el => el.textContent)
   })
 
@@ -103,11 +102,11 @@ describe('search view facet rows', { skip }, () => {
           }
         }
       }).observe(document.querySelector('.AO3E--search-view--facets'), { childList: true, subtree: true })
-      const max = document.querySelector('input[aria-label="Maximum words"]')
+      const max = document.querySelector('input[data-ao3e-words="max"]')
       max.value = '10000'
       max.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    await page.waitForFunction(() => document.querySelector('.AO3E--search-view--count')?.textContent.includes('of 2 '))
+    await page.waitForFunction(() => document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)').length === 2)
 
     assert.deepEqual(await page.evaluate(() => window.__rowsAdded), ['X'])
     assert.deepEqual(await tagRows(), ['X', ...FILLER])

@@ -420,6 +420,8 @@ abstract class FilterEntityToolbar extends Unit {
       items.push({
         icon: markIcon(config.icon),
         label: has ? `Unmark as ${noun}` : `Mark as ${noun}`,
+        action: has ? 'unmark' : 'mark',
+        value: markId,
         scope: 'settings',
         separatorBefore,
         active: has,
@@ -450,6 +452,8 @@ abstract class FilterEntityToolbar extends Unit {
       return [{
         icon: markIcon(config.icon),
         label: `Mark as ${noun}…`,
+        action: 'mark',
+        value: markId,
         scope: 'settings',
         separatorBefore,
         onSelect: openEditor,
@@ -457,10 +461,12 @@ abstract class FilterEntityToolbar extends Unit {
     }
 
     const rows: MenuItem[] = []
-    const advance = (chapter: number, label: string, icon: () => Node): void => {
+    const advance = (chapter: number, label: string, action: string, icon: () => Node): void => {
       rows.push({
         icon,
         label: `${label} (${chapter})`,
+        action,
+        value: String(chapter),
         scope: 'settings',
         // Re-recording the chapter it's already on would be a write that changed
         // nothing, so the row is shown (it says where you are) but inert.
@@ -471,20 +477,23 @@ abstract class FilterEntityToolbar extends Unit {
 
     const published = publishedChapters(link)
     if (published !== null)
-      advance(published, 'Update to latest chapter', () => <MdiFastForward />)
+      advance(published, 'Update to latest chapter', 'update-latest', () => <MdiFastForward />)
     const current = currentChapter()
     if (current !== null)
-      advance(current, 'Update to current chapter', () => <MdiBookOpenPageVariant />)
+      advance(current, 'Update to current chapter', 'update-current', () => <MdiBookOpenPageVariant />)
 
     rows.push({
       icon: () => <MdiCalendarClock />,
       label: 'Set wait-until date…',
+      action: 'set-wait',
       scope: 'settings',
       onSelect: openEditor,
     })
     rows.push({
       icon: markIcon(config.icon),
       label: `Unmark as ${noun}`,
+      action: 'unmark',
+      value: markId,
       scope: 'settings',
       active: true,
       onSelect: () => this.onToggleMark(id, markId, false),
@@ -671,7 +680,7 @@ abstract class FilterEntityToolbar extends Unit {
         // have, so leave that row usable rather than replacing it with nothing.
         return state?.known
           ? this.markAction(id, state.saved, busy)
-          : { icon: () => <MdiClockPlusOutline />, label: 'Mark for later (unavailable)', disabled: true }
+          : { icon: () => <MdiClockPlusOutline />, label: 'Mark for later (unavailable)', action: 'check-for-later', disabled: true }
       }
       return this.markAction(id, saved, busy)
     }
@@ -682,6 +691,7 @@ abstract class FilterEntityToolbar extends Unit {
     return {
       icon: () => <MdiClockPlusOutline />,
       label: 'Checking Marked for Later…',
+      action: 'check-for-later',
       scope: 'account',
       disabled: true,
       resolve,
@@ -699,6 +709,7 @@ abstract class FilterEntityToolbar extends Unit {
     return {
       icon: () => (saved ? <MdiClockCheck /> : <MdiClockPlusOutline />),
       label: saved ? savedLabel : 'Mark for later',
+      action: saved ? 'unmark-for-later' : 'mark-for-later',
       scope: 'account',
       disabled: busy,
       onSelect: () => this.onMark(id),

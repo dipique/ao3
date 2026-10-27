@@ -41,7 +41,7 @@ export interface ProfileList {
  * With no copy kept: how one is, by the tile's own View on AO3, which opens
  * the list's search view and keeps a copy whatever its search switch says.
  */
-const KEEP_BY_VIEW = 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.'
+export const KEEP_BY_VIEW = 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.'
 
 export const PROFILE_LISTS: readonly ProfileList[] = [
   {

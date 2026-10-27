@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { skip, startOptions } from './optionsPage.mjs'
+import { figures, mentions, skip, startOptions } from './optionsPage.mjs'
 
 /** A few rules, two of them sharing a word for the filter to find. */
 const RULES = [
@@ -32,7 +32,7 @@ describe('options UI — rules filter', { skip }, () => {
 
   after(() => session?.close())
 
-  const filterBox = async () => options.control(await options.list(LIST), 'textbox', 'Search rules by text')
+  const filterBox = async () => (await options.list(LIST)).$('[data-list-filter]')
 
   /** Type `text` into the filter (replacing whatever is there), and wait until the filter holds it. */
   const filter = async (text) => {
@@ -47,35 +47,39 @@ describe('options UI — rules filter', { skip }, () => {
   /** The text of every rule the list is showing. Each row is the rule at that place in the stored list. */
   const rows = async () => (await options.listRowIds(LIST)).map(at => RULES[Number(at)].value)
 
+  /** The numbers the header's count gives. */
+  const counted = async () => figures(await options.listCount(LIST))
+
   test('the field drives the filter: typing narrows the rows, and the header counts what is showing', async () => {
     await filter('')
     const all = await rows()
     assert.equal(all.length, RULES.length, all.join(' | '))
-    assert.equal(await options.listCount(LIST), `${RULES.length} rules`)
+    assert.deepEqual(await counted(), [RULES.length])
 
     // What the filter matches is `shownRules`' business, tested case by case in
     // `test/options/listView.test.mjs`; here, that the field reaches it and
     // the list shows what it leaves.
     await filter('slow')
     const listed = await rows()
-    const count = await options.listCount(LIST)
+    const count = await counted()
     await filter('')
     assert.deepEqual(listed.sort(), ['Slow Burn', 'slow build'])
-    assert.equal(count, `2 of ${RULES.length}`)
+    assert.deepEqual(count, [2, RULES.length], 'what is showing, of how many')
   })
 
   test('no matches says so in the list\'s place', async () => {
     await filter('zzzzz')
     const listed = await rows()
-    const text = await options.text(await options.list(LIST))
+    const empty = await (await options.list(LIST)).$('[data-list-empty]')
+    const text = empty && await options.text(empty)
     await filter('')
     assert.deepEqual(listed, [])
-    assert.match(text, /No rules match “zzzzz”/, 'an empty result explains itself')
+    assert.ok(text && mentions(text, 'zzzzz'), 'an empty result explains itself, with what was searched for')
   })
 
   test('clearing the filter brings the whole list back, and keeps the focus in it', async () => {
     await filter('slow')
-    await (await options.control(await options.list(LIST), 'button', 'Clear rule search')).click()
+    await (await options.action(await options.list(LIST), 'clear')).click()
     const box = await filterBox()
     await options.page.waitForFunction(el => el.value === '', {}, box)
     const listed = await rows()

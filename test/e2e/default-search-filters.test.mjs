@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { COMPLETION_LABELS, CROSSOVER_LABELS } from '../../src/common/data.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
+import { mentions } from './optionsPage.mjs'
 import { settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
@@ -84,7 +86,7 @@ describe('default completion and crossover filters', { skip }, () => {
   const prompt = tab => tab.evaluate(() => {
     for (const el of document.body.children) {
       const toast = [...el.shadowRoot?.querySelectorAll('.toast') ?? []]
-        .find(t => t.querySelector('.action')?.textContent.startsWith('Update results'))
+        .find(t => t.dataset.ao3eToast === 'pending-search')
       if (toast && toast.style.visibility !== 'hidden')
         return toast.querySelector('.message').textContent
     }
@@ -105,9 +107,11 @@ describe('default completion and crossover filters', { skip }, () => {
 
   test('each says what it did', async () => {
     const tab = await open(page({ crossover: 'T' }))
-    assert.equal(await prompt(tab), 'Completion filter set to completed works only.')
+    const completion = await prompt(tab)
+    assert.ok(completion && mentions(completion, COMPLETION_LABELS.complete), `the completion default, got ${completion}`)
 
     const other = await open(page({ complete: 'T' }))
-    assert.equal(await prompt(other), 'Crossover filter set to no crossovers.')
+    const crossover = await prompt(other)
+    assert.ok(crossover && mentions(crossover, CROSSOVER_LABELS.exclude), `the crossover default, got ${crossover}`)
   })
 })

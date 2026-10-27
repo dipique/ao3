@@ -3,11 +3,16 @@ import { describe, test } from 'node:test'
 
 import { staleDeclarations } from '../../scripts/generated-types.mjs'
 
-/** The names an auto-imports stub declaring `names` from `module` reports as stale. */
-function staleNames(module, ...names) {
-  const stub = names.map(name => `  const ${name}: typeof import('../mod').${name}`).join('\n')
-  return staleDeclarations('auto-imports.d.ts', stub, spec => (spec === '../mod' ? module : null))
-    .map(problem => problem.match(/declares '(\w+)'/)?.[1])
+/** Whether `problem` names `name` as a word of its own. */
+const names = (problem, name) => new RegExp(`\\b${name}\\b`).test(problem)
+
+/** The names an auto-imports stub declaring `declared` from `module` reports as stale, one problem each. */
+function staleNames(module, ...declared) {
+  const stub = declared.map(name => `  const ${name}: typeof import('../mod').${name}`).join('\n')
+  const problems = staleDeclarations('auto-imports.d.ts', stub, spec => (spec === '../mod' ? module : null))
+  const stale = declared.filter(name => problems.some(problem => names(problem, name)))
+  assert.equal(problems.length, stale.length, 'one problem for each stale name')
+  return stale
 }
 
 describe('staleDeclarations', () => {
@@ -17,7 +22,10 @@ describe('staleDeclarations', () => {
 
   test('reports a stub pointing at no module', () => {
     const problems = staleDeclarations('auto-imports.d.ts', `  const x: typeof import('../gone').x`, () => null)
-    assert.deepEqual(problems, [`auto-imports.d.ts: 'x' points at '../gone', and no file answers to it`])
+    assert.equal(problems.length, 1)
+    assert.ok(names(problems[0], 'x'), 'the problem names the stale name')
+    for (const fact of ['auto-imports.d.ts', '../gone'])
+      assert.ok(problems[0].includes(fact), `the problem names ${fact}`)
   })
 
   test('accepts any name from a module that re-exports everything', () => {

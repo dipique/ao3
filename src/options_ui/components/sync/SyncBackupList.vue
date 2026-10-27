@@ -62,10 +62,10 @@ function press(key: string) {
       <template #icon>
         <span :class="GLYPHS[row.kind]" text="[16px]" aria-hidden="true" />
       </template>
-      <span class="backup-row__label">{{ row.label }}</span>
-      <span class="backup-row__retention">{{ row.retention }}</span>
+      <span class="backup-row__label" data-backup-part="label">{{ row.label }}</span>
+      <span class="backup-row__retention" data-backup-part="retention">{{ row.retention }}</span>
       <template #meta>
-        <span tabular-nums>{{ row.when }}</span>
+        <span tabular-nums data-backup-part="when">{{ row.when }}</span>
       </template>
       <template #actions>
         <!-- One button, armed or not, so a press from the keyboard keeps its focus. -->
@@ -75,6 +75,9 @@ function press(key: string) {
           :class="confirm.armed(restoreId(row.key)) ? 'armed-btn' : 'outline-btn'"
           :aria-label="confirm.armed(restoreId(row.key)) ? `${row.restore}?` : row.restore"
           :disabled="restoring === row.key"
+          :data-armed="confirm.armed(restoreId(row.key)) || undefined"
+          :data-restoring="restoring === row.key || undefined"
+          data-action="restore"
           @click="press(row.key)"
         >
           <template v-if="restoring === row.key">

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { ensureBuilt, findChrome, installMock, storedLists } from './helpers.mjs'
+import { RETRY_AFTER, waitsOutRefusal } from './markedForLater.mjs'
 import { until } from './optionsPage.mjs'
 import { inject, launch } from './trackedPages.mjs'
 
@@ -9,9 +10,6 @@ const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 const URL_TO_READ = 'https://archiveofourown.org/users/me/readings?show=to-read'
-/** What AO3 says to wait, in seconds: long enough that the test sees the wait, and never sits it out. */
-const RETRY_AFTER = 90
-const WAIT_LINE = /^AO3 asked us to slow down — trying again in 1:[23]\d$/
 
 function blurb(id, title) {
   return `<li class="reading work blurb group" id="work_${id}">
@@ -75,9 +73,9 @@ describe('Marked for Later refused at once', { skip }, () => {
     const tab = await open({})
     try {
       const label = () => tab.$eval('.AO3E--search-host--progress-label', el => el.textContent.trim()).catch(() => '')
-      await until('the wait is on screen', async () => WAIT_LINE.test(await label()))
+      await until('the wait is on screen', async () => waitsOutRefusal(await label()))
       const first = await label()
-      await until('it counts down', async () => WAIT_LINE.test(await label()) && await label() !== first)
+      await until('it counts down', async () => waitsOutRefusal(await label()) && await label() !== first)
       assert.ok(await tab.$('.AO3E--search-host--progress-cancel'), 'and it can be cancelled')
     }
     finally {
@@ -96,8 +94,7 @@ describe('Marked for Later refused at once', { skip }, () => {
     try {
       await tab.waitForSelector('.AO3E--search-view--results li.blurb')
       const note = () => tab.$eval('.AO3E--search-view--updating-on .AO3E--search-view--updating-text', el => el.textContent.trim()).catch(() => '')
-      await until('the wait is beside Updating', async () => (await note()).startsWith('Updating… ')
-        && WAIT_LINE.test((await note()).slice('Updating… '.length)))
+      await until('the wait is in the updating note', async () => waitsOutRefusal(await note()))
       assert.match(await tab.$eval('.AO3E--search-view--results', el => el.textContent), /Stored work 2/)
     }
     finally {

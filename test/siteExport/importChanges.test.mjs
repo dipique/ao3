@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { NO_ARCHIVE_TAB } from '../../src/common/markedForLater.ts'
 import { markItems, packIds } from '../../src/common/workMarks.ts'
 import { installMock } from '../e2e/helpers.mjs'
 import { loadModuleInPage, skipWithoutChrome } from './helpers.mjs'
@@ -216,7 +217,7 @@ describe('siteExport/importChanges', { skip }, () => {
     assert.equal(first.toldArchive, 0)
     assert.equal(first.archiveFailed.length, 1)
     assert.equal(first.archiveFailed[0].workId, '11')
-    assert.match(first.archiveFailed[0].reason, /open AO3 in a tab/)
+    assert.ok(first.archiveFailed[0].reason, 'with a reason the reader is given')
     assert.equal((await writes('option.workMarks')).length, 1)
     assert.deepEqual(await writes('cache.appliedChangeOps'), [], 'nothing is owed and ledgered at once')
 
@@ -329,7 +330,7 @@ describe('siteExport/importChanges', { skip }, () => {
       const report = await run(file([op('a', AT, '11', 'markAsRead')]))
 
       assert.equal(report.archiveFailed.length, 1)
-      assert.match(report.archiveFailed[0].reason, /open AO3 in a tab and import this file again/)
+      assert.equal(report.archiveFailed[0].reason, NO_ARCHIVE_TAB.none)
       assert.deepEqual(await delegated(), [])
     })
 

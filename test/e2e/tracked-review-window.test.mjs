@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { formatDay } from '../../src/common/trackedLists.ts'
+import { formatRange } from '../../src/common/trackedReads.ts'
+import { figures, mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { pressFacet, rerun, settled } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, search, TODAY, trackedOption, works } from './trackedReview.mjs'
@@ -12,15 +13,6 @@ const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 const HISTORY_URL = 'https://archiveofourown.org/users/me/readings'
-
-/** The range as the toolbar writes it: the year said once when both ends share it. */
-function rangeText(start, end) {
-  const from = formatDay(start)
-  const to = formatDay(end)
-  if (from === to)
-    return `Reviewing ${from}`
-  return `Reviewing ${from.slice(-4) === to.slice(-4) ? from.slice(0, -5) : from} – ${to}`
-}
 
 /**
  * The review window on screen.
@@ -81,8 +73,18 @@ describe('tracked review: the window', { skip }, () => {
     'cache.markedForLater': { userId: 'me', updatedAt: CLOCK_BASE, ids: '' },
   }
 
-  /** The toolbar, as the reader reads it. */
-  const toolbar = () => tab.evaluate(() => {
+  /**
+   * The toolbar: its range line, its meta line's days, works and target, the
+   * figure its hint gives, its notes line's lists and works still waiting, the
+   * kind of each warning, each day of the strip as `[day, works]`, which of its
+   * steps are off, and whether Mark reviewed is.
+   */
+  const toolbar = async () => {
+    const bar = await tab.evaluate(readBar)
+    return bar && { ...bar, meta: figures(bar.meta), hint: figures(bar.hint), notes: figures(bar.notes) }
+  }
+  /** Runs in the page: the toolbar, its lines as they read. */
+  function readBar() {
     const bar = document.querySelector('.AO3E--tracked-review--bar')
     if (!bar)
       return null
@@ -92,12 +94,12 @@ describe('tracked review: the window', { skip }, () => {
       meta: text('.AO3E--tracked-review--bar--meta'),
       hint: text('.AO3E--tracked-review--bar--hint'),
       notes: text('.AO3E--tracked-review--bar--notes'),
-      warnings: [...bar.querySelectorAll('.AO3E--tracked-review--bar--warning')].map(el => el.textContent.trim()),
-      strip: [...bar.querySelectorAll('.AO3E--tracked-review--bar--day')].map(el => el.getAttribute('title')),
+      warnings: [...bar.querySelectorAll('.AO3E--tracked-review--bar--warning')].map(el => el.dataset.ao3eWarning),
+      strip: [...bar.querySelectorAll('.AO3E--tracked-review--bar--day')].map(el => [Number(el.dataset.ao3eDay), Number(el.dataset.ao3eCount)]),
       steps: [...bar.querySelectorAll('.AO3E--tracked-review--bar--step')].map(el => el.disabled),
       markDisabled: bar.querySelector('.AO3E--tracked-review--bar--mark')?.disabled ?? null,
     }
-  })
+  }
 
   /** Click the toolbar's − day (0) or + day (1), and wait for the range it gathers. */
   const stepDay = async (index) => {
@@ -108,16 +110,15 @@ describe('tracked review: the window', { skip }, () => {
   const shownCount = () => tab.evaluate(() =>
     document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)').length)
 
-  const facetRows = group => tab.evaluate((want) => {
-    const details = Array.from(document.querySelectorAll('.AO3E--search-view--group'))
-      .find(el => el.querySelector('.AO3E--search-view--group-label')?.textContent?.trim().startsWith(want))
+  const facetRows = key => tab.evaluate((want) => {
+    const details = document.querySelector(`.AO3E--search-view--group[data-ao3e-facet="${want}"]`)
     if (!details)
       return null
     return Array.from(details.querySelectorAll('.AO3E--search-view--row')).map(row => ({
       value: row.querySelector('.AO3E--search-view--row-name')?.textContent?.trim(),
       count: Number(row.querySelector('.AO3E--search-view--row-count')?.textContent),
     }))
-  }, group)
+  }, key)
 
   const open = async (url, seed = SEED) => {
     const page = await browser.newPage()
@@ -142,47 +143,44 @@ describe('tracked review: the window', { skip }, () => {
     const chrome = await tab.evaluate(() => {
       const shown = el => getComputedStyle(el).display !== 'none'
       const nav = document.querySelector('#main ul.navigation.actions')
+      const ours = el => el.classList.contains('AO3E--tracked-review--chrome')
       return {
-        heading: [...document.querySelectorAll('#main > h2.heading')].filter(shown).map(h => h.textContent.trim()),
-        current: [...nav.querySelectorAll(':scope > li > span.current')].filter(s => shown(s.parentElement)).map(s => s.textContent.trim()),
+        heading: [...document.querySelectorAll('#main > h2.heading')].filter(shown).map(ours),
+        current: [...nav.querySelectorAll(':scope > li > span.current')].filter(s => shown(s.parentElement)).map(s => ours(s.parentElement)),
         links: [...nav.querySelectorAll(':scope > li > a')].filter(a => shown(a.parentElement)).map(a => a.textContent.trim()),
         nativeList: shown(document.querySelector('#main ol.reading.work.index.group')),
       }
     })
-    assert.deepEqual(chrome.heading, ['Tracked'])
-    assert.deepEqual(chrome.current, ['Tracked'], 'History is no longer the current item')
+    assert.deepEqual(chrome.heading, [true], 'the review\'s own heading, in place of History\'s')
+    assert.deepEqual(chrome.current, [true], 'History is no longer the current item')
     assert.deepEqual(chrome.links, ['History', 'Marked for Later'], 'and History’s Clear goes with it')
     assert.equal(chrome.nativeList, false)
   })
 
   test('the range is the run of days that fits the target, and the toolbar says so', async () => {
     const bar = await toolbar()
-    assert.equal(bar.range, rangeText(since, since + 2))
-    assert.equal(bar.meta, '3 days · 10 works (target 10)')
+    assert.ok(mentions(bar.range, formatRange(since, since + 2)), bar.range)
+    assert.deepEqual(bar.meta, [3, 10, 10])
     assert.equal(await shownCount(), 10)
     assert.equal(bar.markDisabled, false, 'the range is over, and every list answered')
   })
 
   test('the day strip is one bar a day, with the day’s count on it', async () => {
     const bar = await toolbar()
-    assert.deepEqual(bar.strip, [
-      `${formatDay(since)} — 3 works`,
-      `${formatDay(since + 1)} — 4 works`,
-      `${formatDay(since + 2)} — 3 works`,
-    ])
-    assert.equal(bar.hint, '+1 day adds at least 3', 'what one more day would bring, from rows already read')
+    assert.deepEqual(bar.strip, [[since, 3], [since + 1, 4], [since + 2, 3]])
+    assert.ok(bar.hint.includes(3), 'what one more day would bring, from rows already read')
   })
 
   test('the notes line counts the lists and what is still waiting', async () => {
     const bar = await toolbar()
     // Nineteen works across the three lists from the window's start through
     // today, the one Alpha and Beta share counted once, ten of them in the window.
-    assert.equal(bar.notes, '3 lists · about 9 more to review')
+    assert.deepEqual(bar.notes, [3, 9])
     assert.deepEqual(bar.warnings, [], 'nothing to warn about')
   })
 
   test('the List source facet names each list the way the reader named it', async () => {
-    const rows = (await facetRows('List source')).sort((a, b) => (a.value < b.value ? -1 : 1))
+    const rows = (await facetRows('source')).sort((a, b) => (a.value < b.value ? -1 : 1))
     assert.deepEqual(rows, [
       { value: '/tags/gamma/works', count: 1 },
       { value: 'Alpha', count: 9 },
@@ -204,7 +202,7 @@ describe('tracked review: the window', { skip }, () => {
     const before = fetched.length
     await stepDay(1)
     const bar = await toolbar()
-    assert.equal(bar.meta, '4 days · 13 works (target 10)')
+    assert.deepEqual(bar.meta, [4, 10, 13])
     assert.equal(bar.strip.length, 4)
     assert.equal(await shownCount(), 13)
     assert.equal(fetched.length, before, 'a day on the end re-plans over what is already in hand')
@@ -212,14 +210,14 @@ describe('tracked review: the window', { skip }, () => {
 
   test('− day shrinks it, down to a floor of one day', async () => {
     await stepDay(0)
-    assert.equal((await toolbar()).meta, '3 days · 10 works (target 10)')
+    assert.deepEqual((await toolbar()).meta, [3, 10, 10])
 
     await stepDay(0)
     await stepDay(0)
 
     const bar = await toolbar()
-    assert.equal(bar.meta, '1 day · 3 works (target 10)')
-    assert.equal(bar.range, rangeText(since, since))
+    assert.deepEqual(bar.meta, [1, 3, 10])
+    assert.ok(mentions(bar.range, formatRange(since, since)), bar.range)
     assert.deepEqual(bar.steps, [true, false], 'a window is never less than a day')
     assert.equal(await shownCount(), 3)
     await tab.close()
@@ -233,9 +231,12 @@ describe('tracked review: the window', { skip }, () => {
       // The read list is the reader's marks, so its own button needs them on.
       'option.workMarks': { enabled: true, marks: { read: { icon: 'read', label: 'Read', color: '#6b7280', items: '1', order: 0 } } },
     })
+    // AO3's own items by their text; the read list's and the review's by their buttons.
     const order = await tab.evaluate(() =>
-      [...document.querySelectorAll('#main ul.navigation.actions > li')].map(li => li.textContent.trim()))
-    assert.deepEqual(order.slice(0, 4), ['History', 'Marked for Later', 'Search read items', 'Tracked'])
+      [...document.querySelectorAll('#main ul.navigation.actions > li')].map(li => (li.querySelector('.AO3E--search-read-works--button') && 'read list')
+        || (li.querySelector('.AO3E--tracked-review--button') && 'review')
+        || li.textContent.trim()))
+    assert.deepEqual(order.slice(0, 4), ['History', 'Marked for Later', 'read list', 'review'])
     assert.equal(await tab.$('.AO3E--search-host'), null, 'and nothing opens until it is asked to')
   })
 
@@ -255,8 +256,8 @@ describe('tracked review: the window', { skip }, () => {
     await reviewDrawn(tab)
 
     const bar = await toolbar()
-    assert.equal(bar.meta, '1 day · 3 works (target 6)', 'the next day would take it to seven')
-    assert.equal(bar.range, rangeText(since, since))
+    assert.deepEqual(bar.meta, [1, 3, 6], 'the next day would take it to seven')
+    assert.ok(mentions(bar.range, formatRange(since, since)), bar.range)
     assert.equal(await shownCount(), 3)
   })
 })

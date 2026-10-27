@@ -39,7 +39,7 @@ const BUILTIN_NAMES: Readonly<Record<BuiltinKind, string>> = {
 }
 
 /** What each list without a record is called where a link names it. */
-const BUILTIN_TITLES: Readonly<Record<BuiltinKind, string>> = {
+export const BUILTIN_TITLES: Readonly<Record<BuiltinKind, string>> = {
   'marked-for-later': 'Marked for Later',
   'read-works': 'Read works',
   'review': 'the review',

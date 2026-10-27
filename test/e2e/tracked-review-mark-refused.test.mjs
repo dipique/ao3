@@ -3,9 +3,11 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
+import { mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { rerun, settled } from './trackedPages.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewStatus, statusIs, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -65,8 +67,6 @@ describe('tracked review: while the archive refuses', { skip }, () => {
     return wait
   }
 
-  const status = () => tab.evaluate(() => document.querySelector('.AO3E--tracked-review--bar--status')?.textContent?.trim() ?? '')
-
   const shownIds = () => tab.evaluate(() =>
     [...document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)')]
       .map(li => li.id.replace('work_', '')))
@@ -75,12 +75,6 @@ describe('tracked review: while the archive refuses', { skip }, () => {
     (await browser.storage.local.get('option.trackedLists'))['option.trackedLists'].reviewedThrough)
 
   const ids = (from, to) => solo.works.filter(work => work.filed >= from && work.filed <= to).map(work => work.id)
-
-  /** Wait until the toolbar says what it is still reading for the range starting on `start`, with `then` after it. */
-  const stillReading = (start, then) => tab.waitForFunction((want, after) => {
-    const text = document.querySelector('.AO3E--tracked-review--bar--status')?.textContent ?? ''
-    return text.startsWith(want) && text.includes(after)
-  }, { timeout: 15_000 }, `Still reading 1 of 2 lists for `, then)
 
   /** A tab with the review open, Slow refused for `seconds`, and Solo's works drawn. */
   const open = async (seconds) => {
@@ -103,8 +97,10 @@ describe('tracked review: while the archive refuses', { skip }, () => {
   test('what is read is drawn, and the status line counts the pause down', async () => {
     await open(60)
     assert.deepEqual(await shownIds(), ids(since, since + 1))
-    await stillReading(since, 'trying again in')
-    assert.match(await status(), /AO3 asked us to slow down/)
+    await statusIs(tab, 'pending', 'waiting', { timeout: 15_000 })
+    const status = await reviewStatus(tab)
+    assert.equal(status.lists, 'Slow', 'the list still being read')
+    assert.ok(mentions(status.text, WAIT_WORDS.refused), 'the pause is AO3\'s')
     assert.ok(refused.length > 0)
   })
 
@@ -120,8 +116,8 @@ describe('tracked review: while the archive refuses', { skip }, () => {
     await open(7200)
     await tab.waitForFunction(() => !document.querySelector('.AO3E--search-view--updating-on'), { timeout: 15_000 })
     assert.deepEqual(await shownIds(), ids(since, since + 1))
-    await tab.waitForFunction(() => document.querySelector('.AO3E--tracked-review--bar--status')?.textContent?.startsWith('Not yet read: 1 of 2 lists for '), { timeout: 15_000 })
-    assert.match(await status(), /Refresh to try again\.$/)
+    await statusIs(tab, 'pending', 'stopped', { timeout: 15_000 })
+    assert.equal((await reviewStatus(tab)).lists, 'Slow', 'the list not yet read')
     await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
     assert.equal(await watermark(), since + 1)
   })

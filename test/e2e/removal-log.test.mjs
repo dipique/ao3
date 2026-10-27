@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { describeBlurb, OUTCOMES } from '../../src/content_script/removalLog.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { settled, viewDrawn } from './trackedPages.mjs'
 
@@ -47,11 +48,12 @@ function blurb(id, title, tags) {
  * by a hide rule of its own, so "Gone" is carried by the hidden work alone and a
  * search view is free to hand it to its filter.
  */
+const TITLES = { 1: 'Plain one', 2: 'Soft one', 3: 'Gone one', 4: 'Kept one' }
 const WORKS = [
-  blurb(1, 'Plain one', []),
-  blurb(2, 'Soft one', ['Soft']),
-  blurb(3, 'Gone one', ['Gone']),
-  blurb(4, 'Kept one', ['Doomed', 'Keeper']),
+  blurb(1, TITLES[1], []),
+  blurb(2, TITLES[2], ['Soft']),
+  blurb(3, TITLES[3], ['Gone']),
+  blurb(4, TITLES[4], ['Doomed', 'Keeper']),
 ].join('')
 
 /** An uncommon tag's page, which is what offers "Search these works". */
@@ -73,9 +75,8 @@ const TAG_PAGE = `<!doctype html>
   </div>
 </body></html>`
 
-const SOFT = 'Work 2 "Soft one" collapsed — Additional Tags: "Soft" (Any tag "Soft")'
-const GONE = 'Work 3 "Gone one" hidden — Additional Tags: "Gone" (Any tag "Gone")'
-
+/** How the log names work `id`. */
+const named = id => describeBlurb({ work: { id: String(id), name: TITLES[id] }, series: [] })
 /**
  * With debug mode on, every work the extension takes off the page — or out of a
  * search view's results — says so in the console, naming the rule responsible.
@@ -122,13 +123,17 @@ describe('removed works are logged in debug mode', { skip }, () => {
     await viewDrawn(page)
   }
 
-  const linesAbout = (logs, id) => logs.filter(line => line.includes(`Work ${id} "`))
+  const linesAbout = (logs, id) => logs.filter(line => line.includes(named(id)))
+
+  /** Whether the log has a line saying work `id` went the `removal` way, naming the tag that did it. */
+  const logged = (logs, id, removal, tag) => logs.some(line => line.includes(named(id))
+    && line.includes(OUTCOMES[removal]) && line.replace(named(id), '').includes(tag))
 
   test('a listing logs each work it hides or collapses, with the reason', async () => {
     const { page, logs } = await open({ 'option.verbose': true, 'option.rules': RULES })
     try {
-      assert.ok(logs.some(line => line.includes(SOFT)), `no line saying: ${SOFT}\n${logs.join('\n')}`)
-      assert.ok(logs.some(line => line.includes(GONE)), `no line saying: ${GONE}\n${logs.join('\n')}`)
+      assert.ok(logged(logs, 2, 'collapse', 'Soft'), `no line saying work 2 was collapsed by Soft\n${logs.join('\n')}`)
+      assert.ok(logged(logs, 3, 'hide', 'Gone'), `no line saying work 3 was hidden by Gone\n${logs.join('\n')}`)
       assert.deepEqual(linesAbout(logs, 1), [], 'a work nothing matched is not logged')
       assert.deepEqual(linesAbout(logs, 4), [], 'a work an "always show" rule kept is not logged')
     }
@@ -140,7 +145,7 @@ describe('removed works are logged in debug mode', { skip }, () => {
   test('nothing is logged with debug mode off', async () => {
     const { page, logs } = await open({ 'option.verbose': false, 'option.rules': RULES })
     try {
-      assert.deepEqual(logs.filter(line => /Work \d "/.test(line)), [])
+      assert.deepEqual(Object.keys(TITLES).flatMap(id => linesAbout(logs, id)), [])
     }
     finally {
       await page.close()
@@ -151,8 +156,7 @@ describe('removed works are logged in debug mode', { skip }, () => {
     const { page, logs } = await open({ 'option.verbose': true, 'option.searchTagWorks': true, 'option.rules': RULES })
     try {
       await openView(page)
-      const line = 'Work 3 "Gone one" left out of the results — Additional Tags: "Gone" (Any tag "Gone")'
-      assert.ok(logs.some(l => l.includes(line)), `no line saying: ${line}\n${logs.join('\n')}`)
+      assert.ok(logged(logs, 3, 'drop', 'Gone'), `no line saying work 3 was left out by Gone\n${logs.join('\n')}`)
     }
     finally {
       await page.close()
@@ -168,8 +172,7 @@ describe('removed works are logged in debug mode', { skip }, () => {
     })
     try {
       await openView(page)
-      const line = 'Work 3 "Gone one" excluded by the view\'s filter — Additional Tags: "Gone" (Any tag "Gone")'
-      assert.ok(logs.some(l => l.includes(line)), `no line saying: ${line}\n${logs.join('\n')}`)
+      assert.ok(logged(logs, 3, 'exclude', 'Gone'), `no line saying work 3 was handed to the filter for Gone\n${logs.join('\n')}`)
     }
     finally {
       await page.close()

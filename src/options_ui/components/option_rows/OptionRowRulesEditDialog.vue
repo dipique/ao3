@@ -123,6 +123,7 @@ async function commit() {
           <RekaRadioGroupRoot
             :model-value="draft.target"
             aria-label="What the rule matches"
+            data-rule-field="target"
             class="chips"
             @update:model-value="draft = withTarget(draft, $event as RuleTarget)"
           >
@@ -144,6 +145,7 @@ async function commit() {
                 :class="{ 'text-field--mono': draft.matcher === 'regex' }"
                 :placeholder="field.placeholder"
                 :aria-describedby="helpId"
+                data-rule-field="value"
                 autocomplete="off"
                 spellcheck="false"
                 @input="suggest.typed"
@@ -154,6 +156,7 @@ async function commit() {
               <RekaRadioGroupRoot
                 :model-value="draft.matcher"
                 aria-label="How to match"
+                data-rule-field="matcher"
                 class="seg"
                 :disabled="field.byId"
                 @update:model-value="draft.matcher = $event as Rule['matcher']"
@@ -211,6 +214,7 @@ async function commit() {
                 class="text-field input-ring"
                 :placeholder="tester.placeholder"
                 :aria-describedby="helpId"
+                data-rule-field="test"
                 autocomplete="off"
                 spellcheck="false"
               >
@@ -231,6 +235,7 @@ async function commit() {
                 class="link-button canon-toggle input-ring"
                 :aria-expanded="canonical.shown"
                 :aria-controls="canonical.shown ? canonical.boxId : undefined"
+                data-action="canonical"
                 @click="canonical.toggle"
               >
                 {{ canonical.shown ? 'Hide matching canonical tags' : 'Show matching canonical tags' }}
@@ -290,6 +295,7 @@ async function commit() {
             <RekaRadioGroupRoot
               :model-value="draft.action"
               aria-label="What the rule does"
+              data-rule-field="action"
               :aria-describedby="helpId"
               class="acts"
               :disabled="!draft.enabled"
@@ -320,6 +326,7 @@ async function commit() {
             <RekaRadioGroupRoot
               :model-value="draft.swatch"
               aria-label="Highlight colour"
+              data-rule-field="swatch"
               class="swatches"
               :disabled="noHighlight"
               @update:model-value="draft = withSwatch(draft, $event as Swatch)"
@@ -348,7 +355,7 @@ async function commit() {
               />
             </RekaRadioGroupRoot>
             <OptionRowRuleColors>
-              <button type="button" class="link-button input-ring">
+              <button type="button" class="link-button input-ring" data-action="default-colours">
                 Your default highlight colours
               </button>
             </OptionRowRuleColors>
@@ -384,7 +391,7 @@ async function commit() {
       </div>
 
       <div class="rule-editor__foot">
-        <Switch :id="enabledId" v-model="draft.enabled" />
+        <Switch :id="enabledId" v-model="draft.enabled" data-rule-field="enabled" />
         <label :for="enabledId" class="rule-editor__enabled">Rule Enabled</label>
         <RekaDialogClose class="cancel-button input-ring" aria-keyshortcuts="Escape">
           <kbd aria-hidden="true">Esc</kbd> Cancel
@@ -395,6 +402,7 @@ async function commit() {
           :disabled="save.off"
           :title="save.reason ?? undefined"
           :aria-describedby="save.reason ? saveOffId : undefined"
+          data-action="save"
           @click="commit"
         >
           {{ editing ? 'Save' : 'Add rule' }}

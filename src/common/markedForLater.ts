@@ -16,3 +16,13 @@ export function savedIndexChanges(before: ReadonlySet<string>, after: ReadonlySe
   }
   return changes
 }
+
+/**
+ * Why a request to take a work off Marked for Later couldn't be made from an
+ * AO3 tab, for a reader to act on: there was no AO3 page to make it from, or
+ * none of them answered.
+ */
+export const NO_ARCHIVE_TAB = {
+  none: 'the request has to come from an AO3 page — open AO3 in a tab and import this file again',
+  silent: 'your AO3 tabs did not answer — reload one and import this file again',
+} as const

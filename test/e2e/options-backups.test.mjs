@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
+import { backupList, NEXT_BACKUP } from '../../src/options_ui/model/backups.ts'
+import { numbers } from '../facts.mjs'
+import { mentions, scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
+import { toastTypes } from './trackedPages.mjs'
 
 const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 390, height: 844 }
@@ -29,7 +32,8 @@ function everyKind() {
 
 const newestFirst = backups => [...backups].sort((a, b) => b.createdAt - a.createdAt)
 
-const KEPT_APART = 'kept apart · newest ten of its kind'
+/** What the list says of `backups`, as the page words it, with daily backups as the page opens with them. */
+const listOf = (backups, daily = { enabled: true, count: 7 }) => backupList(backups, daily, Date.now())
 
 /**
  * Sync & Backups → Backups: the switch, the count to keep while it is on, and
@@ -57,7 +61,12 @@ describe('options UI — backups', { skip }, () => {
   })
 
   /** The Restore button of the backup `key`. */
-  const restoreButton = async (options, key) => options.control(await options.listRow('backups', key), 'button')
+  const restoreButton = async (options, key) => options.action(await options.listRow('backups', key), 'restore')
+  /** Whether a first press has armed the button, to restore on the next. */
+  const armed = button => button.evaluate(el => el.dataset.armed !== undefined)
+  /** What a row says of its backup: what took it, how long it is kept, and when. */
+  const rowParts = row => row.evaluate(el => Object.fromEntries([...el.querySelectorAll('[data-backup-part]')]
+    .map(part => [part.dataset.backupPart, part.textContent.replace(/\s+/g, ' ').trim()])))
 
   test('lists the snapshots the background has, newest first: what took each, how long it is kept, and when', async () => {
     const backups = everyKind()
@@ -66,23 +75,13 @@ describe('options UI — backups', { skip }, () => {
       assert.ok((await options.sent('listBackups')).length > 0, 'asked the background')
       const sorted = newestFirst(backups)
       assert.deepEqual(await options.listRowIds('backups'), sorted.map(b => b.key))
-      assert.equal(await options.listCount('backups'), '6 · newest first')
+      assert.deepEqual(numbers(await options.listCount('backups')), [6])
 
+      const view = listOf(backups)
       const rows = await options.listRows('backups')
-      const read = await Promise.all(rows.map(row => options.lines(row)))
-      assert.deepEqual(read.map(lines => lines.slice(0, 2)), [
-        ['Daily backup', 'daily · the newest 7 are kept'],
-        ['Before a held sync update', KEPT_APART],
-        ['Before a restore', KEPT_APART],
-        ['Before turning on sync', KEPT_APART],
-        ['Sync update you declined', KEPT_APART],
-        ['Daily backup', 'daily · the newest 7 are kept'],
-      ])
-      assert.match(read[0][2], /^Today, \S/)
-      assert.ok(read.every(lines => lines.at(-1) === 'Restore'), 'every row restores')
-
-      const name = await options.name(await restoreButton(options, sorted[0].key))
-      assert.equal(name, `Restore “Daily backup” from ${read[0][2]}`)
+      assert.deepEqual(await Promise.all(rows.map(rowParts)), view.rows.map(({ label, retention, when }) => ({ label, retention, when })))
+      for (const [i, row] of rows.entries())
+        assert.equal(await options.name(await options.action(row, 'restore')), view.rows[i].restore, 'every row restores, naming the backup')
     }
     finally {
       await options.close()
@@ -93,9 +92,10 @@ describe('options UI — backups', { skip }, () => {
     const options = await open({ listBackups: [] })
     try {
       assert.deepEqual(await options.listRowIds('backups'), [])
-      assert.equal(await options.listCount('backups'), 'none yet')
-      assert.ok((await options.lines(await options.list('backups'))).includes('No backups yet'))
-      assert.match(await options.text(await options.list('backups')), /One is saved automatically the first time you change a setting each day\.$/)
+      assert.equal(await options.listCount('backups'), listOf([]).count)
+      const empty = await options.text(await options.page.$('[data-list="backups"] [data-list-empty]'))
+      assert.ok(mentions(empty, listOf([]).empty.title))
+      assert.ok(mentions(empty, NEXT_BACKUP.daily))
     }
     finally {
       await options.close()
@@ -108,19 +108,19 @@ describe('options UI — backups', { skip }, () => {
     const options = await open({ listBackups: backups, restoreBackup: true })
     try {
       await options.press(await restoreButton(options, first.key))
-      assert.equal(await options.text(await restoreButton(options, first.key)), 'Restore?')
+      assert.equal(await armed(await restoreButton(options, first.key)), true)
 
       await options.press(await restoreButton(options, second.key))
-      assert.equal(await options.text(await restoreButton(options, second.key)), 'Restore?')
-      assert.equal(await options.text(await restoreButton(options, first.key)), 'Restore', 'arming one disarms the other')
+      assert.equal(await armed(await restoreButton(options, second.key)), true)
+      assert.equal(await armed(await restoreButton(options, first.key)), false, 'arming one disarms the other')
       assert.deepEqual(await options.sent('restoreBackup'), [], 'nothing is restored on a first press')
 
       const asked = (await options.sent('listBackups')).length
       await options.press(await restoreButton(options, second.key))
-      await until('the restore to be said', async () => (await options.toasts()).includes('Backup restored'))
+      await until('the restore to be said', async () => (await toastTypes(options.page)).includes('success'))
       assert.deepEqual(await options.sent('restoreBackup'), [[second.key]])
       await until('the list to be read again, with the backup the restore took', async () => (await options.sent('listBackups')).length > asked)
-      assert.equal(await options.text(await restoreButton(options, second.key)), 'Restore')
+      assert.equal(await armed(await restoreButton(options, second.key)), false)
     }
     finally {
       await options.close()
@@ -134,8 +134,9 @@ describe('options UI — backups', { skip }, () => {
       const button = await restoreButton(options, backups[0].key)
       await options.press(button)
       await options.press(button)
-      await until('the button to say the restore is running', async () => await options.text(button) === 'Restoring…')
+      await until('the button to say the restore is running', async () => button.evaluate(el => el.dataset.restoring !== undefined))
       assert.equal(await button.evaluate(el => el.disabled), true)
+      assert.equal(await armed(button), false)
     }
     finally {
       await options.close()
@@ -149,8 +150,9 @@ describe('options UI — backups', { skip }, () => {
       const button = await restoreButton(options, backups[0].key)
       await options.press(button)
       await options.press(button)
-      await until('the failure to be said', async () => (await options.toasts()).includes('Failed to restore backup; see console for details'))
-      assert.equal(await options.text(button), 'Restore')
+      await until('the failure to be said', async () => (await toastTypes(options.page)).includes('error'))
+      assert.equal(await armed(button), false)
+      assert.equal(await button.evaluate(el => el.disabled || el.dataset.restoring !== undefined), false, 'ready to be pressed again')
     }
     finally {
       await options.close()
@@ -184,7 +186,8 @@ describe('options UI — backups', { skip }, () => {
       await options.press(await options.control(await options.row('backups-keep-daily-backups'), 'switch'))
       await until('daily backups to be turned off', async () => await options.stored('sync.backupsEnabled') === false)
       assert.equal(await options.page.$(count), null, 'gone while off')
-      assert.match(await options.text(await options.list('backups')), /No backups yet\s*Daily backups are off\.$/)
+      const empty = await options.text(await options.page.$('[data-list="backups"] [data-list-empty]'))
+      assert.ok(mentions(empty, NEXT_BACKUP.off))
     }
     finally {
       await options.close()
@@ -197,9 +200,9 @@ describe('options UI — backups', { skip }, () => {
       const row = await options.row('backups-number-of-daily-backups-to-keep')
       assert.equal(await (await options.control(row, 'spinbutton')).evaluate(el => el.value), '7')
       // The stepper steps as the pointer goes down, so it is pressed with the pointer.
-      await (await options.control(row, 'button', 'Keep more daily backups')).click()
+      await (await options.action(row, 'increment')).click()
       await until('the count to be written', async () => await options.stored('sync.backupCount') === 8)
-      await (await options.control(row, 'button', 'Keep fewer daily backups')).click()
+      await (await options.action(row, 'decrement')).click()
       await until('the count to be written again', async () => await options.stored('sync.backupCount') === 7)
     }
     finally {
@@ -229,10 +232,9 @@ describe('options UI — backups', { skip }, () => {
     try {
       const [row] = await options.listRows('backups')
       const lines = await options.lines(row)
-      assert.equal(lines.length, 3, `read ${JSON.stringify(lines)}`)
-      assert.equal(lines[0], 'Daily backup')
-      assert.match(lines[1], /^Today, \S/)
-      assert.equal(lines[2], 'Restore')
+      const [newest] = listOf(backups).rows
+      const restore = await options.text(await options.action(row, 'restore'))
+      assert.deepEqual(lines, [newest.label, newest.when, restore], 'its name, then its date, then Restore, each a line of its own')
 
       const { scrollWidth, innerWidth } = await options.page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }))
       assert.ok(scrollWidth <= innerWidth, `the page is ${scrollWidth} px wide in a ${innerWidth} px window`)

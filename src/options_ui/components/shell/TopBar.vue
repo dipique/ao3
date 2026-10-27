@@ -86,6 +86,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
           type="text"
           :placeholder="`Search ${total} settings`"
           aria-label="Search settings by name or description"
+          data-settings-search
           autocomplete="off"
           spellcheck="false"
           min-w-0 flex-1 bg-transparent text="[13px] default-fg" outline-none
@@ -95,6 +96,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
           class="touch-target hidden input-ring md:grid"
           text="muted-fg hover:default-fg" h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-md
           aria-label="Clear the settings search"
+          data-action="clear-search"
           @click="clearSearch"
         >
           <Icon i-mdi-close-circle />
@@ -105,6 +107,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
           class="touch-target grid input-ring md:hidden"
           text="muted-fg hover:default-fg" h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-md
           aria-label="Close the settings search"
+          data-action="close-search"
           @click="closeSearch"
         >
           <Icon i-mdi-close />
@@ -119,6 +122,7 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
         class="touch-target grid input-ring md:hidden"
         h-9 w-9 cursor-pointer place-items-center rounded-lg text="muted-fg lg hover:default-fg"
         aria-label="Search settings"
+        data-action="open-search"
         @click="openSearch"
       >
         <Icon i-mdi-magnify />
@@ -128,6 +132,8 @@ useEventListener(document, 'keydown', (event: KeyboardEvent) => {
         grid cursor-pointer place-items-center rounded-lg text="muted-fg lg hover:default-fg"
         :aria-label="`Switch to ${switchTo} theme`"
         :title="`Switch to ${switchTo} theme`"
+        data-action="switch-theme"
+        :data-switch-to="switchTo"
         @click="switchTheme"
       >
         <Icon v-if="showing === 'dark'" i-mdi-weather-night />

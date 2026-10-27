@@ -84,6 +84,8 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
         :title="discardOff ? withReason('Discard orphans', discardOff) : undefined"
         :aria-describedby="discardOff ? jobOffId : undefined"
         :disabled="!orphanCount || !!jobOff"
+        data-action="discard-orphans"
+        :data-armed="confirm.armed(DISCARD) || undefined"
         @click.prevent="press(DISCARD)"
       >
         {{ confirm.armed(DISCARD) ? `Discard ${orphanCount.toLocaleString()}?` : 'Discard orphans' }}
@@ -94,6 +96,8 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
         :title="deleteOff ? withReason('Delete cached text', deleteOff) : undefined"
         :aria-describedby="deleteOff ? jobOffId : undefined"
         :disabled="!usage.cached || !!jobOff"
+        data-action="delete-cached"
+        :data-armed="confirm.armed(DELETE) || undefined"
         @click.prevent="press(DELETE)"
       >
         {{ confirm.armed(DELETE) ? 'Delete it all?' : 'Delete cached text' }}

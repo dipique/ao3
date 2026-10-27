@@ -89,8 +89,7 @@ describe('search view facet row cap', { skip }, () => {
 
   /** What the Additional Tags group shows: its heading count, its unselected and included rows, and the line under them. */
   const tagGroup = () => page.evaluate(() => {
-    const group = [...document.querySelectorAll('.AO3E--search-view--group')]
-      .find(g => g.querySelector('.AO3E--search-view--group-label')?.textContent?.includes('Additional Tags'))
+    const group = document.querySelector('.AO3E--search-view--group[data-ao3e-facet="freeforms"]')
     const body = group.querySelector('.AO3E--search-view--group-body')
     const name = row => row.querySelector('.AO3E--search-view--row-name').textContent
     return {
@@ -104,7 +103,7 @@ describe('search view facet row cap', { skip }, () => {
   })
 
   const filterTags = text => page.evaluate((value) => {
-    const input = document.querySelector('input[aria-label="Filter Additional Tags"]')
+    const input = document.querySelector('.AO3E--search-view--group[data-ao3e-facet="freeforms"] .AO3E--search-view--group-filter')
     input.value = value
     input.dispatchEvent(new Event('input', { bubbles: true }))
   }, text)
@@ -125,7 +124,7 @@ describe('search view facet row cap', { skip }, () => {
 
     await pressFacet(page, LAST, 'include')
     await filterTags('')
-    await page.waitForFunction(() => document.querySelector('.AO3E--search-view--count')?.textContent.includes('of 1 '))
+    await page.waitForFunction(() => document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)').length === 1)
     const selected = await tagGroup()
     assert.deepEqual(selected.included, [LAST])
     assert.equal(selected.rest.length, FACET_ROW_CAP)

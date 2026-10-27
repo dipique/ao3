@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { RULE_SORTS, sortHint, UNSORTED } from '../../src/options_ui/model/listView.ts'
 import { skip, startOptions } from './optionsPage.mjs'
 
 /**
@@ -54,22 +55,24 @@ describe('options UI — rules sorting', { skip }, () => {
   /** Rule text of every rendered row, in render order. Each row is the rule at that place in the stored list. */
   const order = async () => (await options.listRowIds(LIST)).map(at => RULES[Number(at)].value)
 
-  /** The sort in the list's header, named for the sort the list shows. */
-  const sortButton = async () => options.control(await options.list(LIST), 'button', /^Sort: /)
-  const sortName = async () => options.name(await sortButton())
+  /** The sort in the list's header. */
+  const sortButton = async () => options.action(await options.list(LIST), 'sort')
+  /** Where the sort is, as the button says: the key it sorts by, or null, and which way, in `aria-sort`'s terms. */
+  const sorted = async () => (await sortButton()).evaluate(el => ({ key: el.dataset.sort ?? null, state: el.dataset.sortState }))
+  const UNSORTED_STATE = { key: null, state: 'none' }
 
   const closeMenu = async () => {
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('[role="menuitem"]'))
   }
 
-  /** The menu's keys, as `{ text, name, hint }`: what each shows, what it is called, and what pressing it does. */
+  /** The menu's keys, as `{ key, state, hint }`: what each sorts by, where it is in its cycle, and what pressing it does. */
   const menu = async () => {
     await options.press(await sortButton())
     await page.waitForSelector('[role="menuitem"]')
     const items = await page.$$eval('[role="menuitem"]', els => els.map(el => ({
-      text: el.textContent.trim(),
-      name: el.getAttribute('aria-label'),
+      key: el.dataset.sort,
+      state: el.dataset.sortState,
       hint: el.title,
     })))
     await closeMenu()
@@ -77,32 +80,29 @@ describe('options UI — rules sorting', { skip }, () => {
   }
 
   /**
-   * Press the key so labelled in the sort's menu, `times` times over, then
-   * close the menu. Each press is waited out by the key's name, which says
-   * where the sort is, and changes with every press of a three-way cycle.
+   * Press the key that sorts by `key` in the sort's menu, `times` times over,
+   * then close the menu. Each press is waited out by where the key says it is
+   * in its cycle, which changes with every press.
    */
-  const press = async (label, times = 1) => {
+  const press = async (key, times = 1) => {
     await options.press(await sortButton())
     await page.waitForSelector('[role="menuitem"]')
-    const item = () => page.evaluateHandle(text => [...document.querySelectorAll('[role="menuitem"]')]
-      .find(el => el.textContent.trim() === text), label)
+    const item = () => page.$(`[role="menuitem"][data-sort="${key}"]`)
     for (let i = 0; i < times; i++) {
-      const before = await (await item()).evaluate(el => el.getAttribute('aria-label'))
+      const before = await (await item()).evaluate(el => el.dataset.sortState)
       await (await item()).evaluate(el => el.click())
-      await page.waitForFunction((text, was) => [...document.querySelectorAll('[role="menuitem"]')]
-        .find(el => el.textContent.trim() === text)
-        ?.getAttribute('aria-label') !== was, {}, label, before)
+      await page.waitForFunction((k, was) => document.querySelector(`[role="menuitem"][data-sort="${k}"]`)?.dataset.sortState !== was, {}, key, before)
     }
     await closeMenu()
   }
 
   test('the menu offers the four keys, Action first, none of them sorting yet: the list is in its default grouping', async () => {
     const items = await menu()
-    assert.deepEqual(items.map(item => item.text), ['Action', 'Priority', 'Rule', 'Applies to'])
-    assert.deepEqual(items.map(item => item.name), ['Action', 'Priority', 'Rule', 'Applies to'])
-    assert.ok(items.every(item => item.hint === 'Sort ascending'), JSON.stringify(items))
+    assert.deepEqual(items.map(item => item.key), RULE_SORTS.map(choice => choice.value))
+    assert.ok(items.every(item => item.state === 'none'), JSON.stringify(items))
+    assert.ok(items.every(item => item.hint === sortHint(UNSORTED, item.key)), JSON.stringify(items))
     assert.deepEqual(await order(), DEFAULT_ORDER)
-    assert.equal(await sortName(), 'Sort: none')
+    assert.deepEqual(await sorted(), UNSORTED_STATE)
   })
 
   test('pressing a key sorts the rows by it, and the button and the key say so', async () => {
@@ -110,25 +110,25 @@ describe('options UI — rules sorting', { skip }, () => {
     // and `cycleSort`'s business, tested case by case in
     // `test/options/listView.test.mjs`; here, that the menu reaches them and the
     // list and its labels show the result.
-    await press('Rule')
+    await press('value')
     assert.deepEqual(await order(), ['apple', 'banana', 'Mango', 'Zebra'])
-    assert.equal(await sortName(), 'Sort: Rule, ascending')
-    const rule = (await menu()).find(item => item.text === 'Rule')
-    assert.deepEqual(rule, { text: 'Rule', name: 'Rule, sorted ascending', hint: 'Sort descending' })
+    assert.deepEqual(await sorted(), { key: 'value', state: 'ascending' })
+    const rule = (await menu()).find(item => item.key === 'value')
+    assert.deepEqual(rule, { key: 'value', state: 'ascending', hint: sortHint({ key: 'value', direction: 'asc' }, 'value') })
   })
 
   test('the menu stays open, so the cycle can be stepped through at once: two more presses and the sort is off', async () => {
-    await press('Rule', 2)
+    await press('value', 2)
     assert.deepEqual(await order(), DEFAULT_ORDER)
-    assert.equal(await sortName(), 'Sort: none')
+    assert.deepEqual(await sorted(), UNSORTED_STATE)
   })
 
   test('sorting writes nothing, and a reload starts unsorted', async () => {
-    await press('Priority')
+    await press('priority')
     await options.saved()
     assert.equal(await options.lastWrite('option.rules'), null)
     await options.reload()
-    assert.equal(await sortName(), 'Sort: none')
+    assert.deepEqual(await sorted(), UNSORTED_STATE)
     assert.deepEqual(await order(), DEFAULT_ORDER)
   })
 

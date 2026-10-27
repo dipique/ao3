@@ -3,8 +3,9 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { openToolbar, rerun, settled } from './trackedPages.mjs'
+import { boxAction, boxActions, clickBoxAction, openToolbar, pillRow, rerun, settled, toastNamed } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -136,17 +137,12 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   const pillText = tab => tab.$eval(TRACK_TEXT, el => el.textContent.trim())
 
-  /** The messages of the toasts on screen. */
-  const toasts = tab => tab.evaluate(() => [...document.querySelectorAll('body > div')]
-    .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast .message') ?? []])
-    .map(el => el.textContent.trim()))
-
   let tab
 
   test('a works search offers to be tracked', async () => {
     tab = await load(SEARCH_URL, SEARCH_PAGE)
     await openPanel(tab)
-    assert.equal(await pillText(tab), 'Track this search')
+    assert.equal(await pillRow(tab), 'new')
     // Nothing is written until the reader says so.
     assert.equal(await savedOption(tab), null)
   })
@@ -160,7 +156,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
   })
 
   test('Cancel closes it again, having written nothing', async () => {
-    await tab.click(`${TRACK_BOX} button:last-of-type`)
+    await clickBoxAction(tab, 'cancel')
     assert.equal(await tab.$eval(TRACK_BOX, el => el.hidden), true)
     assert.equal(await savedOption(tab), null)
     // …and it reopens with the name still there.
@@ -172,7 +168,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     await tab.$eval(ALIAS_INPUT, (el) => {
       el.value = 'Coffee shop AUs'
     })
-    await rerun(tab, () => tab.click(`${TRACK_BOX} button:first-of-type`))
+    await rerun(tab, () => clickBoxAction(tab, 'track'))
 
     const saved = await savedOption(tab)
     assert.ok(saved, 'the option should have been written')
@@ -201,32 +197,32 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   test('the rebuilt pill says the page is tracked, and by what name', async () => {
     await openPanel(tab)
-    assert.equal(await pillText(tab), 'Tracked as “Coffee shop AUs”')
+    assert.equal(await pillRow(tab), `exact:${(await savedOption(tab)).lists[0].id}`)
+    assert.ok(mentions(await pillText(tab), 'Coffee shop AUs'), 'by the reader\'s own name for it')
     assert.equal(await tab.$eval(TRACK_PILL, el => el.getAttribute('aria-pressed')), 'true')
   })
 
   test('it offers a way to stop, and a way through to the review', async () => {
     await pressPill(tab, true)
-    const actions = await tab.$$eval(`${TRACK_BOX} a, ${TRACK_BOX} button`, els =>
-      els.map(el => ({ text: el.textContent.trim(), href: el.getAttribute('href') })))
-    assert.deepEqual(actions.map(a => a.text), ['Stop tracking', 'Review…'])
+    assert.deepEqual(await boxActions(tab), ['stop-tracking', 'review'])
     // The review lives on the reader's own readings page, and is linkable.
-    assert.equal(actions[1].href, 'https://archiveofourown.org/users/someone/readings#ao3e-tracked')
+    assert.equal(await (await boxAction(tab, 'review')).evaluate(a => a.getAttribute('href')), 'https://archiveofourown.org/users/someone/readings#ao3e-tracked')
   })
 
   let id
 
   test('Stop tracking takes the list out of what syncs, and keeps it saved', async () => {
     id = (await savedOption(tab)).lists[0].id
-    await rerun(tab, () => tab.click(`${TRACK_BOX} button`))
+    await rerun(tab, () => clickBoxAction(tab, 'stop-tracking'))
     assert.deepEqual((await savedOption(tab)).lists, [], 'the entry goes')
     assert.equal((await savedOption(tab, 'savedLists')).lists[id].title, 'Coffee shop AUs', 'and the saved list keeps its title')
-    assert.ok((await toasts(tab)).includes('Stopped tracking “Coffee shop AUs”. It stays a saved list on this browser.'))
+    assert.ok(mentions((await toastNamed(tab, 'stopped-tracking'))?.message ?? '', 'Coffee shop AUs'), 'the stop is said, naming the list')
   })
 
   test('the pill then offers to track that saved list, and does it in one click, under its own id', async () => {
     await openPanel(tab)
-    assert.equal(await pillText(tab), 'Track “Coffee shop AUs”')
+    assert.equal(await pillRow(tab), `saved:${id}`)
+    assert.ok(mentions(await pillText(tab), 'Coffee shop AUs'))
     assert.equal(await tab.$eval(TRACK_PILL, el => el.getAttribute('aria-pressed')), 'false')
     // No box: the list already has its title.
     assert.equal(await tab.$(TRACK_BOX), null)
@@ -240,7 +236,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     assert.equal(entry.since, TODAY)
 
     await openPanel(tab)
-    assert.equal(await pillText(tab), 'Tracked as “Coffee shop AUs”')
+    assert.equal(await pillRow(tab), `exact:${id}`)
     await tab.close()
   })
 
@@ -251,9 +247,9 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     const auto = { id: 'aut0', kind: 'text-search', url: '/works/search?work_search[query]=coffee', title: '', type: 'search', entity: 'coffee' }
     await page.evaluate(record => window.browser.storage.local.set({ 'option.savedLists': { v: 1, lists: { [record.id]: record } } }), auto)
     await openPanel(page)
-    assert.equal(await pillText(page), 'Track this search')
+    assert.equal(await pillRow(page), 'new')
     await pressPill(page, true)
-    await rerun(page, () => page.click(`${TRACK_BOX} button:first-of-type`))
+    await rerun(page, () => clickBoxAction(page, 'track'))
 
     assert.deepEqual((await savedOption(page)).lists.map(entry => entry.id), ['aut0'], 'no second list at its address')
     assert.deepEqual((await savedOption(page, 'savedLists')).lists, { aut0: { ...auto, title: 'Search: coffee' } })

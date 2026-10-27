@@ -256,7 +256,7 @@ function removeTheList(): void {
         >
         <div v-else class="saved-list__name-line">
           <span class="saved-list__name" :class="{ 'saved-list__name--raw': row.rawKey }" :title="row.title">{{ row.title }}</span>
-          <ArchiveLink v-if="row.rawKey && copy?.listUrl" :href="copy.listUrl" :aria-label="`Open ${name} on AO3`" class="saved-list__open touch-target">
+          <ArchiveLink v-if="row.rawKey && copy?.listUrl" :href="copy.listUrl" :aria-label="`Open ${name} on AO3`" data-action="open" class="saved-list__open touch-target">
             Open on AO3
           </ArchiveLink>
         </div>
@@ -265,7 +265,7 @@ function removeTheList(): void {
           <SeverityGlyph severity="destructive" class="saved-list__glyph" />
           <span>
             {{ titleRefusal(refused) }}
-            <button type="button" class="saved-list__link-btn touch-target link" :aria-label="`Undo: put back the title ${row.title}`" @click="undoTitle">(undo)</button>
+            <button type="button" class="saved-list__link-btn touch-target link" :aria-label="`Undo: put back the title ${row.title}`" data-action="undo" @click="undoTitle">(undo)</button>
           </span>
         </p>
         <p v-else-if="row.pending === 'not-archive'" class="saved-list__note">
@@ -296,19 +296,20 @@ function removeTheList(): void {
           </template>
           <template v-if="row.sharedTitle">
             <span aria-hidden="true">·</span>
-            <span class="saved-list__shared" :title="SHARED_TITLE_NOTE">
+            <span class="saved-list__shared" :title="SHARED_TITLE_NOTE" data-saved-list-shared-title>
               <SeverityGlyph severity="warning" class="saved-list__glyph" />Same title as another list
             </span>
           </template>
           <template v-if="sameSearch">
             <span aria-hidden="true">·</span>
-            <span class="saved-list__trunc">{{ sameSearch }}</span>
+            <span class="saved-list__trunc" data-saved-list-same-search>{{ sameSearch }}</span>
           </template>
           <template v-if="viewEdit">
             <span aria-hidden="true">·</span>
             <ArchiveLink
               :href="viewEdit"
               :aria-label="`View or edit ${name} on AO3`"
+              data-action="view-edit"
               title="Opens it ready to edit: change the search there, and the floating toolbar offers to update this list"
               class="touch-target"
             >
@@ -320,6 +321,7 @@ function removeTheList(): void {
             type="button"
             class="saved-list__copy touch-target input-ring"
             :data-copied="copied"
+            data-action="copy-url"
             :aria-label="`${copied ? 'Copied' : 'Copy'} the AO3 address of ${name}`"
             title="Copy this list's address on AO3"
             @click="copyUrl"
@@ -333,6 +335,8 @@ function removeTheList(): void {
       <div
         class="saved-list__status"
         data-saved-list-part="status"
+        :data-saved-list-status="row.status"
+        :data-saved-list-pending="row.pending ?? undefined"
         :class="{ 'saved-list__status--off': row.trackOff === TRACK_OFF.review }"
       >
         <IconToggle
@@ -356,15 +360,16 @@ function removeTheList(): void {
         <span v-if="row.trackOff" :id="ids.trackOff" hidden>{{ sentence(row.trackOff) }}.</span>
       </div>
 
-      <div class="saved-list__caching" data-saved-list-part="caching">
+      <div class="saved-list__caching" data-saved-list-part="caching" :data-saved-list-caching="row.caching.kind">
         <BucketBar v-if="caching.bar" :bar="caching.bar" class="saved-list__bar" />
         <span v-else class="saved-list__bar saved-list__bar--none" aria-hidden="true" />
         <span class="saved-list__lines" :class="{ 'saved-list__lines--muted': caching.muted }" :title="cachingTip">
-          <span class="saved-list__l1">{{ caching.line }}</span>
+          <span class="saved-list__l1" data-saved-list-caching-line>{{ caching.line }}</span>
           <ArchiveLink
             v-if="caching.link"
             :href="getArchiveLink(caching.link)"
             :aria-label="`Open ${name} on AO3 to keep a copy`"
+            data-action="open"
             class="saved-list__l2 saved-list__hint touch-target"
           >{{ caching.detail }}</ArchiveLink>
           <span v-else class="saved-list__l2">{{ caching.detail }}</span>
@@ -380,6 +385,7 @@ function removeTheList(): void {
           :title="withReason(DOWNLOAD_LABEL, action.off)"
           :disabled="!!action.off"
           :aria-describedby="action.off ? ids.refreshOff : undefined"
+          data-action="download"
           @click="run(downloadSite)"
         >
           <span class="i-tabler-download" aria-hidden="true" />
@@ -392,6 +398,7 @@ function removeTheList(): void {
             class="saved-list__act saved-list__act--icon outline-btn"
             :aria-label="`Pause ${action.verb} ${name}`"
             title="Pause"
+            data-action="pause"
             @click="stop()"
           >
             <span class="i-tabler-player-pause" aria-hidden="true" />
@@ -401,6 +408,7 @@ function removeTheList(): void {
             class="saved-list__act saved-list__act--icon outline-btn"
             :aria-label="`Cancel ${action.verb} ${name}`"
             title="Cancel"
+            data-action="cancel"
             @click="cancel()"
           >
             <span class="i-tabler-x" aria-hidden="true" />
@@ -409,6 +417,7 @@ function removeTheList(): void {
         <button
           type="button"
           class="saved-list__disclose icon-btn"
+          data-action="details"
           :aria-expanded="open"
           :aria-label="`Details for ${name}`"
           @click="open = !open"
@@ -423,11 +432,11 @@ function removeTheList(): void {
     <div v-if="job?.here" class="saved-list__job">
       <SiteExportProgress>
         <template v-if="job.actions === 'resume'" #foot>
-          <button type="button" class="primary-btn small-btn" @click="resume()">
+          <button type="button" class="primary-btn small-btn" data-action="resume" @click="resume()">
             <span class="i-tabler-player-play" aria-hidden="true" />
             Continue
           </button>
-          <button type="button" class="saved-list__discard ghost-btn small-btn" @click="discard()">
+          <button type="button" class="saved-list__discard ghost-btn small-btn" data-action="discard" @click="discard()">
             Discard
           </button>
         </template>
@@ -458,6 +467,7 @@ function removeTheList(): void {
               :title="withReason(refreshLabel, offline.refreshOff)"
               :disabled="!!offline.refreshOff"
               :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
+              data-action="refresh"
               @click="run(refreshList)"
             >
               <span class="i-tabler-refresh" aria-hidden="true" />
@@ -469,6 +479,7 @@ function removeTheList(): void {
               :title="withReason(cacheLabel, offline.off)"
               :disabled="!!offline.off"
               :aria-describedby="offline.off ? ids.offlineOff : undefined"
+              data-action="cache"
               @click="run(cacheWorks)"
             >
               <span class="i-tabler-cloud-download" aria-hidden="true" />
@@ -480,6 +491,7 @@ function removeTheList(): void {
               :title="withReason(DOWNLOAD_LABEL, offline.refreshOff)"
               :disabled="!!offline.refreshOff"
               :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
+              data-action="download"
               @click="run(downloadSite)"
             >
               <span class="i-tabler-download" aria-hidden="true" />
@@ -493,6 +505,7 @@ function removeTheList(): void {
               :title="offline.refreshOff ? sentence(offline.refreshOff) : 'Re-scrape the list, then cache against it. Slower, and the only way the “has this work changed?” check can be accurate.'"
               :disabled="!!offline.refreshOff"
               :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
+              data-action="refresh-first"
               @click="run(refreshAndCache)"
             >
               Refresh the list first, then cache
@@ -504,6 +517,7 @@ function removeTheList(): void {
               :title="offline.off ? sentence(offline.off) : 'Don\'t wait out the retry delay on the works that failed — for after signing back in to AO3.'"
               :disabled="!!offline.off"
               :aria-describedby="offline.off ? ids.offlineOff : undefined"
+              data-action="retry"
               @click="copy && cacheWorks(copy, { retryNow: true })"
             >
               Retry the {{ offline.retry.toLocaleString() }} failed {{ offline.retry === 1 ? 'work' : 'works' }} now
@@ -515,6 +529,7 @@ function removeTheList(): void {
               :title="offline.off ? sentence(offline.off) : 'Package exactly what is saved here now, without asking AO3 for anything.'"
               :disabled="!!offline.off"
               :aria-describedby="offline.off ? ids.offlineOff : undefined"
+              data-action="download-cached"
               @click="run(downloadCached)"
             >
               Download without refreshing
@@ -528,12 +543,14 @@ function removeTheList(): void {
               :title="offline.remove.off ? withReason('Remove offline copy', offline.remove.off) : undefined"
               :disabled="!!offline.remove.off"
               :aria-describedby="offline.remove.off ? ids.removeCopyOff : undefined"
+              data-action="remove-copy"
+              :data-armed="confirm.armed(removeCopyId) || undefined"
               @click="removeCopy"
             >
               <span class="saved-list__remove-glyph i-tabler-trash" aria-hidden="true" />
               {{ confirm.armed(removeCopyId) ? 'Remove it?' : 'Remove offline copy' }}
             </button>
-            <span class="saved-list__why">{{ offline.remove.note }}</span>
+            <span class="saved-list__why" data-saved-list-note="remove-copy">{{ offline.remove.note }}</span>
             <span v-if="offline.remove.off" :id="ids.removeCopyOff" hidden>{{ sentence(offline.remove.off) }}.</span>
           </div>
         </template>
@@ -557,7 +574,7 @@ function removeTheList(): void {
           <span>{{ tracking.problem }}</span>
         </p>
         <p v-if="viewEdit" class="saved-list__view-edit">
-          <ArchiveLink :href="viewEdit" :aria-label="`View or edit ${name} on AO3`">
+          <ArchiveLink :href="viewEdit" :aria-label="`View or edit ${name} on AO3`" data-action="view-edit">
             View/Edit
           </ArchiveLink>
           {{ ' ' }}<span class="saved-list__muted">{{ VIEW_EDIT_NOTE }}</span>
@@ -570,6 +587,7 @@ function removeTheList(): void {
             :title="withReason(tracking.action.kind === 'stop' ? 'Stop tracking this list; it stays a saved list' : 'Track this list for review', tracking.action.off)"
             :disabled="!!tracking.action.off"
             :aria-describedby="tracking.action.off ? ids.trackOff : undefined"
+            :data-action="tracking.action.kind === 'stop' ? 'stop-tracking' : 'track'"
             @click="track(tracking.action?.kind === 'track')"
           >
             <span :class="tracking.action.kind === 'stop' ? 'i-tabler-circle-minus' : 'i-tabler-circle-check'" aria-hidden="true" />
@@ -585,12 +603,14 @@ function removeTheList(): void {
             :title="tracking.remove.off ? withReason('Remove list', tracking.remove.off) : undefined"
             :disabled="!!tracking.remove.off"
             :aria-describedby="tracking.remove.off ? ids.removeListOff : undefined"
+            data-action="remove-list"
+            :data-armed="confirm.armed(removeListId) || undefined"
             @click="removeTheList"
           >
             <span class="saved-list__remove-glyph i-tabler-trash" aria-hidden="true" />
             {{ confirm.armed(removeListId) ? 'Remove it?' : 'Remove list' }}
           </button>
-          <span class="saved-list__why">{{ tracking.remove.note }}</span>
+          <span class="saved-list__why" data-saved-list-note="remove-list">{{ tracking.remove.note }}</span>
           <span v-if="tracking.remove.off" :id="ids.removeListOff" hidden>{{ sentence(tracking.remove.off) }}.</span>
         </div>
       </section>

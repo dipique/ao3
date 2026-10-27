@@ -179,11 +179,7 @@ describe('the floating surface palette', { skip }, () => {
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
     }))
-    await tab.evaluate(() => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))
-      row.click()
-    })
+    await tab.evaluate(() => document.querySelector('.AO3E--menu .AO3E--menu--item[data-ao3e-action="mark"][data-ao3e-value="continue"]').click())
     await tab.waitForSelector('.AO3E--progress-editor')
 
     const read = async (selector) => {

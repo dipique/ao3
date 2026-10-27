@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { NO_COPY } from '../../src/options_ui/model/savedListRows.ts'
+import { numbers } from '../facts.mjs'
 import { storedListIds } from './helpers.mjs'
-import { skip, startOptions, until } from './optionsPage.mjs'
+import { mentions, skip, startOptions, until } from './optionsPage.mjs'
 import { ARCHIVE, keptStore, listingPage, openTab, stored, visit } from './trackedPages.mjs'
 
 /** A saved list of each kind the archive has a page for, none of them with a copy yet. */
@@ -36,8 +38,11 @@ function standInForClipboard() {
 // eslint-disable-next-line unicorn/prefer-dom-node-text-content
 const part = (row, name) => row.$eval(`[data-saved-list-part="${name}"]`, el => el.innerText.split('\n').map(line => line.trim()).filter(Boolean))
 
-/** The link a row's Not cached offers, which opens the list on AO3 and so keeps its copy. */
-const HINT = list => `Open ${list.title} on AO3 to keep a copy`
+/** What a row's caching cell holds: `none` for Not cached, `copy` for a copy kept. */
+const caching = row => row.$eval('[data-saved-list-part="caching"]', el => el.dataset.savedListCaching)
+
+/** The links a row's Not cached offers, which open the list on AO3 and so keep its copy. */
+const hints = async row => (await row.$('[data-saved-list-part="caching"]')).$$('[data-action="open"]')
 
 /**
  * Every saved list with a page on AO3 has an open URL — that page, naming the
@@ -58,7 +63,7 @@ describe('options UI — saved lists on their open URLs', { skip }, () => {
       viewport: { width: 1440, height: 900 },
       prepare: page => page.evaluateOnNewDocument(standInForClipboard),
     })
-    await until('the stored lists to be read', async () => (await part(await options.savedList(SERIES.id), 'caching'))[0] === 'Not cached')
+    await until('the stored lists to be read', async () => await caching(await options.savedList(SERIES.id)) === 'none')
   }, { timeout: 180000 })
 
   after(() => session?.close())
@@ -66,8 +71,9 @@ describe('options UI — saved lists on their open URLs', { skip }, () => {
   test('a list with no copy says Not cached, and links its open URL, which keeps one, for every kind', async () => {
     for (const list of [FILTERED, SEARCH, TAG, SERIES]) {
       const row = await options.savedList(list.id)
-      assert.deepEqual(await part(row, 'caching'), ['Not cached', 'open it on AO3 to keep a copy'], list.kind)
-      const link = await options.control(row, 'link', HINT(list))
+      assert.equal(await caching(row), 'none', list.kind)
+      const [link, ...more] = await hints(row)
+      assert.ok(link && !more.length, `${list.kind}: one link`)
       assert.equal(await link.evaluate(a => a.getAttribute('href')), `${ARCHIVE}${list.url}#ao3e-open=${list.id}`, list.kind)
       assert.equal(await link.evaluate(a => a.target), '_blank', 'a new tab: the copy shows here once it is kept')
     }
@@ -76,23 +82,25 @@ describe('options UI — saved lists on their open URLs', { skip }, () => {
   test('its details say the same, a filtered listing\'s as any other\'s', async () => {
     for (const list of [FILTERED, SERIES]) {
       const details = await options.savedListDetails(list.id)
-      assert.match(await options.text(details), /None yet\. Open it on AO3 to keep a copy: from then on, it refreshes from here\./, list.kind)
+      assert.ok(mentions(await options.text(details), NO_COPY.opens), list.kind)
     }
   })
 
   test('Copy URL copies the same open URL', async () => {
     const row = await options.savedList(FILTERED.id)
-    await options.press(await options.control(row, 'button', `Copy the AO3 address of ${FILTERED.title}`))
-    await until('the copy to be said', async () => (await options.controls(row, 'button', `Copied the AO3 address of ${FILTERED.title}`)).length === 1)
-    const hint = await (await options.control(row, 'link', HINT(FILTERED))).evaluate(a => a.href)
+    const copy = await options.action(row, 'copy-url')
+    await options.press(copy)
+    await until('the copy to be said', () => copy.evaluate(el => el.dataset.copied === 'true'))
+    const hint = await (await hints(row))[0].evaluate(a => a.href)
     assert.deepEqual(await options.page.evaluate(() => window.__copied), [hint])
   })
 
   test('a list at no address on the archive has no open URL: no link and no Copy URL, and its own words', async () => {
     const row = await options.savedList(ELSEWHERE.id)
-    assert.deepEqual(await part(row, 'caching'), ['Not cached', 'cache it from its page on AO3'])
+    assert.equal(await caching(row), 'none')
+    assert.notDeepEqual(await part(row, 'caching'), await part(await options.savedList(SERIES.id), 'caching'), 'it says where a copy comes from instead')
     assert.deepEqual(await options.controls(await row.$('[data-saved-list-part="caching"]'), 'link'), [])
-    assert.deepEqual(await options.controls(row, 'button', `Copy the AO3 address of ${ELSEWHERE.title}`), [])
+    assert.deepEqual(await options.actions(row, 'copy-url'), [])
   })
 
   test('nothing threw along the way', () => {
@@ -121,9 +129,9 @@ describe('options UI — a filtered listing kept from its open URL', { skip }, (
     const options = await session.open({ seed, hash: '#saved-lists', viewport: { width: 1440, height: 900 } })
     try {
       const row = await options.savedList(FILTERED.id)
-      await until('the stored lists to be read', async () => (await part(row, 'caching'))[0] === 'Not cached')
-      assert.deepEqual(await options.controls(row, 'button', `Download ${FILTERED.title}`), [], 'nothing to download yet')
-      const link = await (await options.control(row, 'link', HINT(FILTERED))).evaluate(a => a.href)
+      await until('the stored lists to be read', async () => await caching(row) === 'none')
+      assert.deepEqual(await options.actions(row, 'download'), [], 'nothing to download yet')
+      const link = await (await hints(row))[0].evaluate(a => a.href)
 
       const tab = await openTab(session.browser, {
         seed,
@@ -142,10 +150,11 @@ describe('options UI — a filtered listing kept from its open URL', { skip }, (
       // The listing's tab wrote into the storage every extension page shares,
       // which tells each open page what changed.
       await options.page.evaluate(items => window.browser.storage.local.set(items), kept)
-      await until('the copy to be read', async () => (await part(row, 'caching'))[0] === '0 of 2 cached · 0 B')
-      const download = await options.control(row, 'button', `Download ${FILTERED.title}`)
+      await until('the copy to be read', async () => await caching(row) === 'copy')
+      assert.deepEqual(numbers((await part(row, 'caching'))[0]), [0, 2, 0], 'none of its two works cached, taking nothing')
+      const download = await options.action(row, 'download')
       assert.equal(await download.evaluate(el => el.disabled), false)
-      assert.deepEqual(await options.controls(row, 'link', HINT(FILTERED)), [], 'cached, so no hint')
+      assert.deepEqual(await hints(row), [], 'cached, so no hint')
       assert.deepEqual(options.problems(), [])
     }
     finally {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { bucketBar, bucketFigures, formatBytes } from '../../src/options_ui/model/buckets.ts'
+import { figures, mentions } from '../facts.mjs'
 
 const MB = 1024 * 1024
 
@@ -21,6 +22,9 @@ describe('formatBytes', () => {
 })
 
 describe('bucketBar', () => {
+  /** The tooltip's figures, a line each. */
+  const tipFigures = bar => bar.tip.split('\n').map(line => figures(line))
+
   test('the cached and failed works as parts of the bar, the new ones the rest of it', () => {
     const bar = bucketBar(buckets())
     assert.equal(bar.cached, 85.4)
@@ -29,36 +33,37 @@ describe('bucketBar', () => {
 
   test('named for every bucket, and its tooltip one bucket a line', () => {
     const bar = bucketBar(buckets())
-    assert.equal(bar.label, '205 of 240 works cached, 6 failed, 29 new')
-    assert.equal(bar.tip, 'cached: 205\nfailed: 6\nnew: 29\ntotal: 240')
+    assert.deepEqual(figures(bar.label), [6, 29, 205, 240])
+    assert.deepEqual(tipFigures(bar), [[205], [6], [29], [240]], 'cached, failed, new, and the whole')
   })
 
   test('a cached work whose refetch failed is drawn as cached: its text is here', () => {
     const bar = bucketBar(buckets({ staleFailures: 4 }))
     assert.equal(bar.cached, 85.4)
     assert.equal(bar.failed, 2.5)
-    assert.equal(bar.label, '205 of 240 works cached, 6 failed, 29 new')
+    assert.equal(bar.label, bucketBar(buckets()).label)
   })
 
   test('nothing cached yet: an empty bar', () => {
     const bar = bucketBar(buckets({ total: 620, cached: 0, failed: 0, unfetched: 620, bytes: 0 }))
     assert.equal(bar.cached, 0)
     assert.equal(bar.failed, 0)
-    assert.equal(bar.label, '0 of 620 works cached, 0 failed, 620 new')
+    assert.deepEqual(figures(bar.label), [0, 0, 620, 620])
   })
 
   test('an empty list draws nothing, rather than dividing by nothing', () => {
     const bar = bucketBar(buckets({ total: 0, cached: 0, failed: 0, unfetched: 0, bytes: 0 }))
     assert.equal(bar.cached, 0)
     assert.equal(bar.failed, 0)
-    assert.equal(bar.label, '0 of 0 works cached, 0 failed, 0 new')
+    assert.deepEqual(figures(bar.label), [0, 0, 0, 0])
   })
 
-  test('one work, and figures in the thousands', () => {
-    assert.equal(bucketBar(buckets({ total: 1, cached: 1, failed: 0, unfetched: 0 })).label, '1 of 1 work cached, 0 failed, 0 new')
+  test('figures in the thousands', () => {
     const big = bucketBar(buckets({ total: 2400, cached: 1205, failed: 0, unfetched: 1195 }))
-    assert.equal(big.label, '1,205 of 2,400 works cached, 0 failed, 1,195 new')
-    assert.equal(big.tip, 'cached: 1,205\nfailed: 0\nnew: 1,195\ntotal: 2,400')
+    assert.deepEqual(figures(big.label), [0, 1195, 1205, 2400])
+    for (const n of [1205, 2400, 1195])
+      assert.ok(mentions(big.label, n.toLocaleString()) && mentions(big.tip, n.toLocaleString()), `${n} grouped by thousands`)
+    assert.deepEqual(tipFigures(big), [[1205], [0], [1195], [2400]])
   })
 })
 

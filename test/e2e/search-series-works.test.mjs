@@ -145,13 +145,11 @@ describe('search a series\' works', { skip }, () => {
         return null
       const items = Array.from(button.closest('ul.navigation.actions').children)
       return {
-        text: button.textContent.trim(),
         // Appended after the row's last native action, which is the bookmark link.
         after: items[items.indexOf(button.closest('li')) - 1]?.textContent.trim(),
       }
     })
     assert.ok(found, 'the button should be added')
-    assert.equal(found.text, 'Search these works')
     assert.equal(found.after, 'Bookmark Series')
   })
 

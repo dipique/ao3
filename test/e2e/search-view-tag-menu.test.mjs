@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { menuClosed, openMenu, settled, viewDrawn } from './trackedPages.mjs'
+import { menuClosed, openMenu, pickRow, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -99,7 +99,7 @@ describe('tag and fandom menus in the search view', { skip }, () => {
 
   /**
    * Right-click the first link in the view matching `selector` whose text is
-   * `text`, and return the menu's row labels. A synthetic `contextmenu` is what
+   * `text`, and return what the menu's rows do. A synthetic `contextmenu` is what
    * a real right-click delivers to the delegated listener.
    */
   const openMenuOn = async (selector, text) => {
@@ -112,18 +112,12 @@ describe('tag and fandom menus in the search view', { skip }, () => {
     }, [selector, text]))
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .map(el => el.querySelector('.AO3E--menu--label').textContent))
+        .map(el => el.dataset.ao3eAction ?? null))
   }
 
-  /** Click the open menu's row starting with `prefix`, and wait for the menu to close behind it. */
-  const pick = async (prefix) => {
-    await page.evaluate((p) => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => el.textContent.startsWith(p))
-      if (!row)
-        throw new Error(`no menu row starting "${p}"`)
-      row.click()
-    }, prefix)
+  /** Click the open menu's row that does `action`, and wait for the menu to close behind it. */
+  const pick = async (action) => {
+    assert.ok(await pickRow(page, action), `no menu row that does ${action}`)
     await menuClosed(page)
   }
 
@@ -148,15 +142,15 @@ describe('tag and fandom menus in the search view', { skip }, () => {
   })
 
   test('a tag menu offers include, exclude and require', async () => {
-    const labels = await openMenuOn('ul.tags a.tag', 'Fluff')
-    assert.ok(labels.includes('Include in filter'), labels.join(' | '))
-    assert.ok(labels.includes('Exclude from filter'), labels.join(' | '))
+    const actions = await openMenuOn('ul.tags a.tag', 'Fluff')
+    assert.ok(actions.includes('include'), actions.join(' | '))
+    assert.ok(actions.includes('exclude'), actions.join(' | '))
     // "Require" is the view's own third direction; AO3's sidebar has no such filter.
-    assert.ok(labels.includes('Require in filter'), labels.join(' | '))
+    assert.ok(actions.includes('require'), actions.join(' | '))
   })
 
   test('excluding a tag filters the view, not AO3', async () => {
-    await pick('Exclude from filter')
+    await pick('exclude')
     assert.deepEqual((await visibleTitles()).sort(), ['A quiet one', 'Angsty one'])
     assert.equal(page.url(), READINGS_URL, 'nothing should have been submitted')
   })
@@ -170,24 +164,24 @@ describe('tag and fandom menus in the search view', { skip }, () => {
 
   test('choosing it again clears the exclusion', async () => {
     await openMenuOn('ul.tags a.tag', 'Fluff')
-    await pick('Exclude from filter')
+    await pick('exclude')
     assert.deepEqual((await visibleTitles()).length, 4)
     assert.deepEqual(await indicatorsOn('ul.tags a.tag', 'Fluff'), [])
   })
 
   test('requiring a tag keeps only the works that carry it', async () => {
     await openMenuOn('ul.tags a.tag', 'Fluff')
-    await pick('Require in filter')
+    await pick('require')
     assert.deepEqual((await visibleTitles()).sort(), ['Both at once', 'Fluffy one'])
     assert.deepEqual(await indicatorsOn('ul.tags a.tag', 'Fluff'), ['require'])
     await openMenuOn('ul.tags a.tag', 'Fluff')
-    await pick('Require in filter')
+    await pick('require')
     assert.equal((await visibleTitles()).length, 4)
   })
 
   test('"Reset filters" clears the indicators along with the facet rows', async () => {
     await openMenuOn('ul.tags a.tag', 'Fluff')
-    await pick('Require in filter')
+    await pick('require')
     assert.deepEqual(await indicatorsOn('ul.tags a.tag', 'Fluff'), ['require'])
     await page.click('.AO3E--search-view--reset')
     assert.equal((await visibleTitles()).length, 4)
@@ -195,21 +189,21 @@ describe('tag and fandom menus in the search view', { skip }, () => {
   })
 
   test('a fandom menu drives the view too — by name, with no id to resolve', async () => {
-    const labels = await openMenuOn('h5.fandoms a.tag', 'Other Fandom')
-    assert.ok(labels.includes('Exclude from filter'), labels.join(' | '))
-    await pick('Exclude from filter')
+    const actions = await openMenuOn('h5.fandoms a.tag', 'Other Fandom')
+    assert.ok(actions.includes('exclude'), actions.join(' | '))
+    await pick('exclude')
     assert.deepEqual((await visibleTitles()).sort(), ['Angsty one', 'Fluffy one'])
     assert.deepEqual(await indicatorsOn('h5.fandoms a.tag', 'Other Fandom'), ['exclude'])
     await openMenuOn('h5.fandoms a.tag', 'Other Fandom')
-    await pick('Exclude from filter')
+    await pick('exclude')
     assert.equal((await visibleTitles()).length, 4)
   })
 
   test('the rating symbol offers the same three rows', async () => {
-    const labels = await openMenuOn('ul.required-tags li a', 'General Audiences')
-    assert.ok(labels.includes('Include in filter'), labels.join(' | '))
-    assert.ok(labels.includes('Exclude from filter'), labels.join(' | '))
-    assert.ok(labels.includes('Require in filter'), labels.join(' | '))
+    const actions = await openMenuOn('ul.required-tags li a', 'General Audiences')
+    assert.ok(actions.includes('include'), actions.join(' | '))
+    assert.ok(actions.includes('exclude'), actions.join(' | '))
+    assert.ok(actions.includes('require'), actions.join(' | '))
     await page.keyboard.press('Escape')
     await menuClosed(page)
   })

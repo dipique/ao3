@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { COMPLETION_LABELS, CROSSOVER_LABELS } from '../../src/common/data.ts'
 import { skip, startOptions } from './optionsPage.mjs'
 
 const COMPLETION = 'filter-defaults-default-completion-status'
@@ -28,7 +29,7 @@ describe('options UI — completion and crossover defaults', { skip }, () => {
   }
 
   /**
-   * Open the row's dropdown and pick the option reading `label`. The dropdown is
+   * Open the row's dropdown and pick the option named `label`, as the row names it. The dropdown is
    * brought to the middle of the window first: at the bottom, the "Options
    * saved" toasts from the switch can be sitting over it.
    */
@@ -47,22 +48,22 @@ describe('options UI — completion and crossover defaults', { skip }, () => {
   test('switching on the completion default stores its starting choice', async () => {
     await switchOn(COMPLETION)
     assert.deepEqual(await options.lastWrite('option.searchCompletion'), { enabled: true, completion: 'complete' })
-    assert.equal(await shown(COMPLETION), 'Completed works only')
+    assert.equal(await shown(COMPLETION), COMPLETION_LABELS.complete)
   })
 
   test('picking works in progress stores it', async () => {
-    await choose(COMPLETION, 'Incomplete works only')
+    await choose(COMPLETION, COMPLETION_LABELS.incomplete)
     assert.deepEqual(await options.lastWrite('option.searchCompletion'), { enabled: true, completion: 'incomplete' })
   })
 
   test('switching on the crossover default stores its starting choice', async () => {
     await switchOn(CROSSOVERS)
     assert.deepEqual(await options.lastWrite('option.searchCrossovers'), { enabled: true, crossovers: 'exclude' })
-    assert.equal(await shown(CROSSOVERS), 'No crossovers')
+    assert.equal(await shown(CROSSOVERS), CROSSOVER_LABELS.exclude)
   })
 
   test('picking crossovers only stores it', async () => {
-    await choose(CROSSOVERS, 'Crossovers only')
+    await choose(CROSSOVERS, CROSSOVER_LABELS.only)
     assert.deepEqual(await options.lastWrite('option.searchCrossovers'), { enabled: true, crossovers: 'only' })
   })
 

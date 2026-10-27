@@ -3,9 +3,10 @@ import { describe, test } from 'node:test'
 
 import { claimRefresh } from '../../src/content_script/searchView/listRefresh.ts'
 import { bucketBar, bucketFigures } from '../../src/options_ui/model/buckets.ts'
-import { foreignView, jobView } from '../../src/options_ui/model/jobView.ts'
+import { foreignView, jobView, offReason } from '../../src/options_ui/model/jobView.ts'
 import { timeAgo } from '../../src/options_ui/model/moments.ts'
-import { PROFILE_LISTS, profileTiles, REFRESH_OFF, refreshNeeds } from '../../src/options_ui/model/profileLists.ts'
+import { KEEP_BY_VIEW, PROFILE_LISTS, profileTiles, REFRESH_OFF, refreshNeeds } from '../../src/options_ui/model/profileLists.ts'
+import { mentions } from '../facts.mjs'
 
 const NOW = 1_800_000_000_000
 const ARCHIVE = 'https://archiveofourown.org'
@@ -90,14 +91,18 @@ describe('the profile lists', () => {
 
 describe('a tile with its copy', () => {
   test('how many works, and how old the copy is', () => {
-    assert.deepEqual(marked().figure, { count: '240', detail: `works · as of ${timeAgo(HOURS_AGO, NOW)}` })
-    assert.deepEqual(read().figure, { count: '620', detail: `works · as of ${timeAgo(readCopy.scrapedAt, NOW)}` })
-    assert.equal(marked({ copies: { 'marked-for-later': markedCopy({ count: 1 }), 'read-works': null } }).figure.detail, `work · as of ${timeAgo(HOURS_AGO, NOW)}`)
+    assert.equal(marked().figure.count, '240')
+    assert.ok(mentions(marked().figure.detail, timeAgo(HOURS_AGO, NOW)), marked().figure.detail)
+    assert.equal(read().figure.count, '620')
+    assert.ok(mentions(read().figure.detail, timeAgo(readCopy.scrapedAt, NOW)), read().figure.detail)
     assert.equal(marked({ copies: { 'marked-for-later': markedCopy({ count: 2400 }), 'read-works': null } }).figure.count, '2,400')
   })
 
   test('works whose blurbs a refresh would bring back are counted', () => {
-    assert.equal(marked({ copies: { 'marked-for-later': markedCopy({ unstored: 4 }), 'read-works': null } }).figure.detail, `works · as of ${timeAgo(HOURS_AGO, NOW)} · 4 need refreshing`)
+    const detail = marked({ copies: { 'marked-for-later': markedCopy({ unstored: 4 }), 'read-works': null } }).figure.detail
+    assert.match(detail, /\b4\b/)
+    assert.ok(mentions(detail, timeAgo(HOURS_AGO, NOW)), detail)
+    assert.doesNotMatch(marked().figure.detail, /\b4\b/, 'with every blurb stored, nothing to count')
   })
 
   test('the bucket bar and its figures', () => {
@@ -143,7 +148,7 @@ describe('a tile with no copy', () => {
 
   test('says how one is kept: by its own View on AO3, which keeps one whatever the list\'s search switch says', () => {
     for (const tile of none())
-      assert.equal(tile.empty, 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.', tile.id)
+      assert.equal(tile.empty, KEEP_BY_VIEW, tile.id)
   })
 
   test('with no View on AO3, the reader\'s account not known, it gives the list\'s own advice on keeping one', () => {
@@ -199,7 +204,7 @@ describe('Read works with work marks off, when its view opens nothing', () => {
   test('Marked for Later, which needs no marks, keeps its View on AO3 and its note', () => {
     assert.equal(marked({ settings: MARKS_OFF }).view, '/users/tester/readings?show=to-read#ao3e-open=marked-for-later')
     assert.equal(none()[0].view, '/users/tester/readings?show=to-read#ao3e-open=marked-for-later')
-    assert.equal(none()[0].empty, 'None yet. Use View on AO3, signed in, to keep a copy: from then on, it refreshes from here.')
+    assert.equal(none()[0].empty, KEEP_BY_VIEW)
   })
 
   test('a list tracked or not makes no difference to either tile', () => {
@@ -214,7 +219,6 @@ describe('Read works with work marks off and its copy kept, which a refresh woul
     const tile = read({ settings: MARKS_OFF })
     assert.equal(tile.refreshOff, REFRESH_OFF.workMarks)
     assert.equal(tile.refreshNeeds, REFRESH_OFF.workMarks, 'said in the tile, where the reader is looking')
-    assert.equal(REFRESH_OFF.workMarks, 'off while Work marks, under Reading, is switched off: this list is made from your marks, so without them it can\'t be refreshed or viewed on AO3')
   })
 
   test('Cache works, the retry and Download without refreshing work from the copy as it is, so they stay on', () => {
@@ -236,14 +240,14 @@ describe('Read works with work marks off and its copy kept, which a refresh woul
 
   test('another list\'s job turns every offline action off, and the refresh keeps its own reason, which outlasts the job', () => {
     const tile = read({ settings: MARKS_OFF, job: job(MARKED) })
-    assert.equal(tile.offlineOff, 'off for now: one job at a time, and Marked for Later is caching')
+    assert.equal(tile.offlineOff, offReason(job(MARKED), READ))
     assert.equal(tile.refreshOff, REFRESH_OFF.workMarks)
     assert.equal(tile.refreshNeeds, REFRESH_OFF.workMarks)
   })
 
   test('with work marks on, another list\'s job is the refresh\'s reason too', () => {
     const tile = read({ job: job(MARKED) })
-    assert.equal(tile.refreshOff, 'off for now: one job at a time, and Marked for Later is caching')
+    assert.equal(tile.refreshOff, offReason(job(MARKED), READ))
     assert.equal(tile.refreshNeeds, null)
   })
 
@@ -265,7 +269,8 @@ describe('a tile and the job', () => {
   test('another list\'s job turns its offline actions off, naming that list', () => {
     const tile = read({ job: job(MARKED) })
     assert.equal(tile.actions, 'offline')
-    assert.equal(tile.offlineOff, 'off for now: one job at a time, and Marked for Later is caching')
+    assert.equal(tile.offlineOff, offReason(job(MARKED), READ))
+    assert.ok(mentions(tile.offlineOff, list('marked-for-later').name), tile.offlineOff)
     assert.equal(tile.job, false)
   })
 

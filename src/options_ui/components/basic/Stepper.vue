@@ -53,7 +53,7 @@ const incrementTitle = computed(() => withReason(props.incrementLabel, props.off
     :class="{ 'stepper--row': size === 'row' }"
     @update:model-value="take"
   >
-    <RekaNumberFieldDecrement class="stepper__button touch-target" :aria-label="decrementLabel" :title="decrementTitle">
+    <RekaNumberFieldDecrement class="stepper__button touch-target" :aria-label="decrementLabel" :title="decrementTitle" data-action="decrement">
       <span class="i-tabler-minus" aria-hidden="true" />
     </RekaNumberFieldDecrement>
     <RekaNumberFieldInput
@@ -63,7 +63,7 @@ const incrementTitle = computed(() => withReason(props.incrementLabel, props.off
       :title="off ? withReason(label ?? '', off) : undefined"
       :aria-describedby="off ? reasonId : undefined"
     />
-    <RekaNumberFieldIncrement class="stepper__button touch-target" :aria-label="incrementLabel" :title="incrementTitle">
+    <RekaNumberFieldIncrement class="stepper__button touch-target" :aria-label="incrementLabel" :title="incrementTitle" data-action="increment">
       <span class="i-tabler-plus" aria-hidden="true" />
     </RekaNumberFieldIncrement>
     <span v-if="off" :id="reasonId" hidden>{{ sentence(off) }}.</span>

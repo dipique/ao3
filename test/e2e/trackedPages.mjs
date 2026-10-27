@@ -220,6 +220,35 @@ export function menuClosed(tab) {
 }
 
 /**
+ * The open menu's rows, in order, by what each does: its `data-ao3e-action`
+ * and `data-ao3e-value`, whether it is off or the current choice, the scope
+ * group it sits in, and whether it is in the open submenu.
+ */
+export function menuRows(tab) {
+  return tab.evaluate(() => [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
+    action: el.dataset.ao3eAction ?? null,
+    value: el.dataset.ao3eValue ?? null,
+    disabled: el.disabled,
+    active: el.classList.contains('AO3E--menu--active'),
+    scope: [...el.classList].find(c => c.startsWith('AO3E--menu--item--'))?.slice('AO3E--menu--item--'.length) ?? null,
+    submenu: !!el.closest('.AO3E--menu--submenu'),
+  })))
+}
+
+/**
+ * Click the open menu's row that does `action` — to `value`, when given — in
+ * the menu or its open submenu. False when there is no such row, or it is off.
+ */
+export function pickRow(tab, action, value) {
+  return tab.evaluate((a, v) => {
+    const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
+      .find(el => el.dataset.ao3eAction === a && (v === undefined || el.dataset.ao3eValue === v) && !el.disabled)
+    row?.click()
+    return !!row
+  }, action, value)
+}
+
+/**
  * Wait for a search view to be on screen and done loading: its works drawn,
  * with no progress panel up and no refresh under way. Opening a view is work a
  * unit leaves going once it is ready, so {@link settled} doesn't wait for it.
@@ -277,7 +306,9 @@ export async function navigateBy(tab, action) {
 export const TRACK_PILL = '.AO3E--filter-toolbar--track > button'
 export const TRACK_TEXT = '.AO3E--filter-toolbar--track--text'
 export const TRACK_BOX = '.AO3E--filter-toolbar--track--box'
-export const TITLE_INPUT = `${TRACK_BOX} input[aria-label="Title for this list"]`
+export const TITLE_INPUT = `${TRACK_BOX} input.AO3E--filter-toolbar--track--alias`
+/** The box's chooser of which list to update, where there are several. */
+export const LIST_CHOOSER = `${TRACK_BOX} select.AO3E--filter-toolbar--track--chooser`
 
 /** Open the toolbar, unless it is open, and wait for its pills to be in place. */
 export async function openToolbar(tab) {
@@ -315,9 +346,13 @@ export function pillText(tab) {
   return tab.$eval(TRACK_TEXT, el => el.textContent.trim())
 }
 
-/** Everything the box says, as the reader reads it. */
-export function boxText(tab) {
-  return tab.$eval(TRACK_BOX, el => el.textContent.replace(/\s+/g, ' ').trim())
+/**
+ * Which state the pill was drawn for, as its `data-ao3e-row` says: `new`,
+ * `exact:<id>`, `saved:<id>`, `same-root:<ids>`, or `refining:<id>:` with
+ * `same` until the search differs from the list's and `changed` once it does.
+ */
+export function pillRow(tab) {
+  return tab.$eval('.AO3E--filter-toolbar--track', el => el.dataset.ao3eRow ?? null)
 }
 
 /** The lines of the box's diff summary. */
@@ -325,61 +360,91 @@ export function diffLines(tab) {
   return tab.$$eval(`${TRACK_BOX} ul li`, els => els.map(el => el.textContent.trim()))
 }
 
-/** The texts of the box's buttons, in order. */
-export function boxButtons(tab) {
-  return tab.$$eval(`${TRACK_BOX} button`, els => els.map(el => el.textContent.trim()))
+/** What the box warns of, in order, by each warning's `data-ao3e-warn`: `root`, `twin`. */
+export function boxWarnings(tab) {
+  return tab.$$eval(`${TRACK_BOX} [data-ao3e-warn]`, els => els.map(el => el.dataset.ao3eWarn))
 }
 
-/** Click the box's button with this text — a real pointer click. */
-export async function clickBoxButton(tab, text) {
-  const handles = await tab.$$(`${TRACK_BOX} button`)
-  for (const handle of handles) {
-    if (await handle.evaluate(el => el.textContent.trim()) === text)
-      return handle.click()
-  }
-  throw new Error(`No button "${text}" in the box`)
+/** What each of the box's buttons and links does, by its `data-ao3e-action`, in order. */
+export function boxActions(tab) {
+  return tab.$$eval(`${TRACK_BOX} [data-ao3e-action]`, els => els.map(el => el.dataset.ao3eAction))
 }
 
-/** The messages of the toasts on screen. */
-export function toasts(tab) {
+/** The box's control that does `action`. */
+export async function boxAction(tab, action) {
+  const handle = await tab.$(`${TRACK_BOX} [data-ao3e-action="${action}"]`)
+  if (!handle)
+    throw new Error(`No control that does ${action} in the box`)
+  return handle
+}
+
+/** Click the box's control that does `action` — a real pointer click. */
+export async function clickBoxAction(tab, action) {
+  return (await boxAction(tab, action)).click()
+}
+
+/** The type of each toast on screen — `success`, `error`, or null for a plain one. */
+export function toastTypes(tab) {
   return tab.evaluate(() => [...document.querySelectorAll('body > div')]
-    .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast .message') ?? []])
-    .map(el => el.textContent.trim()))
+    .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast') ?? []])
+    .map(el => el.dataset.type ?? null))
 }
 
-/** The links the toasts on screen offer, as `{ label, href }`, `href` as the page resolves it. */
+/** Which toast each one on screen is, by its `data-ao3e-toast`; null for one with no name. */
+export function toastNames(tab) {
+  return tab.evaluate(() => [...document.querySelectorAll('body > div')]
+    .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast') ?? []])
+    .map(el => el.dataset.ao3eToast ?? null))
+}
+
+/** Where the links the toasts on screen offer go, as the page resolves each `href`. */
 export function toastLinks(tab) {
   return tab.evaluate(() => [...document.querySelectorAll('body > div')]
     .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast a.link') ?? []])
-    .map(a => ({ label: a.textContent.trim(), href: a.href })))
+    .map(a => a.href))
 }
 
-/** Follow the toast's link with this text, as a click on it does. */
-export function clickToastLink(tab, label) {
-  return tab.evaluate((text) => {
+/** Follow the toast's link to `href`, as a click on it does. */
+export function clickToastLink(tab, href) {
+  return tab.evaluate((to) => {
     for (const el of document.querySelectorAll('body > div')) {
-      const link = [...el.shadowRoot?.querySelectorAll('.toast a.link') ?? []].find(a => a.textContent.trim() === text)
+      const link = [...el.shadowRoot?.querySelectorAll('.toast a.link') ?? []].find(a => a.href === to)
       if (link) {
         link.click()
         return true
       }
     }
     return false
-  }, label)
+  }, href)
 }
 
-/** Click a toast's action button (its **Undo**). */
-export function clickToastAction(tab, label) {
-  return tab.evaluate((text) => {
+/**
+ * The toasts on screen, as `{ name, type, message }`: `name` is the toast's
+ * `data-ao3e-toast`, which says which one it is however it is worded.
+ */
+export function shownToasts(tab) {
+  return tab.evaluate(() => [...document.querySelectorAll('body > div')]
+    .flatMap(el => [...el.shadowRoot?.querySelectorAll('.toast') ?? []])
+    .map(el => ({ name: el.dataset.ao3eToast ?? null, type: el.dataset.type ?? null, message: el.querySelector('.message')?.textContent.trim() ?? '' })))
+}
+
+/** The toast named `name` that is on screen, as {@link shownToasts} gives it, or null. */
+export async function toastNamed(tab, name) {
+  return (await shownToasts(tab)).find(one => one.name === name) ?? null
+}
+
+/** Click the action of the toast named `name` (its **Undo**, its **Mark reviewed**). False when no such toast is up. */
+export function pressToast(tab, name) {
+  return tab.evaluate((want) => {
     for (const el of document.querySelectorAll('body > div')) {
-      const button = [...el.shadowRoot?.querySelectorAll('.toast button.action') ?? []].find(b => b.textContent.trim() === text)
+      const button = el.shadowRoot?.querySelector(`.toast[data-ao3e-toast="${want}"] button.action`)
       if (button) {
         button.click()
         return true
       }
     }
     return false
-  }, label)
+  }, name)
 }
 
 // ---------------------------------------------------------------------------

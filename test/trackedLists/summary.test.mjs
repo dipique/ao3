@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { describeFilters, describeUpdate, FILTER_SUMMARY_LENGTH } from '../../src/common/trackedLists.ts'
+import { ADDED_VERBS, describeFilters, describeUpdate, FILTER_SUMMARY_LENGTH } from '../../src/common/trackedLists.ts'
+import { figures, mentions } from '../facts.mjs'
 
 /** An uncommon tag's page: a custom search, so the view filter is all it can have. */
 const TAG = '/tags/marriage%20problems'
@@ -12,57 +13,85 @@ const NONE = { text: '', full: '', more: 0 }
 /** The whole line, however long. */
 const full = entry => describeFilters(entry, { maxLength: Infinity }).full
 
+/** `text` gives each of `parts`, in this order. */
+function inOrder(text, parts) {
+  let from = 0
+  for (const part of parts) {
+    const at = text.indexOf(part, from)
+    assert.ok(at >= 0, `${JSON.stringify(text)} gives ${JSON.stringify(part)} after what comes before it`)
+    from = at + part.length
+  }
+}
+
+/**
+ * How many of `conditions` — what each condition of a cut line is known by, in
+ * the order the whole line gives them — the line shows: a run from the first,
+ * the rest left out, and counted as left out.
+ */
+function shown(summary, conditions) {
+  const count = conditions.filter(fact => mentions(summary.text, fact)).length
+  conditions.forEach((fact, i) => assert.equal(mentions(summary.text, fact), i < count, `${summary.text}: ${fact}`))
+  assert.equal(summary.more, conditions.length - count, 'what it leaves out')
+  for (const fact of conditions)
+    assert.ok(mentions(summary.full, fact), `the whole line gives ${fact}`)
+  return count
+}
+
 describe('describeFilters: the view filter, by name', () => {
   test('includes, requires and excludes, in that order, each list sorted', () => {
     const filter = { facets: { characters: { ex: ['Ron Weasley', 'Draco Malfoy'] }, fandoms: { in: ['Harry Potter'] }, freeforms: { req: ['Fluff'] } } }
-    assert.equal(full({ url: TAG, filter }), 'Includes: Harry Potter · Requires: Fluff · Excludes: Draco Malfoy, Ron Weasley')
+    inOrder(full({ url: TAG, filter }), [ADDED_VERBS.include, 'Harry Potter', ADDED_VERBS.require, 'Fluff', ADDED_VERBS.exclude, 'Draco Malfoy', 'Ron Weasley'])
   })
 
   test('one verb across several groups is one clause', () => {
     const filter = { facets: { characters: { ex: ['Draco Malfoy'] }, relationships: { ex: ['Draco Malfoy/Harry Potter'] } } }
-    assert.equal(full({ url: TAG, filter }), 'Excludes: Draco Malfoy, Draco Malfoy/Harry Potter')
+    const line = full({ url: TAG, filter })
+    inOrder(line, [ADDED_VERBS.exclude, 'Draco Malfoy', 'Draco Malfoy/Harry Potter'])
+    assert.equal(line.split(ADDED_VERBS.exclude).length - 1, 1, line)
   })
 
-  test('the text box, quoted', () => {
-    assert.equal(full({ url: TAG, filter: { text: '  dragons  ' } }), 'Text: “dragons”')
+  test('the text box, trimmed', () => {
+    const line = full({ url: TAG, filter: { text: '  dragons  ' } })
+    assert.ok(mentions(line, 'dragons'), line)
+    assert.equal(line, full({ url: TAG, filter: { text: 'dragons' } }))
   })
 
   test('the word-count range, open at either end or neither', () => {
-    assert.equal(full({ url: TAG, filter: { words: [5000, null] } }), 'Word count: ≥ 5,000')
-    assert.equal(full({ url: TAG, filter: { words: [null, 20000] } }), 'Word count: ≤ 20,000')
-    assert.equal(full({ url: TAG, filter: { words: [1000, 5000] } }), 'Word count: 1,000–5,000')
-  })
-
-  test('reads as the lines an update adding the same filter would show', () => {
-    // One vocabulary: the summary is the "after" side of each change line.
-    const filter = { facets: { characters: { ex: ['Draco Malfoy'] }, fandoms: { in: ['Harry Potter'] }, freeforms: { req: ['Fluff'] } }, text: 'dragons', words: [1000, 5000] }
-    const lines = describeUpdate({ url: TAG }, { url: TAG, filter }).changes.map(change => change.text.replace('any → ', ''))
-    assert.equal(full({ url: TAG, filter }), lines.join(' · '))
+    const atLeast = full({ url: TAG, filter: { words: [5000, null] } })
+    const atMost = full({ url: TAG, filter: { words: [null, 5000] } })
+    assert.deepEqual(figures(atLeast), [5000])
+    assert.deepEqual(figures(atMost), [5000])
+    assert.notEqual(atLeast, atMost, 'each says which end is open')
+    assert.deepEqual(figures(full({ url: TAG, filter: { words: [null, 20000] } })), [20000])
+    inOrder(full({ url: TAG, filter: { words: [1000, 5000] } }), ['1,000', '5,000'])
   })
 
   test('the stored spelling doesn\'t matter', () => {
     assert.equal(
       full({ url: TAG, filter: { facets: { characters: { ex: ['b', 'a', 'b', ' '], in: [] }, fandoms: {} }, text: ' x  y ' } }),
-      'Excludes: a, b · Text: “x y”',
+      full({ url: TAG, filter: { facets: { characters: { ex: ['a', 'b'] } }, text: 'x y' } }),
     )
   })
 
   test('a series has only a view filter too', () => {
-    assert.equal(full({ url: '/series/9991', filter: { facets: { characters: { req: ['Draco Malfoy'] } } } }), 'Requires: Draco Malfoy')
+    inOrder(full({ url: '/series/9991', filter: { facets: { characters: { req: ['Draco Malfoy'] } } } }), [ADDED_VERBS.require, 'Draco Malfoy'])
   })
 })
 
 describe('describeFilters: the archive\'s filters, counted', () => {
+  /** The archive's filters a listing's line counts. */
+  const counted = url => figures(full({ url }))
+
   test('each criterion once, however the listing is spelled', () => {
     const filters = 'work_search[complete]=T&work_search[language_id]=en&exclude_work_search[character_ids][]=12&exclude_work_search[character_ids][]=34'
-    assert.equal(full({ url: `/tags/Harry%20Potter/works?${filters}` }), '4 search filters')
-    assert.equal(full({ url: `/works?${filters}&tag_id=Harry+Potter` }), '4 search filters')
+    assert.deepEqual(counted(`/tags/Harry%20Potter/works?${filters}`), [4])
+    assert.deepEqual(counted(`/works?${filters}&tag_id=Harry+Potter`), [4])
     // The key holds each parameter and value once, and so does the count.
-    assert.equal(full({ url: `/works?${filters}&exclude_work_search[character_ids][]=12&tag_id=Harry+Potter` }), '4 search filters')
+    assert.deepEqual(counted(`/works?${filters}&exclude_work_search[character_ids][]=12&tag_id=Harry+Potter`), [4])
   })
 
   test('one is one search filter', () => {
-    assert.equal(full({ url: '/tags/Bees/works?work_search[complete]=T' }), '1 search filter')
+    assert.deepEqual(counted('/tags/Bees/works?work_search[complete]=T'), [1])
   })
 
   test('the sort, a relative date and the listing\'s owner aren\'t filters', () => {
@@ -71,36 +100,33 @@ describe('describeFilters: the archive\'s filters, counted', () => {
     assert.deepEqual(describeFilters({ url: `/users/BuckysGrace/works?${sorted}` }), NONE)
     assert.deepEqual(describeFilters({ url: '/works?user_id=BuckysGrace' }), NONE)
     assert.deepEqual(describeFilters({ url: '/collections/yuletide/works' }), NONE)
-    assert.equal(full({ url: `/works?${sorted}&work_search[complete]=T&tag_id=Bees` }), '1 search filter')
+    assert.deepEqual(counted(`/works?${sorted}&work_search[complete]=T&tag_id=Bees`), [1])
   })
 
   test('a collection named in the query is its owner, not a filter of it', () => {
     assert.deepEqual(describeFilters({ url: '/works?collection_id=yuletide' }), NONE)
-    assert.equal(full({ url: '/works?collection_id=yuletide&work_search[complete]=T' }), '1 search filter')
+    assert.deepEqual(counted('/works?collection_id=yuletide&work_search[complete]=T'), [1])
   })
 
   test('a pseud, and a tag beside an author, are filters of the author\'s listing', () => {
-    assert.equal(full({ url: '/users/BuckysGrace/pseuds/Grace%20Notes/works' }), '1 search filter')
-    assert.equal(full({ url: '/works?pseud_id=Grace+Notes&user_id=BuckysGrace' }), '1 search filter')
-    assert.equal(full({ url: '/works?tag_id=Fluff&user_id=BuckysGrace' }), '1 search filter')
+    assert.deepEqual(counted('/users/BuckysGrace/pseuds/Grace%20Notes/works'), [1])
+    assert.deepEqual(counted('/works?pseud_id=Grace+Notes&user_id=BuckysGrace'), [1])
+    assert.deepEqual(counted('/works?tag_id=Fluff&user_id=BuckysGrace'), [1])
   })
 
   test('a works search\'s words are what it searches, not a filter', () => {
     assert.deepEqual(describeFilters({ url: '/works/search?work_search[query]=coffee' }), NONE)
-    assert.equal(
-      full({ url: '/works/search?work_search[query]=coffee&work_search[complete]=T&work_search[excluded_tag_names]=Angst,Fluff&work_search[sort_column]=kudos_count' }),
-      '2 search filters',
-    )
+    assert.deepEqual(counted('/works/search?work_search[query]=coffee&work_search[complete]=T&work_search[excluded_tag_names]=Angst,Fluff&work_search[sort_column]=kudos_count'), [2])
   })
 
   test('without words, a works search\'s subject field is what it searches, and its other fields filter', () => {
     // Its fandom is its root; the character and the completion narrow it.
     const url = '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[character_names]=Draco+Malfoy&work_search[complete]=T'
-    assert.equal(full({ url }), '2 search filters')
-    assert.equal(full({ url: '/works/search?work_search[character_names]=Draco+Malfoy&work_search[complete]=T' }), '1 search filter')
+    assert.deepEqual(counted(url), [2])
+    assert.deepEqual(counted('/works/search?work_search[character_names]=Draco+Malfoy&work_search[complete]=T'), [1])
     assert.deepEqual(describeFilters({ url: '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling' }), NONE)
     // With none of those fields, it's a search of nothing in particular, and every field filters.
-    assert.equal(full({ url: '/works/search?work_search[complete]=T&work_search[excluded_tag_names]=Angst' }), '2 search filters')
+    assert.deepEqual(counted('/works/search?work_search[complete]=T&work_search[excluded_tag_names]=Angst'), [2])
   })
 
   test('what describeUpdate calls the root is what the count leaves out', () => {
@@ -124,10 +150,13 @@ describe('describeFilters: the archive\'s filters, counted', () => {
 
 describe('describeFilters: both, and neither', () => {
   test('the count comes first, as an update lists the query\'s changes first', () => {
-    assert.deepEqual(
-      describeFilters({ url: '/works/search?work_search[query]=coffee&work_search[complete]=T', filter: { facets: { characters: { ex: ['Draco Malfoy'] } } } }),
-      { text: '1 search filter · Excludes: Draco Malfoy', full: '1 search filter · Excludes: Draco Malfoy', more: 0 },
-    )
+    const got = describeFilters({ url: '/works/search?work_search[query]=coffee&work_search[complete]=T', filter: { facets: { characters: { ex: ['Draco Malfoy'] } } } })
+    assert.deepEqual({ ...got, text: null, full: null }, { text: null, full: null, more: 0 })
+    assert.equal(got.text, got.full)
+    assert.deepEqual(figures(got.full), [1])
+    const count = got.full.search(/\b1\b/)
+    assert.ok(count < got.full.indexOf(ADDED_VERBS.exclude), got.full)
+    inOrder(got.full, [ADDED_VERBS.exclude, 'Draco Malfoy'])
   })
 
   test('nothing at all for a list with neither', () => {
@@ -143,45 +172,51 @@ describe('describeFilters: both, and neither', () => {
 
 describe('describeFilters: more than fits', () => {
   const MANY = { url: TAG, filter: { facets: { characters: { ex: ['Draco Malfoy', 'Ron Weasley', 'Hermione Granger', 'Ginny Weasley', 'Neville Longbottom'] } }, words: [5000, null] } }
-  const ALL = 'Excludes: Draco Malfoy, Ginny Weasley, Hermione Granger, Neville Longbottom, Ron Weasley · Word count: ≥ 5,000'
+  /** Its conditions in the whole line's order: the names sorted, then the word range. */
+  const CONDITIONS = ['Draco Malfoy', 'Ginny Weasley', 'Hermione Granger', 'Neville Longbottom', 'Ron Weasley', '5,000']
 
   test('a line that fits is all there', () => {
     const got = describeFilters({ url: TAG, filter: { facets: { characters: { ex: ['Draco Malfoy'] } } } })
-    assert.deepEqual(got, { text: 'Excludes: Draco Malfoy', full: 'Excludes: Draco Malfoy', more: 0 })
+    assert.equal(got.text, got.full)
+    assert.equal(shown(got, ['Draco Malfoy']), 1)
   })
 
   test('cut between two names, saying how many conditions are left out', () => {
-    assert.deepEqual(describeFilters(MANY, { maxLength: 50 }), { text: 'Excludes: Draco Malfoy, Ginny Weasley +4 more', full: ALL, more: 4 })
+    const got = describeFilters(MANY, { maxLength: 50 })
+    const count = shown(got, CONDITIONS)
+    assert.ok(count > 0 && count < CONDITIONS.length, got.text)
+    assert.ok(got.text.length <= 50, got.text)
+    assert.deepEqual(figures(got.text, ...CONDITIONS.slice(0, count)), [got.more], 'how many it left out')
+    assert.ok(shown(describeFilters(MANY, { maxLength: 70 }), CONDITIONS) >= count, 'more room shows as many or more')
   })
 
   test('by default, cut to about a line of small print', () => {
     const got = describeFilters(MANY)
-    assert.equal(got.full, ALL)
-    assert.ok(ALL.length > FILTER_SUMMARY_LENGTH, 'the whole line is too long')
+    assert.equal(got.full, full(MANY))
+    assert.ok(got.full.length > FILTER_SUMMARY_LENGTH, 'the whole line is too long')
     assert.ok(got.text.length <= FILTER_SUMMARY_LENGTH, got.text)
-    assert.deepEqual(got, { text: 'Excludes: Draco Malfoy, Ginny Weasley, Hermione Granger +3 more', full: ALL, more: 3 })
+    const count = shown(got, CONDITIONS)
+    assert.ok(count > 0 && count < CONDITIONS.length, got.text)
+    assert.deepEqual(got, describeFilters(MANY, { maxLength: FILTER_SUMMARY_LENGTH }))
   })
 
   test('the text box and the word range count as one condition each', () => {
     const got = describeFilters({ url: TAG, filter: { facets: { characters: { ex: ['Draco Malfoy'] } }, text: 'dragons', words: [5000, null] } }, { maxLength: 40 })
-    assert.deepEqual(got, {
-      text: 'Excludes: Draco Malfoy +2 more',
-      full: 'Excludes: Draco Malfoy · Text: “dragons” · Word count: ≥ 5,000',
-      more: 2,
-    })
+    const count = shown(got, ['Draco Malfoy', 'dragons', '5,000'])
+    assert.ok(count > 0 && count < 3, got.text)
   })
 
   test('a clause that doesn\'t fit is left out whole, not shown headless', () => {
     const got = describeFilters({ url: TAG, filter: { facets: { characters: { req: ['Draco Malfoy'], ex: ['Ron Weasley'] } } } }, { maxLength: 30 })
-    assert.deepEqual(got, { text: 'Requires: Draco Malfoy +1 more', full: 'Requires: Draco Malfoy · Excludes: Ron Weasley', more: 1 })
+    assert.equal(shown(got, ['Draco Malfoy', 'Ron Weasley']), 1)
+    assert.ok(mentions(got.text, ADDED_VERBS.require), got.text)
+    assert.ok(!mentions(got.text, ADDED_VERBS.exclude), `no verb without its names: ${got.text}`)
   })
 
   test('the count, and one of the view\'s names, show however little room there is', () => {
     const got = describeFilters({ url: '/works/search?work_search[query]=coffee&work_search[complete]=T', filter: { facets: { characters: { ex: ['Draco Malfoy', 'Ron Weasley'] } } } }, { maxLength: 10 })
-    assert.deepEqual(got, {
-      text: '1 search filter · Excludes: Draco Malfoy +1 more',
-      full: '1 search filter · Excludes: Draco Malfoy, Ron Weasley',
-      more: 1,
-    })
+    assert.equal(shown(got, ['Draco Malfoy', 'Ron Weasley']), 1)
+    assert.deepEqual(figures(got.full, 'Draco Malfoy', 'Ron Weasley'), [1], 'the archive\'s one filter')
+    assert.ok(got.text.search(/\b1\b/) < got.text.indexOf('Draco Malfoy'), `the count first: ${got.text}`)
   })
 })

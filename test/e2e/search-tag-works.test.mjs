@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { figures } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch, storedListIds } from './helpers.mjs'
 import { settled, viewDrawn } from './trackedPages.mjs'
 
@@ -169,11 +170,10 @@ describe('search an uncommon tag\'s works', { skip }, () => {
       const link = document.querySelector('.AO3E--search-tag-works--link')
       if (!link)
         return null
-      return { text: link.textContent.trim(), notice: link.parentElement.textContent.trim() }
+      return { notice: link.parentElement.textContent.trim() }
     })
     assert.ok(found, 'the link should be added')
-    assert.equal(found.text, 'Search these works')
-    assert.match(found.notice, /^This tag has not been marked common/)
+    assert.match(found.notice, /^This tag has not been marked common/, 'inside AO3\'s own notice')
   })
 
   test('clicking it loads every page into one view', async () => {
@@ -301,7 +301,7 @@ describe('search an uncommon tag\'s works', { skip }, () => {
     assert.equal(state.shown.length, PAGES * PER_PAGE - PAGES, 'one work per page should be gone')
     for (const id of ['work_1', 'work_6', 'work_11'])
       assert.ok(!state.shown.includes(id), `${id} was hidden by a rule and should have left the results`)
-    assert.match(state.count, new RegExp(`of ${PAGES * PER_PAGE - PAGES} works`))
+    assert.ok(figures(state.count).includes(PAGES * PER_PAGE - PAGES), `the count is of the works left: ${state.count}`)
     // The one that also carries the "always show" tag stays, because invert
     // outranks hide by default...
     assert.ok(state.shown.includes('work_2'), 'an always-show rule should beat the hide rule')

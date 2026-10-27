@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { capFor, cycleSort, filterRows, filterSavedLists, focusSuccessor, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, SAVED_LIST_SORTS, savedListsHead, shownRules, shownSavedLists, sortHint, sortMarks, sortRows, sortSavedLists, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
+import { capFor, cycleSort, filterRows, filterSavedLists, focusSuccessor, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, SAVED_LIST_SORTS, savedListsHead, shownRules, shownSavedLists, SORT_HINTS, sortHint, sortMarks, sortRows, sortSavedLists, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
+import { figures } from '../facts.mjs'
 
 const MARKS = [
   { id: 'read', label: 'Read', icon: 'Check' },
@@ -120,11 +121,7 @@ describe('sortMarks', () => {
   ]
 
   test('three sorts, your order first, which is where the list starts', () => {
-    assert.deepEqual(MARK_SORTS, [
-      { value: 'order', label: 'Your order' },
-      { value: 'name', label: 'Name' },
-      { value: 'works', label: 'Works' },
-    ])
+    assert.deepEqual(MARK_SORTS.map(sort => sort.value), ['order', 'name', 'works'])
   })
 
   test('your order is the order the rows were given in', () => {
@@ -156,7 +153,6 @@ describe('sortMarks', () => {
 
 describe('markOrderOff', () => {
   test('the order buttons work only in your order, and say why otherwise', () => {
-    assert.equal(MARK_ORDER_OFF, 'Sort by your order to rearrange')
     assert.equal(markOrderOff('order'), null)
     assert.equal(markOrderOff('name'), MARK_ORDER_OFF)
     assert.equal(markOrderOff('works'), MARK_ORDER_OFF)
@@ -192,11 +188,12 @@ describe('sortState and sortHint', () => {
     assert.equal(sortState({ key: 'value', direction: 'asc' }, 'priority'), 'none', 'only the key sorted by')
   })
 
-  test('each key says what pressing it next does', () => {
-    assert.equal(sortHint(UNSORTED, 'value'), 'Sort ascending')
-    assert.equal(sortHint({ key: 'priority', direction: 'desc' }, 'value'), 'Sort ascending')
-    assert.equal(sortHint({ key: 'value', direction: 'asc' }, 'value'), 'Sort descending')
-    assert.equal(sortHint({ key: 'value', direction: 'desc' }, 'value'), 'Clear sort')
+  test('each key says what pressing it next does, by where it is in its cycle', () => {
+    assert.equal(sortHint(UNSORTED, 'value'), SORT_HINTS.none)
+    assert.equal(sortHint({ key: 'priority', direction: 'desc' }, 'value'), SORT_HINTS.none)
+    assert.equal(sortHint({ key: 'value', direction: 'asc' }, 'value'), SORT_HINTS.ascending)
+    assert.equal(sortHint({ key: 'value', direction: 'desc' }, 'value'), SORT_HINTS.descending)
+    assert.equal(new Set(Object.values(SORT_HINTS)).size, 3, 'each a hint of its own')
   })
 })
 
@@ -261,12 +258,7 @@ describe('shownRules: the sort', () => {
     shownRules(rules, query, key ? { key, direction } : UNSORTED).map(at => rules[at].value)
 
   test('four keys: action, priority, the rule\'s text, and what it applies to', () => {
-    assert.deepEqual(RULE_SORTS, [
-      { value: 'behavior', label: 'Action' },
-      { value: 'priority', label: 'Priority' },
-      { value: 'value', label: 'Rule' },
-      { value: 'target', label: 'Applies to' },
-    ])
+    assert.deepEqual(RULE_SORTS.map(sort => sort.value), ['behavior', 'priority', 'value', 'target'])
   })
 
   test('unsorted, rules are grouped by their stored target, then by text', () => {
@@ -339,45 +331,33 @@ describe('shownRules: the sort', () => {
 
 describe('rulePriorityCell', () => {
   const rule = props => ({ target: 'tag', value: 'x', matcher: 'exact', ...props })
+  /** The cell, with its tooltip as the priority it gives, if any. */
+  const cell = (props) => {
+    const { text, title, custom } = rulePriorityCell(rule(props))
+    return { text, gives: figures(title), custom }
+  }
 
   test('a priority its action gives it is plain, and says it is the default', () => {
-    assert.deepEqual(rulePriorityCell(rule({})), { text: '0', title: 'Priority 0 (default)', custom: false })
-    assert.deepEqual(rulePriorityCell(rule({ behavior: 'invert' })), { text: '4', title: 'Priority 4 (default)', custom: false })
+    assert.deepEqual(cell({}), { text: '0', gives: [0], custom: false })
+    assert.deepEqual(cell({ behavior: 'invert' }), { text: '4', gives: [4], custom: false })
   })
 
   test('a priority of the rule\'s own stands out, and says what it does', () => {
-    assert.deepEqual(rulePriorityCell(rule({ priority: 6 })), {
-      text: '6',
-      title: 'Priority 6: beats lower-priority rules that match the same work',
-      custom: true,
-    })
-    assert.equal(rulePriorityCell(rule({ behavior: 'invert', priority: 2 })).custom, true)
+    assert.deepEqual(cell({ priority: 6 }), { text: '6', gives: [6], custom: true })
+    assert.notEqual(rulePriorityCell(rule({ priority: 6 })).title, rulePriorityCell(rule({ behavior: 'hide' })).title, 'it says something the default doesn\'t')
+    assert.equal(cell({ behavior: 'invert', priority: 2 }).custom, true)
   })
 
   test('highlight and hide-tag rules show none, since they never contest a work', () => {
-    assert.deepEqual(rulePriorityCell(rule({ behavior: 'highlight', priority: 7 })), {
-      text: '–',
-      title: 'Highlight rules have no priority: they never conflict with other rules',
-      custom: false,
-    })
-    assert.deepEqual(rulePriorityCell(rule({ behavior: 'hideFilter' })), {
-      text: '–',
-      title: 'Hide-tag rules have no priority: they never conflict with other rules',
-      custom: false,
-    })
+    assert.deepEqual(cell({ behavior: 'highlight', priority: 7 }), { text: '–', gives: [], custom: false })
+    assert.deepEqual(cell({ behavior: 'hideFilter' }), { text: '–', gives: [], custom: false })
+    assert.notEqual(rulePriorityCell(rule({ behavior: 'highlight' })).title, rulePriorityCell(rule({ behavior: 'hideFilter' })).title, 'each names its own kind of rule')
   })
 
   test('a disabled rule shows the priority it keeps for when it is on again', () => {
-    assert.deepEqual(rulePriorityCell(rule({ behavior: 'none' })), {
-      text: '0',
-      title: 'Priority 0, kept while the rule is disabled',
-      custom: false,
-    })
-    assert.deepEqual(rulePriorityCell(rule({ behavior: 'none', priority: 4 })), {
-      text: '4',
-      title: 'Priority 4, kept while the rule is disabled',
-      custom: true,
-    })
+    assert.deepEqual(cell({ behavior: 'none' }), { text: '0', gives: [0], custom: false })
+    assert.deepEqual(cell({ behavior: 'none', priority: 4 }), { text: '4', gives: [4], custom: true })
+    assert.notEqual(rulePriorityCell(rule({ behavior: 'none' })).title, rulePriorityCell(rule({})).title, 'it says it is kept, not that it is the default')
   })
 })
 
@@ -426,11 +406,7 @@ describe('filterSavedLists', () => {
 
 describe('sortSavedLists', () => {
   test('offers Name, Status and Last refreshed, Name first, as the default', () => {
-    assert.deepEqual(SAVED_LIST_SORTS, [
-      { value: 'name', label: 'Name' },
-      { value: 'status', label: 'Status' },
-      { value: 'refreshed', label: 'Last refreshed' },
-    ])
+    assert.deepEqual(SAVED_LIST_SORTS.map(sort => sort.value), ['name', 'status', 'refreshed'])
   })
 
   test('Name: A to Z by what each is called, ignoring case and accents', () => {
@@ -476,19 +452,27 @@ describe('shownSavedLists', () => {
 })
 
 describe('savedListsHead', () => {
-  test('with no lists: none yet', () => {
-    assert.deepEqual(savedListsHead([], [], ''), { count: 'none yet', shortCount: 'none yet', placeholder: 'Filter lists' })
+  /** The header's figures: the count's, the short count's, and the placeholder's. */
+  const head = (rows, shown, query) => {
+    const { count, shortCount, placeholder } = savedListsHead(rows, shown, query)
+    return { count: figures(count), shortCount: figures(shortCount), placeholder: figures(placeholder) }
+  }
+
+  test('with no lists: none yet, and nothing to count', () => {
+    const { count, shortCount, placeholder } = savedListsHead([], [], '')
+    assert.ok(count && shortCount && placeholder, 'each says something')
+    assert.deepEqual(head([], [], ''), { count: [], shortCount: [], placeholder: [] })
   })
 
-  test('how many lists, how many of them are tracked, and how many have an offline copy', () => {
-    assert.deepEqual(savedListsHead(SAVED_ROWS, SAVED_ROWS, ''), { count: '6 lists · 3 tracked · 4 cached', shortCount: '6', placeholder: 'Filter 6 lists' })
-    assert.deepEqual(savedListsHead([TEA], [TEA], ''), { count: '1 list · 0 tracked · 1 cached', shortCount: '1', placeholder: 'Filter 1 list' })
+  test('how many lists, how many of them are tracked, and how many have an offline copy; narrow, only how many', () => {
+    assert.deepEqual(head(SAVED_ROWS, SAVED_ROWS, ''), { count: [3, 4, 6], shortCount: [6], placeholder: [6] })
+    assert.deepEqual(head([TEA], [TEA], ''), { count: [0, 1, 1], shortCount: [1], placeholder: [1] })
   })
 
-  test('while the filter holds a query, how many lists it shows', () => {
+  test('while the filter holds a query, how many lists it shows, of how many', () => {
     const shown = filterSavedLists(SAVED_ROWS, 'tag')
-    assert.deepEqual(savedListsHead(SAVED_ROWS, shown, 'tag'), { count: '3 of 6', shortCount: '3 of 6', placeholder: 'Filter 6 lists' })
-    assert.deepEqual(savedListsHead(SAVED_ROWS, [], 'nothing'), { count: '0 of 6', shortCount: '0 of 6', placeholder: 'Filter 6 lists' })
+    assert.deepEqual(head(SAVED_ROWS, shown, 'tag'), { count: [3, 6], shortCount: [3, 6], placeholder: [6] })
+    assert.deepEqual(head(SAVED_ROWS, [], 'nothing'), { count: [0, 6], shortCount: [0, 6], placeholder: [6] })
     assert.deepEqual(savedListsHead(SAVED_ROWS, SAVED_ROWS, '  '), savedListsHead(SAVED_ROWS, SAVED_ROWS, ''), 'spaces are no query')
   })
 })

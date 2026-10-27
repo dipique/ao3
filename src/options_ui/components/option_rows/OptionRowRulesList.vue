@@ -148,6 +148,7 @@ function add(event: MouseEvent) {
           class="icon-btn"
           :aria-label="`Edit rule “${rule.value}”`"
           title="Edit rule"
+          data-action="edit"
           @click="context.edit?.(rule)"
         >
           <span class="i-tabler-pencil" text="[14px]" aria-hidden="true" />
@@ -157,6 +158,7 @@ function add(event: MouseEvent) {
           class="icon-btn"
           :aria-label="`Remove rule “${rule.value}”`"
           title="Remove rule"
+          data-action="remove"
           @click="context.remove?.(rule)"
         >
           <span class="i-tabler-trash" text="[14px]" aria-hidden="true" />

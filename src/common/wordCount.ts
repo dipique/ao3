@@ -59,6 +59,20 @@ export function parseBoundInput(text: string): number | null | undefined {
   return Number.isSafeInteger(n) ? n : undefined
 }
 
+/** Why a bound the editor was given can't be saved: it isn't a whole number of 0 or more ({@link parseBoundInput}). */
+export const NOT_A_WORD_COUNT = 'Word counts must be whole numbers of 0 or more.'
+
+/** Why a range in the editor's list can't be saved: another is the same ({@link duplicateOf}). */
+export const RANGE_REPEATED = 'This range is already in the list.'
+
+/** Each reason {@link rangeError} gives. */
+export const RANGE_ERRORS = {
+  lower: 'The lower bound must be a whole number of 0 or more.',
+  upper: 'The upper bound must be a whole number of 0 or more.',
+  empty: 'Set at least one of the two bounds.',
+  inverted: 'The upper bound must not be below the lower bound.',
+} as const
+
 /**
  * Why this range can't be saved, or null when it's fine. The two rules asked
  * for: no negative numbers, and `to - from` may not be below zero. Both bounds
@@ -67,13 +81,13 @@ export function parseBoundInput(text: string): number | null | undefined {
 export function rangeError(range: WordCountRange): string | null {
   const { from, to } = range
   if (from !== null && (!Number.isInteger(from) || from < 0))
-    return 'The lower bound must be a whole number of 0 or more.'
+    return RANGE_ERRORS.lower
   if (to !== null && (!Number.isInteger(to) || to < 0))
-    return 'The upper bound must be a whole number of 0 or more.'
+    return RANGE_ERRORS.upper
   if (from === null && to === null)
-    return 'Set at least one of the two bounds.'
+    return RANGE_ERRORS.empty
   if (from !== null && to !== null && to - from < 0)
-    return 'The upper bound must not be below the lower bound.'
+    return RANGE_ERRORS.inverted
   return null
 }
 

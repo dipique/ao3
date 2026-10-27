@@ -37,6 +37,12 @@ import { markIsLocal, markTracksProgress, setMark, setMarkGroup, setMarkProgress
  * what commits them.
  */
 
+/**
+ * Why a work marked read here isn't asked off Marked for Later: a scrape since
+ * the mark no longer lists it.
+ */
+export const OFF_THE_LIST = 'marked here, but it is no longer on your Marked for Later list'
+
 /** One op that could not be applied, and what to tell the reader about it. */
 export interface ReplaySkip {
   workId: string
@@ -112,7 +118,7 @@ export function replayChanges(ops: ChangeOp[], ctx: ReplayContext): ReplayResult
     // on nothing, so only it is weighed against what the list last said.
     if (op.op === 'markAsRead' && op.payload.on) {
       if (alreadyOffTheList(ctx, op))
-        result.skipped.push({ workId: op.workId, reason: 'marked here, but it is no longer on your Marked for Later list' })
+        result.skipped.push({ workId: op.workId, reason: OFF_THE_LIST })
       else
         result.archive.push({ workId: op.workId, opId: op.id })
     }

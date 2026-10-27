@@ -3,15 +3,12 @@ import { after, before, describe, test } from 'node:test'
 
 import { claimRefresh, REFRESH_CLAIM_TTL_MS } from '../../src/content_script/searchView/listRefresh.ts'
 import { ensureBuilt, findChrome } from './helpers.mjs'
-import { archiveTab, KEY, liveTitles, loadToRead, openToRead, runToRead, shownTitles, storedClaim, storedSeed, toReadPage, updatingNote, updatingStop } from './markedForLater.mjs'
+import { archiveTab, KEY, liveTitles, loadToRead, openToRead, RETRY_AFTER, runToRead, shownTitles, showsProgress, storedClaim, storedSeed, toReadPage, updatingNote, updatingStop, waitsOutRefusal } from './markedForLater.mjs'
 import { until } from './optionsPage.mjs'
 import { launch, linkWrites, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
-
-/** What AO3 says to wait, in seconds: long enough that the test sees the wait, and never sits it out. */
-const RETRY_AFTER = 90
 
 /**
  * The reader's Marked for Later list open in two tabs, which share one store as
@@ -68,10 +65,10 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
     try {
       archive.holding = true
       await runToRead(a)
-      await until('tab A to be refreshing', async () => /^Updating… Loaded \d of 3 pages$/.test(await updatingNote(a) ?? ''))
+      await until('tab A to be refreshing', async () => showsProgress(await updatingNote(a)))
 
       await runToRead(b)
-      await until('tab B to show tab A’s refresh', async () => /^Updating… Loaded \d of 3 pages$/.test(await updatingNote(b) ?? ''))
+      await until('tab B to show tab A’s refresh', async () => showsProgress(await updatingNote(b)))
       assert.ok(await updatingStop(b), 'with a Stop')
       assert.deepEqual(await shownTitles(b), ['Stored work 1', 'Stored work 2'], 'over the stored copy')
 
@@ -99,10 +96,9 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
       archive.titles = 'Newer'
       archive.refusing = true
       await a.$eval('.AO3E--search-view--refresh', button => button.click())
-      const waiting = /^Updating… AO3 asked us to slow down — trying again in 1:[23]\d$/
-      await until('tab B to show the pause, counting down', async () => waiting.test(await updatingNote(b) ?? ''))
+      await until('tab B to show the pause, counting down', async () => waitsOutRefusal(await updatingNote(b)))
       const first = await updatingNote(b)
-      await until('it counts down', async () => waiting.test(await updatingNote(b) ?? '') && await updatingNote(b) !== first)
+      await until('it counts down', async () => waitsOutRefusal(await updatingNote(b)) && await updatingNote(b) !== first)
 
       await (await updatingStop(b)).evaluate(button => button.click())
       await until('tab A to stop', async () => await updatingNote(a) === null)
@@ -122,9 +118,9 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
     try {
       archive.holding = true
       await runToRead(a)
-      await until('tab A to be refreshing', async () => (await updatingNote(a) ?? '').startsWith('Updating…'))
+      await until('tab A to be refreshing', async () => await updatingNote(a) !== null)
       await runToRead(b)
-      await until('tab B to follow it', async () => (await updatingNote(b) ?? '').startsWith('Updating…'))
+      await until('tab B to follow it', async () => await updatingNote(b) !== null)
 
       await (await updatingStop(a)).evaluate(button => button.click())
       await until('tab B’s note to go', async () => await updatingNote(b) === null)
@@ -144,9 +140,9 @@ describe('Marked for Later: two tabs share one refresh', { skip }, () => {
     try {
       archive.holding = true
       await runToRead(a)
-      await until('tab A to be refreshing', async () => (await updatingNote(a) ?? '').startsWith('Updating…'))
+      await until('tab A to be refreshing', async () => await updatingNote(a) !== null)
       await runToRead(b)
-      await until('tab B to follow it', async () => (await updatingNote(b) ?? '').startsWith('Updating…'))
+      await until('tab B to follow it', async () => await updatingNote(b) !== null)
 
       // The view switched off in tab A alone: the re-run takes its view down
       // mid-refresh and nothing puts it back, so the refresh stops with it.

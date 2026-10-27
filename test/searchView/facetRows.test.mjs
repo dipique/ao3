@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { FACET_ROW_CAP, groupCountText, layoutFacetRows, leftOutNote, nameRanks } from '../../src/content_script/searchView/facetRows.ts'
+import { figures, mentions } from '../facts.mjs'
 
 const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
 
@@ -206,11 +207,10 @@ describe('leftOutNote', () => {
     assert.equal(leftOutNote({ shown: 3, matching: 3, leftOut: 0 }), null)
   })
 
-  test('says how many show of how many, numbers grouped, and where the rest are', () => {
-    assert.equal(
-      leftOutNote({ shown: FACET_ROW_CAP, matching: 4012, leftOut: 4012 - FACET_ROW_CAP }),
-      `Showing ${FACET_ROW_CAP.toLocaleString()} of ${(4012).toLocaleString()} — type in the filter box to find the rest`,
-    )
+  test('says how many show of how many, numbers grouped', () => {
+    const note = leftOutNote({ shown: FACET_ROW_CAP, matching: 4012, leftOut: 4012 - FACET_ROW_CAP })
+    assert.ok(mentions(note, groupCountText(4012)), note)
+    assert.deepEqual(figures(note), [FACET_ROW_CAP, 4012])
   })
 })
 
@@ -218,7 +218,7 @@ describe('groupCountText', () => {
   test('groups the digits the way the left-out line does', () => {
     assert.equal(groupCountText(4012), (4012).toLocaleString())
     const note = leftOutNote({ shown: FACET_ROW_CAP, matching: 4012, leftOut: 4012 - FACET_ROW_CAP })
-    assert.ok(note.includes(` of ${groupCountText(4012)} `), note)
+    assert.ok(mentions(note, groupCountText(4012)), note)
   })
 
   test('leaves a small count as it is', () => {

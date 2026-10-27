@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { WordCountRange } from '#common'
 
-import { duplicateOf, formatWordCountRange, parseBoundInput, rangeError } from '#common'
+import { duplicateOf, formatWordCountRange, NOT_A_WORD_COUNT, parseBoundInput, RANGE_REPEATED, rangeError } from '#common'
 
 const { enabled, ranges } = useOption('wordCountToolbar')
 
@@ -40,7 +40,7 @@ const parsed = computed(() => drafts.value.map(parseDraft))
 
 const errors = computed(() => parsed.value.map((range, index) => {
   if (!range)
-    return 'Word counts must be whole numbers of 0 or more.'
+    return NOT_A_WORD_COUNT
   const error = rangeError(range)
   if (error)
     return error
@@ -49,7 +49,7 @@ const errors = computed(() => parsed.value.map((range, index) => {
   // Unparseable rows get a sentinel no real range can equal, so they never
   // read as a duplicate of (or for) a row that does parse.
   const comparable = parsed.value.map(r => r ?? { from: -1, to: -1 })
-  return duplicateOf(comparable, index) === -1 ? '' : 'This range is already in the list.'
+  return duplicateOf(comparable, index) === -1 ? '' : RANGE_REPEATED
 }))
 
 const valid = computed(() => errors.value.every(error => !error))
@@ -158,6 +158,7 @@ function remove(index: number) {
               class="icon-btn"
               aria-label="Remove range"
               title="Remove range"
+              data-action="remove"
               @click="remove(index)"
             >
               <span class="i-tabler-trash" text="sm" aria-hidden="true" />

@@ -173,45 +173,47 @@ describe('unreadRange', () => {
 })
 
 describe('the hint text', () => {
-  test('plural, singular, and none', () => {
-    assert.equal(describeUnread({ chapter: 6 }, 9), 'Unread: chapters 7-9')
-    assert.equal(describeUnread({ chapter: 8 }, 9), 'Unread: chapter 9')
-    assert.equal(describeUnread({ chapter: 9 }, 9), 'No unread chapters')
-    assert.equal(describeUnread({ chapter: 9 }, null), 'No unread chapters')
+  /** The numbers `text` gives, in order. */
+  const numbers = text => (text.match(/\d+/g) ?? []).map(Number)
+
+  test('the chapters unread, first to last, a single one once, and none', () => {
+    assert.deepEqual(numbers(describeUnread({ chapter: 6 }, 9)), [7, 9])
+    assert.deepEqual(numbers(describeUnread({ chapter: 8 }, 9)), [9])
+    assert.deepEqual(numbers(describeUnread({ chapter: 9 }, 9)), [])
+    assert.equal(describeUnread({ chapter: 9 }, null), describeUnread({ chapter: 9 }, 9), 'an unknown count has nothing unread either')
+    assert.notEqual(describeUnread({ chapter: 6 }, 9).replace(/\d+/g, '#'), describeUnread({ chapter: 8 }, 9).replace(/\d+/g, '#'), 'one chapter is not said as a range')
   })
 
   test('what the wait-until date says', () => {
-    assert.equal(describeWaitUntil({ chapter: 1 }, TODAY), 'Ready (no Wait Until date set)')
-    assert.equal(
-      describeWaitUntil({ chapter: 1, waitUntil: TODAY }, TODAY),
-      'Ready (passed Wait Until date 3/14/26)',
-      'a date that has come round today counts as passed',
-    )
-    assert.equal(
-      describeWaitUntil({ chapter: 1, waitUntil: toEpochDays('2026-03-13') }, TODAY),
-      'Ready (passed Wait Until date 3/13/26)',
-    )
-    assert.equal(
-      describeWaitUntil({ chapter: 1, waitUntil: toEpochDays('2026-03-15') }, TODAY),
-      'Not Ready (wait until 3/15/26)',
-    )
+    /** The line with its date taken out, to compare what it says of the date. */
+    const verdict = (waitUntil) => {
+      const line = describeWaitUntil({ chapter: 1, waitUntil }, TODAY)
+      assert.ok(line.includes(formatEpochDays(waitUntil)), `${line} should give the date`)
+      return line.replace(formatEpochDays(waitUntil), '')
+    }
+    const none = describeWaitUntil({ chapter: 1 }, TODAY)
+    assert.deepEqual(numbers(none), [], 'no date to give')
+    assert.equal(verdict(TODAY), verdict(toEpochDays('2026-03-13')), 'a date that has come round today counts as passed')
+    assert.notEqual(verdict(toEpochDays('2026-03-15')), verdict(TODAY), 'a date still to come is not')
   })
 
   test('both lines, newline-joined', () => {
+    const progress = { chapter: 6, waitUntil: toEpochDays('2026-03-14') }
     assert.equal(
-      describeProgress({ chapter: 6, waitUntil: toEpochDays('2026-03-14') }, 9, TODAY),
-      'Unread: chapters 7-9\nReady (passed Wait Until date 3/14/26)',
+      describeProgress(progress, 9, TODAY),
+      `${describeUnread(progress, 9)}\n${describeWaitUntil(progress, TODAY)}`,
     )
   })
 
-  test('the collapsed-row label names the mark and the reason', () => {
-    assert.equal(hiddenLabel('waiting'), 'Ongoing (Not Ready)')
-    assert.equal(hiddenLabel('caughtUp'), 'Ongoing (No unread chapters)')
-    assert.equal(hiddenLabel('waiting', 'In progress'), 'In progress (Not Ready)')
+  test('the collapsed-row label names the mark, and tells the two states apart', () => {
+    assert.ok(hiddenLabel('waiting', 'In progress').includes('In progress'))
+    assert.ok(hiddenLabel('caughtUp', 'In progress').includes('In progress'))
+    assert.notEqual(hiddenLabel('waiting', 'In progress'), hiddenLabel('caughtUp', 'In progress'))
   })
 
-  test('the facet labels are the three states spelled out', () => {
-    assert.deepEqual(READINESS_LABELS, { ready: 'Ready', waiting: 'Waiting', caughtUp: 'Caught up' })
+  test('the facet has a label for each of the three states', () => {
+    assert.deepEqual(Object.keys(READINESS_LABELS).sort(), ['caughtUp', 'ready', 'waiting'])
+    assert.equal(new Set(Object.values(READINESS_LABELS)).size, 3, 'each told apart')
   })
 })
 

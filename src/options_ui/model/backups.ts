@@ -36,6 +36,12 @@ export interface DailyBackups {
   count: number
 }
 
+/** What the list says with no backups of when the next is taken: `daily` with daily backups on, `off` with them off, when none is. */
+export const NEXT_BACKUP = {
+  daily: 'One is saved automatically the first time you change a setting each day.',
+  off: 'Daily backups are off.',
+} as const
+
 /**
  * The list for `backups`, the index as the background lists it, or null until
  * it has answered. A kind this build doesn't know is pruned as an event backup
@@ -45,7 +51,7 @@ export function backupList(backups: readonly BackupSummary[] | null, daily: Dail
   if (!backups)
     return { count: '', rows: [], empty: { title: null, text: 'Loading…' } }
   if (!backups.length) {
-    const text = daily.enabled ? 'One is saved automatically the first time you change a setting each day.' : 'Daily backups are off.'
+    const text = daily.enabled ? NEXT_BACKUP.daily : NEXT_BACKUP.off
     return { count: 'none yet', rows: [], empty: { title: 'No backups yet', text } }
   }
   const rows = sortBackups(backups).map((backup): BackupRow => {

@@ -11,7 +11,7 @@ import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { addressOf, planRetitle, planStopTracking, planTrack, planTrackSearch } from '../../src/common/savedLists.ts'
 import { decode, MANIFEST_KEY, SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
 import { HELD_BACKUP_NOTE } from '../../src/common/syncMessages.ts'
-import { syncStatusView } from '../../src/options_ui/model/syncStatus.ts'
+import { syncStatusView, YOURS } from '../../src/options_ui/model/syncStatus.ts'
 import { createCloud, createDevice, createLegacyDevice, markedWorks, marksFixture, range, rulesFixture, textReplacementsFixture, trackedListsFixture } from './harness.mjs'
 
 /** The options the first sync build knew: everything but what came later. */
@@ -49,6 +49,14 @@ function decisionOn(pause) {
 
 /** What the answer `choice` says it does. */
 const consequence = (decision, choice) => decision.answers.find(answer => answer.choice === choice).consequence
+
+/** What accepting says of this browser's settings being backed up: `backedUp`, `failed`, or null for nothing. */
+function acceptSays(decision) {
+  const said = consequence(decision, 'accept')
+  if (said.includes(YOURS.backedUp))
+    return 'backedUp'
+  return said.includes(YOURS.failed) ? 'failed' : null
+}
 
 describe('sync scenarios', () => {
   test('a change in one browser reaches the other', async () => {
@@ -249,7 +257,7 @@ describe('sync scenarios', () => {
         assert.equal(desktop.options.rules.filters.length, 41, daily)
         const decision = decisionOn(desktop.meta.pause)
         assert.equal(decision.backup, null, daily)
-        assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with your synced settings. Yours aren\'t backed up: the backup couldn\'t be saved.', daily)
+        assert.equal(acceptSays(decision), 'failed', daily)
 
         assert.equal(await desktop.resolveHeld('accept'), true, daily)
         await cloud.run()
@@ -337,7 +345,7 @@ describe('sync scenarios', () => {
 
       const decision = decisionOn(desktop.meta.pause)
       assert.equal(decision.backup, HELD_BACKUP_NOTE)
-      assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with your synced settings. Yours are backed up.')
+      assert.equal(acceptSays(decision), 'backedUp')
     })
 
     test('a newer copy arriving while it asks is weighed afresh: asked over it, or settled once it no longer differs', async () => {
@@ -2141,7 +2149,7 @@ describe('sync scenarios', () => {
         assert.equal(laptop.options.rules.filters.length, 40, `nothing applied, ${daily}`)
         const decision = decisionOn(laptop.meta.pause)
         assert.equal(decision.backup, null, daily)
-        assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with the other browser\'s. Yours aren\'t backed up: the backup couldn\'t be saved.', daily)
+        assert.equal(acceptSays(decision), 'failed', daily)
 
         assert.equal(await laptop.resolveHeld('accept'), true, daily)
         await cloud.run()
@@ -2171,11 +2179,11 @@ describe('sync scenarios', () => {
       await laptop.setMeta({ pause: older })
       await laptop.edit({ wordsPerMinute: 999 })
       laptop.breakBackups()
-      assert.equal(consequence(decisionOn(older), 'accept'), 'Replaces this browser\'s settings with the other browser\'s.', 'precondition: it says nothing of a backup')
+      assert.equal(acceptSays(decisionOn(older)), null, 'precondition: it says nothing of a backup')
 
       assert.deepEqual(await laptop.answer('accept'), { resolved: false, refused: 'unbacked' })
       assert.deepEqual(laptop.meta.pause, { ...older, backupFailed: true })
-      assert.equal(consequence(decisionOn(laptop.meta.pause), 'accept'), 'Replaces this browser\'s settings with the other browser\'s. Yours aren\'t backed up: the backup couldn\'t be saved.')
+      assert.equal(acceptSays(decisionOn(laptop.meta.pause)), 'failed')
       assert.equal(await laptop.resolveHeld('accept'), true)
       await cloud.run()
       assert.equal(laptop.options.rules.filters.length, 1)
@@ -2196,7 +2204,7 @@ describe('sync scenarios', () => {
 
       const decision = decisionOn(laptop.meta.pause)
       assert.equal(decision.backup, HELD_BACKUP_NOTE)
-      assert.equal(consequence(decision, 'accept'), 'Replaces this browser\'s settings with the other browser\'s. Yours are backed up.')
+      assert.equal(acceptSays(decision), 'backedUp')
     })
 
     test('a newer update within bounds applies and clears the hold', async () => {

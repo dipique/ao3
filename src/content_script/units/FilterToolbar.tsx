@@ -397,7 +397,7 @@ export class FilterToolbar extends Unit {
     const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`} />
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
-      <button type="button" class={BUTTON_CLASS} aria-pressed="false">
+      <button type="button" class={BUTTON_CLASS} aria-pressed="false" data-ao3e-action="peek">
         {icon}
         {text}
       </button>
@@ -510,7 +510,7 @@ export class FilterToolbar extends Unit {
     const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiFindReplace /></span>
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
-      <button type="button" class={BUTTON_CLASS} aria-pressed="false">
+      <button type="button" class={BUTTON_CLASS} aria-pressed="false" data-ao3e-action="replace-tools">
         {icon}
         {text}
       </button>
@@ -705,17 +705,17 @@ export class FilterToolbar extends Unit {
       const before = await readListState()
       const plan = planTrack(before, id, utcToday())
       if (!plan.ok) {
-        toast(`This search is already tracked as ${describeList(plan.twin)}.`, { type: 'error' })
+        toast(`This search is already tracked as ${describeList(plan.twin)}.`, { type: 'error', name: 'refused-duplicate' })
         return
       }
       if (plan.state === before) {
         // Gone, or tracked already: either way the options say so, and the
         // write that would have redrawn this pill never comes.
-        toast(`“${label}” is no longer a saved list waiting to be tracked.`, { type: 'error' })
+        toast(`“${label}” is no longer a saved list waiting to be tracked.`, { type: 'error', name: 'refused-missing' })
         return
       }
       await writeListState(before, plan.state)
-      toast(`Tracking “${label}”. Works added or updated from today on will turn up in your review.`, { type: 'success' })
+      toast(`Tracking “${label}”. Works added or updated from today on will turn up in your review.`, { type: 'success', name: 'tracking' })
     }
     catch (err) {
       this.logger.error('Could not track the list.', err)
@@ -725,7 +725,7 @@ export class FilterToolbar extends Unit {
 
   /** What a tracked list offers: stop, or go and look at the review. */
   private fillTrackedBox(box: HTMLElement, entry: TrackedList, label: string): void {
-    const stop = minorButton('Stop tracking', 'Stop tracking this page. It stays a saved list on this browser, title and all.')
+    const stop = minorButton('stop-tracking', 'Stop tracking', 'Stop tracking this page. It stays a saved list on this browser, title and all.')
     stop.addEventListener('click', () => void this.stopTracking(entry.id, label))
 
     const row: HTMLElement = <div class={TRACK_ROW_CLASS}>{stop}</div>
@@ -734,7 +734,7 @@ export class FilterToolbar extends Unit {
     if (userId) {
       const href = getArchiveLink(`/users/${encodeURIComponent(userId)}/readings#ao3e-tracked`)
       row.append(
-        <a class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`} href={href} title="Open your review of everything your tracked lists have turned up.">
+        <a class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`} href={href} data-ao3e-action="review" title="Open your review of everything your tracked lists have turned up.">
           Review…
         </a>,
       )
@@ -749,7 +749,7 @@ export class FilterToolbar extends Unit {
     try {
       const before = await readListState()
       await writeListState(before, planStopTracking(before, id))
-      toast(`Stopped tracking “${label}”. It stays a saved list on this browser.`, { type: 'success' })
+      toast(`Stopped tracking “${label}”. It stays a saved list on this browser.`, { type: 'success', name: 'stopped-tracking' })
     }
     catch (err) {
       this.logger.error('Could not stop tracking the list.', err)
@@ -786,8 +786,8 @@ export class FilterToolbar extends Unit {
       nodes.push(relativeDateNote(page))
 
     const title = titleField(uniqueTitle(defaultTitle(page.meta), titles))
-    const track = minorButton('Track')
-    const cancel = minorButton('Cancel')
+    const track = minorButton('track', 'Track')
+    const cancel = minorButton('cancel', 'Cancel')
     const save = (): void => void this.createList(page, title.input.value, track)
     track.addEventListener('click', save)
     cancel.addEventListener('click', close)
@@ -847,7 +847,7 @@ export class FilterToolbar extends Unit {
 
     const offered = (): string => titleAfterUpdate(aliasOf(list), page.normalized.url, meta, titles)
     const title = titleField(offered())
-    const update = minorButton(`Update “${label}”`, `Change “${label}” to search what this page does.${entry ? ' It keeps its place in your review.' : ''}`)
+    const update = minorButton('update', `Update “${label}”`, `Change “${label}” to search what this page does.${entry ? ' It keeps its place in your review.' : ''}`)
     // A title the reader hasn't touched is the one the update would offer, and
     // the update works it out again against the lists as they stand when it is
     // made, which this page's copy may be behind.
@@ -856,7 +856,7 @@ export class FilterToolbar extends Unit {
       refining: true,
     }))
     const asNew = this.options.trackedLists.enabled
-      ? minorButton('Track as a new list instead', `Leave “${label}” as it is, and track this page as a list of its own.`)
+      ? minorButton('track-new', 'Track as a new list instead', `Leave “${label}” as it is, and track this page as a list of its own.`)
       : null
     if (asNew) {
       asNew.addEventListener('click', () => {
@@ -899,7 +899,7 @@ export class FilterToolbar extends Unit {
 
   /** Ends the tab's refining mark, leaving the list exactly as it is. */
   private stopRefiningButton(page: TrackablePage, group: HTMLElement, label: string): HTMLButtonElement {
-    const stop = minorButton('Stop refining', `Stop refining “${label}” in this tab. The list stays exactly as it is.`)
+    const stop = minorButton('stop-refining', 'Stop refining', `Stop refining “${label}” in this tab. The list stays exactly as it is.`)
     stop.addEventListener('click', () => {
       endRefining()
       // Not a write, so nothing re-runs: the pill is rebuilt here, for what the
@@ -934,8 +934,8 @@ export class FilterToolbar extends Unit {
         ) as HTMLElement as HTMLSelectElement
       : null
     const summary: HTMLElement = <div class={TRACK_SUMMARY_CLASS} />
-    const update = minorButton('')
-    const refine = minorButton('')
+    const update = minorButton('update', '')
+    const refine = minorButton('refine', '')
     const draw = (): void => {
       const label = sourceLabel(chosen, lists)
       name.textContent = `“${label}”`
@@ -998,7 +998,7 @@ export class FilterToolbar extends Unit {
     const update = describeUpdate(list, { url: page.normalized.url, filter, type: meta.type, entity: meta.entity }, { nameId: sidebarNameId })
     const nodes: Node[] = []
     if (update.root)
-      nodes.push(<p class={TRACK_WARN_CLASS}>{rootMoveText(label, update.root)}</p>)
+      nodes.push(<p class={TRACK_WARN_CLASS} data-ao3e-warn="root">{rootMoveText(label, update.root)}</p>)
     if (update.changes.length) {
       nodes.push(
         <ul class={TRACK_DIFF_CLASS} aria-label={`What updating “${label}” changes`}>
@@ -1012,7 +1012,7 @@ export class FilterToolbar extends Unit {
     const pageKey = filteredKey(page.normalized.key, filter)
     const twin = tracked ? lists.find(one => one.id !== list.id && trackedKey(one) === pageKey) : undefined
     if (twin)
-      nodes.push(<p class={TRACK_WARN_CLASS}>{`This search is already tracked as “${sourceLabel(twin, lists)}”, so “${label}” can't become it.`}</p>)
+      nodes.push(<p class={TRACK_WARN_CLASS} data-ao3e-warn="twin">{`This search is already tracked as “${sourceLabel(twin, lists)}”, so “${label}” can't become it.`}</p>)
     return nodes
   }
 
@@ -1040,7 +1040,7 @@ export class FilterToolbar extends Unit {
       const title = typed.trim() || uniqueTitle(defaultTitle(meta), titles, existing?.id)
       const taken = titleTakenBy(title, titles, existing?.id)
       if (taken) {
-        toast(titleRefusal(taken), { type: 'error' })
+        toast(titleRefusal(taken), { type: 'error', name: 'refused-title' })
       }
       else {
         // An uncommon tag costs one request here (see `needsScan`) — long enough
@@ -1061,11 +1061,11 @@ export class FilterToolbar extends Unit {
           toast(
             `Tracking “${title}”. Works added or updated from today on will turn up in your review.${
               scan ? ' This tag is read from its own page, so an update to an older work may be missed.' : ''}`,
-            { type: 'success' },
+            { type: 'success', name: 'tracking' },
           )
           return
         }
-        toast('twin' in plan ? `This search is already tracked as ${describeList(plan.twin)}.` : titleRefusal(aliasOf(plan.takenBy)), { type: 'error' })
+        toast('twin' in plan ? `This search is already tracked as ${describeList(plan.twin)}.` : titleRefusal(aliasOf(plan.takenBy)), { type: 'error', name: 'twin' in plan ? 'refused-duplicate' : 'refused-title' })
       }
     }
     catch (err) {
@@ -1135,7 +1135,7 @@ export class FilterToolbar extends Unit {
         endRefining()
         trackWritten?.(before)
       }
-      toast(saveBackRefusal(plan, label), { type: 'error' })
+      toast(saveBackRefusal(plan, label), { type: 'error', name: `refused-${plan.reason}` })
     }
     catch (err) {
       this.logger.error('Could not save the list back.', err)
@@ -1169,7 +1169,7 @@ export class FilterToolbar extends Unit {
   buildOptionsButton(): HTMLElement {
     const label = 'Open the AO3 Enhancements options page'
     const button: HTMLButtonElement = (
-      <button type="button" class={BUTTON_CLASS} title={label} aria-label={label}>
+      <button type="button" class={BUTTON_CLASS} title={label} aria-label={label} data-ao3e-action="options">
         <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiCog /></span>
         <span>Open extension options…</span>
       </button>
@@ -1360,10 +1360,10 @@ function trackBox(group: HTMLElement, button: HTMLButtonElement, onFirstOpen?: (
   return { box, close: () => setOpen(false) }
 }
 
-/** One of a box's own buttons. */
-function minorButton(text: string, title?: string): HTMLButtonElement {
+/** One of a box's own buttons, which does `action`. */
+function minorButton(action: string, text: string, title?: string): HTMLButtonElement {
   const button = (
-    <button type="button" class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`}>{text}</button>
+    <button type="button" class={`${BUTTON_CLASS}  ${TRACK_MINOR_CLASS}`} data-ao3e-action={action}>{text}</button>
   ) as HTMLElement as HTMLButtonElement
   if (title)
     button.title = title
@@ -1515,6 +1515,7 @@ function offerUndo(done: SaveBackDone, detached: readonly DetachedSnapshot[], wa
   let undone = false
   toast(`Updated “${titleIn(done.after, done.id)}”.`, {
     type: 'success',
+    name: 'updated',
     timeout: SAVE_BACK_UNDO_TIMEOUT,
     action: {
       label: 'Undo',
@@ -1553,7 +1554,7 @@ async function undoSaveBack(done: SaveBackDone, detached: readonly DetachedSnaps
     await writeListState(state, plan.state)
     await restoreCopies(detached)
     trackWritten?.(plan.state)
-    toast(`Put “${titleIn(plan.state, done.id)}” back as it was.`, { type: 'success' })
+    toast(`Put “${titleIn(plan.state, done.id)}” back as it was.`, { type: 'success', name: 'undone' })
   }
   catch (err) {
     FilterToolbar.logger.error('Could not undo the update.', err)

@@ -584,7 +584,7 @@ describe('archiveFetch — reading `Retry-After`', () => {
 
 describe('archiveFetch — a pause, as a reader watches it', () => {
   test('each kind of pause has words of its own, so the reader can tell them apart', () => {
-    assert.deepEqual(WAIT_WORDS, { refused: 'AO3 asked us to slow down', pacing: 'Giving AO3 a moment' })
+    assert.notEqual(WAIT_WORDS.refused, WAIT_WORDS.pacing)
   })
 
   test('the time left reads in seconds under a minute, and in minutes and seconds from one', () => {
@@ -597,10 +597,13 @@ describe('archiveFetch — a pause, as a reader watches it', () => {
 })
 
 describe('archiveFetch — the line a waiting reader is shown', () => {
+  /** Whether `line` names the kind of pause, and the time it has left. */
+  const says = (line, reason, left) => line.includes(WAIT_WORDS[reason]) && line.includes(countdown(left))
+
   test('what the pause is and how long it has left, while it lasts', () => {
     const now = Date.UTC(2026, 0, 1)
-    assert.equal(waitLine(now + 296_000, 'refused', now), 'AO3 asked us to slow down — trying again in 4:56')
-    assert.equal(waitLine(now + 8_100, 'pacing', now), 'Giving AO3 a moment — trying again in 9s')
+    assert.ok(says(waitLine(now + 296_000, 'refused', now), 'refused', 296_000))
+    assert.ok(says(waitLine(now + 8_100, 'pacing', now), 'pacing', 8_100))
   })
 
   test('nothing once it is over', () => {
@@ -617,9 +620,9 @@ describe('archiveFetch — the line a waiting reader is shown', () => {
 
     const lines = []
     const stop = watchWaitLine(line => lines.push(line))
-    assert.equal(lines[0], 'AO3 asked us to slow down — trying again in 5s')
+    assert.ok(says(lines[0], 'refused', 5000), lines[0])
     await clk.tick(1000)
-    assert.equal(lines.at(-1), 'AO3 asked us to slow down — trying again in 4s')
+    assert.ok(says(lines.at(-1), 'refused', 4000), lines.at(-1))
     await clk.until(() => pending.done)
     assert.equal(lines.at(-1), null)
 

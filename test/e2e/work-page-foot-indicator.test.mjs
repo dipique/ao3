@@ -6,7 +6,7 @@ import { after, before, describe, test } from 'node:test'
 import { createDefaultMarks, markItems } from '../../src/common/workMarks.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { openMenu, rerun, settled } from './trackedPages.mjs'
+import { menuRows, openMenu, pickRow, rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -140,20 +140,17 @@ describe('the work indicator beside Mark as Read at the foot of a work', { skip 
   test('clicking it opens the title\'s menu', async () => {
     const tab = await open(workPage({ saved: true }))
     await openMenu(tab, () => tab.click(`${FOOT_INDICATOR} .AO3E--indicator`))
-    const labels = await tab.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item .AO3E--menu--label')].map(el => el.textContent))
+    const rows = await menuRows(tab)
     await tab.close()
-    assert.ok(labels.includes('Mark as favorite'), labels.join(' | '))
-    assert.ok(labels.includes('Remove from Marked for Later'), labels.join(' | '))
+    const does = rows.map(row => `${row.action} ${row.value}`)
+    assert.ok(does.includes('mark favorite'), does.join(' | '))
+    assert.ok(rows.some(row => row.action === 'unmark-for-later'), does.join(' | '))
   })
 
   test('a read mark chosen there records it and marks the work read on AO3', async () => {
     const tab = await open(workPage({ saved: true }))
     await openMenu(tab, () => tab.click(`${FOOT_INDICATOR} .AO3E--indicator`))
-    await tab.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent === 'Mark as favorite').click()
-    })
+    assert.ok(await pickRow(tab, 'mark', 'favorite'))
     await until('AO3\'s Mark as Read to be submitted', () =>
       tab.evaluate(() => window.__submitted.length > 0))
     await until('the mark to be written', async () => !!(await lastMarks(tab)))

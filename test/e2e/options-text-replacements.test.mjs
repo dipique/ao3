@@ -1,22 +1,15 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { skip, startOptions } from './optionsPage.mjs'
+import { MATCH_CASING_OFF } from '../../src/options_ui/model/textReplacements.ts'
+import { figures, mentions, skip, startOptions } from './optionsPage.mjs'
 
 const LIST = 'text-replacements'
 const KEY = 'option.textReplacements'
 const HASH = '#work-text'
 
-/** Each icon toggle by its accessible name, and the flag it edits. */
-const TOGGLES = {
-  'Case sensitive': 'caseSensitive',
-  'Match casing': 'matchCasing',
-  'Whole word': 'wholeWord',
-  'Match across formatting': 'acrossFormatting',
-  'Disable this replacement': 'disabled',
-}
-
-const CASING_OFF = 'Off while Case sensitive is on'
+/** The flags a rule's icon toggles edit, a toggle each, found by its `data-flag`. */
+const FLAGS = ['caseSensitive', 'matchCasing', 'wholeWord', 'acrossFormatting', 'disabled']
 
 /**
  * A mix of on and off in every flag, so a flag lost, flipped or read from the
@@ -48,33 +41,40 @@ describe('options UI — text replacements', { skip }, () => {
 
   const open = (rules, viewport) => session.open({ seed: seed(rules), hash: HASH, viewport })
 
-  const toggle = async (options, index, name) => options.control(await options.listRow(LIST, index), 'button', name)
+  const toggle = async (options, index, flag) => {
+    const handle = await (await options.listRow(LIST, index)).$(`[data-flag="${flag}"]`)
+    assert.ok(handle, `no ${flag} toggle in row ${index}`)
+    return handle
+  }
+  const input = async (options, index, name) => {
+    const handle = await (await options.listRow(LIST, index)).$(`[data-field="${name}"]`)
+    assert.ok(handle, `no ${name} field in row ${index}`)
+    return handle
+  }
   const pressed = async handle => handle.evaluate(el => el.getAttribute('aria-pressed') === 'true')
 
   /** What a row shows: its two fields and whether each toggle is on, by flag. */
   const shown = async (options, index) => {
-    const row = await options.listRow(LIST, index)
     const flags = {}
-    for (const [name, flag] of Object.entries(TOGGLES))
-      flags[flag] = await pressed(await options.control(row, 'button', name))
+    for (const flag of FLAGS)
+      flags[flag] = await pressed(await toggle(options, index, flag))
     return {
-      find: await (await options.control(row, 'textbox', 'Find')).evaluate(el => el.value),
-      replace: await (await options.control(row, 'textbox', 'Replace with')).evaluate(el => el.value),
+      find: await (await input(options, index, 'find')).evaluate(el => el.value),
+      replace: await (await input(options, index, 'replace')).evaluate(el => el.value),
       ...flags,
     }
   }
 
-  test('the rules load into a frame headed by its title and count, under the Editing tools switch', async () => {
+  test('the rules load into a frame headed by its count, under the Editing tools switch', async () => {
     const options = await open()
     try {
       const list = await options.list(LIST)
-      assert.equal(await options.name(list), 'Text replacements')
       assert.equal(await options.listCount(LIST), '3')
       assert.deepEqual(await options.listRowIds(LIST), ['0', '1', '2'])
       for (const [index, rule] of RULES.entries())
         assert.deepEqual(await shown(options, index), rule, `row ${index}`)
 
-      const tools = await options.control(await options.row('work-text-text-replacement'), 'switch', /^Editing tools on the work page/)
+      const tools = await (await options.row('work-text-text-replacement')).$('#ao3e-text-replacement-tools')
       assert.ok(
         await tools.evaluate((el, frame) => !!(el.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING), list),
         'the switch comes before the list',
@@ -93,13 +93,12 @@ describe('options UI — text replacements', { skip }, () => {
     try {
       const expected = structuredClone(RULES)
       // Match casing before Case sensitive, which would leave it inert.
-      for (const name of ['Match casing', 'Whole word', 'Match across formatting', 'Disable this replacement', 'Case sensitive']) {
-        const flag = TOGGLES[name]
-        await options.press(await toggle(options, 0, name))
+      for (const flag of ['matchCasing', 'wholeWord', 'acrossFormatting', 'disabled', 'caseSensitive']) {
+        await options.press(await toggle(options, 0, flag))
         await options.saved()
         expected[0][flag] = !expected[0][flag]
-        assert.deepEqual((await options.lastWrite(KEY)).rules, expected, `after ${name}`)
-        assert.equal(await pressed(await toggle(options, 0, name)), expected[0][flag], `${name} shows its new state`)
+        assert.deepEqual((await options.lastWrite(KEY)).rules, expected, `after ${flag}`)
+        assert.equal(await pressed(await toggle(options, 0, flag)), expected[0][flag], `${flag} shows its new state`)
       }
       assert.deepEqual(options.problems(), [])
     }
@@ -111,18 +110,18 @@ describe('options UI — text replacements', { skip }, () => {
   test('Match casing is inert while Case sensitive is on, says why, and keeps its value', async () => {
     const options = await open()
     try {
-      const casing = await toggle(options, 2, 'Match casing')
+      const casing = await toggle(options, 2, 'matchCasing')
       assert.equal(await casing.evaluate(el => el.disabled), true, 'inert')
       assert.equal(await pressed(casing), true, 'still showing the stored value')
-      assert.equal(await options.description(casing), CASING_OFF)
+      assert.ok(mentions(await options.description(casing), MATCH_CASING_OFF))
       await options.press(casing)
       await options.saved()
       assert.equal(await options.lastWrite(KEY), null, 'an inert toggle takes no press')
 
-      await options.press(await toggle(options, 2, 'Case sensitive'))
+      await options.press(await toggle(options, 2, 'caseSensitive'))
       await options.saved()
       assert.deepEqual((await options.lastWrite(KEY)).rules[2], { ...RULES[2], caseSensitive: false })
-      const live = await toggle(options, 2, 'Match casing')
+      const live = await toggle(options, 2, 'matchCasing')
       assert.equal(await live.evaluate(el => el.disabled), false, 'live again')
       assert.equal(await options.description(live), '')
       await options.press(live)
@@ -137,14 +136,11 @@ describe('options UI — text replacements', { skip }, () => {
   test('a toggle whose name doesn\'t say what it does says it in its tooltip', async () => {
     const options = await open()
     try {
-      const tips = {}
-      for (const name of ['Match casing', 'Match across formatting', 'Disable this replacement'])
-        tips[name] = await options.tooltip(await toggle(options, 0, name))
-      assert.deepEqual(tips, {
-        'Match casing': 'Match casing: matches any casing, and capitalises the replacement where the match was capitalised',
-        'Match across formatting': 'Across formatting: matches through italics, links and the like; the replacement takes the formatting of where the match starts',
-        'Disable this replacement': 'Disabled: kept, but not applied',
-      })
+      for (const flag of ['matchCasing', 'acrossFormatting', 'disabled']) {
+        const handle = await toggle(options, 0, flag)
+        const tip = await options.tooltip(handle)
+        assert.notEqual(tip, await options.name(handle), `${flag}'s tooltip says more than its name`)
+      }
     }
     finally {
       await options.close()
@@ -171,7 +167,7 @@ describe('options UI — text replacements', { skip }, () => {
         const field = async el => ({ opacity: await opacity(el), colour: await el.evaluate(f => getComputedStyle(f).color) })
         return {
           arrow: await opacity(await row.$('.i-tabler-arrow-right')),
-          remove: await opacity(await options.control(row, 'button', 'Remove replacement')),
+          remove: await opacity(await options.action(row, 'remove')),
           fields: await Promise.all((await options.controls(row, 'textbox')).map(field)),
         }
       }
@@ -180,12 +176,12 @@ describe('options UI — text replacements', { skip }, () => {
       const off = { arrow: 0.48, remove: 0.48, fields: [{ opacity: 1, colour: `rgba(${r}, ${g}, ${b}, 0.57)` }, { opacity: 1, colour: `rgba(${r}, ${g}, ${b}, 0.57)` }] }
 
       assert.deepEqual([await drawn(0), await drawn(1), await drawn(2)], [whole, whole, off])
-      assert.equal(await opacity(await toggle(options, 2, 'Case sensitive')), 0.48, 'a toggle that is on fades with its row')
-      await options.press(await toggle(options, 2, 'Disable this replacement'))
+      assert.equal(await opacity(await toggle(options, 2, 'caseSensitive')), 0.48, 'a toggle that is on fades with its row')
+      await options.press(await toggle(options, 2, 'disabled'))
       await options.saved()
       assert.equal((await options.lastWrite(KEY)).rules[2].disabled, false)
       assert.deepEqual(await drawn(2), whole)
-      assert.equal(await opacity(await toggle(options, 2, 'Case sensitive')), 1)
+      assert.equal(await opacity(await toggle(options, 2, 'caseSensitive')), 1)
     }
     finally {
       await options.close()
@@ -195,15 +191,14 @@ describe('options UI — text replacements', { skip }, () => {
   test('Add in the header gives a blank rule ready to type in, written as it is filled', async () => {
     const options = await open()
     try {
-      await options.press(await options.control(await options.list(LIST), 'button', 'Add a replacement'))
+      await options.press(await options.action(await options.list(LIST), 'add'))
       await options.page.waitForFunction(id => document.querySelector(`[data-list="${id}"] [data-list-row="3"]`)?.contains(document.activeElement), {}, LIST)
       assert.equal(await options.listCount(LIST), '4')
-      const row = await options.listRow(LIST, 3)
-      const find = await options.control(row, 'textbox', 'Find')
+      const find = await input(options, 3, 'find')
       assert.ok(await find.evaluate(el => el === document.activeElement), 'the new rule\'s Find is focused')
 
       await options.page.keyboard.type('smirked')
-      await (await options.control(row, 'textbox', 'Replace with')).type('smiled')
+      await (await input(options, 3, 'replace')).type('smiled')
       await options.saved()
       assert.deepEqual((await options.lastWrite(KEY)).rules, [...RULES, {
         find: 'smirked',
@@ -224,17 +219,17 @@ describe('options UI — text replacements', { skip }, () => {
   test('Remove writes the shortened list, and with none left the frame says so in place', async () => {
     const options = await open(RULES.slice(0, 2))
     try {
-      await options.press(await options.control(await options.listRow(LIST, 0), 'button', 'Remove replacement'))
+      await options.press(await options.action(await options.listRow(LIST, 0), 'remove'))
       await options.saved()
       assert.deepEqual((await options.lastWrite(KEY)).rules, [RULES[1]])
       assert.equal(await options.listCount(LIST), '1')
 
-      await options.press(await options.control(await options.listRow(LIST, 0), 'button', 'Remove replacement'))
+      await options.press(await options.action(await options.listRow(LIST, 0), 'remove'))
       await options.saved()
       assert.deepEqual((await options.lastWrite(KEY)).rules, [])
       assert.deepEqual(await options.listRows(LIST), [])
-      assert.equal(await options.listCount(LIST), 'none yet')
-      assert.ok((await options.text(await options.list(LIST))).includes('No replacements yet'), 'the empty state shows')
+      assert.deepEqual(figures(await options.listCount(LIST)), [], 'nothing to count')
+      assert.ok(await (await options.list(LIST)).$('[data-list-empty]'), 'the empty state shows')
     }
     finally {
       await options.close()

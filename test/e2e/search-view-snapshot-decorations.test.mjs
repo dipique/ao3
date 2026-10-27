@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { openMenu, rerun, settled, viewDrawn } from './trackedPages.mjs'
+import { openMenu, pickRow, rerun, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -156,12 +156,7 @@ describe('stored search-view lists hold undecorated blurbs', { skip }, () => {
         .find(el => el.querySelector('h4.heading a').textContent === 'Angsty one')
       li.querySelector('h4.heading .AO3E--indicator--mark-saved').click()
     }))
-    await until('the menu to offer to mark it read', () => page.evaluate(() => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => !el.disabled && el.textContent.trim().startsWith('Mark as read'))
-      row?.click()
-      return !!row
-    }))
+    await until('the menu to offer to mark it read', () => pickRow(page, 'unmark-for-later'))
     await until('the stored list to be rewritten', async () => (await storedBlurbs()).length !== 4)
     const stored = await storedBlurbs()
     assert.equal(stored.length, 3, 'marking it read should have taken the work off the stored list')

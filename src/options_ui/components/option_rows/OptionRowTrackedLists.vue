@@ -155,6 +155,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                 <button
                   ref="changeButton"
                   type="button"
+                  data-action="change"
                   class="outline-btn small-btn"
                   :title="withReason('Change the last day reviewed', block.settingsOff)"
                   :disabled="!!block.settingsOff"
@@ -174,10 +175,10 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                   class="review__date input-ring"
                   @change="commitDate"
                 >
-                <button type="button" class="outline-btn" @click="commitDate">
+                <button type="button" class="outline-btn" data-action="save" @click="commitDate">
                   Save
                 </button>
-                <button type="button" class="ghost-btn" @click="endChange">
+                <button type="button" class="ghost-btn" data-action="cancel" @click="endChange">
                   Cancel
                 </button>
               </div>
@@ -209,8 +210,8 @@ watch(lists, () => void readRecordsLine(), { deep: true })
 
             <ReviewCell cell="this-review" head="This review" :job="block.actions === 'stop'">
               <div v-if="block.figure" class="review__line">
-                <span class="review__value">{{ block.figure.count }}</span>
-                <span class="review__detail">{{ block.figure.detail }}</span>
+                <span class="review__value" data-review-figure="count">{{ block.figure.count }}</span>
+                <span class="review__detail" data-review-figure="detail">{{ block.figure.detail }}</span>
               </div>
               <p v-else class="review__empty">
                 {{ block.empty }}
@@ -234,6 +235,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                   :title="withReason(preloadLabel, block.preload.off)"
                   :disabled="!!block.preload.off"
                   :aria-describedby="preloadOffId"
+                  data-action="preload"
                   @click="preload"
                 >
                   <span class="i-tabler-refresh" aria-hidden="true" />
@@ -248,6 +250,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                     :title="withReason(cacheLabel, block.offlineOff)"
                     :disabled="!!block.offlineOff"
                     :aria-describedby="block.offlineOff ? offlineOffId : undefined"
+                    data-action="cache"
                     @click="cache"
                   >
                     <span class="i-tabler-cloud-download" aria-hidden="true" />
@@ -259,6 +262,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                     :title="withReason(downloadLabel, block.offlineOff)"
                     :disabled="!!block.offlineOff"
                     :aria-describedby="block.offlineOff ? offlineOffId : undefined"
+                    data-action="download"
                     @click="download"
                   >
                     <span class="i-tabler-download" aria-hidden="true" />
@@ -270,6 +274,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                     :title="withReason(preloadLabel, block.preload.off)"
                     :disabled="!!block.preload.off"
                     :aria-describedby="preloadOffId"
+                    data-action="preload"
                     @click="preload"
                   >
                     <span class="i-tabler-refresh" aria-hidden="true" />
@@ -286,20 +291,20 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                   />
                 </template>
                 <template v-else-if="block.actions === 'stop'">
-                  <button type="button" class="outline-btn small-btn" @click="stop()">
+                  <button type="button" class="outline-btn small-btn" data-action="pause" @click="stop()">
                     <span class="i-tabler-player-pause" aria-hidden="true" />
                     Pause
                   </button>
-                  <button type="button" class="outline-btn small-btn" @click="cancel()">
+                  <button type="button" class="outline-btn small-btn" data-action="cancel" @click="cancel()">
                     Cancel
                   </button>
                 </template>
                 <template v-else>
-                  <button type="button" class="primary-btn small-btn" @click="resume()">
+                  <button type="button" class="primary-btn small-btn" data-action="resume" @click="resume()">
                     <span class="i-tabler-player-play" aria-hidden="true" />
                     Continue
                   </button>
-                  <button type="button" class="ghost-btn small-btn" @click="discard()">
+                  <button type="button" class="ghost-btn small-btn" data-action="discard" @click="discard()">
                     Discard
                   </button>
                 </template>
@@ -311,6 +316,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                 target="_blank"
                 rel="noopener noreferrer"
                 class="review__start touch-target input-ring"
+                data-action="start"
                 :aria-label="block.start.label"
               >
                 Start Review
@@ -320,6 +326,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                 v-else
                 type="button"
                 class="review__start touch-target input-ring"
+                data-action="start"
                 :title="withReason(block.start.label, block.start.off)"
                 disabled
                 :aria-describedby="startOffId"

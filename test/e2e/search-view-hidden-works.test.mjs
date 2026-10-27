@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { figures } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { rerun, settled, viewDrawn } from './trackedPages.mjs'
 
@@ -146,18 +147,21 @@ describe('hidden works in the search view', { skip }, () => {
       .map(li => li.querySelector('h4.heading a').textContent))
 
   /**
-   * The peek pill's text, or null when it isn't being offered. Read a frame on:
-   * the pill follows the view on the next one.
+   * The peek pill, or null when it isn't being offered: whether it is peeking,
+   * and the count it gives. Read a frame on: the pill follows the view on the
+   * next one.
    */
-  const peekPill = () => page.evaluate(async () => {
-    await new Promise(requestAnimationFrame)
-    const toolbar = document.querySelector('.AO3E--filter-toolbar')
-    if (!toolbar || toolbar.hidden)
-      return null
-    const pill = [...toolbar.querySelectorAll('.AO3E--filter-toolbar--button')]
-      .find(b => /filtered work/.test(b.textContent) && !b.hidden)
-    return pill ? pill.textContent.trim() : null
-  })
+  const peekPill = async () => {
+    const pill = await page.evaluate(async () => {
+      await new Promise(requestAnimationFrame)
+      const toolbar = document.querySelector('.AO3E--filter-toolbar')
+      if (!toolbar || toolbar.hidden)
+        return null
+      const button = toolbar.querySelector('[data-ao3e-action="peek"]')
+      return button && !button.hidden ? { peeking: button.getAttribute('aria-pressed') === 'true', text: button.textContent } : null
+    })
+    return pill && { peeking: pill.peeking, count: figures(pill.text) }
+  }
 
   /** The exclude button on the collapsed work whose reason line names `value`. */
   const clickExclude = value => page.evaluate((want) => {
@@ -182,7 +186,7 @@ describe('hidden works in the search view', { skip }, () => {
     await viewDrawn(page)
     // Both hidden works are in the view now: the rule-hidden one and the
     // crossover.
-    assert.equal(await peekPill(), 'Show 2 filtered works')
+    assert.deepEqual(await peekPill(), { peeking: false, count: [2] })
   })
 
   test('the native listing behind the view is not counted twice', async () => {
@@ -213,7 +217,7 @@ describe('hidden works in the search view', { skip }, () => {
     assert.equal(state.mounted, PAGES * PER_PAGE)
     assert.equal((await visibleTitles()).length, PAGES * PER_PAGE)
     assert.ok(!(await visibleTitles()).includes('A rule-gone one'))
-    assert.match(state.count, new RegExp(`of ${PAGES * PER_PAGE} works`))
+    assert.ok(figures(state.count).includes(PAGES * PER_PAGE), `the count is of the results: ${state.count}`)
     assert.deepEqual(state.marked.sort(), ['A crossover', 'A rule-hidden one'])
   })
 
@@ -223,18 +227,10 @@ describe('hidden works in the search view', { skip }, () => {
       return getComputedStyle(wrapper).display
     })
     assert.equal(await shown(), 'none')
-    await page.evaluate(() => {
-      [...document.querySelectorAll('.AO3E--filter-toolbar--button')]
-        .find(b => /filtered work/.test(b.textContent))
-        .click()
-    })
+    await page.evaluate(() => document.querySelector('.AO3E--filter-toolbar [data-ao3e-action="peek"]').click())
     assert.equal(await shown(), 'block')
-    assert.equal(await peekPill(), 'Hide 2 filtered works')
-    await page.evaluate(() => {
-      [...document.querySelectorAll('.AO3E--filter-toolbar--button')]
-        .find(b => /filtered work/.test(b.textContent))
-        .click()
-    })
+    assert.deepEqual(await peekPill(), { peeking: true, count: [2] })
+    await page.evaluate(() => document.querySelector('.AO3E--filter-toolbar [data-ao3e-action="peek"]').click())
     assert.equal(await shown(), 'none')
   })
 
@@ -276,14 +272,17 @@ describe('hidden works in the search view', { skip }, () => {
   })
 
   test('and the pill drops to what is still hidden', async () => {
-    assert.equal(await peekPill(), 'Show 1 filtered work')
+    assert.deepEqual(await peekPill(), { peeking: false, count: [1] })
   })
 
   test('a crossover offers no exclude, its fandom count being no value to filter by', async () => {
-    assert.equal(await clickExclude('2 fandoms'), false)
+    const crossover = await page.evaluateHandle(() => [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
+      .find(li => li.querySelector('h4.heading a').textContent === 'A crossover'))
+    assert.ok(await crossover.evaluate(li => !!li.querySelector('.AO3E--hide-works--msg')), 'it is collapsed')
+    assert.equal(await crossover.evaluate(li => li.querySelector('.AO3E--hide-works--exclude')), null)
     const titles = await visibleTitles()
     assert.ok(titles.includes('A crossover'))
     assert.equal(titles.length, PAGES * PER_PAGE - 1)
-    assert.equal(await peekPill(), 'Show 1 filtered work')
+    assert.deepEqual(await peekPill(), { peeking: false, count: [1] })
   })
 })

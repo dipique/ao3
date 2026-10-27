@@ -3,28 +3,18 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { COMPLETION_LABELS } from '../../src/common/data.ts'
+import { COMPLETE_VALUE, WIP_VALUE } from '../../src/content_script/searchView/engine.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { menuClosed, menuGuardOver, openMenu, settled, viewDrawn } from './trackedPages.mjs'
+import { mentions } from './optionsPage.mjs'
+import { menuClosed, menuGuardOver, menuRows, openMenu, pickRow, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
-/** The open menu's rows. */
-const menuRows = page => page.evaluate(() =>
-  [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
-    label: el.querySelector('.AO3E--menu--label').textContent,
-    disabled: el.disabled,
-  })))
-
-/** Click the open menu's row whose label starts with `prefix`, and wait for the menu to close behind it. */
-async function pick(page, prefix) {
-  const picked = await page.evaluate((p) => {
-    const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      .find(el => el.querySelector('.AO3E--menu--label').textContent.startsWith(p))
-    row?.click()
-    return !!row
-  }, prefix)
-  assert.ok(picked, `no "${prefix}" row in the menu`)
+/** Click the open menu's row that does `action`, and wait for the menu to close behind it. */
+async function pick(page, action) {
+  assert.ok(await pickRow(page, action), `no ${action} row in the menu`)
   await menuClosed(page)
 }
 
@@ -127,7 +117,7 @@ describe('completion menu', { skip }, () => {
   const prompt = () => page.evaluate(() => {
     for (const el of document.body.children) {
       const toast = [...el.shadowRoot?.querySelectorAll('.toast') ?? []]
-        .find(t => t.querySelector('.action')?.textContent.startsWith('Update results'))
+        .find(t => t.dataset.ao3eToast === 'pending-search')
       if (toast && toast.style.visibility !== 'hidden')
         return toast.querySelector('.message').textContent
     }
@@ -151,33 +141,30 @@ describe('completion menu', { skip }, () => {
 
   test('offers both choices, and no clear row while none is set', async () => {
     const rows = await openMenuOn(page, '#open dd.chapters .AO3E--completion')
-    assert.deepEqual(rows.map(r => r.label), ['Completed works only', 'Incomplete works only'])
+    assert.deepEqual(rows.map(r => r.action), ['complete', 'incomplete'])
   })
 
   test('picking one ticks AO3\'s radio without re-running the search', async () => {
-    await pick(page, 'Completed works only')
+    await pick(page, 'complete')
     assert.deepEqual(await radio(), { checked: 'T', submits: 0 })
-    assert.equal(await prompt(), 'Completion filter set to completed works only.')
+    const said = await prompt()
+    assert.ok(said && mentions(said, COMPLETION_LABELS.complete), `the prompt should say what was set, got ${said}`)
   })
 
   test('the label opens the same menu, showing the choice as current', async () => {
     const rows = await openMenuOn(page, '#done dt.chapters')
-    assert.deepEqual(rows.map(r => r.label), [
-      'Clear completion filter (completed works only)',
-      'Completed works only',
-      'Incomplete works only',
-    ])
+    assert.deepEqual(rows.map(r => r.action), ['clear', 'complete', 'incomplete'])
     assert.equal(rows[1].disabled, true, 'the choice already on should not be selectable again')
   })
 
   test('the other choice replaces it', async () => {
-    await pick(page, 'Incomplete works only')
+    await pick(page, 'incomplete')
     assert.deepEqual(await radio(), { checked: 'F', submits: 0 })
   })
 
   test('clearing goes back to all works, and the prompt comes down', async () => {
     await openMenuOn(page, '#done dd.chapters .AO3E--completion')
-    await pick(page, 'Clear')
+    await pick(page, 'clear')
     assert.deepEqual(await radio(), { checked: '', submits: 0 })
     assert.equal(await prompt(), null, 'the form is back in step with the results')
   })
@@ -272,11 +259,11 @@ describe('completion menu in the search view', { skip }, () => {
       .sort())
 
   /** The completion values whose facet row has its "include" toggle on. */
-  const included = () => page.evaluate(() =>
+  const included = () => page.evaluate(values =>
     [...document.querySelectorAll('.AO3E--search-view--row')]
       .filter(row => row.querySelector('.AO3E--search-view--toggle-include')?.getAttribute('aria-pressed') === 'true')
       .map(row => row.querySelector('.AO3E--search-view--row-name').textContent)
-      .filter(name => name === 'Complete' || name === 'Work in Progress'))
+      .filter(name => values.includes(name)), [COMPLETE_VALUE, WIP_VALUE])
 
   const TOTAL = '.AO3E--search-view--results dd.chapters .AO3E--completion'
 
@@ -287,15 +274,15 @@ describe('completion menu in the search view', { skip }, () => {
     // filter and the list and its sidebar show the result.
     assert.deepEqual(await visibleTitles(), ['A finished one', 'An ongoing one', 'Another finished one'], 'the view opened with every work')
     const rows = await openMenuOn(page, TOTAL)
-    assert.deepEqual(rows.map(r => r.label), ['Completed works only', 'Incomplete works only'])
-    await pick(page, 'Incomplete works only')
+    assert.deepEqual(rows.map(r => r.action), ['complete', 'incomplete'])
+    await pick(page, 'incomplete')
     assert.deepEqual(await visibleTitles(), ['An ongoing one'])
-    assert.deepEqual(await included(), ['Work in Progress'], 'the facet sidebar shows the same filter')
+    assert.deepEqual(await included(), [WIP_VALUE], 'the facet sidebar shows the same filter')
     assert.equal(page.url(), READINGS_URL)
 
     const again = await openMenuOn(page, TOTAL)
-    assert.equal(again[0].label, 'Clear completion filter (incomplete works only)')
-    await pick(page, 'Clear')
+    assert.deepEqual(again.map(r => r.action), ['clear', 'complete', 'incomplete'])
+    await pick(page, 'clear')
     assert.deepEqual(await visibleTitles(), ['A finished one', 'An ongoing one', 'Another finished one'])
     assert.deepEqual(await included(), [])
   })

@@ -219,7 +219,7 @@ const PLACEHOLDERS: Partial<Record<RuleTarget, string>> = {
 }
 
 /** What a tag's Exact field says of the name typed, by where its suggestions come from. */
-const EXACT_HELP: Record<SuggestSource['kind'], string> = {
+export const EXACT_HELP: Record<SuggestSource['kind'], string> = {
   ao3: 'Suggestions come from AO3’s tag autocomplete, so the rule uses AO3’s own spelling.',
   fixed: 'Suggestions are the archive’s own names, so the rule uses AO3’s own spelling.',
   none: 'The whole name, exactly as AO3 spells it.',
@@ -313,9 +313,17 @@ export interface RegexTester {
 /** What the tester, and the canonical tags' preview, say while a check of the pattern runs. */
 export const CHECKING = 'Checking…'
 
-const VERDICT_LABELS = { match: 'Matches', miss: 'No match', invalid: 'Invalid pattern', slow: 'Too slow', checking: CHECKING } as const
+/** The words on each verdict. */
+export const VERDICT_LABELS = { match: 'Matches', miss: 'No match', invalid: 'Invalid pattern', slow: 'Too slow', checking: CHECKING } as const
 
-const TESTER_HELP = 'Checks the pattern as you type. Nothing is saved from here.'
+/** What the tester, and the canonical tags' preview, say before a pattern is typed. */
+export const NO_PATTERN = 'No pattern yet'
+
+/** The line under the tester, while it tests. */
+export const TESTER_HELP = 'Checks the pattern as you type. Nothing is saved from here.'
+
+/** The line under the tester once a pattern has run past its time budget. */
+export const TESTER_STOPPED = 'Testing stopped: the pattern took too long.'
 
 /**
  * The regex tester, in Regex mode, unless a work's or a series' number matches
@@ -334,10 +342,10 @@ export function regexTester(draft: Pick<RuleDraft, 'target' | 'matcher' | 'value
     verdict,
     label: verdict.kind !== 'none'
       ? VERDICT_LABELS[verdict.kind]
-      : value.trim() === '' ? 'No pattern yet' : `Type a ${noun}`,
+      : value.trim() === '' ? NO_PATTERN : `Type a ${noun}`,
     help: verdict.kind === 'invalid'
       ? verdict.reason
-      : verdict.kind === 'slow' ? 'Testing stopped: the pattern took too long.' : TESTER_HELP,
+      : verdict.kind === 'slow' ? TESTER_STOPPED : TESTER_HELP,
   }
 }
 

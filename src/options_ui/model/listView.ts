@@ -72,9 +72,12 @@ export function sortState<K extends string>(sort: KeySort<K>, key: K): 'ascendin
   return sort.direction === 'asc' ? 'ascending' : 'descending'
 }
 
+/** What pressing a key next does, by where it is in its cycle ({@link sortState}). */
+export const SORT_HINTS = { none: 'Sort ascending', ascending: 'Sort descending', descending: 'Clear sort' } as const
+
 /** What pressing a key next does, spelled out, since a three-way cycle isn't guessable. */
 export function sortHint<K extends string>(sort: KeySort<K>, key: K): string {
-  return ({ none: 'Sort ascending', ascending: 'Sort descending', descending: 'Clear sort' })[sortState(sort, key)]
+  return SORT_HINTS[sortState(sort, key)]
 }
 
 /** What the rules list sorts by: what a rule does, its priority, its text, what it applies to. */

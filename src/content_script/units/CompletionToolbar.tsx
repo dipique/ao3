@@ -88,6 +88,7 @@ function buildCompletionMenu(target: CompletionTarget): MenuItem[] {
     items.push({
       icon: () => <MdiCloseCircleOutline />,
       label: `Clear completion filter (${COMPLETION_LABELS[current].toLowerCase()})`,
+      action: 'clear',
       scope: 'search',
       onSelect: () => target.apply(null),
     })
@@ -98,6 +99,7 @@ function buildCompletionMenu(target: CompletionTarget): MenuItem[] {
     items.push({
       icon: ICONS[completion],
       label: COMPLETION_LABELS[completion],
+      action: completion,
       scope: 'search',
       active,
       // Re-applying the choice that's already on would just re-run the same

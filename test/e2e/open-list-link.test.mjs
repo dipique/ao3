@@ -19,7 +19,7 @@ import {
   stored,
   tagPage,
   toastLinks,
-  toasts,
+  toastNames,
   visit,
 } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, resetWorkIds, listing as reviewListing, TODAY, trackedOption, works } from './trackedReview.mjs'
@@ -201,7 +201,8 @@ describe('a list opened by its URL', { skip }, () => {
   })
 
   describe('a link this page can\'t open', () => {
-    const CANT_OPEN = 'This link doesn’t name a list saved on this browser for this page.'
+    /** The toast saying the link names no list this page can open. */
+    const CANT_OPEN = 'unknown-link'
 
     test('a list this browser doesn\'t have leaves the page as it is, with a toast and no link', async () => {
       const requests = []
@@ -209,8 +210,8 @@ describe('a list opened by its URL', { skip }, () => {
       const tab = await openTab(browser, { seed: { ...SEED, [`option.${kind.option}`]: true }, route, requests })
       try {
         await visit(tab, `${ARCHIVE}${kind.list.url}#ao3e-open=n0n3`)
-        await until('the toast', async () => (await toasts(tab)).length > 0)
-        assert.deepEqual(await toasts(tab), [CANT_OPEN])
+        await until('the toast', async () => (await toastNames(tab)).length > 0)
+        assert.deepEqual(await toastNames(tab), [CANT_OPEN])
         assert.deepEqual(await toastLinks(tab), [], 'with no list to point to')
         assert.equal(await viewOpen(tab), false)
         assert.ok(await tab.$(kind.button), 'the page as its switch has it')
@@ -228,9 +229,9 @@ describe('a list opened by its URL', { skip }, () => {
       const tab = await openTab(browser, { seed: SEED, route, requests })
       try {
         await visit(tab, `${ARCHIVE}/tags/Bees/works#ao3e-open=${series.id}`)
-        await until('the toast', async () => (await toasts(tab)).length > 0)
-        assert.deepEqual(await toasts(tab), [CANT_OPEN])
-        assert.deepEqual(await toastLinks(tab), [{ label: `Open “${series.title}”`, href: `${ARCHIVE}${series.url}#ao3e-open=${series.id}` }])
+        await until('the toast', async () => (await toastNames(tab)).length > 0)
+        assert.deepEqual(await toastNames(tab), [CANT_OPEN])
+        assert.deepEqual(await toastLinks(tab), [`${ARCHIVE}${series.url}#ao3e-open=${series.id}`])
         assert.equal(await viewOpen(tab), false)
         assert.deepEqual(walks(requests), [])
         assert.equal(await address(tab), `${ARCHIVE}/tags/Bees/works`, 'nothing navigates by itself')
@@ -247,13 +248,14 @@ describe('a list opened by its URL', { skip }, () => {
       const tab = await openTab(browser, { seed: { ...SEED, 'option.savedLists': { v: 1, lists } }, route })
       try {
         await visit(tab, `${ARCHIVE}${list.url}#ao3e-open=${moved.id}`)
-        await until('the toast', async () => (await toasts(tab)).length > 0)
-        assert.deepEqual(await toasts(tab), [CANT_OPEN])
-        assert.deepEqual(await toastLinks(tab), [{ label: `Open “${moved.title}”`, href: `${ARCHIVE}${moved.url}#ao3e-open=${moved.id}` }])
+        await until('the toast', async () => (await toastNames(tab)).length > 0)
+        assert.deepEqual(await toastNames(tab), [CANT_OPEN])
+        const there = `${ARCHIVE}${moved.url}#ao3e-open=${moved.id}`
+        assert.deepEqual(await toastLinks(tab), [there])
         assert.equal(await viewOpen(tab), false)
         assert.equal(await address(tab), `${ARCHIVE}${list.url}`, 'nothing navigates by itself')
 
-        await navigateBy(tab, async () => assert.ok(await clickToastLink(tab, `Open “${moved.title}”`)))
+        await navigateBy(tab, async () => assert.ok(await clickToastLink(tab, there)))
         await until('the view to be up', async () => (await shownIds(tab)).length > 0)
         assert.deepEqual(await shownIds(tab), IDS.filter(id => !DRACO.has(id)), 'the list\'s filter is seeded')
         assert.equal(await address(tab), `${ARCHIVE}${moved.url}`)
@@ -275,9 +277,9 @@ describe('a list opened by its URL', { skip }, () => {
     }
     const READINGS = `${ARCHIVE}/users/someone/readings`
     const BUILTIN_LINKS = {
-      'marked-for-later': { at: '/tags/Bees/works#ao3e-open=marked-for-later', link: { label: 'Open Marked for Later', href: `${READINGS}?show=to-read#ao3e-open=marked-for-later` } },
-      'read-works': { at: '/series/9991#ao3e-open=read-works', link: { label: 'Open Read works', href: `${READINGS}#ao3e-open=read-works` } },
-      'review': { at: '/works/search?work_search[query]=tea#ao3e-tracked', link: { label: 'Open the review', href: `${READINGS}#ao3e-open=tracked-review` } },
+      'marked-for-later': { at: '/tags/Bees/works#ao3e-open=marked-for-later', link: `${READINGS}?show=to-read#ao3e-open=marked-for-later` },
+      'read-works': { at: '/series/9991#ao3e-open=read-works', link: `${READINGS}#ao3e-open=read-works` },
+      'review': { at: '/works/search?work_search[query]=tea#ao3e-tracked', link: `${READINGS}#ao3e-open=tracked-review` },
     }
 
     /** Visit each of `cases`, a list without a record off its page, and read its toast's links. */
@@ -288,8 +290,8 @@ describe('a list opened by its URL', { skip }, () => {
         for (const kind of cases) {
           const { at } = BUILTIN_LINKS[kind]
           await visit(tab, `${ARCHIVE}${at}`)
-          await until('the toast', async () => (await toasts(tab)).length > 0)
-          assert.deepEqual(await toasts(tab), [CANT_OPEN], at)
+          await until('the toast', async () => (await toastNames(tab)).length > 0)
+          assert.deepEqual(await toastNames(tab), [CANT_OPEN], at)
           assert.equal(await viewOpen(tab), false, at)
           links[kind] = await toastLinks(tab)
         }
@@ -320,8 +322,8 @@ describe('a list opened by its URL', { skip }, () => {
       const tab = await openTab(browser, { seed: SEED, route })
       try {
         await visit(tab, `${ARCHIVE}/tags/Bees/works#ao3e-open=marked-for-later`)
-        await until('the toast', async () => (await toasts(tab)).length > 0)
-        assert.deepEqual(await toasts(tab), [CANT_OPEN])
+        await until('the toast', async () => (await toastNames(tab)).length > 0)
+        assert.deepEqual(await toastNames(tab), [CANT_OPEN])
         assert.deepEqual(await toastLinks(tab), [], 'with no page to point to')
       }
       finally {

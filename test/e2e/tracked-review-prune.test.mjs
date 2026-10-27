@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { rerun, settled } from './trackedPages.mjs'
+import { pickRow, rerun, settled } from './trackedPages.mjs'
 import { advanceClock, archiveRoutes, blurbHtml, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
@@ -127,14 +127,8 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
     }, saved.id)
-    await tab.waitForSelector('.AO3E--menu .AO3E--menu--item')
-    const clicked = await tab.evaluate(() => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => el.textContent.trim().startsWith('Mark for later'))
-      row?.click()
-      return !!row
-    })
-    assert.equal(clicked, true, 'the work menu should offer to save it')
+    await tab.waitForSelector('.AO3E--menu .AO3E--menu--item[data-ao3e-action="mark-for-later"]')
+    assert.equal(await pickRow(tab, 'mark-for-later'), true, 'the work menu should offer to save it')
     await until('the saved-work index to be written', async () => (await tab.evaluate(async () =>
       (await browser.storage.local.get('cache.markedForLater'))['cache.markedForLater']?.ids)) !== '')
 

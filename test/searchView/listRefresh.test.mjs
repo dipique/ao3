@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { claimLive } from '../../src/common/claim.ts'
+import { waitLine } from '../../src/content_script/archiveFetch.ts'
 import {
   cancels,
   claimRefresh,
@@ -21,6 +22,7 @@ import {
   withPause,
   withProgress,
 } from '../../src/content_script/searchView/listRefresh.ts'
+import { figures } from '../facts.mjs'
 
 const NOW = 1_800_000_000_000
 
@@ -262,41 +264,42 @@ describe('lapseIn', () => {
 })
 
 describe('updatingNote', () => {
-  test('before the page count is known', () => {
-    assert.equal(updatingNote(claimRefresh('me', 'page', NOW), NOW), 'Updating…')
+  const loaded = (by, page) => withProgress(claimRefresh(by, page, NOW), 2, 5, NOW)
+
+  test('before the page count is known, no count', () => {
+    assert.deepEqual(figures(updatingNote(claimRefresh('me', 'page', NOW), NOW)), [])
   })
 
   test('pages loaded', () => {
-    assert.equal(updatingNote(withProgress(claimRefresh('me', 'page', NOW), 2, 5, NOW), NOW), 'Updating… Loaded 2 of 5 pages')
+    assert.deepEqual(figures(updatingNote(loaded('me', 'page'), NOW)), [2, 5])
   })
 
   test('the same whichever page runs it', () => {
-    assert.equal(updatingNote(withProgress(claimRefresh('them', 'options', NOW), 2, 5, NOW), NOW), 'Updating… Loaded 2 of 5 pages')
-    assert.equal(updatingNote(withProgress(claimRefresh('them', 'page', NOW), 2, 5, NOW), NOW), 'Updating… Loaded 2 of 5 pages')
+    const own = updatingNote(loaded('me', 'page'), NOW)
+    assert.equal(updatingNote(loaded('them', 'options'), NOW), own)
+    assert.equal(updatingNote(loaded('them', 'page'), NOW), own)
   })
 
   test('a pause takes the page count’s place, counting down', () => {
-    const paused = withPause(withProgress(claimRefresh('me', 'page', NOW), 2, 5, NOW), NOW + 65_000, 'refused', NOW)
-    assert.equal(updatingNote(paused, NOW), 'Updating… AO3 asked us to slow down — trying again in 1:05')
-    assert.equal(updatingNote(paused, NOW + 60_000), 'Updating… AO3 asked us to slow down — trying again in 5s')
+    const paused = withPause(loaded('me', 'page'), NOW + 65_000, 'refused', NOW)
+    for (const at of [NOW, NOW + 60_000]) {
+      const note = updatingNote(paused, at)
+      assert.deepEqual(figures(note, waitLine(NOW + 65_000, 'refused', at)), [], 'the pause, and no page count')
+    }
   })
 
   test('a pause that has run out goes back to the page count', () => {
-    const paused = withPause(withProgress(claimRefresh('them', 'page', NOW), 2, 5, NOW), NOW + 5000, 'pacing', NOW)
-    assert.equal(updatingNote(paused, NOW + 5000), 'Updating… Loaded 2 of 5 pages')
-  })
-
-  test('one page is a page', () => {
-    assert.equal(updatingNote(withProgress(claimRefresh('me', 'page', NOW), 1, 1, NOW), NOW), 'Updating… Loaded 1 of 1 page')
+    const paused = withPause(loaded('them', 'page'), NOW + 5000, 'pacing', NOW)
+    assert.equal(updatingNote(paused, NOW + 5000), updatingNote(loaded('them', 'page'), NOW + 5000))
   })
 })
 
 describe('loadingLine', () => {
   test('the page the refresh is on, as a job says it', () => {
-    assert.equal(loadingLine(2, 5), 'Loading page 2 of 5…')
+    assert.deepEqual(figures(loadingLine(2, 5)), [2, 5])
   })
 
-  test('before the page count is known, the list being fetched', () => {
-    assert.equal(loadingLine(0, 0), 'Fetching the list…')
+  test('before the page count is known, no count', () => {
+    assert.deepEqual(figures(loadingLine(0, 0)), [])
   })
 })

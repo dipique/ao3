@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { ensureBuilt, findChrome, installMock, storedListIds, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { inject, launch, openMenu, toasts } from './trackedPages.mjs'
+import { inject, launch, openMenu, pickRow, toastTypes } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -86,13 +86,8 @@ describe('Marked for Later kept from a listing', { skip }, () => {
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
     }, WORK_ID))
-    await until('the menu offers to save it', () => tab.evaluate(() => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => el.textContent.trim().startsWith('Mark for later'))
-      row?.click()
-      return !!row
-    }))
-    await until('the work is saved', async () => (await toasts(tab)).includes('Saved for later.'))
+    await until('the menu offers to save it', () => pickRow(tab, 'mark-for-later'))
+    await until('the work is saved', async () => (await toastTypes(tab)).includes('success'))
   }
 
   const read = (tab, key) => tab.evaluate(async k => (await browser.storage.local.get(k))[k] ?? null, key)

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { openMenu, settled } from './trackedPages.mjs'
+import { menuRows, openMenu, pickRow, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -111,18 +111,9 @@ describe('the ongoing mark on a work page', { skip }, () => {
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
     }))
-    const labels = await tab.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item .AO3E--menu--label')]
-        .map(el => el.textContent))
+    const rows = await menuRows(tab)
 
-    const picked = await tab.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      const row = rows.find(el =>
-        el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))
-      if (row)
-        row.click()
-      return !!row
-    })
+    const picked = await pickRow(tab, 'mark', 'continue')
     if (picked)
       await tab.waitForSelector('.AO3E--progress-editor')
     const field = await tab.$eval('.AO3E--progress-editor--chapter', el => ({
@@ -130,7 +121,7 @@ describe('the ongoing mark on a work page', { skip }, () => {
       max: el.max,
     })).catch(() => null)
     await tab.close()
-    return { labels, field }
+    return { rows, field }
   }
 
   test('reading chapter 7 of a 9-chapter work prefills 7, not 9', async () => {
@@ -161,8 +152,9 @@ describe('the ongoing mark on a work page', { skip }, () => {
     marked['option.workMarks'].marks.continue.items = '1'
     marked['option.workMarks'].marks.continue.progress = '1:3'
 
-    const { labels } = await inspect(workPage({ index: chapterIndex(7) }), marked)
-    assert.ok(labels.includes('Update to latest chapter (9)'), labels.join(' | '))
-    assert.ok(labels.includes('Update to current chapter (7)'), labels.join(' | '))
+    const { rows } = await inspect(workPage({ index: chapterIndex(7) }), marked)
+    const does = rows.map(row => `${row.action} ${row.value}`)
+    assert.ok(does.includes('update-latest 9'), does.join(' | '))
+    assert.ok(does.includes('update-current 7'), does.join(' | '))
   })
 })

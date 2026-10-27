@@ -23,16 +23,19 @@ const NEVER_EXPORTED: readonly string[] = [WORK_TEXT_PREFIX, WORK_TEXT_INDEX_KEY
  * blurbs they name would import as lists of nothing.
  */
 const EXPORT_VARIANTS = [{
+  kind: 'all',
   fileSuffix: '',
   keyPrefixes: [] as string[],
   title: 'Export all',
   subtitle: 'Recommended for backup',
 }, {
+  kind: 'options',
   fileSuffix: '_options',
   keyPrefixes: ['option.'],
   title: 'Export options only',
   subtitle: 'Recommended for sharing with others',
 }, {
+  kind: 'cache',
   fileSuffix: '_cache',
   keyPrefixes: ['cache.', BLURB_PREFIX, BLURB_DATA_PREFIX, BLURB_INDEX_KEY],
   title: 'Export cache only',
@@ -141,13 +144,13 @@ async function startExport({ keyPrefixes, fileSuffix }: typeof EXPORT_VARIANTS[n
     :subtitle="`Save every setting, rule and mark to a file, or load one back in. ~${sizeUsed}kB in use.`"
   >
     <div flex="~ row wrap items-center justify-end gap-2">
-      <button type="button" class="outline-btn" @click.prevent="startImport()">
+      <button type="button" class="outline-btn" data-action="import" @click.prevent="startImport()">
         <span class="i-tabler-upload" text="[14px]" aria-hidden="true" />
         Import
       </button>
       <DropdownMenu :modal="false">
         <DropdownMenuTrigger>
-          <button type="button" class="outline-btn">
+          <button type="button" class="outline-btn" data-action="export">
             <span class="i-tabler-download" text="[14px]" aria-hidden="true" />
             Export
             <span class="i-tabler-chevron-down" text="[13px]" aria-hidden="true" />
@@ -159,6 +162,7 @@ async function startExport({ keyPrefixes, fileSuffix }: typeof EXPORT_VARIANTS[n
             :key="variant.fileSuffix"
             :aria-labelledby="`${menuId}-${i}`"
             :aria-describedby="`${menuId}-${i}-note`"
+            :data-action="variant.kind"
             class="flex flex-col cursor-pointer select-none items-start gap-[3px] rounded-[7px] px-[11px] py-[9px] input-ring data-[highlighted]:bg-[var(--row-hover)]"
             @select="startExport(variant)"
           >

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { NO_ARCHIVE_TAB } from '../../src/common/markedForLater.ts'
 import { loadModuleInPage, skipWithoutChrome } from '../siteExport/helpers.mjs'
 
 /**
@@ -154,12 +155,13 @@ describe('markForLater — delegation', { skip }, () => {
 
   test('a refusal comes back as what the archive said, not as a lost connection', async () => {
     await reset({ archive: 422 })
-    assert.equal(await viaTab('11', false), 'Mark request failed (422)')
+    const said = await viaTab('11', false)
+    assert.ok(said?.includes('422'), `the archive's answer, got ${said}`)
   })
 
   test('with no AO3 tab open, the message says what to do about it', async () => {
     await reset({ tabs: [] })
-    assert.match(await viaTab('11', false), /open AO3 in a tab and import this file again/)
+    assert.equal(await viaTab('11', false), NO_ARCHIVE_TAB.none)
   })
 
   /**
@@ -169,7 +171,7 @@ describe('markForLater — delegation', { skip }, () => {
    */
   test('a tab that never answers is reported as a tab to reload', async () => {
     await reset({ listening: false })
-    assert.match(await viaTab('11', false), /reload one/)
+    assert.equal(await viaTab('11', false), NO_ARCHIVE_TAB.silent)
     assert.deepEqual(await fetches(), [], 'nothing reached the archive')
   })
 })

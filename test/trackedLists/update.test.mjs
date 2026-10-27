@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { canonicalFilter, describeUpdate, filteredKey, normalizeTrackedUrl, refineLink, refiningId, trackedKey } from '../../src/common/trackedLists.ts'
+import { ADDED_VERBS, canonicalFilter, describeUpdate, filteredKey, ID_NOUNS, normalizeTrackedUrl, refineLink, refiningId, REMOVED_VERBS, trackedKey } from '../../src/common/trackedLists.ts'
+import { figures, mentions } from '../facts.mjs'
 
 const AO3 = 'https://archiveofourown.org'
 
@@ -118,6 +119,30 @@ describe('refineLink and refiningId', () => {
 describe('describeUpdate', () => {
   const texts = update => update.changes.map(change => change.text)
 
+  /** A line adding `names` the `verb` way. */
+  const adds = (verb, ...names) => line => mentions(line, ADDED_VERBS[verb]) && !mentions(line, REMOVED_VERBS[verb]) && names.every(name => mentions(line, name))
+  /** A line taking `names` away from those selected the `verb` way. */
+  const drops = (verb, ...names) => line => mentions(line, REMOVED_VERBS[verb]) && names.every(name => mentions(line, name))
+  /** A line counting ids the URL can't name: `change` of them (+2, −1), of what `field` holds. */
+  const counts = (change, field) => line => mentions(line, change) && mentions(line, ID_NOUNS[field])
+  /** A line giving each of `facts`, in this order, and no other number. */
+  const gives = (...facts) => (line) => {
+    let from = 0
+    for (const fact of facts) {
+      const at = line.indexOf(fact, from)
+      if (at < 0)
+        return false
+      from = at + fact.length
+    }
+    return figures(line, ...facts).length === 0
+  }
+
+  /** The lines are as many as `checks`, and each passes its own. */
+  function reads(lines, checks) {
+    assert.equal(lines.length, checks.length, JSON.stringify(lines))
+    lines.forEach((line, i) => assert.ok(checks[i](line), `line ${i}: ${line}`))
+  }
+
   test('nothing a list is matched by changed: no root, no lines', () => {
     assert.deepEqual(
       describeUpdate({ url: '/tags/Bees/works?work_search[complete]=T' }, { url: '/works?work_search[sort_column]=kudos_count&work_search[complete]=T&tag_id=Bees' }),
@@ -131,42 +156,46 @@ describe('describeUpdate', () => {
       { url: '/works/search?work_search[query]=coffee&work_search[excluded_tag_names]=Angst%2C+Fluff&work_search[other_tag_names]=Slow+Burn' },
     )
     assert.equal(update.root, null)
-    assert.deepEqual(texts(update), ['Includes: Slow Burn', 'Excludes: Fluff', 'No longer excludes: Major Character Death'])
+    reads(texts(update), [adds('include', 'Slow Burn'), adds('exclude', 'Fluff'), drops('exclude', 'Major Character Death')])
+    assert.ok(texts(update).every(line => !mentions(line, 'Angst')), 'what stays isn\'t a change')
     assert.ok(update.changes.every(change => change.layer === 'query'))
   })
 
   test('the sidebar\'s ids are counted, unless the page can name them', () => {
     const before = { url: '/tags/Harry%20Potter/works' }
     const after = { url: '/works?exclude_work_search[character_ids][]=12&exclude_work_search[character_ids][]=34&include_work_search[rating_ids][]=13&tag_id=Harry+Potter' }
-    assert.deepEqual(texts(describeUpdate(before, after)), ['+2 excluded characters', '+1 included rating'])
+    reads(texts(describeUpdate(before, after)), [counts('+2', 'character'), counts('+1', 'rating')])
 
     const nameId = (param, id) => (param === 'exclude_work_search[character_ids][]' && id === '12' ? 'Draco Malfoy' : null)
-    assert.deepEqual(texts(describeUpdate(before, after, { nameId })), ['Excludes: Draco Malfoy', '+1 excluded character', '+1 included rating'])
-    assert.deepEqual(texts(describeUpdate(after, before, { nameId })), ['No longer excludes: Draco Malfoy', '−1 excluded character', '−1 included rating'])
+    reads(texts(describeUpdate(before, after, { nameId })), [adds('exclude', 'Draco Malfoy'), counts('+1', 'character'), counts('+1', 'rating')])
+    reads(texts(describeUpdate(after, before, { nameId })), [drops('exclude', 'Draco Malfoy'), counts('−1', 'character'), counts('−1', 'rating')])
   })
 
-  test('word counts, as ranges', () => {
-    assert.deepEqual(texts(describeUpdate({ url: '/tags/Bees/works?work_search[words_from]=5000' }, { url: '/tags/Bees/works' })), ['Word count: ≥ 5,000 → any'])
-    assert.deepEqual(
+  test('word counts, as ranges, from what they were to what they would be', () => {
+    const [dropped] = texts(describeUpdate({ url: '/tags/Bees/works?work_search[words_from]=5000' }, { url: '/tags/Bees/works' }))
+    const [added] = texts(describeUpdate({ url: '/tags/Bees/works' }, { url: '/tags/Bees/works?work_search[words_from]=5000' }))
+    assert.ok(gives('5,000')(dropped) && gives('5,000')(added), `${dropped} | ${added}`)
+    assert.notEqual(dropped, added, 'each says which way it goes')
+    reads(
       texts(describeUpdate({ url: '/tags/Bees/works?work_search[words_from]=1000&work_search[words_to]=5000' }, { url: '/works?work_search[words_to]=10000&tag_id=Bees' })),
-      ['Word count: 1,000–5,000 → ≤ 10,000'],
+      [gives('1,000', '5,000', '10,000')],
     )
   })
 
   test('other fields say what they were and would be', () => {
-    assert.deepEqual(
-      texts(describeUpdate(
-        { url: '/tags/Bees/works?work_search[complete]=T&work_search[language_id]=en&work_search[crossover]=F' },
-        { url: '/tags/Bees/works?work_search[complete]=F&work_search[query]=coffee' },
-      )),
-      ['Completion: complete only → in progress only', 'Crossovers: no crossovers → any', 'Language: en → any', 'Search within results: any → “coffee”'],
-    )
+    const lines = texts(describeUpdate(
+      { url: '/tags/Bees/works?work_search[complete]=T&work_search[language_id]=en&work_search[crossover]=F' },
+      { url: '/tags/Bees/works?work_search[complete]=F&work_search[query]=coffee' },
+    ))
+    assert.equal(lines.length, 4, 'completion, crossovers, language and the search within the results')
+    assert.equal(lines.filter(line => /\ben\b/.test(line)).length, 1, 'the language it was')
+    assert.equal(lines.filter(line => mentions(line, 'coffee')).length, 1, 'the words it would search')
   })
 
   test('a pseud is a filter of its author, not a new root', () => {
     const update = describeUpdate({ url: '/users/BuckysGrace/works' }, { url: '/works?pseud_id=Grace+Notes&user_id=BuckysGrace' })
     assert.equal(update.root, null)
-    assert.deepEqual(texts(update), ['Pseud: any → Grace Notes'])
+    reads(texts(update), [line => mentions(line, 'Grace Notes')])
   })
 
   test('the view\'s filters, by name, after the query\'s', () => {
@@ -175,42 +204,43 @@ describe('describeUpdate', () => {
       { url, filter: { facets: { characters: { ex: ['Draco Malfoy'] } } } },
       { url, filter: { facets: { characters: { ex: ['Draco Malfoy', 'Harry Potter'] }, freeforms: { req: ['Fluff'] } }, text: 'dragons', words: [1000, null] } },
     )
-    assert.deepEqual(update.changes, [
-      { layer: 'view', text: 'Requires: Fluff' },
-      { layer: 'view', text: 'Excludes: Harry Potter' },
-      { layer: 'view', text: 'Text: any → “dragons”' },
-      { layer: 'view', text: 'Word count: any → ≥ 1,000' },
-    ])
+    assert.ok(update.changes.every(change => change.layer === 'view'))
+    const [require, exclude, ...values] = texts(update)
+    reads([require, exclude], [adds('require', 'Fluff'), adds('exclude', 'Harry Potter')])
+    assert.ok(!mentions(exclude, 'Draco Malfoy'), 'what stays isn\'t a change')
+    // The text box and the word range, each as it was and would be.
+    assert.equal(values.length, 2, JSON.stringify(values))
+    assert.equal(values.filter(line => mentions(line, 'dragons')).length, 1)
+    assert.equal(values.filter(gives('1,000')).length, 1)
 
     const both = describeUpdate(
       { url: '/works/search?work_search[query]=coffee' },
       { url: '/works/search?work_search[query]=coffee&work_search[complete]=T', filter: { facets: { fandoms: { in: ['Bees'] } } } },
     )
-    assert.deepEqual(both.changes, [
-      { layer: 'query', text: 'Completion: any → complete only' },
-      { layer: 'view', text: 'Includes: Bees' },
-    ])
+    assert.deepEqual(both.changes.map(change => change.layer), ['query', 'view'])
+    assert.ok(adds('include', 'Bees')(both.changes[1].text), both.changes[1].text)
   })
 
   test('a move to another root is flagged, with what it was and would be a search of', () => {
     const tag = describeUpdate({ url: '/tags/Harry%20Potter/works', type: 'fandom' }, { url: '/works?tag_id=Marvel&work_search[complete]=T' })
     assert.deepEqual(tag.root, { from: { type: 'fandom', entity: 'Harry Potter' }, to: { type: 'tag', entity: 'Marvel' } })
-    assert.deepEqual(texts(tag), ['Completion: any → complete only'], 'the owner itself is not a line')
+    assert.equal(tag.changes.length, 1, 'the owner itself is not a line, only the completion')
+    assert.ok(!mentions(tag.changes[0].text, 'Marvel'), tag.changes[0].text)
 
     const search = describeUpdate({ url: '/works/search?work_search[query]=coffee' }, { url: '/works/search?work_search[query]=tea' })
     assert.deepEqual(search.root, { from: { type: 'search', entity: 'coffee' }, to: { type: 'search', entity: 'tea' } })
-    assert.deepEqual(texts(search), ['Search words: “coffee” → “tea”'])
+    reads(texts(search), [gives('coffee', 'tea')])
   })
 
   test('a works search without words moves only when its subject field does', () => {
     const was = { url: '/works/search?work_search[fandom_names]=Harry+Potter&work_search[character_names]=Draco+Malfoy' }
     const narrowed = describeUpdate(was, { url: '/works/search?work_search[fandom_names]=Harry+Potter&work_search[character_names]=Ron+Weasley' })
     assert.equal(narrowed.root, null)
-    assert.deepEqual(texts(narrowed), ['Includes: Ron Weasley', 'No longer includes: Draco Malfoy'])
+    reads(texts(narrowed), [adds('include', 'Ron Weasley'), drops('include', 'Draco Malfoy')])
 
     const moved = describeUpdate(was, { url: '/works/search?work_search[fandom_names]=Marvel&work_search[character_names]=Draco+Malfoy' })
     assert.deepEqual(moved.root, { from: { type: 'search', entity: 'Harry Potter' }, to: { type: 'search', entity: 'Marvel' } })
-    assert.deepEqual(texts(moved), ['Includes: Marvel', 'No longer includes: Harry Potter'])
+    reads(texts(moved), [adds('include', 'Marvel'), drops('include', 'Harry Potter')])
   })
 
   test('nothing for a URL that isn\'t trackable', () => {

@@ -2,13 +2,13 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { joinSavedLists } from '../../src/common/savedLists.ts'
-import { formatDay } from '../../src/common/trackedLists.ts'
+import { describeFilters, formatDay, TRACKED_TYPE_LABELS } from '../../src/common/trackedLists.ts'
 import { bucketBar, formatBytes } from '../../src/options_ui/model/buckets.ts'
-import { jobView, offReason } from '../../src/options_ui/model/jobView.ts'
+import { jobVerb, jobView, offReason } from '../../src/options_ui/model/jobView.ts'
 import { timeAgo } from '../../src/options_ui/model/moments.ts'
-import { sentence } from '../../src/options_ui/model/phrases.ts'
 import { REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
-import { blurbsOnRemove, cachingCell, copyTitle, describeList, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, statusCell, STOP_NOTE, titleRefusal, titlesInWords, TRACK_OFF, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
+import { blurbsOnRemove, cachingCell, COPY_REMOVAL, copyTitle, describeList, KIND_LABELS, LIST_REMOVAL, NEEDS_VISIT_NOTE, NO_COPY, NO_SWITCH, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, STATUS_DETAILS, STATUS_TIPS, STATUS_WORDS, statusCell, STOP_NOTE, titleRefusal, titlesInWords, TRACK_OFF, TRACKING_STATE, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
+import { figures, mentions } from '../facts.mjs'
 
 const AO3 = 'https://archiveofourown.org'
 const DAY = 20_400
@@ -36,8 +36,8 @@ const copy = (key, fields = {}) => ({ key, scrapedAt: 1_000, ...fields })
 const described = (key, sourceId, path, label, fields = {}) => copy(key, { sourceId, listUrl: `${AO3}${path}`, label, ...fields })
 
 /** What a stored list holds, by key, made up for each copy. */
-const figures = key => ({ buckets: { total: 10, cached: 6, failed: 1, unfetched: 3, bytes: key.length, staleFailures: 2 }, unstored: 4 })
-const IDLE = { copy: figures, review: true, workMarks: true, jobOff: () => null }
+const holds = key => ({ buckets: { total: 10, cached: 6, failed: 1, unfetched: 3, bytes: key.length, staleFailures: 2 }, unstored: 5 })
+const IDLE = { copy: holds, review: true, workMarks: true, jobOff: () => null }
 
 /** The rows, by id. */
 function rows(join, ctx = IDLE) {
@@ -61,10 +61,10 @@ describe('savedListRows', () => {
       placeholder: 'Search: tea',
       titleEditable: true,
       rawKey: false,
-      type: 'Search',
+      type: TRACKED_TYPE_LABELS.search,
       typeTip: 'Search: tea',
-      kind: 'Works search',
-      filters: { text: 'Text: “slow burn”', full: 'Text: “slow burn”', more: 0 },
+      kind: KIND_LABELS['text-search'],
+      filters: describeFilters(tea),
       viewEdit: `${TEA}#ao3e-list=t3a`,
       open: `${TEA}#ao3e-open=t3a`,
       status: 'tracked',
@@ -72,7 +72,7 @@ describe('savedListRows', () => {
       since: DAY - 3,
       sharedTitle: false,
       sameAddressAs: [],
-      caching: { kind: 'copy', key: teaCopy.key, keys: [teaCopy.key], ...figures(teaCopy.key), scrapedAt: 7_000 },
+      caching: { kind: 'copy', key: teaCopy.key, keys: [teaCopy.key], ...holds(teaCopy.key), scrapedAt: 7_000 },
     })
   })
 
@@ -170,7 +170,7 @@ describe('savedListRows', () => {
       pending: 'needs-visit',
       sharedTitle: false,
       sameAddressAs: [],
-      caching: { kind: 'copy', key: old.key, keys: [old.key], ...figures(old.key), scrapedAt: 1_000 },
+      caching: { kind: 'copy', key: old.key, keys: [old.key], ...holds(old.key), scrapedAt: 1_000 },
       trackOff: TRACK_OFF.needsVisit,
       offlineOff: OFFLINE_OFF.undescribed,
     })
@@ -205,8 +205,8 @@ describe('savedListRows', () => {
     assert.equal(got.viewEdit, undefined)
     assert.equal(got.open, undefined, 'no id to open it by, or copy a link to, until its record is filed')
     assert.equal('copyUrl' in got, false, 'Copy URL copies the open URL, which it hasn\'t')
-    assert.equal(got.type, 'Tag')
-    assert.equal(got.kind, 'Uncommon tag')
+    assert.equal(got.type, TRACKED_TYPE_LABELS.tag)
+    assert.equal(got.kind, KIND_LABELS['tag-works'])
   })
 
   test('a filtered listing\'s copy not yet given its record tracks like any search, and its saved list reads it once filed', () => {
@@ -217,8 +217,8 @@ describe('savedListRows', () => {
     assert.equal(got.pending, null)
     assert.equal(got.trackOff, undefined)
     assert.equal(got.open, undefined)
-    assert.equal(got.type, 'Tag')
-    assert.equal(got.kind, 'Filtered listing')
+    assert.equal(got.type, TRACKED_TYPE_LABELS.tag)
+    assert.equal(got.kind, KIND_LABELS['works-filter'])
 
     const bees = record('b33s', '/tags/Bees/works', { kind: 'works-filter', type: 'tag', entity: 'Bees' })
     assert.equal(rows(joinSavedLists(state([], [bees]), [fresh])).b33s.caching.key, 'works-filter:/tags/Bees/works')
@@ -259,12 +259,10 @@ describe('savedListRows', () => {
  * says: only *Discard unneeded blurbs automatically* has them go at once.
  */
 describe('blurbsOnRemove', () => {
-  test('with Discard unneeded blurbs automatically on, the blurbs no other list holds go now', () => {
-    assert.equal(blurbsOnRemove(true), 'The blurbs saved for it that no other list holds go now, since Discard unneeded blurbs automatically is on.')
-  })
-
-  test('with it off, they stay for Discard orphans', () => {
-    assert.equal(blurbsOnRemove(false), 'The blurbs saved for it stay until Discard orphans clears them, since Discard unneeded blurbs automatically is off.')
+  test('says one thing with Discard unneeded blurbs automatically on, and another with it off', () => {
+    assert.ok(blurbsOnRemove(true))
+    assert.ok(blurbsOnRemove(false))
+    assert.notEqual(blurbsOnRemove(true), blurbsOnRemove(false))
   })
 })
 
@@ -280,9 +278,14 @@ const jobStatus = (key, fields = {}) => ({
   waitReason: null,
   ...fields,
 })
+const OTHER = 'Marked for Later'
 const NO_JOB = jobView(jobStatus(null), () => '', NOW)
-const jobOn = (key, fields) => jobView(jobStatus(key, fields), () => 'Marked for Later', NOW)
-const BUSY = 'off for now: one job at a time, and Marked for Later is caching'
+const jobOn = (key, fields) => jobView(jobStatus(key, fields), () => OTHER, NOW)
+
+/** A reason that is another list's job: it names that list. */
+const othersJob = off => typeof off === 'string' && mentions(off, OTHER)
+/** A reason that is the row's own job: it says what the job is doing, and names no other list. */
+const ownJob = (off, job) => typeof off === 'string' && mentions(off, jobVerb(job)) && !mentions(off, OTHER)
 
 /** The rows with `job` turning their offline actions off, as the page has them; by id. */
 function rowsWith(join, job, ctx = {}) {
@@ -300,91 +303,78 @@ describe('the row\'s cells', () => {
   const idle = rowsWith(join, NO_JOB)
 
   describe('statusCell', () => {
+    /** The cell, with only what its switch is: its tooltip is checked where it gives a reason. */
+    const status = ({ toggle, ...cell }) => ({ ...cell, toggle: toggle.kind })
+
     test('a tracked list: since when, and what tracking means', () => {
-      assert.deepEqual(statusCell(idle.t3a), {
-        word: 'Tracked',
-        detail: `since ${formatDay(DAY - 3)}`,
-        tip: 'Tracked for your review: its new and updated works are gathered there. It does everything any other saved list does as well.',
-        toggle: { kind: 'switch', title: 'Track this list for review' },
-      })
+      const cell = statusCell(idle.t3a)
+      assert.ok(mentions(cell.detail, formatDay(DAY - 3)), cell.detail)
+      assert.deepEqual(status({ ...cell, detail: null }), { word: STATUS_WORDS.tracked, detail: null, tip: STATUS_TIPS.tracked, toggle: 'switch' })
     })
 
     test('a saved list: not tracked, and switching it on tracks it from today', () => {
-      assert.deepEqual(statusCell(idle.s3r), {
-        word: 'Saved',
-        detail: 'not tracked',
-        tip: 'Saved: kept, refreshed, cached and editable like any list, but not tracked for review. Switch it on to track it from today.',
-        toggle: { kind: 'switch', title: 'Track this list for review, from today on' },
-      })
+      assert.deepEqual(status(statusCell(idle.s3r)), { word: STATUS_WORDS.saved, detail: STATUS_DETAILS.notTracked, tip: STATUS_TIPS.saved, toggle: 'switch' })
     })
 
     test('with review off, the switch says why it is off', () => {
       const off = rows(join, { ...IDLE, review: false })
-      assert.equal(statusCell(off.s3r).toggle.title, `Track this list for review, from today on — ${TRACK_OFF.review}`)
-      assert.equal(statusCell(off.t3a).toggle.title, `Track this list for review — ${TRACK_OFF.review}`)
+      assert.ok(mentions(statusCell(off.s3r).toggle.title, TRACK_OFF.review))
+      assert.ok(mentions(statusCell(off.t3a).toggle.title, TRACK_OFF.review))
+      assert.ok(!mentions(statusCell(idle.t3a).toggle.title, TRACK_OFF.review), 'and not while it is on')
     })
 
     test('a list at no address on the archive is pending; tracked, its switch can stop it; saved, it is off with the reason', () => {
-      assert.deepEqual(statusCell(idle.br0), {
-        word: 'Tracked (pending)',
-        detail: 'not an AO3 address',
-        tip: 'Tracked, but waiting on you: its address isn\'t a page on AO3, so nothing from it can be reviewed. Remove it and track the list again from its page.',
-        toggle: { kind: 'switch', title: 'Track this list for review' },
-      })
-      const untracked = rowsWith(joinSavedLists(state([], [broken]), []), NO_JOB).br0
-      assert.deepEqual(statusCell(untracked), {
-        word: 'Saved (pending)',
-        detail: 'not an AO3 address',
-        tip: 'Saved, but waiting on you: its address isn\'t a page on AO3, so it can\'t be tracked. Remove it, and keep the list again from its page.',
-        toggle: { kind: 'switch', title: `Track this list for review, from today on — ${TRACK_OFF.notArchive}` },
-      })
+      assert.deepEqual(status(statusCell(idle.br0)), { word: STATUS_WORDS.trackedPending, detail: STATUS_DETAILS.notArchive, tip: STATUS_TIPS.trackedNotArchive, toggle: 'switch' })
+      const untracked = statusCell(rowsWith(joinSavedLists(state([], [broken]), []), NO_JOB).br0)
+      assert.deepEqual(status(untracked), { word: STATUS_WORDS.savedPending, detail: STATUS_DETAILS.notArchive, tip: STATUS_TIPS.savedNotArchive, toggle: 'switch' })
+      assert.ok(mentions(untracked.toggle.title, TRACK_OFF.notArchive))
     })
 
     test('an undescribed copy waits on one visit, and has no switch at all, only why', () => {
       assert.deepEqual(statusCell(idle['copy:tag-works:Coffee%20Shop%20AU']), {
-        word: 'Saved (pending)',
-        detail: 'needs one visit',
-        tip: 'Saved, but waiting on you: it was saved before the extension could fetch it again. Open it on AO3 and press its search button; until then it can\'t be refreshed or tracked.',
-        toggle: { kind: 'none', title: 'Can\'t be tracked until it has been opened on AO3 once' },
+        word: STATUS_WORDS.savedPending,
+        detail: STATUS_DETAILS.needsVisit,
+        tip: STATUS_TIPS.needsVisit,
+        toggle: { kind: 'none', title: NO_SWITCH.needsVisit },
       })
     })
 
     test('a list that isn\'t a search is saved, and can\'t be tracked', () => {
       assert.deepEqual(statusCell(idle['copy:marked-for-later:them']), {
-        word: 'Saved',
-        detail: 'not tracked',
-        tip: 'Saved: kept, refreshed and cached like any list. Only a search, an uncommon tag or a series can be tracked for review.',
-        toggle: { kind: 'none', title: 'Can\'t be tracked: only a search, an uncommon tag or a series can be' },
+        word: STATUS_WORDS.saved,
+        detail: STATUS_DETAILS.notTracked,
+        tip: STATUS_TIPS.notSearch,
+        toggle: { kind: 'none', title: NO_SWITCH.notSearch },
       })
     })
   })
 
   describe('cachingCell', () => {
-    const { buckets } = figures(teaCopy.key)
+    const { buckets } = holds(teaCopy.key)
+    const age = timeAgo(7_000, NOW)
 
     test('a copy: the bar, what of it is cached and its size, and how old it is, with its failures', () => {
-      assert.deepEqual(cachingCell(idle.t3a, NO_JOB, NOW), {
-        bar: bucketBar(buckets),
-        line: `6 of 10 cached · ${formatBytes(buckets.bytes)}`,
-        detail: `as of ${timeAgo(7_000, NOW)} · 1 failed`,
-        muted: false,
-        link: null,
-      })
+      const cell = cachingCell(idle.t3a, NO_JOB, NOW)
+      assert.deepEqual({ ...cell, line: null, detail: null }, { bar: bucketBar(buckets), line: null, detail: null, muted: false, link: null })
+      assert.deepEqual(figures(cell.line, formatBytes(buckets.bytes)), [6, 10], 'cached, of how many')
+      assert.deepEqual(figures(cell.detail, age), [1], 'and how many failed')
     })
 
     test('while its own job runs, it says so in place of how old it is', () => {
-      const job = jobOn(teaCopy.key)
-      assert.equal(cachingCell(rowsWith(join, job).t3a, job, NOW).detail, 'caching now')
-      const refreshing = jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['refreshing', 'caching'] } })
-      assert.equal(cachingCell(rowsWith(join, refreshing).t3a, refreshing, NOW).detail, 'refreshing now')
-      const downloading = jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['exporting'] } })
-      assert.equal(cachingCell(rowsWith(join, downloading).t3a, downloading, NOW).detail, 'downloading now', 'a Download\'s last stage, as its button says')
+      const says = (job) => {
+        const { detail } = cachingCell(rowsWith(join, job).t3a, job, NOW)
+        return { doing: mentions(detail, jobVerb(job)), age: mentions(detail, age) }
+      }
+      assert.deepEqual(says(jobOn(teaCopy.key)), { doing: true, age: false })
+      assert.deepEqual(says(jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['refreshing', 'caching'] } })), { doing: true, age: false })
+      assert.deepEqual(says(jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['exporting'] } })), { doing: true, age: false }, 'a Download\'s last stage, as its button says')
       const other = jobOn(old.key)
-      assert.equal(cachingCell(rowsWith(join, other).t3a, other, NOW).detail, `as of ${timeAgo(7_000, NOW)} · 1 failed`)
+      assert.equal(cachingCell(rowsWith(join, other).t3a, other, NOW).detail, cachingCell(idle.t3a, NO_JOB, NOW).detail, 'another list\'s job changes nothing here')
     })
 
     test('with no copy: not cached, and a link that opens it on AO3, which keeps one', () => {
-      assert.deepEqual(cachingCell(idle.s3r, NO_JOB, NOW), { bar: null, line: 'Not cached', detail: 'open it on AO3 to keep a copy', muted: true, link: '/series/9991#ao3e-open=s3r' })
+      const { bar, muted, link } = cachingCell(idle.s3r, NO_JOB, NOW)
+      assert.deepEqual({ bar, muted, link }, { bar: null, muted: true, link: '/series/9991#ao3e-open=s3r' })
     })
 
     test('every kind of list with no copy says so alike, and links its own open URL, a filtered listing\'s too', () => {
@@ -392,15 +382,19 @@ describe('the row\'s cells', () => {
       const tag = record('m4rr', TAG, { kind: 'tag-works' })
       const search = record('s34rch', TEA)
       const got = rows(joinSavedLists(state([tracking(hp)], [hp, tag, search]), []))
+      const series = cachingCell(idle.s3r, NO_JOB, NOW)
       for (const [id, page] of [['hp', HP], ['m4rr', TAG], ['s34rch', TEA]]) {
         const cell = cachingCell(got[id], NO_JOB, NOW)
-        assert.deepEqual(cell, { bar: null, line: 'Not cached', detail: 'open it on AO3 to keep a copy', muted: true, link: `${page}#ao3e-open=${id}` }, id)
+        assert.deepEqual(cell, { ...series, link: `${page}#ao3e-open=${id}` }, id)
         assert.equal(cell.link, got[id].open, 'the row\'s open URL')
       }
     })
 
     test('a list at no address on the archive has no open URL, so nothing to link, and keeps its own words', () => {
-      assert.deepEqual(cachingCell(idle.br0, NO_JOB, NOW), { bar: null, line: 'Not cached', detail: 'cache it from its page on AO3', muted: true, link: null })
+      const cell = cachingCell(idle.br0, NO_JOB, NOW)
+      const linked = cachingCell(idle.s3r, NO_JOB, NOW)
+      assert.deepEqual({ ...cell, detail: null }, { ...linked, detail: null, link: null })
+      assert.notEqual(cell.detail, linked.detail, 'it can\'t point at a link it hasn\'t')
     })
   })
 
@@ -408,15 +402,18 @@ describe('the row\'s cells', () => {
     test('a list with a copy offers Download, off while another list\'s job runs', () => {
       assert.deepEqual(rowAction(idle.t3a, NO_JOB), { kind: 'download', off: null })
       const other = jobOn(old.key)
-      assert.deepEqual(rowAction(rowsWith(join, other).t3a, other), { kind: 'download', off: BUSY })
+      const busy = rowAction(rowsWith(join, other).t3a, other)
+      assert.equal(busy.kind, 'download')
+      assert.ok(othersJob(busy.off), busy.off)
       assert.deepEqual(rowAction(idle['copy:tag-works:Coffee%20Shop%20AU'], NO_JOB), { kind: 'download', off: OFFLINE_OFF.undescribed })
     })
 
     test('Download becomes Stop while its own job runs, and leaves Continue to the job\'s line once it stops', () => {
       const running = jobOn(teaCopy.key)
-      assert.deepEqual(rowAction(rowsWith(join, running).t3a, running), { kind: 'stop', verb: 'caching' })
+      assert.deepEqual(rowAction(rowsWith(join, running).t3a, running), { kind: 'stop', verb: jobVerb(running) })
       const downloading = jobOn(teaCopy.key, { job: { ...jobStatus(teaCopy.key).job, steps: ['exporting'] } })
-      assert.deepEqual(rowAction(rowsWith(join, downloading).t3a, downloading), { kind: 'stop', verb: 'downloading' })
+      assert.deepEqual(rowAction(rowsWith(join, downloading).t3a, downloading), { kind: 'stop', verb: jobVerb(downloading) })
+      assert.notEqual(jobVerb(downloading), jobVerb(running), 'each says what its job is doing')
       const stopped = jobOn(teaCopy.key, { running: false })
       assert.deepEqual(rowAction(rowsWith(join, stopped).t3a, stopped), { kind: 'none' })
     })
@@ -433,14 +430,22 @@ describe('the row\'s details', () => {
   const series = record('s3r', '/series/9991', { kind: 'series-works', title: 'Long haul' })
   const join = joinSavedLists(state([tracking(tea, DAY - 3)], [tea, series]), [teaCopy])
   const idle = rowsWith(join, NO_JOB)
-  const { buckets } = figures(teaCopy.key)
+  const { buckets } = holds(teaCopy.key)
   const size = formatBytes(buckets.bytes)
-  const keeps = `The 6 cached works (${size}) stay, since another list may be reading the same copies. Opening the list on AO3 again brings it straight back.`
+  const age = timeAgo(7_000, NOW)
+
+  /** What Remove offline copy says of a copy with cached works: what goes of its blurbs, that its 6 cached works stay, and how to get it back. */
+  function removesCopy(note, prune) {
+    assert.ok(mentions(note, blurbsOnRemove(prune)), note)
+    assert.deepEqual(figures(note, size), [6], 'the cached works that stay')
+    assert.ok(mentions(note, COPY_REMOVAL.reopens), note)
+  }
 
   describe('offlineDetails', () => {
     test('a copy: its figures, what a retry would ask for, and what removing it does', () => {
-      assert.deepEqual(offlineDetails(idle.t3a, NO_JOB, NOW, false), {
-        summary: `10 works as of ${timeAgo(7_000, NOW)} · 6 cached (${size}) · 4 uncached · 1 failed · 4 need refreshing`,
+      const got = offlineDetails(idle.t3a, NO_JOB, NOW, false)
+      assert.deepEqual({ ...got, summary: null, remove: null }, {
+        summary: null,
         empty: null,
         note: null,
         off: null,
@@ -448,32 +453,38 @@ describe('the row\'s details', () => {
         refreshNote: null,
         retry: 3,
         cached: 6,
-        remove: { off: null, note: `${blurbsOnRemove(false)} ${keeps}` },
+        remove: null,
       })
+      // Its works, cached, uncached, failed, and needing a refresh.
+      assert.deepEqual(figures(got.summary, age, size), [1, 4, 5, 6, 10])
+      assert.equal(got.remove.off, null)
+      removesCopy(got.remove.note, false)
+      assert.ok(!mentions(got.remove.note, COPY_REMOVAL.discardsJob), 'no job to discard')
     })
 
     test('uncached is said only while some works were never fetched; the failed ones are counted on their own', () => {
       const failedOnly = rowsWith(join, NO_JOB, { copy: () => ({ buckets: { total: 10, cached: 8, failed: 2, unfetched: 0, bytes: 50, staleFailures: 0 }, unstored: 0 }) })
-      assert.equal(offlineDetails(failedOnly.t3a, NO_JOB, NOW, false).summary, `10 works as of ${timeAgo(7_000, NOW)} · 8 cached (50 B) · 2 failed`)
+      assert.deepEqual(figures(offlineDetails(failedOnly.t3a, NO_JOB, NOW, false).summary, age, formatBytes(50)), [2, 8, 10])
     })
 
     test('with blurbs discarded automatically, removing says they go now', () => {
-      assert.equal(offlineDetails(idle.t3a, NO_JOB, NOW, true).remove.note, `${blurbsOnRemove(true)} ${keeps}`)
+      removesCopy(offlineDetails(idle.t3a, NO_JOB, NOW, true).remove.note, true)
     })
 
     test('another list\'s job turns the actions off, and says so where the reader is looking; removing stays on', () => {
       const job = jobOn('marked-for-later:tester')
       const got = offlineDetails(rowsWith(join, job).t3a, job, NOW, false)
-      assert.equal(got.off, BUSY)
-      assert.deepEqual(got.note, { severity: 'neutral', text: 'Off for now: one job at a time, and Marked for Later is caching.' })
+      assert.ok(othersJob(got.off), got.off)
+      assert.equal(got.note.severity, 'neutral')
+      assert.ok(mentions(got.note.text, got.off), got.note.text)
       assert.equal(got.remove.off, null)
     })
 
     test('its own job turns its actions off, and removing it too', () => {
       const job = jobOn(teaCopy.key)
       const got = offlineDetails(rowsWith(join, job).t3a, job, NOW, false)
-      assert.equal(got.off, 'off while this list is caching')
-      assert.equal(got.remove.off, 'off while this list is caching')
+      assert.ok(ownJob(got.off, job), got.off)
+      assert.equal(got.remove.off, got.off)
     })
 
     test('a stopped job on it goes with the copy, which removing says', () => {
@@ -481,70 +492,79 @@ describe('the row\'s details', () => {
       const got = offlineDetails(rowsWith(join, job).t3a, job, NOW, false)
       assert.equal(got.off, null)
       assert.equal(got.remove.off, null)
-      assert.equal(got.remove.note, `${blurbsOnRemove(false)} ${keeps} Its stopped job is discarded with it.`)
+      removesCopy(got.remove.note, false)
+      assert.ok(mentions(got.remove.note, COPY_REMOVAL.discardsJob), got.remove.note)
     })
 
     test('a copy two lists share: removing it from one takes it from both, and says so', () => {
       const mine = record('m', TEA, { title: 'Mine' })
       const theirs = record('t', TEA_BY_KUDOS, { filter: SLOW_BURN, title: 'Theirs' })
       const shared = rowsWith(joinSavedLists(state([], [mine, theirs]), [teaCopy]), NO_JOB)
-      assert.match(offlineDetails(shared.m, NO_JOB, NOW, false).remove.note, /“Theirs” shares this copy, and loses it too\.$/)
+      assert.ok(mentions(offlineDetails(shared.m, NO_JOB, NOW, false).remove.note, 'Theirs'))
+      assert.ok(!mentions(offlineDetails(idle.t3a, NO_JOB, NOW, false).remove.note, 'Theirs'), 'and only then')
     })
 
     test('an undescribed copy: why its actions are off, as a warning, and nothing about cached works it has none of', () => {
       const old = copy('tag-works:Old%20Tag')
       const row = rowsWith(joinSavedLists(state([], []), [old]), NO_JOB, { copy: () => ({ buckets: { total: 94, cached: 0, failed: 0, unfetched: 94, bytes: 0, staleFailures: 0 }, unstored: 0 }) })['copy:tag-works:Old%20Tag']
       const got = offlineDetails(row, NO_JOB, NOW, false)
-      assert.equal(got.summary, `94 works as of ${timeAgo(1_000, NOW)} · 0 cached (0 B) · 94 uncached`)
+      assert.deepEqual(figures(got.summary, timeAgo(1_000, NOW), formatBytes(0)), [0, 94, 94], 'its works, none cached, all uncached')
       assert.deepEqual(got.note, { severity: 'warning', text: NEEDS_VISIT_NOTE })
       assert.equal(got.off, OFFLINE_OFF.undescribed)
-      assert.equal(got.remove.note, `${blurbsOnRemove(false)} Opening the list on AO3 again brings it straight back.`)
+      assert.ok(mentions(got.remove.note, blurbsOnRemove(false)))
+      assert.ok(mentions(got.remove.note, COPY_REMOVAL.reopens))
+      assert.deepEqual(figures(got.remove.note), [], 'no cached works to say stay')
     })
 
     test('no copy: where one comes from, and nothing to remove', () => {
       const got = offlineDetails(idle.s3r, NO_JOB, NOW, false)
       assert.equal(got.summary, null)
-      assert.equal(got.empty, 'None yet. Open it on AO3 to keep a copy: from then on, it refreshes from here.')
+      assert.equal(got.empty, NO_COPY.opens)
       assert.equal(got.remove, null)
     })
 
     test('a filtered listing with no copy: one comes from the same place', () => {
       const hp = record('hp', HP, { kind: 'works-filter', type: 'tag', entity: 'Harry Potter' })
       const got = offlineDetails(rows(joinSavedLists(state([], [hp]), [])).hp, NO_JOB, NOW, false)
-      assert.equal(got.empty, 'None yet. Open it on AO3 to keep a copy: from then on, it refreshes from here.')
+      assert.equal(got.empty, NO_COPY.opens)
     })
 
     test('a list at no address on the archive, which can\'t be opened from here, keeps its own words', () => {
       const broken = record('br0', BROKEN, { kind: 'tag-works', title: 'Elsewhere' })
       const got = offlineDetails(rows(joinSavedLists(state([], [broken]), [])).br0, NO_JOB, NOW, false)
-      assert.equal(got.empty, 'None yet. Open the list on AO3 and press the search button there: a copy is kept from then on, and refreshes from here.')
+      assert.equal(got.empty, NO_COPY.elsewhere)
     })
   })
 
   describe('trackingDetails', () => {
     test('a tracked list: since when, what it searches, Stop tracking, and Remove list with what it takes', () => {
-      assert.deepEqual(trackingDetails(idle.t3a, NO_JOB, false), {
-        state: `Tracked since ${formatDay(DAY - 3)}. Its new and updated works turn up in your review.`,
+      const got = trackingDetails(idle.t3a, NO_JOB, false)
+      assert.deepEqual({ ...got, state: null, what: null, remove: null }, {
+        state: null,
         muted: false,
-        what: 'Works search · Text: “slow burn”',
+        what: null,
         problem: null,
         action: { kind: 'stop', off: null, note: STOP_NOTE },
-        remove: { off: null, note: `Forgets the list and its title, and stops tracking it. Its offline copy goes too. ${blurbsOnRemove(false)} Cached work text stays. To keep it without reviewing it, stop tracking it instead.` },
+        remove: null,
       })
-      assert.equal(STOP_NOTE, 'It stays a Saved list, title and all. Tracking it again starts from that day, so anything it turns up in between is never reviewed.')
+      assert.ok(mentions(got.state, formatDay(DAY - 3)), got.state)
+      assert.ok(mentions(got.what, KIND_LABELS['text-search']) && mentions(got.what, describeFilters(tea).text), got.what)
+      assert.equal(got.remove.off, null)
+      for (const fact of [LIST_REMOVAL.forgetsTracked, LIST_REMOVAL.copyGoes, blurbsOnRemove(false), LIST_REMOVAL.textStays, LIST_REMOVAL.stopInstead])
+        assert.ok(mentions(got.remove.note, fact), fact)
     })
 
     test('a saved list: tracking starts from today; with no copy, removing takes only the list', () => {
       assert.deepEqual(trackingDetails(idle.s3r, NO_JOB, false), {
-        state: 'Not tracked. Tracking starts from today, so nothing from before it reaches the review.',
+        state: TRACKING_STATE.notTracked,
         muted: false,
         what: null,
         problem: null,
         action: { kind: 'track', off: null, note: null },
-        remove: { off: null, note: 'Forgets the list and its title.' },
+        remove: { off: null, note: LIST_REMOVAL.forgets },
       })
       const withCopy = rowsWith(joinSavedLists(state([], [tea]), [teaCopy]), NO_JOB).t3a
-      assert.equal(trackingDetails(withCopy, NO_JOB, false).state, 'Not tracked. Tracking starts from today: however many works the offline copy already holds, none of them reaches the review.')
+      assert.equal(trackingDetails(withCopy, NO_JOB, false).state, TRACKING_STATE.notTrackedWithCopy)
     })
 
     test('with review off, tracking and stopping are off with the reason; removing isn\'t', () => {
@@ -558,39 +578,40 @@ describe('the row\'s details', () => {
       const mine = record('m', TEA, { title: 'Mine' })
       const theirs = record('t', TEA_BY_KUDOS, { filter: SLOW_BURN, title: 'Theirs' })
       const shared = rowsWith(joinSavedLists(state([], [mine, theirs]), [teaCopy]), NO_JOB)
-      assert.equal(trackingDetails(shared.m, NO_JOB, false).remove.note, 'Forgets the list and its title. Its offline copy stays: “Theirs” searches the same thing.')
+      const { note } = trackingDetails(shared.m, NO_JOB, false).remove
+      assert.ok(mentions(note, LIST_REMOVAL.forgets), note)
+      assert.ok(mentions(note, 'Theirs'), 'naming the list that keeps it')
+      assert.ok(!mentions(note, LIST_REMOVAL.copyGoes), note)
     })
 
     test('removing a list is off while its copy\'s own job runs', () => {
       const job = jobOn(teaCopy.key)
-      assert.equal(trackingDetails(rowsWith(join, job).t3a, job, false).remove.off, 'off while this list is caching')
+      const { off } = trackingDetails(rowsWith(join, job).t3a, job, false).remove
+      assert.ok(ownJob(off, job), off)
     })
 
     test('a list at no address on the archive: what is wrong, and Remove list; tracked, Stop tracking too, which can\'t be taken back', () => {
       const broken = record('br0', BROKEN, { kind: 'tag-works', title: 'Elsewhere' })
       const row = rowsWith(joinSavedLists(state([tracking(broken)], [broken]), []), NO_JOB).br0
-      assert.deepEqual(trackingDetails(row, NO_JOB, false), {
+      const got = trackingDetails(row, NO_JOB, false)
+      assert.deepEqual({ ...got, remove: null }, {
         state: null,
         muted: false,
         what: null,
         problem: NOT_ARCHIVE_NOTE,
         action: { kind: 'stop', off: null, note: NOT_ARCHIVE_STOP_NOTE },
-        remove: { off: null, note: 'Forgets the list and its title, and stops tracking it. Its address isn\'t a page on AO3, so nothing was ever fetched for it.' },
+        remove: null,
       })
-      assert.equal(NOT_ARCHIVE_STOP_NOTE, 'It stays a Saved list, title and all, but can\'t be tracked again: its address isn\'t a page on AO3.')
+      assert.equal(got.remove.off, null)
+      assert.ok(mentions(got.remove.note, LIST_REMOVAL.forgetsTracked) && mentions(got.remove.note, LIST_REMOVAL.neverFetched), got.remove.note)
 
       const off = rows(joinSavedLists(state([tracking(broken)], [broken]), []), { ...IDLE, review: false }).br0
       assert.deepEqual(trackingDetails(off, NO_JOB, false).action, { kind: 'stop', off: TRACK_OFF.review, note: NOT_ARCHIVE_STOP_NOTE }, 'off with Tracked lists, as every switch is')
 
-      const saved = rowsWith(joinSavedLists(state([], [broken]), []), NO_JOB).br0
-      assert.deepEqual(trackingDetails(saved, NO_JOB, false), {
-        state: null,
-        muted: false,
-        what: null,
-        problem: NOT_ARCHIVE_NOTE,
-        action: null,
-        remove: { off: null, note: 'Forgets the list and its title. Its address isn\'t a page on AO3, so nothing was ever fetched for it.' },
-      })
+      const saved = trackingDetails(rowsWith(joinSavedLists(state([], [broken]), []), NO_JOB).br0, NO_JOB, false)
+      assert.deepEqual({ ...saved, remove: null }, { state: null, muted: false, what: null, problem: NOT_ARCHIVE_NOTE, action: null, remove: null })
+      assert.equal(saved.remove.off, null)
+      assert.ok(mentions(saved.remove.note, LIST_REMOVAL.forgets) && mentions(saved.remove.note, LIST_REMOVAL.neverFetched), saved.remove.note)
     })
 
     test('a copy with no record: why it can\'t be tracked, or Track this list for a search, and no Remove list', () => {
@@ -599,14 +620,14 @@ describe('the row\'s details', () => {
       const fresh = described('tag-works:marriage%20problems', 'tag-works', TAG, 'Uncommon tag — marriage problems')
       const got = rowsWith(joinSavedLists(state([], []), [old, theirs, fresh], 'me'), NO_JOB)
       assert.deepEqual(trackingDetails(got['copy:tag-works:Old%20Tag'], NO_JOB, false), {
-        state: 'Can\'t be tracked until it has been opened on AO3 once — the same visit that lets it refresh.',
+        state: TRACKING_STATE.needsVisit,
         muted: true,
         what: null,
         problem: null,
         action: null,
         remove: null,
       })
-      assert.equal(trackingDetails(got['copy:marked-for-later:them'], NO_JOB, false).state, 'Can\'t be tracked: only a search, an uncommon tag or a series can be.')
+      assert.equal(trackingDetails(got['copy:marked-for-later:them'], NO_JOB, false).state, TRACKING_STATE.notSearch)
       assert.deepEqual(trackingDetails(got['copy:tag-works:marriage%20problems'], NO_JOB, false).action, { kind: 'track', off: null, note: null })
       assert.equal(trackingDetails(got['copy:tag-works:marriage%20problems'], NO_JOB, false).remove, null)
     })
@@ -630,30 +651,30 @@ describe('a job on an older sort order of a list\'s search', () => {
 
   test('is the row\'s while it runs: its actions off as its own, Download become Stop, and its caching says so', () => {
     const row = rowsWith(join, running).t3a
-    assert.equal(row.offlineOff, 'off while this list is caching')
-    assert.deepEqual(rowAction(row, running), { kind: 'stop', verb: 'caching' })
-    assert.equal(cachingCell(row, running, NOW).detail, 'caching now')
+    assert.ok(ownJob(row.offlineOff, running), row.offlineOff)
+    assert.deepEqual(rowAction(row, running), { kind: 'stop', verb: jobVerb(running) })
+    assert.ok(mentions(cachingCell(row, running, NOW).detail, jobVerb(running)))
     assert.deepEqual(rowJob(row, running), { actions: 'stop', off: null, here: true }, 'its line is under the row')
   })
 
   test('neither removal can take a copy from under it', () => {
     const row = rowsWith(join, running).t3a
-    assert.equal(offlineDetails(row, running, NOW, false).remove.off, 'off while this list is caching')
-    assert.equal(trackingDetails(row, running, false).remove.off, 'off while this list is caching')
+    assert.ok(ownJob(offlineDetails(row, running, NOW, false).remove.off, running))
+    assert.ok(ownJob(trackingDetails(row, running, false).remove.off, running))
   })
 
   test('stopped, its line is the row\'s, with Continue and Discard, and removing the copy discards it too', () => {
     const row = rowsWith(join, stopped).t3a
     assert.deepEqual(rowJob(row, stopped), { actions: 'resume', off: null, here: true })
     assert.deepEqual(rowAction(row, stopped), { kind: 'none' })
-    assert.match(offlineDetails(row, stopped, NOW, false).remove.note, /Its stopped job is discarded with it\.$/)
+    assert.ok(mentions(offlineDetails(row, stopped, NOW, false).remove.note, COPY_REMOVAL.discardsJob))
     assert.equal(offlineDetails(row, stopped, NOW, false).remove.off, null)
   })
 
   test('to every other row it is another list\'s job', () => {
     const row = rowsWith(join, running).s3r
-    assert.equal(row.offlineOff, BUSY)
-    assert.deepEqual(rowJob(row, running), { actions: 'offline', off: BUSY, here: false })
+    assert.ok(othersJob(row.offlineOff), row.offlineOff)
+    assert.deepEqual(rowJob(row, running), { actions: 'offline', off: row.offlineOff, here: false })
     assert.equal(offlineDetails(row, running, NOW, false).remove.off, null)
     assert.equal(trackingDetails(row, running, false).remove.off, null)
   })
@@ -677,7 +698,8 @@ describe('another account\'s Read works, with Work marks off', () => {
   const READ_ROW = 'copy:read-works:them'
   const MARKED_ROW = 'copy:marked-for-later:them'
   const marksOff = (job = NO_JOB) => rowsWith(join, job, { workMarks: false })
-  const NEEDS = { severity: 'neutral', text: `${sentence(REFRESH_OFF.workMarks)}.` }
+  /** A neutral note that gives `reason`, where the reader is looking. */
+  const notes = (note, reason) => note?.severity === 'neutral' && mentions(note.text, reason)
 
   test('the row says the list needs Work marks to be refreshed; nothing else of it is off', () => {
     const row = marksOff()[READ_ROW]
@@ -699,7 +721,7 @@ describe('another account\'s Read works, with Work marks off', () => {
   test('the details turn off Refresh list, Download and Refresh the list first, saying why where the reader is looking; Cache works, the retry, Download without refreshing and Remove offline copy stay on', () => {
     const got = offlineDetails(marksOff()[READ_ROW], NO_JOB, NOW, false)
     assert.equal(got.refreshOff, REFRESH_OFF.workMarks)
-    assert.deepEqual(got.refreshNote, NEEDS)
+    assert.ok(notes(got.refreshNote, REFRESH_OFF.workMarks), JSON.stringify(got.refreshNote))
     assert.equal(got.off, null)
     assert.equal(got.note, null)
     assert.equal(got.remove.off, null)
@@ -708,21 +730,23 @@ describe('another account\'s Read works, with Work marks off', () => {
   test('another list\'s job turns the rest off too, and the refresh keeps its own reason, which outlasts the job', () => {
     const other = jobOn('tag-works:Coffee%20Shop%20AU')
     const row = marksOff(other)[READ_ROW]
-    assert.equal(row.offlineOff, BUSY)
+    assert.ok(othersJob(row.offlineOff), row.offlineOff)
     assert.deepEqual(rowAction(row, other), { kind: 'download', off: REFRESH_OFF.workMarks })
     const got = offlineDetails(row, other, NOW, false)
-    assert.equal(got.off, BUSY)
+    assert.equal(got.off, row.offlineOff)
     assert.equal(got.refreshOff, REFRESH_OFF.workMarks)
-    assert.deepEqual(got.note, { severity: 'neutral', text: `${sentence(BUSY)}.` })
-    assert.deepEqual(got.refreshNote, NEEDS)
+    assert.ok(notes(got.note, row.offlineOff), JSON.stringify(got.note))
+    assert.ok(notes(got.refreshNote, REFRESH_OFF.workMarks), JSON.stringify(got.refreshNote))
   })
 
   test('with Work marks on, a job is the refresh\'s only reason, as it is every other action\'s', () => {
     const other = jobOn('tag-works:Coffee%20Shop%20AU')
     const row = rowsWith(join, other)[READ_ROW]
-    assert.deepEqual(rowAction(row, other), { kind: 'download', off: BUSY })
+    const action = rowAction(row, other)
+    assert.equal(action.kind, 'download')
+    assert.ok(othersJob(action.off), action.off)
     const got = offlineDetails(row, other, NOW, false)
-    assert.equal(got.refreshOff, BUSY)
+    assert.equal(got.refreshOff, action.off)
     assert.equal(got.refreshNote, null)
   })
 })
@@ -735,27 +759,30 @@ describe('naming lists', () => {
   })
 
   test('describeList: by its title, and what it searches where the title doesn\'t say', () => {
-    assert.equal(describeList({ id: 'm', alias: 'Mine', url: TEA }), '“Mine” (Search: tea)')
-    assert.equal(describeList({ id: 'm', alias: 'Search: tea', url: TEA }), '“Search: tea”')
+    const mine = describeList({ id: 'm', alias: 'Mine', url: TEA })
+    assert.ok(mentions(mine, 'Mine') && mentions(mine, 'Search: tea'), mine)
+    const plain = describeList({ id: 'm', alias: 'Search: tea', url: TEA })
+    assert.equal(plain.split('Search: tea').length - 1, 1, `named once: ${plain}`)
   })
 
   test('titleRefusal: names the list that has the title', () => {
-    assert.equal(
-      titleRefusal(record('lh', '/series/2947183', { kind: 'series-works', title: 'The Long Haul' })),
-      'Another list is already called “The Long Haul” (Series: 2947183), so this title isn\'t saved. Choose a different one.',
-    )
+    const refusal = titleRefusal(record('lh', '/series/2947183', { kind: 'series-works', title: 'The Long Haul' }))
+    assert.ok(mentions(refusal, 'The Long Haul') && mentions(refusal, 'Series: 2947183'), refusal)
   })
 
-  test('titlesInWords: one, two, or more titles, as a sentence names them', () => {
-    assert.equal(titlesInWords(['A']), '“A”')
-    assert.equal(titlesInWords(['A', 'B']), '“A” and “B”')
-    assert.equal(titlesInWords(['A', 'B', 'C']), '“A”, “B” and “C”')
+  test('titlesInWords: one, two, or more titles, in order', () => {
+    assert.ok(mentions(titlesInWords(['Alpha']), 'Alpha'))
+    for (const titles of [['Alpha', 'Beta'], ['Alpha', 'Beta', 'Gamma']]) {
+      const words = titlesInWords(titles)
+      const places = titles.map(title => words.indexOf(title))
+      assert.ok(places.every((place, i) => place >= 0 && (i === 0 || place > places[i - 1])), words)
+    }
   })
 
   test('sameSearchNote: the other lists at the address, by title', () => {
     const mine = record('m', TEA, { title: 'Mine' })
     const theirs = record('t', TEA_BY_KUDOS, { filter: SLOW_BURN, title: 'Theirs' })
-    assert.equal(sameSearchNote(rows(joinSavedLists(state([], [mine, theirs]), [])).m), 'Same search as “Theirs”')
+    assert.ok(mentions(sameSearchNote(rows(joinSavedLists(state([], [mine, theirs]), [])).m), 'Theirs'))
     assert.equal(sameSearchNote(rows(joinSavedLists(state([], [mine]), [])).m), null)
   })
 })

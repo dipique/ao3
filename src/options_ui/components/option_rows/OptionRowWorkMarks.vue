@@ -382,6 +382,7 @@ function save() {
                 :title="orderOff ?? `Move ${row.label} up, here and in a work’s menu`"
                 :aria-describedby="orderOff ? orderOffId : undefined"
                 :disabled="!!orderOff || !row.canMoveUp"
+                data-action="move-up"
                 @click="move(row.id, -1)"
               >
                 <span class="i-tabler-chevron-up" text="[15px]" aria-hidden="true" />
@@ -393,6 +394,7 @@ function save() {
                 :title="orderOff ?? `Move ${row.label} down, here and in a work’s menu`"
                 :aria-describedby="orderOff ? orderOffId : undefined"
                 :disabled="!!orderOff || !row.canMoveDown"
+                data-action="move-down"
                 @click="move(row.id, 1)"
               >
                 <span class="i-tabler-chevron-down" text="[15px]" aria-hidden="true" />
@@ -401,6 +403,7 @@ function save() {
             <span
               v-else
               class="grid size-6 place-items-center"
+              data-mark-pin
               :title="`${row.label} always comes last: it isn’t a verdict, but says you’re waiting on more chapters`"
             >
               <Icon i-tabler-pin text="[13px]" :label="`${row.label} is always last`" />
@@ -412,6 +415,7 @@ function save() {
               class="icon-btn"
               :dialog="dialog"
               :title="`Change the ${row.label} icon or colour`"
+              data-action="icon"
               @click="edit(row.id)"
             >
               <Icon
@@ -423,7 +427,7 @@ function save() {
             </DialogDetachedTrigger>
           </template>
           <span class="min-w-0 flex items-center gap-1">
-            <span class="truncate" :title="`id: ${row.id}`">{{ row.label }}</span>
+            <span class="truncate" :title="`id: ${row.id}`" data-mark-name>{{ row.label }}</span>
             <!-- Below 768 px, a control's parent is drawn over what comes before
                  it, holding the control's hit area: the pencil has a parent of its
                  own, so the name isn't drawn over the icon's hit area. -->
@@ -433,6 +437,7 @@ function save() {
                 class="icon-btn"
                 :dialog="dialog"
                 :title="`Rename ${row.label}`"
+                data-action="rename"
                 @click="edit(row.id)"
               >
                 <Icon i-tabler-pencil text="[13px]" :label="`Rename ${row.label}`" />
@@ -448,8 +453,8 @@ function save() {
           </template>
           <template #actions>
             <div class="flex items-center gap-[2px]">
-              <IconToggle v-model="row.hide.value" :label="row.hideAria" :tip="row.hideLabel" icon="i-tabler-eye-off" />
-              <IconToggle v-model="row.offer.value" :label="row.offerAria" :tip="OFFER_TIP" icon="i-tabler-menu-2" />
+              <IconToggle v-model="row.hide.value" :label="row.hideAria" :tip="row.hideLabel" icon="i-tabler-eye-off" data-action="hide" />
+              <IconToggle v-model="row.offer.value" :label="row.offerAria" :tip="OFFER_TIP" icon="i-tabler-menu-2" data-action="offer" />
               <!-- One button, armed or not, so a press from the keyboard keeps its focus. -->
               <button
                 type="button"
@@ -461,6 +466,8 @@ function save() {
                   ? `Clear all ${row.count.toLocaleString()} “${row.label}” marks? This can't be undone (a daily backup may still have them).`
                   : `Clear ${row.label} marks`"
                 :disabled="row.count === 0"
+                :data-armed="confirm.armed(clearId(row.id)) || undefined"
+                data-action="clear"
                 @click="clear(row.id)"
               >
                 <template v-if="confirm.armed(clearId(row.id))">
@@ -489,7 +496,7 @@ function save() {
     </div>
 
     <Dialog :ref="setDialogRef" v-model:open="open" detached-trigger>
-      <DialogContent>
+      <DialogContent :data-mark-dialog="creating ? 'add' : 'edit'">
         <DialogTitle>
           {{ creating ? 'Add mark' : 'Edit mark' }}
         </DialogTitle>
@@ -551,6 +558,7 @@ function save() {
             <Button
               text="sm"
               variant="outline"
+              data-action="cancel"
               @click="open = false"
             >
               Cancel
@@ -559,6 +567,7 @@ function save() {
               text="sm"
               variant="default"
               :disabled="!!draftError"
+              data-action="save"
               @click="save"
             >
               Save

@@ -1,4 +1,4 @@
-import { api, fetchToken, getArchiveLink } from '#common'
+import { api, fetchToken, getArchiveLink, NO_ARCHIVE_TAB } from '#common'
 
 /**
  * The one request that changes a work's Marked for Later state on AO3.
@@ -121,10 +121,6 @@ function isLoginUrl(url: string): boolean {
 /** Where the content script runs, which is the same thing as where this can be delegated. */
 const ARCHIVE_TABS = '*://*.archiveofourown.org/*'
 
-/** Said when there is no AO3 page to borrow, and when none of them would answer. */
-const NO_TAB = 'the request has to come from an AO3 page — open AO3 in a tab and import this file again'
-const NO_ANSWER = 'your AO3 tabs did not answer — reload one and import this file again'
-
 /**
  * Make the same request from a tab that is already on AO3.
  *
@@ -155,7 +151,7 @@ export async function submitMarkViaTab(workId: string, save: boolean): Promise<v
       ids.push(tab.id)
   }
   if (!ids.length)
-    throw new Error(NO_TAB)
+    throw new Error(NO_ARCHIVE_TAB.none)
 
   for (const id of ids) {
     let answer
@@ -173,7 +169,7 @@ export async function submitMarkViaTab(workId: string, save: boolean): Promise<v
     throw new Error(answer.error)
   }
 
-  throw new Error(NO_ANSWER)
+  throw new Error(NO_ARCHIVE_TAB.silent)
 }
 
 /**

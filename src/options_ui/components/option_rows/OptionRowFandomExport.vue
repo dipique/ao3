@@ -50,11 +50,11 @@ async function clearCache(): Promise<void> {
     :subtitle="`${total} ids collected while browsing (${counts.fandoms} fandoms, ${counts.characters} characters, ${counts.relationships} relationships).`"
   >
     <div flex="~ row wrap items-center justify-end gap-2">
-      <button type="button" class="outline-btn" :disabled="total === 0" @click.prevent="startExport">
+      <button type="button" class="outline-btn" :disabled="total === 0" data-action="export" @click.prevent="startExport">
         <span class="i-tabler-download" text="[14px]" aria-hidden="true" />
         Export ids
       </button>
-      <button type="button" class="ghost-btn" :disabled="total === 0" @click.prevent="clearCache">
+      <button type="button" class="ghost-btn" :disabled="total === 0" data-action="clear" @click.prevent="clearCache">
         Clear
       </button>
     </div>

@@ -69,7 +69,7 @@ export function readListLinks(options: Options): void {
   }
   if (target && !ask) {
     const link = ownPageLink(target, lists, options) ?? undefined
-    whenShown(() => toast(UNKNOWN_LINK, { type: 'error', link }))
+    whenShown(() => toast(UNKNOWN_LINK, { type: 'error', name: 'unknown-link', link }))
   }
 }
 

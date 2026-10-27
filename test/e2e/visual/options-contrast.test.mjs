@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { numbers } from '../../facts.mjs'
 import { storedLists } from '../helpers.mjs'
 import { ARCHIVE, scriptBackground, skip, startOptions, stubArchive, until } from '../optionsPage.mjs'
 
@@ -155,7 +156,7 @@ describe('options UI — text contrast', { skip }, () => {
             const [lowest] = await options.controls(await options.row('filter-defaults-default-word-count'), 'textbox')
             await lowest.click({ clickCount: 3 })
             await lowest.type('-5')
-            await until('the default word count to say why', async () => (await options.text(await options.row('filter-defaults-default-word-count'))).includes('whole numbers'))
+            await until('the default word count to say why', async () => !!(await (await options.row('filter-defaults-default-word-count')).$('[data-error]')))
           }
           if (category === 'sync-backups')
             await until('the backups to be listed', async () => (await options.listRows('backups')).length === REPLIES.listBackups.length)
@@ -165,7 +166,7 @@ describe('options UI — text contrast', { skip }, () => {
           if (category === 'reading') {
             const foot = await (await options.list('work-marks')).$('[data-list-foot]')
             assert.ok(foot, 'Work marks’ foot was there to be read')
-            assert.match(await options.text(foot), /100 KB sync budget/, 'with its figure')
+            assert.ok(numbers(await options.text(foot)).includes(100), 'with its figure, of the sync budget')
 
             // A field's words are its value, which is no text node, so the sweep reads past them.
             const off = await options.listRow('text-replacements', 1)
@@ -199,7 +200,7 @@ describe('options UI — text contrast', { skip }, () => {
       })
       try {
         const cell = await options.page.$('[data-review-cell="this-review"]')
-        await options.press(await options.control(cell, 'button', 'Cache works'))
+        await options.press(await options.action(cell, 'cache'))
         await until('the review’s job to run', () => cell.evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState === 'running'))
         await options.calm()
         assert.deepEqual(await options.illegibleText(), [])
@@ -212,7 +213,7 @@ describe('options UI — text contrast', { skip }, () => {
     test(`the work-mark dialog saying why a name can't be saved, ${theme}`, async () => {
       const options = await open(theme, '#marks-status')
       try {
-        const dialog = await options.openDialog(await options.control(await options.list('work-marks'), 'button', 'Add mark'))
+        const dialog = await options.openDialog(await options.action(await options.list('work-marks'), 'add'))
         await (await dialog.$('input[name="mark-name"]')).type('read')
         await until('the dialog to say why', async () => !!(await dialog.$('[role="alert"]')))
         await options.calm()
@@ -230,43 +231,44 @@ describe('options UI — text contrast', { skip }, () => {
         const unread = {}
         /**
          * Arm `control` with a press of the pointer, which stays on it as a
-         * reader's does, and read the page while it asks `asks`. It asks for
+         * reader's does, and read the page while it asks again. It asks for
          * a few seconds only, so it is checked to be asking still once read.
          */
-        async function arm(what, control, asks) {
+        async function arm(what, control) {
+          const asking = () => control.evaluate(el => el.dataset.armed !== undefined)
           await control.evaluate(el => el.scrollIntoView({ block: 'center' }))
           await control.click()
-          await until(`${what} to ask`, async () => asks.test(await options.text(control)))
+          await until(`${what} to ask`, asking)
           await options.calm()
           unread[what] = await options.illegibleText()
-          assert.match(await options.text(control), asks, `${what} still asking once read`)
+          assert.ok(await asking(), `${what} still asking once read`)
         }
 
         await jobDrawn(options)
         const tag = await options.savedListDetails(TAG.id)
-        await arm('Remove offline copy', await options.control(tag, 'button', /^Remove offline copy/), /^Remove it\?$/)
-        await arm('Remove list', await options.control(tag, 'button', /^Remove list/), /^Remove it\?$/)
+        await arm('Remove offline copy', await options.action(tag, 'remove-copy'))
+        await arm('Remove list', await options.action(tag, 'remove-list'))
 
         const cache = await options.row('offline-reading-cached-work-text')
-        const discard = await options.control(cache, 'button', 'Discard orphans')
+        const discard = await options.action(cache, 'discard-orphans')
         await until('Discard orphans to have something to discard', () => discard.evaluate(el => !el.disabled))
-        await arm('Discard orphans', discard, /^Discard [\d,]+\?$/)
-        await arm('Delete cached text', await options.control(cache, 'button', 'Delete cached text'), /^Delete it all\?$/)
+        await arm('Discard orphans', discard)
+        await arm('Delete cached text', await options.action(cache, 'delete-cached'))
 
-        const more = await options.control(await options.tile('marked-for-later'), 'button', 'More for Marked for Later')
+        const more = await options.action(await options.tile('marked-for-later'), 'more')
         await more.focus()
         await options.page.keyboard.press('Enter')
         await until('the tile’s menu to open', async () => (await options.controls(options.page, 'menuitem')).length > 0)
-        await arm('Remove Marked for Later’s offline copy', await options.control(options.page, 'menuitem', /^Remove offline copy/), /^Remove offline copy\?/)
+        await arm('Remove Marked for Later’s offline copy', await options.menuItem('remove'))
         await options.page.keyboard.press('Escape')
         await until('the tile’s menu to close', async () => (await options.controls(options.page, 'menuitem')).length === 0)
 
         await options.goTo('#backups')
         await until('the backups to be listed', async () => (await options.listRows('backups')).length === REPLIES.listBackups.length)
-        await arm('Restore', await options.control(await options.listRow('backups', 'backup.1'), 'button'), /^Restore\?$/)
+        await arm('Restore', await options.action(await options.listRow('backups', 'backup.1'), 'restore'))
 
         await options.goTo('#marks-status')
-        await arm('Clear Read marks', await options.control(await options.listRow('work-marks', 'read'), 'button', /^Clear /), /^Clear 2\?$/)
+        await arm('Clear Read marks', await options.action(await options.listRow('work-marks', 'read'), 'clear'))
 
         assert.deepEqual(unread, Object.fromEntries(Object.keys(unread).map(what => [what, []])))
       }

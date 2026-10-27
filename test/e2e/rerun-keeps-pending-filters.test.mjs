@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { menuClosed, openMenu, rerun, settled } from './trackedPages.mjs'
+import { menuClosed, openMenu, pickRow, rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -122,20 +122,14 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
     await browser?.close()
   })
 
-  /** Right-click the link with this text and pick the row whose label starts with `label`. */
-  const pick = async (linkText, label) => {
+  /** Right-click the link with this text and pick the row that does `action`. */
+  const pick = async (linkText, action) => {
     await page.keyboard.press('Escape')
     await menuClosed(page)
     const link = await page.evaluateHandle(text =>
       [...document.querySelectorAll('#work_1 a.tag')].find(a => a.textContent.trim() === text), linkText)
     await openMenu(page, () => link.click({ button: 'right' }))
-    const picked = await page.evaluate((l) => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => el.querySelector('.AO3E--menu--label').textContent.startsWith(l))
-      row?.click()
-      return !!row
-    }, label)
-    assert.ok(picked, `no "${label}" row on ${linkText}`)
+    assert.ok(await pickRow(page, action), `no ${action} row on ${linkText}`)
     await menuClosed(page)
   }
 
@@ -160,7 +154,7 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
   })
 
   test('the reader changes it, then picks a rule — and the filter stays as they left it', async () => {
-    await pick('Crossover Fandom', 'Exclude')
+    await pick('Crossover Fandom', 'exclude')
     assert.deepEqual((await form()).injected, [true], 'excluding an unlisted fandom injects a checked box')
 
     await page.evaluate(() => {
@@ -171,7 +165,7 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
       document.getElementById('ex_r_13').checked = false
     })
 
-    await rerun(page, () => pick('Fluff', 'Highlight'))
+    await rerun(page, () => pick('Fluff', 'highlight'))
     assert.ok(
       await page.$('#work_1 .AO3E--indicator--highlight'),
       'the highlight should be drawn, i.e. the re-run happened',
@@ -190,9 +184,9 @@ describe('a settings re-run keeps the pending search', { skip }, () => {
   })
 
   test('the surviving fandom checkbox is still the one its menu drives', async () => {
-    await pick('Crossover Fandom', 'Exclude')
+    await pick('Crossover Fandom', 'exclude')
     assert.deepEqual((await form()).injected, [false], 'toggling off should reuse the box, not inject another')
-    await pick('Crossover Fandom', 'Exclude')
+    await pick('Crossover Fandom', 'exclude')
     assert.deepEqual((await form()).injected, [true])
   })
 

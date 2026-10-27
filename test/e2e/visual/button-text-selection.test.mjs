@@ -99,11 +99,7 @@ describe('button text is never selected', { skip }, () => {
         )
       }))
       const menuItems = await userSelect(tab, '.AO3E--menu .AO3E--menu--item')
-      await tab.evaluate(() => {
-        const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-          .find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))
-        row.click()
-      })
+      await tab.evaluate(() => document.querySelector('.AO3E--menu .AO3E--menu--item[data-ao3e-action="mark"][data-ao3e-value="continue"]').click())
       await tab.waitForSelector('.AO3E--progress-editor')
       const editorButtons = await userSelect(tab, '.AO3E--progress-editor button')
       const [[, title]] = await userSelect(tab, '.AO3E--progress-editor--title')

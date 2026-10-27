@@ -3,6 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { unpackIds } from '../../src/common/workMarks.ts'
 import { WAIT_BUDGET } from '../../src/content_script/archiveFetch.ts'
+import { figures } from '../facts.mjs'
 import { ensureBuilt, findChrome, installMock, storedListIds, storedLists } from './helpers.mjs'
 import { archiveTab, blurb, DESCRIPTOR, HOUR, KEY, liveTitles, loadToRead, shownTitles, storedClaim, TO_READ, toReadPage, updatingNote } from './markedForLater.mjs'
 import { until } from './optionsPage.mjs'
@@ -12,7 +13,11 @@ const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 const PROGRESS = '.AO3E--search-host--progress-label'
-const progressText = tab => tab.$eval(PROGRESS, el => el.textContent.trim()).catch(() => null)
+/** The pages the progress panel says are loaded, and in all, as `done/total`; null with no panel. */
+const progress = async (tab) => {
+  const text = await tab.$eval(PROGRESS, el => el.textContent).catch(() => null)
+  return text === null ? null : figures(text).join('/')
+}
 
 /** A stored list the page holds now, by its key, or undefined. */
 const storedList = (tab, key) => tab.evaluate(async k => (await window.browser.storage.local.get('cache.searchLists'))['cache.searchLists']?.[k], key)
@@ -55,12 +60,12 @@ describe('a first load shows its works as they come', { skip }, () => {
       await loadToRead(tab)
       await inject(tab)
       // Page 2 lands first: the listing from page 1 on is still empty.
-      await until('page 2 to land', async () => await progressText(tab) === 'Loaded 1 of 3 pages…')
+      await until('page 2 to land', async () => await progress(tab) === '1/3')
       page1.release()
 
       await until('the view to show pages 1–2', async () => JSON.stringify(await shownTitles(tab)) === JSON.stringify(liveTitles().slice(0, 4)))
       assert.equal(await tab.$(PROGRESS), null, 'the progress panel has made way for the view')
-      assert.equal(await updatingNote(tab), 'Loaded 2 of 3 pages…', 'and its progress is the view’s note')
+      assert.deepEqual(figures(await updatingNote(tab)), [2, 3], 'and its progress is the view’s note')
       assert.equal(await storedList(tab, KEY), undefined, 'nothing is stored yet')
 
       page3.release()

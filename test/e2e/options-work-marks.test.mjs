@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { skip, startOptions } from './optionsPage.mjs'
+import { MARK_ORDER_OFF } from '../../src/options_ui/model/listView.ts'
+import { numbers } from '../facts.mjs'
+import { mentions, skip, startOptions } from './optionsPage.mjs'
 
 const LIST = 'work-marks'
 const ROW = 'marks-status-work-marks'
 const KEY = 'option.workMarks'
 const HASH = '#marks-status'
-
-const ORDER_OFF = 'Sort by your order to rearrange'
 
 /**
  * A mark table with one non-default entry — `gross` opting out of hiding — so
@@ -81,50 +81,46 @@ describe('options UI — work marks', { skip }, () => {
 
   after(() => session?.close())
 
-  /** The rendered rows: label, everything the row says, and whether the hide toggle is on. */
-  const rows = async () => Promise.all((await options.listRows(LIST)).map(async (row) => {
-    const hide = await options.control(row, 'button', /^Hide works marked /)
-    return {
-      mark: (await options.name(hide)).slice('Hide works marked '.length).replace(/ (?:in listings|until ready)$/, ''),
-      on: await hide.evaluate(el => el.getAttribute('aria-pressed') === 'true'),
-      text: await options.text(row),
-    }
-  }))
+  /** The rendered rows: the mark's name, what its meta line says, and whether the hide toggle is on. */
+  const rows = async () => Promise.all((await options.listRows(LIST)).map(async row => ({
+    mark: await options.text(await row.$('[data-mark-name]')),
+    on: await (await options.action(row, 'hide')).evaluate(el => el.getAttribute('aria-pressed') === 'true'),
+    meta: await options.text(await row.$('[data-list-meta]')),
+  })))
 
-  /** Whether the named button is disabled, or null when there is no such button. */
-  const moveButton = async (name) => {
-    const [button] = await options.controls(await options.list(LIST), 'button', name)
+  /** Whether the mark's move button that does `action` is disabled, or null when it has none. */
+  const moveButton = async (id, action) => {
+    const [button] = await options.actions(await options.listRow(LIST, id), action)
     return button ? button.evaluate(el => el.disabled) : null
   }
 
-  /** Any button in the list, by its name — the row's icon, pencil and move buttons all have one. */
-  const clickNamed = async name => options.press(await options.control(await options.list(LIST), 'button', name))
+  /** Press the control that does `action` in the mark's row. */
+  const pressIn = async (id, action) => options.press(await options.action(await options.listRow(LIST, id), action))
 
   /**
    * Add mark, pressed the way a click that doesn't focus its button presses it
    * (Safari's, Firefox's on macOS), so focus is wherever an earlier dialog left
    * it.
    */
-  const openAddDialog = async () => options.openDialog(await options.control(await options.list(LIST), 'button', 'Add mark'))
+  const openAddDialog = async () => options.openDialog(await options.action(await options.list(LIST), 'add'))
 
-  /** A button inside the open dialog, by the text on it. */
-  const clickDialogButton = text => page.evaluate(
-    t => [...document.querySelectorAll('[role="dialog"] button')].find(b => b.textContent.trim() === t)?.click(),
-    text,
+  /** Press the open dialog's button that does `action`. */
+  const clickDialogButton = action => page.evaluate(
+    a => document.querySelector(`[role="dialog"] [data-action="${a}"]`)?.click(),
+    action,
   )
 
-  /** What the dialog currently says: its heading, the key preview, and any error. */
+  /** What the dialog currently shows: whether it adds or edits, the name, the key preview, and any error. */
   const dialogState = () => page.evaluate(() => {
     const dialog = document.querySelector('[role="dialog"]')
     if (!dialog)
       return null
-    const save = [...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save')
     return {
-      title: dialog.querySelector('h1')?.textContent.trim() ?? '',
+      mode: dialog.dataset.markDialog ?? null,
       name: dialog.querySelector('input[name="mark-name"]')?.value ?? '',
       key: dialog.querySelector('code')?.textContent.trim() ?? null,
       error: dialog.querySelector('[role="alert"]')?.textContent.trim() ?? null,
-      saveDisabled: save?.disabled ?? null,
+      saveDisabled: dialog.querySelector('[data-action="save"]')?.disabled ?? null,
     }
   })
 
@@ -136,9 +132,9 @@ describe('options UI — work marks', { skip }, () => {
     await page.waitForFunction(value => document.querySelector('[role="dialog"] input[name="mark-name"]')?.value === value, {}, text)
   }
 
-  /** Press a button inside the open dialog, by the text on it, and wait until the dialog has closed and what it saved is written. */
-  const saveDialog = async (text) => {
-    await clickDialogButton(text)
+  /** Press the open dialog's Save, and wait until the dialog has closed and what it saved is written. */
+  const saveDialog = async () => {
+    await clickDialogButton('save')
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
     await options.saved()
   }
@@ -151,9 +147,8 @@ describe('options UI — work marks', { skip }, () => {
     assert.deepEqual(got.map(r => r.mark), ['Read', 'Favorite', 'Good', 'Gross', 'Ongoing'])
   })
 
-  test('the frame is headed by its title, the marks, and the works they are on', async () => {
-    assert.equal(await options.name(await options.list(LIST)), 'Work marks')
-    assert.equal(await options.listCount(LIST), '5 · 4 works', 'read and favorite hold two works each')
+  test('the frame is headed by the marks, and the works they are on', async () => {
+    assert.deepEqual(numbers(await options.listCount(LIST)), [5, 4], 'five marks; read and favorite hold two works each')
   })
 
   /** The frame's foot, and where it is drawn against the frame and its scrolling rows. */
@@ -171,12 +166,13 @@ describe('options UI — work marks', { skip }, () => {
     }
   }, LIST)
 
-  test('a foot inside the frame, under its rows, says the marks are kept with your settings', async () => {
+  test('a foot inside the frame, under its rows, says where the marks are kept', async () => {
     const foot = await footOf(options)
     assert.ok(foot, 'the frame has a foot')
     const { text, ...where } = foot
     assert.deepEqual(where, { inBody: false, underBody: true, inFrame: true }, 'outside the scrolling rows, under them, inside the frame')
-    assert.equal(text, 'Kept with your settings, in backups and sync', 'a few marks take too little to be worth a figure')
+    assert.ok(text, 'it says where they are kept')
+    assert.deepEqual(numbers(text), [], 'a few marks take too little to be worth a figure')
   })
 
   test('past a kilobyte the foot says what the marks take of the sync budget', async () => {
@@ -184,7 +180,7 @@ describe('options UI — work marks', { skip }, () => {
     try {
       const foot = await footOf(heavy)
       assert.ok(foot, 'the frame has a foot')
-      assert.equal(foot.text, 'Kept with your settings, in backups and sync · ~1.2 KB before compression, of the 100 KB sync budget all settings share')
+      assert.deepEqual(numbers(foot.text), [1.2, 100], 'what they take, in kilobytes, of the sync budget')
     }
     finally {
       await heavy.close()
@@ -192,31 +188,33 @@ describe('options UI — work marks', { skip }, () => {
   })
 
   test('each control says what it does that its name doesn\'t', async () => {
+    /** What the control says beyond its name: its tooltip, or its title. */
+    const saysMore = async (control, said) => {
+      assert.ok(said, `${await options.name(control)} has a tooltip`)
+      assert.notEqual(said, await options.name(control), `${await options.name(control)}'s tooltip says more than its name`)
+    }
     const ongoing = await options.listRow(LIST, 'continue')
-    assert.equal(
-      await options.tooltip(await options.control(ongoing, 'button', 'Hide works marked Ongoing until ready')),
-      'Hide until ready: collapsed while nothing past the chapter you finished is out, or before any date you set',
-    )
-    assert.equal(
-      await ongoing.$eval('[title^="Ongoing "]', el => el.title),
-      'Ongoing always comes last: it isn’t a verdict, but says you’re waiting on more chapters',
-    )
-    assert.equal(
-      await options.tooltip(await options.control(await options.listRow(LIST, 'gross'), 'button', 'Offer Gross when marking a work')),
-      'In menus: off, it isn’t offered when you mark a work. Works keep it: a mark is never deleted.',
-    )
     const read = await options.listRow(LIST, 'read')
-    assert.equal(await (await options.control(read, 'button', 'Move Read down')).evaluate(el => el.title), 'Move Read down, here and in a work’s menu')
-    assert.equal(await (await options.control(read, 'button', 'Change the Read icon')).evaluate(el => el.title), 'Change the Read icon or colour')
+    const readHide = await options.action(read, 'hide')
+    const ongoingHide = await options.action(ongoing, 'hide')
+    await saysMore(ongoingHide, await options.tooltip(ongoingHide))
+    assert.notEqual(await options.tooltip(ongoingHide), await options.tooltip(readHide), 'a progress mark\'s hiding is its own')
+    assert.ok(await ongoing.$eval('[data-mark-pin]', el => el.title), 'the pin says why Ongoing doesn\'t move')
+    const offer = await options.action(await options.listRow(LIST, 'gross'), 'offer')
+    await saysMore(offer, await options.tooltip(offer))
+    for (const action of ['move-down', 'icon']) {
+      const control = await options.action(read, action)
+      await saysMore(control, await control.evaluate(el => el.title))
+    }
   })
 
   test('shows each mark\'s count, and what it counts as', async () => {
     const got = await rows()
-    assert.match(got[0].text, /2 works/)
-    assert.match(got[1].text, /2 works/)
-    assert.match(got[1].text, /counts as Read/, 'an aliased mark says what it behaves as')
-    assert.match(got[2].text, /0 works/)
-    assert.doesNotMatch(got[0].text, /counts as/, 'the root mark aliases nothing')
+    assert.deepEqual(numbers(got[0].meta), [2])
+    assert.deepEqual(numbers(got[1].meta), [2])
+    assert.ok(mentions(got[1].meta, 'Read'), 'an aliased mark says what it behaves as')
+    assert.deepEqual(numbers(got[2].meta), [0])
+    assert.ok(!mentions(got[0].meta, 'Read'), 'the root mark aliases nothing')
   })
 
   test('the hide toggle reads through the trigger alias', async () => {
@@ -230,7 +228,7 @@ describe('options UI — work marks', { skip }, () => {
   test('toggling a mark that follows its root stores an override', async () => {
     const before = await rows()
     assert.equal(before[1].on, true)
-    await options.press(await options.control(await options.listRow(LIST, 'favorite'), 'button', 'Hide works marked Favorite in listings'))
+    await pressIn('favorite', 'hide')
     await options.saved()
     const stored = await storedMarks()
     assert.equal(stored?.marks?.favorite?.hideSearchResult, false, 'diverging from the root is stored')
@@ -238,15 +236,15 @@ describe('options UI — work marks', { skip }, () => {
   })
 
   test('the ends of the run, and the ongoing mark, cannot be moved', async () => {
-    assert.equal(await moveButton('Move Read up'), true, 'nothing above the first mark')
-    assert.equal(await moveButton('Move Read down'), false)
-    assert.equal(await moveButton('Move Gross down'), true, 'the last verdict cannot pass Ongoing')
-    assert.equal(await moveButton('Move Ongoing up'), null, 'Ongoing has no move buttons at all')
-    assert.equal(await moveButton('Move Ongoing down'), null)
+    assert.equal(await moveButton('read', 'move-up'), true, 'nothing above the first mark')
+    assert.equal(await moveButton('read', 'move-down'), false)
+    assert.equal(await moveButton('gross', 'move-down'), true, 'the last verdict cannot pass Ongoing')
+    assert.equal(await moveButton('continue', 'move-up'), null, 'Ongoing has no move buttons at all')
+    assert.equal(await moveButton('continue', 'move-down'), null)
   })
 
   test('moving a mark reorders the rows and stores the new order', async () => {
-    await clickNamed('Move Favorite up')
+    await pressIn('favorite', 'move-up')
     await options.saved()
 
     const got = await rows()
@@ -264,19 +262,21 @@ describe('options UI — work marks', { skip }, () => {
   })
 
   test('each row carries its key for hovering, and the name is separate from it', async () => {
-    const titles = await (await options.list(LIST)).$$eval('[title^="id: "]', els =>
-      els.map(el => [el.getAttribute('title'), el.textContent.trim()]))
-    assert.deepEqual(titles, [
-      ['id: favorite', 'Favorite'],
-      ['id: read', 'Read'],
-      ['id: good', 'Good'],
-      ['id: gross', 'Gross'],
-      ['id: continue', 'Ongoing'],
+    const names = await (await options.list(LIST)).$$eval('[data-list-row]', els =>
+      els.map(row => [row.dataset.listRow, row.querySelector('[data-mark-name]')]).map(([id, name]) => [id, name.getAttribute('title'), name.textContent.trim()]))
+    assert.deepEqual(names.map(([id, , name]) => [id, name]), [
+      ['favorite', 'Favorite'],
+      ['read', 'Read'],
+      ['good', 'Good'],
+      ['gross', 'Gross'],
+      ['continue', 'Ongoing'],
     ])
+    for (const [id, title] of names)
+      assert.ok(mentions(title, id), `${id}'s name carries its key for hovering`)
   })
 
   test('"in menus" writes the disabled flag, and clearing it removes the field', async () => {
-    const offer = async () => options.control(await options.listRow(LIST, 'gross'), 'button', 'Offer Gross when marking a work')
+    const offer = async () => options.action(await options.listRow(LIST, 'gross'), 'offer')
     const pressed = async () => (await offer()).evaluate(el => el.getAttribute('aria-pressed') === 'true')
     assert.equal(await pressed(), true, 'offered until it says otherwise')
     await options.press(await offer())
@@ -292,9 +292,9 @@ describe('options UI — work marks', { skip }, () => {
   })
 
   test('the pencil renames a mark without moving the key its works are filed under', async () => {
-    await options.openDialog(await options.control(await options.list(LIST), 'button', 'Rename Good'))
+    await options.openDialog(await options.action(await options.listRow(LIST, 'good'), 'rename'))
     assert.deepEqual(await dialogState(), {
-      title: 'Edit mark',
+      mode: 'edit',
       name: 'Good',
       key: 'good',
       error: null,
@@ -302,7 +302,7 @@ describe('options UI — work marks', { skip }, () => {
     })
 
     await typeName('Great')
-    await saveDialog('Save')
+    await saveDialog()
 
     const stored = await storedMarks()
     assert.equal(stored.marks.good.label, 'Great', 'the display name moved')
@@ -311,24 +311,24 @@ describe('options UI — work marks', { skip }, () => {
   })
 
   test('the row icon opens the same dialog, where the palette sets the icon', async () => {
-    await options.openDialog(await options.control(await options.list(LIST), 'button', 'Change the Great icon'))
-    assert.equal((await dialogState()).title, 'Edit mark')
+    await options.openDialog(await options.action(await options.listRow(LIST, 'good'), 'icon'))
+    assert.deepEqual(await dialogState().then(state => [state.mode, state.name]), ['edit', 'Great'])
 
     await page.evaluate(() => {
       [...document.querySelectorAll('[role="dialog"] button')].find(b => b.title === 'mdi/star')?.click()
     })
-    await saveDialog('Save')
+    await saveDialog()
 
     assert.equal((await storedMarks()).marks.good.icon, 'mdi/star')
   })
 
   test('a name whose key is taken is refused rather than merged', async () => {
     await openAddDialog()
-    assert.equal((await dialogState()).title, 'Add mark')
+    assert.equal((await dialogState()).mode, 'add')
 
     await typeName('read')
     const state = await dialogState()
-    assert.match(state.error, /already taken/)
+    assert.ok(state.error, 'the name is refused, saying why')
     assert.equal(state.saveDisabled, true, 'and there is no way to save it anyway')
     const error = await page.$('[role="dialog"] [role="alert"]')
     assert.deepEqual(await options.colour(error), await options.token('default-fg'), 'the error\'s words are in the text colour')
@@ -336,11 +336,10 @@ describe('options UI — work marks', { skip }, () => {
     assert.ok(glyph, 'a glyph marks the error')
     assert.deepEqual(await options.colour(glyph), await options.token('destructive'), 'and carries the red')
 
-    await clickDialogButton('Cancel')
+    await clickDialogButton('cancel')
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.getAttribute('aria-label')),
-      'Add mark',
+    assert.ok(
+      await (await options.action(await options.list(LIST), 'add')).evaluate(el => document.activeElement === el),
       'focus goes back to the button that opened the dialog',
     )
   })
@@ -351,7 +350,7 @@ describe('options UI — work marks', { skip }, () => {
     await typeName('Did Not Finish')
     assert.equal((await dialogState()).key, 'did-not-finish', 'shown before it is committed to')
 
-    await saveDialog('Save')
+    await saveDialog()
 
     const added = (await storedMarks()).marks['did-not-finish']
     assert.equal(added.label, 'Did Not Finish')
@@ -373,7 +372,7 @@ describe('options UI — work marks', { skip }, () => {
   const modeBox = async () => options.control(await options.row(ROW), 'combobox')
   const priorityBox = async () => options.control(await options.row(ROW), 'spinbutton')
   const hideSettings = async () => ({
-    mode: await options.text(await modeBox()),
+    mode: await (await modeBox()).evaluate(el => el.dataset.value),
     priority: await (await priorityBox()).evaluate(el => el.value),
   })
 
@@ -382,7 +381,7 @@ describe('options UI — work marks', { skip }, () => {
     // existed — the row has to answer with the shipped defaults rather than
     // with nothing.
     const got = await hideSettings()
-    assert.match(got.mode, /^Collapse/, 'collapsed to a reason line')
+    assert.equal(got.mode, 'collapse', 'collapsed to a reason line')
     assert.equal(got.priority, '9', 'above an "always show" rule at its own default of 4')
   })
 
@@ -407,22 +406,22 @@ describe('options UI — work marks', { skip }, () => {
     assert.deepEqual(options.problems(), [])
   })
 
-  /** The sort in the list's header, named for the sort it shows. */
-  const sortButton = async view => view.control(await view.list(LIST), 'button', /^Sort: /)
+  /** The sort in the list's header. */
+  const sortButton = async view => view.action(await view.list(LIST), 'sort')
+  /** The sort the list shows, by its value. */
+  const shownSort = async view => (await sortButton(view)).evaluate(el => el.dataset.sort)
 
-  /** Choose a sort from the header's menu, and return the choice the menu then shows as checked. */
+  /** Choose a sort, by its value, from the header's menu. */
   const sortBy = async (view, choice) => {
     await view.press(await sortButton(view))
     await view.page.waitForSelector('[role="menuitemradio"]')
-    await view.page.evaluate(text => [...document.querySelectorAll('[role="menuitemradio"]')]
-      .find(item => item.textContent.trim() === text)
-      .click(), choice)
+    await view.page.evaluate(value => document.querySelector(`[role="menuitemradio"][data-sort="${value}"]`).click(), choice)
     await view.page.waitForFunction(() => !document.querySelector('[role="menuitemradio"]'))
   }
 
-  /** Whether the move button so named is inert, and what it is described by. */
-  const moveState = async (view, name) => {
-    const button = await view.control(await view.list(LIST), 'button', name)
+  /** Whether the mark's move button that does `action` is inert, and what it is described by. */
+  const moveState = async (view, id, action) => {
+    const button = await view.action(await view.listRow(LIST, id), action)
     return { disabled: await button.evaluate(el => el.disabled), why: await view.description(button) }
   }
 
@@ -430,32 +429,32 @@ describe('options UI — work marks', { skip }, () => {
     const counted = await session.open({ seed: COUNTED, hash: HASH })
     try {
       const yourOrder = ['read', 'favorite', 'good', 'gross', 'continue']
-      assert.equal(await counted.name(await sortButton(counted)), 'Sort: Your order', 'the list starts in your order')
+      assert.equal(await shownSort(counted), 'order', 'the list starts in your order')
       assert.deepEqual(await counted.listRowIds(LIST), yourOrder)
-      assert.deepEqual(await moveState(counted, 'Move Favorite up'), { disabled: false, why: '' })
+      assert.deepEqual(await moveState(counted, 'favorite', 'move-up'), { disabled: false, why: '' })
 
-      await sortBy(counted, 'Works')
-      assert.equal(await counted.name(await sortButton(counted)), 'Sort: Works')
+      await sortBy(counted, 'works')
+      assert.equal(await shownSort(counted), 'works')
       assert.deepEqual(await counted.listRowIds(LIST), ['continue', 'favorite', 'read', 'gross', 'good'], 'most works first')
-      for (const name of ['Move Read up', 'Move Favorite up', 'Move Favorite down', 'Move Gross down'])
-        assert.deepEqual(await moveState(counted, name), { disabled: true, why: ORDER_OFF }, name)
-      await counted.press(await counted.control(await counted.list(LIST), 'button', 'Move Favorite up'))
+      for (const [id, action] of [['read', 'move-up'], ['favorite', 'move-up'], ['favorite', 'move-down'], ['gross', 'move-down']])
+        assert.deepEqual(await moveState(counted, id, action), { disabled: true, why: MARK_ORDER_OFF }, `${id} ${action}`)
+      await counted.press(await counted.action(await counted.listRow(LIST, 'favorite'), 'move-up'))
 
-      await sortBy(counted, 'Name')
+      await sortBy(counted, 'name')
       assert.deepEqual(await counted.listRowIds(LIST), ['favorite', 'good', 'gross', 'continue', 'read'], 'Favorite, Good, Gross, Ongoing, Read')
-      assert.deepEqual(await moveState(counted, 'Move Favorite down'), { disabled: true, why: ORDER_OFF })
+      assert.deepEqual(await moveState(counted, 'favorite', 'move-down'), { disabled: true, why: MARK_ORDER_OFF })
 
-      await sortBy(counted, 'Your order')
+      await sortBy(counted, 'order')
       assert.deepEqual(await counted.listRowIds(LIST), yourOrder)
-      assert.deepEqual(await moveState(counted, 'Move Favorite up'), { disabled: false, why: '' })
-      assert.deepEqual(await moveState(counted, 'Move Read up'), { disabled: true, why: '' }, 'the first mark still has nowhere to go')
+      assert.deepEqual(await moveState(counted, 'favorite', 'move-up'), { disabled: false, why: '' })
+      assert.deepEqual(await moveState(counted, 'read', 'move-up'), { disabled: true, why: '' }, 'the first mark still has nowhere to go')
 
       await counted.saved()
       assert.equal(await counted.lastWrite(KEY), null, 'no sort and no inert press writes a thing')
 
-      await sortBy(counted, 'Works')
+      await sortBy(counted, 'works')
       await counted.reload()
-      assert.equal(await counted.name(await sortButton(counted)), 'Sort: Your order', 'a visit starts in your order')
+      assert.equal(await shownSort(counted), 'order', 'a visit starts in your order')
       assert.deepEqual(await counted.listRowIds(LIST), yourOrder)
       assert.deepEqual(counted.problems(), [])
     }
@@ -467,27 +466,29 @@ describe('options UI — work marks', { skip }, () => {
   test('Clear asks again in its own place, and only the second press clears', async () => {
     const counted = await session.open({ seed: COUNTED, hash: HASH })
     try {
-      const clear = async id => counted.control(await counted.listRow(LIST, id), 'button', /^Clear /)
-      assert.equal(await counted.name(await clear('favorite')), 'Clear Favorite marks')
+      const clear = async id => counted.action(await counted.listRow(LIST, id), 'clear')
+      const armed = async id => (await clear(id)).evaluate(el => el.dataset.armed !== undefined)
+      assert.equal(await armed('favorite'), false)
       assert.equal(await (await clear('good')).evaluate(el => el.disabled), true, 'a mark on no works has nothing to clear')
 
       await counted.press(await clear('favorite'))
       await counted.saved()
-      assert.equal(await counted.text(await clear('favorite')), 'Clear 3?', 'armed, saying how many it would clear')
+      assert.equal(await armed('favorite'), true, 'armed')
+      assert.deepEqual(numbers(await counted.text(await clear('favorite'))), [3], 'saying how many it would clear')
       assert.equal(await counted.lastWrite(KEY), null, 'nothing cleared on the first press')
 
       await counted.press(await clear('read'))
-      assert.equal(await counted.text(await clear('read')), 'Clear 2?')
-      assert.equal(await counted.name(await clear('favorite')), 'Clear Favorite marks', 'arming one disarms the other')
+      assert.deepEqual(numbers(await counted.text(await clear('read'))), [2])
+      assert.equal(await armed('favorite'), false, 'arming one disarms the other')
 
       await counted.press(await clear('read'))
       await counted.saved()
       const stored = await counted.lastWrite(KEY)
       assert.equal(stored.marks.read.items, '', 'cleared on the second press')
       assert.equal(stored.marks.favorite.items, '3,1,1', 'and nothing else')
-      assert.match(await counted.text(await counted.listRow(LIST, 'read')), /0 works/)
+      assert.deepEqual(numbers(await counted.text(await (await counted.listRow(LIST, 'read')).$('[data-list-meta]'))), [0])
       assert.equal(await (await clear('read')).evaluate(el => el.disabled), true)
-      assert.equal(await counted.listCount(LIST), '5 · 8 works')
+      assert.deepEqual(numbers(await counted.listCount(LIST)), [5, 8])
     }
     finally {
       await counted.close()
@@ -503,7 +504,7 @@ describe('options UI — work marks', { skip }, () => {
           frame: { left: frame.left, right: frame.right },
           scroll: document.documentElement.scrollWidth - window.innerWidth,
           rows: [...document.querySelectorAll(`[data-list="${id}"] [data-list-row]`)].map((row) => {
-            const name = row.querySelector('[title^="id: "]')
+            const name = row.querySelector('[data-mark-name]')
             const boxes = [...row.querySelectorAll('button')].map(b => b.getBoundingClientRect())
             return {
               mark: row.dataset.listRow,

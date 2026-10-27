@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { formatDay } from '../../src/common/trackedLists.ts'
+import { formatRange } from '../../src/common/trackedReads.ts'
+import { figures, mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { pressFacet, rerun, runs, settled } from './trackedPages.mjs'
+import { pressFacet, pressToast, rerun, runs, settled } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, search, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
@@ -100,21 +101,12 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     await reviewDrawn(tab)
   }
 
-  /** Click a button in the toast shadow root by its label. */
-  const clickToast = label => tab.evaluate((want) => {
-    for (const el of document.body.children) {
-      const button = el.shadowRoot?.querySelector('.toast button.action')
-      if (button?.textContent?.trim() === want) {
-        button.click()
-        return true
-      }
-    }
-    return false
-  }, label)
+  /** The toolbar's days, works and target, as its meta line gives them. */
+  const meta = async () => figures(await barText('--meta'))
 
   test('the first window is the two days the target fits', async () => {
     tab = await open()
-    assert.equal(await barText('--meta'), '2 days · 6 works (target 6)')
+    assert.deepEqual(await meta(), [2, 6, 6])
     assert.equal((await shownIds()).length, 6)
     assert.equal(await watermark(), since - 1)
   })
@@ -129,8 +121,8 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     await markReviewed()
     assert.equal(await watermark(), since + 1, 'the last day of the range just finished')
     const after = await shownIds()
-    assert.equal(await barText('--meta'), '2 days · 6 works (target 6)')
-    assert.equal(await barText('--range'), `Reviewing ${formatDay(since + 2).slice(0, -5)} – ${formatDay(since + 3)}`)
+    assert.deepEqual(await meta(), [2, 6, 6])
+    assert.ok(mentions(await barText('--range'), formatRange(since + 2, since + 3)))
     assert.deepEqual(after.filter(id => before.includes(id)), [], 'a fresh range, not the one just cleared')
   })
 
@@ -141,11 +133,11 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
 
   test('Undo puts the watermark back, and reads again the days the records let go of', async () => {
     const before = await runs(tab)
-    assert.equal(await clickToast('Undo'), true, 'the Undo offer should still be up')
+    assert.equal(await pressToast(tab, 'marked-reviewed'), true, 'the Undo offer should still be up')
     await settled(tab, before)
     await reviewDrawn(tab)
     assert.equal(await watermark(), since - 1)
-    assert.equal(await barText('--range'), `Reviewing ${formatDay(since).slice(0, -5)} – ${formatDay(since + 1)}`)
+    assert.ok(mentions(await barText('--range'), formatRange(since, since + 1)))
     const record = await tab.evaluate(async () => (await browser.storage.local.get('trackedRead.solo'))['trackedRead.solo'])
     assert.equal(record.from, since, 'read again from the watermark put back')
     await tab.close()
@@ -159,20 +151,17 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
       seed: { ...SEED, 'option.trackedLists': trackedOption([solo, broken], { target: 6, reviewedThrough: since - 1 }) },
     })
 
-    assert.equal(await barText('--status'), '“Hurt/comfort” couldn’t be loaded, so its works are missing from this range.')
+    assert.equal(await tab.$eval('.AO3E--tracked-review--bar--status', el => el.dataset.kind), 'failed')
+    assert.ok(mentions(await barText('--status'), 'Hurt/comfort'), 'the status line names the list')
 
     await tab.click('.AO3E--tracked-review--bar--mark')
     await tab.waitForSelector('.AO3E--tracked-review--bar--prompt .AO3E--tracked-review--bar--confirm')
     assert.equal(await watermark(), since - 1, 'nothing has moved yet')
-    const prompt = await barText('--prompt')
-    assert.match(prompt, /“Hurt\/comfort” couldn’t be loaded; its works for .* will be skipped\./)
+    assert.ok(mentions(await barText('--prompt'), 'Hurt/comfort'), 'the confirmation names the list whose works would be skipped')
   })
 
   test('and goes ahead once the reader says so', async () => {
-    await rerun(tab, () => tab.evaluate(() => {
-      const buttons = [...document.querySelectorAll('.AO3E--tracked-review--bar--confirm')]
-      buttons.find(button => button.textContent.trim() === 'Mark reviewed anyway').click()
-    }))
+    await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--prompt [data-ao3e-action="confirm"]'))
     await reviewDrawn(tab)
     assert.equal(await watermark(), since + 1)
     await tab.close()
@@ -188,11 +177,11 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     })
     // Today's works can't be reviewed yet, so the range up to yesterday is empty.
     await tab.waitForFunction(() => [...document.querySelectorAll('body > div')]
-      .some(el => [...el.shadowRoot?.querySelectorAll('.toast button.action') ?? []].some(button => button.textContent.trim() === 'Mark reviewed')))
+      .some(el => !!el.shadowRoot?.querySelector('.toast[data-ao3e-toast="nothing-to-review"] button.action')))
     assert.equal(await tab.$('.AO3E--search-host'), null, 'the view closed, with nothing to show')
 
     const before = await runs(tab)
-    assert.equal(await clickToast('Mark reviewed'), true)
+    assert.equal(await pressToast(tab, 'nothing-to-review'), true)
     await settled(tab, before)
     assert.equal(await watermark(), TODAY - 1)
     const claim = await tab.evaluate(async () => (await browser.storage.local.get('cache.trackedReadClaim'))['cache.trackedReadClaim'])

@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { summarizeRuleTimings } from '../../src/common/ruleTiming.ts'
+import { ruleTimingText } from '../../src/options_ui/model/ruleTiming.ts'
 import { DIST, ensureBuilt, installMock, launch } from './helpers.mjs'
 import { chromePath, skip, startOptions, until } from './optionsPage.mjs'
 import { settled } from './trackedPages.mjs'
@@ -111,18 +113,17 @@ describe('rule timings — the options page sums them up', { skip }, () => {
 
   test('says when nothing is recorded yet', async () => {
     const options = await session.open()
-    assert.deepEqual(await text(options), ['No ruleset evaluations recorded yet.'])
+    assert.deepEqual(await text(options), [ruleTimingText(null).summary])
     await options.page.close()
   })
 
   test('counts the evaluations and works, with the time per 100 works and the split under it', async () => {
     const now = Date.now()
     const entry = props => ({ at: now, where: 'page', works: 100, rules: 4, matchers: { exact: 2, contains: 1, regex: 1 }, ms: 0.5, matchMs: 0.2, pageMs: 0.1, ...props })
-    const options = await session.open({ seed: { 'cache.ruleTimings': [entry(), entry({ at: now - 60_000, works: 300, ms: 1.5, matchMs: 1.4, pageMs: undefined, where: 'list', rules: 6, matchers: { exact: 6, contains: 0, regex: 0 } })] } })
-    assert.deepEqual(await text(options), [
-      '2 ruleset evaluations in the last seven days on 400 total works. Average time to process ruleset: 0.50ms/100 items for 5.0 average rules.',
-      'Matching rules: 0.40ms/100 items. Changing AO3 listing pages: 0.10ms/100 items. Rules by match type, on average: 4.0 exact, 0.5 contains, 0.5 regex.',
-    ])
+    const log = [entry(), entry({ at: now - 60_000, works: 300, ms: 1.5, matchMs: 1.4, pageMs: undefined, where: 'list', rules: 6, matchers: { exact: 6, contains: 0, regex: 0 } })]
+    const options = await session.open({ seed: { 'cache.ruleTimings': log } })
+    const { summary, detail } = ruleTimingText(summarizeRuleTimings(log, now))
+    assert.deepEqual(await text(options), [summary, detail])
     assert.deepEqual(options.problems(), [])
     await options.page.close()
   })

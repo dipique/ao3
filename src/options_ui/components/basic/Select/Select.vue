@@ -29,6 +29,7 @@ const size = computed(() => SIZES[props.size ?? 'default'])
       :class="size.trigger"
       flex="~ items-center justify-between"
       border="1 input"
+      :data-value="props.modelValue ?? undefined"
       v-bind="$attrs"
     >
       <RekaSelectValue v-slot="{ modelValue, selectedLabel }">

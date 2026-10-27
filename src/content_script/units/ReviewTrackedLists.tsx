@@ -800,6 +800,7 @@ export class ReviewTrackedLists extends Unit {
       const stored = facts
       if (!stored || stored.computedAt === 0) {
         range.textContent = 'Gathering your tracked lists…'
+        range.toggleAttribute('data-ao3e-gathering', true)
         meta.textContent = ''
         controls.classList.add(`${BAR_CLASS}--off`)
         return
@@ -808,6 +809,7 @@ export class ReviewTrackedLists extends Unit {
       const span = stored.end - stored.start + 1
       const count = Object.values(stored.days).reduce((sum, n) => sum + n, 0)
 
+      range.toggleAttribute('data-ao3e-gathering', false)
       range.textContent = caughtUp ? 'You’re caught up.' : `Reviewing ${formatRange(stored.start, stored.end)}`
       meta.textContent = caughtUp
         ? 'Today’s works so far are below; they can be reviewed tomorrow.'
@@ -846,6 +848,10 @@ export class ReviewTrackedLists extends Unit {
       status.textContent = line.text
       status.title = line.lists.join(', ')
       status.dataset.kind = line.kind
+      if (line.reading)
+        status.dataset.ao3eReading = line.reading
+      else
+        delete status.dataset.ao3eReading
 
       notes.textContent = noteLine(option.lists, current?.later)
       warnings.replaceChildren(...warningLines(reviewed))
@@ -943,6 +949,7 @@ export class ReviewTrackedLists extends Unit {
       // The reading here sees the watermark move, and keeps those days off as it goes.
       toast(`Marked ${formatRange(range.start, range.end)} reviewed.`, {
         type: 'success',
+        name: 'marked-reviewed',
         timeout: UNDO_TIMEOUT_MS,
         action: { label: 'Undo', onClick: () => void undoReviewed(before, moved.reviewedThrough) },
       })
@@ -967,6 +974,7 @@ export class ReviewTrackedLists extends Unit {
     if (!quiet.reviewable)
       return
     toast(`Nothing from your tracked lists for ${formatRange(quiet.start, quiet.end)}.`, {
+      name: 'nothing-to-review',
       timeout: 0,
       action: {
         label: 'Mark reviewed',
@@ -1152,7 +1160,7 @@ function drawStrip(strip: HTMLElement, window: TrackedReviewCache): void {
   const peak = Math.max(1, ...days.map(([, count]) => count))
   strip.replaceChildren(...days.map(([day, count]) => {
     const label = `${formatDay(day)} — ${count} ${count === 1 ? 'work' : 'works'}`
-    const bar = (<span class={`${BAR_CLASS}--day`} title={label} aria-label={label} role="img" />) as HTMLElement
+    const bar = (<span class={`${BAR_CLASS}--day`} title={label} aria-label={label} role="img" data-ao3e-day={day} data-ao3e-count={count} />) as HTMLElement
     // A day with nothing in it still gets a sliver, so the run of quiet days a
     // range can hold is visible as a run rather than as a gap.
     bar.style.height = `${Math.max(8, Math.round((count / peak) * 100))}%`
@@ -1180,12 +1188,13 @@ function labelsOf(ids: readonly string[], lists: readonly TrackedList[]): string
 /** The lines under the toolbar that say what this window may be missing. */
 function warningLines(set: ReviewedSet | null): HTMLElement[] {
   if (set && !set.savedKnown)
-    return [warning('Marked for Later not loaded on this browser. Open it once to skip saved works.')]
+    return [warning('saved-unknown', 'Marked for Later not loaded on this browser. Open it once to skip saved works.')]
   return []
 }
 
-function warning(text: string): HTMLElement {
-  return (<div class={`${BAR_CLASS}--warning`}>{text}</div>) as HTMLElement
+/** A warning line, which `kind` names. */
+function warning(kind: string, text: string): HTMLElement {
+  return (<div class={`${BAR_CLASS}--warning`} data-ao3e-warning={kind}>{text}</div>) as HTMLElement
 }
 
 /** What the reader is agreeing to when they mark a range whose lists couldn't all be read. */
@@ -1196,7 +1205,7 @@ function skipWarning(failed: readonly string[], window: TrackedReviewCache): str
 
 /** A line of explanation with one or two buttons under it. */
 function confirmRow(text: string, label: string, onConfirm: () => void, onCancel: (() => void) | null): HTMLElement {
-  const confirm = (<button type="button" class={`${BAR_CLASS}--confirm`}>{label}</button>) as HTMLElement as HTMLButtonElement
+  const confirm = (<button type="button" class={`${BAR_CLASS}--confirm`} data-ao3e-action="confirm">{label}</button>) as HTMLElement as HTMLButtonElement
   confirm.addEventListener('click', onConfirm)
   const row = (
     <div class={`${BAR_CLASS}--prompt-row`}>
@@ -1205,7 +1214,7 @@ function confirmRow(text: string, label: string, onConfirm: () => void, onCancel
     </div>
   ) as HTMLElement
   if (onCancel) {
-    const cancel = (<button type="button" class={`${BAR_CLASS}--confirm`}>Cancel</button>) as HTMLElement as HTMLButtonElement
+    const cancel = (<button type="button" class={`${BAR_CLASS}--confirm`} data-ao3e-action="cancel">Cancel</button>) as HTMLElement as HTMLButtonElement
     cancel.addEventListener('click', onCancel)
     row.append(cancel)
   }

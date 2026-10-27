@@ -1,4 +1,6 @@
+import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
 import { installMock, openWindow, storedLists } from './helpers.mjs'
+import { mentions } from './optionsPage.mjs'
 import { ARCHIVE, inject, relayWrites } from './trackedPages.mjs'
 
 /**
@@ -101,6 +103,19 @@ export async function openToRead(tab) {
 /** What the view's *Updating…* note says, or null while it is off. */
 export function updatingNote(tab) {
   return tab.$eval('.AO3E--search-view--updating-on .AO3E--search-view--updating-text', el => el.textContent.trim()).catch(() => null)
+}
+
+/** Whether `note` counts the pages of the list loaded so far, out of `total`. */
+export function showsProgress(note, total = PAGES) {
+  return new RegExp(`\\b\\d+\\b\\D+\\b${total}\\b`).test(note ?? '')
+}
+
+/** What AO3 says to wait, in seconds: long enough that a test sees the wait, and never sits it out. */
+export const RETRY_AFTER = 90
+
+/** Whether `line` says AO3 refused, counting down what is left of a {@link RETRY_AFTER} pause. */
+export function waitsOutRefusal(line) {
+  return mentions(line ?? '', WAIT_WORDS.refused) && /\b1:[23]\d\b/.test(line ?? '')
 }
 
 /** The note's Stop button, while it offers one. */

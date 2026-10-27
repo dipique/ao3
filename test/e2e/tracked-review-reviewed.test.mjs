@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { figures } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { rerun, settled } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
@@ -115,10 +116,10 @@ describe('tracked review: works already dealt with', { skip }, () => {
     // Eight works over the two days; five of them count, which is inside the
     // target of six — so the range runs to yesterday instead of stopping after
     // the first day, which eight would have forced.
-    assert.equal(await barText('--meta'), '2 days · 5 works (target 6)')
+    assert.deepEqual(figures(await barText('--meta')), [2, 5, 6], 'two days, five works, a target of six')
     const strip = await tab.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--tracked-review--bar--day')].map(el => el.getAttribute('title')))
-    assert.deepEqual(strip.map(title => title.split('—')[1].trim()), ['2 works', '3 works'])
+      [...document.querySelectorAll('.AO3E--tracked-review--bar--day')].map(el => Number(el.dataset.ao3eCount)))
+    assert.deepEqual(strip, [2, 3])
   })
 
   test('a work marked during the review stays where it is', async () => {
@@ -137,7 +138,7 @@ describe('tracked review: works already dealt with', { skip }, () => {
     const shown = await shownIds()
     assert.ok(!shown.includes(plain.id))
     assert.equal(shown.length, 4)
-    assert.equal(await barText('--meta'), '2 days · 4 works (target 6)')
+    assert.deepEqual(figures(await barText('--meta')), [2, 4, 6])
   })
 
   test('the Refresh button reads nothing again while the records are whole, and offers nothing', async () => {
@@ -155,8 +156,8 @@ describe('tracked review: works already dealt with', { skip }, () => {
     tab = await open(seed)
 
     const warnings = await tab.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--tracked-review--bar--warning')].map(el => el.textContent.trim()))
-    assert.deepEqual(warnings, ['Marked for Later not loaded on this browser. Open it once to skip saved works.'])
+      [...document.querySelectorAll('.AO3E--tracked-review--bar--warning')].map(el => el.dataset.ao3eWarning))
+    assert.deepEqual(warnings, ['saved-unknown'])
     const shown = await shownIds()
     assert.ok(shown.includes(savedForLater.id), 'the index cannot rule it out, so it is shown')
     assert.equal(shown.length, 6)

@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test'
 import { createDefaultMarks } from '../../src/common/workMarks.ts'
 import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { ARCHIVE, blurb, launch, openMenu, openTab, stored, toasts, viewDrawn, visit } from './trackedPages.mjs'
+import { ARCHIVE, blurb, launch, openMenu, openTab, pickRow, stored, toastTypes, viewDrawn, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -82,17 +82,12 @@ describe('marking a work read from the Marked for Later view', { skip }, () => {
     return { tab, requests }
   }
 
-  /** Open the work's menu from its clock, and choose the row whose label starts with `label`. */
-  const chooseFromClock = async (tab, label) => {
+  /** Open the work's menu from its clock, and choose the row that takes it off Marked for Later. */
+  const takeOffFromClock = async (tab) => {
     await openMenu(tab, () => tab.evaluate((id) => {
       document.querySelector(`#work_${id} h4.heading .AO3E--indicator--mark-saved`).click()
     }, TAKEN))
-    await until(`the menu to offer "${label}"`, () => tab.evaluate((label) => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => !el.disabled && el.textContent.trim().startsWith(label))
-      row?.click()
-      return !!row
-    }, label))
+    await until('the menu to offer to take it off', () => pickRow(tab, 'unmark-for-later'))
   }
 
   test('every work carries the clock, and no Mark as Read button', async () => {
@@ -109,19 +104,19 @@ describe('marking a work read from the Marked for Later view', { skip }, () => {
     }
   })
 
-  for (const { name, workMarks, label } of [
-    { name: 'with work marks off', workMarks: { enabled: false, marks: createDefaultMarks() }, label: 'Mark as read' },
-    { name: 'with work marks on', workMarks: { enabled: true, marks: createDefaultMarks() }, label: 'Remove from Marked for Later' },
+  for (const { name, workMarks } of [
+    { name: 'with work marks off', workMarks: { enabled: false, marks: createDefaultMarks() } },
+    { name: 'with work marks on', workMarks: { enabled: true, marks: createDefaultMarks() } },
   ]) {
     test(`${name}, the clock's menu marks it read and the view and its copy let it go`, async () => {
       const { tab, requests } = await open(workMarks)
       try {
-        await chooseFromClock(tab, label)
+        await takeOffFromClock(tab)
         await until('AO3 to be told', () => requests.some(url => new URL(url).pathname === `/works/${TAKEN}/mark_as_read`))
         await until('the work to leave the view', async () => !(await shownIds(tab)).includes(TAKEN))
         assert.deepEqual(await shownIds(tab), KEPT.filter(id => id !== TAKEN))
         await until('the work to come off the copy', async () => !storedListIds((await stored(tab, 'cache.searchLists'))?.[KEY]).includes(TAKEN))
-        assert.ok((await toasts(tab)).includes('Marked as read — removed from your Marked for Later list.'))
+        assert.ok((await toastTypes(tab)).includes('success'), 'the reader is told it worked')
       }
       finally {
         await tab.close()

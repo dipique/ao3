@@ -870,8 +870,8 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   })
   syncDir()
 
-  const minInput = (<input type="number" min="0" inputmode="numeric" class={cx('input')} placeholder="min" aria-label="Minimum words" />) as HTMLElement as HTMLInputElement
-  const maxInput = (<input type="number" min="0" inputmode="numeric" class={cx('input')} placeholder="max" aria-label="Maximum words" />) as HTMLElement as HTMLInputElement
+  const minInput = (<input type="number" min="0" inputmode="numeric" class={cx('input')} placeholder="min" aria-label="Minimum words" data-ao3e-words="min" />) as HTMLElement as HTMLInputElement
+  const maxInput = (<input type="number" min="0" inputmode="numeric" class={cx('input')} placeholder="max" aria-label="Maximum words" data-ao3e-words="max" />) as HTMLElement as HTMLInputElement
   minInput.value = state.wordsMin != null ? String(state.wordsMin) : ''
   maxInput.value = state.wordsMax != null ? String(state.wordsMax) : ''
   const onWords = debounce(() => {
@@ -1185,7 +1185,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         </div>
       ) as HTMLElement
       const group = (
-        <details class={cx('group')} open={!collapsed}>
+        <details class={cx('group')} open={!collapsed} data-ao3e-facet={key}>
           <summary class={cx('group-title')}>
             <span class={cx('group-label')}>
               {FACET_LABELS[key]}

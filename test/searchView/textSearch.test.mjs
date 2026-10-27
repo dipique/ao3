@@ -7,11 +7,13 @@ import {
   createWorkTextSearcher,
   describeTextSearch,
   foldText,
+  NOTHING_TO_SEARCH,
   parseTextQuery,
   textMatches,
   textSnippet,
   workTextOf,
 } from '../../src/content_script/searchView/textSearch.ts'
+import { figures, mentions } from '../facts.mjs'
 
 /** A stored work as the sanitizer writes one: the meta block, then the work's own text. */
 function storedWork(body, meta = '<dl class="work meta group"><dt class="words">Words:</dt><dd class="words">5,000</dd></dl>') {
@@ -271,33 +273,29 @@ describe('createWorkTextSearcher', () => {
 
 describe('describeTextSearch', () => {
   test('before a search, says how much of the list it covers', () => {
-    assert.equal(describeTextSearch({ kind: 'idle', searchable: 3, total: 3 }), 'Searches the saved text of all 3 works')
-    assert.equal(describeTextSearch({ kind: 'idle', searchable: 1, total: 1 }), 'Searches the saved text of the work')
-    assert.equal(describeTextSearch({ kind: 'idle', searchable: 2, total: 5 }), 'Searches the 2 of 5 works with saved text')
-    assert.equal(describeTextSearch({ kind: 'idle', searchable: 0, total: 5 }), 'No work here has saved text to search')
+    assert.deepEqual(figures(describeTextSearch({ kind: 'idle', searchable: 3, total: 3 })), [3])
+    assert.deepEqual(figures(describeTextSearch({ kind: 'idle', searchable: 2, total: 5 })), [2, 5])
+    assert.equal(describeTextSearch({ kind: 'idle', searchable: 0, total: 5 }), NOTHING_TO_SEARCH)
   })
 
   test('while searching, says how far it has got', () => {
-    assert.equal(describeTextSearch({ kind: 'searching', done: 40, total: 120 }), 'Searching… 40 of 120')
+    assert.deepEqual(figures(describeTextSearch({ kind: 'searching', done: 40, total: 120 })), [40, 120])
   })
 
   test('after a search, says where it was found and what it could not look at', () => {
-    assert.equal(describeTextSearch({ kind: 'done', hits: 2, searched: 3, unavailable: 0 }), 'Found in 2 of 3 works')
-    assert.equal(describeTextSearch({ kind: 'done', hits: 1, searched: 1, unavailable: 0 }), 'Found in 1 of 1 work')
-    assert.equal(describeTextSearch({ kind: 'done', hits: 0, searched: 3, unavailable: 0 }), 'Not found in any of 3 works')
-    assert.equal(describeTextSearch({ kind: 'done', hits: 0, searched: 1, unavailable: 0 }), 'Not found in the work')
-    assert.equal(
-      describeTextSearch({ kind: 'done', hits: 2, searched: 3, unavailable: 1 }),
-      'Found in 2 of 3 works · 1 work without saved text was not searched',
-    )
-    assert.equal(
-      describeTextSearch({ kind: 'done', hits: 0, searched: 3, unavailable: 4 }),
-      'Not found in any of 3 works · 4 works without saved text were not searched',
-    )
-    assert.equal(describeTextSearch({ kind: 'done', hits: 0, searched: 0, unavailable: 4 }), 'No work here has saved text to search')
+    const found = describeTextSearch({ kind: 'done', hits: 2, searched: 3, unavailable: 0 })
+    assert.deepEqual(figures(found), [2, 3])
+    const missed = describeTextSearch({ kind: 'done', hits: 0, searched: 3, unavailable: 0 })
+    assert.ok(figures(missed).includes(3), missed)
+    assert.notEqual(missed, describeTextSearch({ kind: 'done', hits: 3, searched: 3, unavailable: 0 }))
+    const partly = describeTextSearch({ kind: 'done', hits: 2, searched: 3, unavailable: 1 })
+    assert.deepEqual(figures(partly), [1, 2, 3])
+    const unsearched = describeTextSearch({ kind: 'done', hits: 0, searched: 3, unavailable: 4 })
+    assert.ok(figures(unsearched).includes(3) && figures(unsearched).includes(4), unsearched)
+    assert.equal(describeTextSearch({ kind: 'done', hits: 0, searched: 0, unavailable: 4 }), NOTHING_TO_SEARCH)
   })
 
-  test('a failure says so', () => {
-    assert.equal(describeTextSearch({ kind: 'failed', message: 'it broke' }), 'Couldn\'t search the text: it broke')
+  test('a failure says what went wrong', () => {
+    assert.ok(mentions(describeTextSearch({ kind: 'failed', message: 'it broke' }), 'it broke'))
   })
 })

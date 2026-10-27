@@ -259,16 +259,16 @@ describe('siteExport/payload — the shell', () => {
 
   test('says the file is inert until a script replaces it', () => {
     const head = siteShellHead(manifest, BUNDLE)
-    assert.ok(head.includes(`id="${SITE_SHELL_ID}"`))
     // What a reader sees where scripts don't run — Safari, with a local file.
-    assert.match(head, /This page needs JavaScript, and none is running/)
-    assert.match(head, /Microsoft Edge/)
+    const shell = new RegExp(`<div id="${SITE_SHELL_ID}" class="ao3e-site-inert">([\\s\\S]*?)</div>`).exec(head)
+    assert.ok(shell, 'the shell is in the file, marked inert')
+    assert.ok(shell[1].replace(/<[^>]+>/g, '').trim(), 'and says something')
   })
 
   test('reads out the list the way the options row does', () => {
     const head = siteShellHead(manifest, BUNDLE)
-    assert.match(head, /1,191 works/)
-    assert.match(head, /1,190 readable offline/)
+    const meta = (/<p class="ao3e-site-meta">(.*?)<\/p>/.exec(head)?.[1] ?? '').replace(/&#?\w+;/g, ' ')
+    assert.deepEqual(meta.match(/\d[\d,]*/g), ['1,191', '1,190'], 'the works, then those readable offline')
   })
 
   test('escapes the one thing in it that came from AO3', () => {

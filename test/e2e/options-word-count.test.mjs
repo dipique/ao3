@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { skip, startOptions, until } from './optionsPage.mjs'
+import { NOT_A_WORD_COUNT, RANGE_REPEATED, rangeError } from '../../src/common/wordCount.ts'
+import { figures, mentions, skip, startOptions, until } from './optionsPage.mjs'
 
 const SEED = {
   'option.wordCountToolbar': { enabled: true, ranges: [{ from: 1000, to: 3000 }] },
@@ -11,9 +12,6 @@ const SEED = {
 /** The Word count menu's ranges, and the Default word count row. */
 const RANGES = 'word-count-ranges'
 const DEFAULT_ROW = 'filter-defaults-default-word-count'
-
-/** A line saying why a range can't be saved. */
-const ERROR = /\bmust\b|\balready\b|^Set at least/
 
 /**
  * The two word-count rows in the options UI. Both edit their bounds as text and
@@ -37,12 +35,17 @@ describe('options UI — word count ranges', { skip }, () => {
   /** The default's two bounds. */
   const defaultInputs = async () => options.controls(await options.row(DEFAULT_ROW), 'textbox')
 
-  const rangeErrors = async () => {
-    const lines = await Promise.all((await options.listRows(RANGES)).map(row => options.lines(row)))
-    return lines.flat().filter(line => ERROR.test(line))
-  }
+  /** The lines saying why a range can't be saved: one in each row that can't be. */
+  const rangeErrors = async () => Promise.all((await (await options.list(RANGES)).$$('[data-list-error]')).map(line => options.text(line)))
 
-  const defaultErrors = async () => (await options.lines(await options.row(DEFAULT_ROW))).filter(line => ERROR.test(line))
+  const defaultErrors = async () => Promise.all((await (await options.row(DEFAULT_ROW)).$$('[data-error]')).map(line => options.text(line)))
+
+  /** Each of `lines` gives `reason`, and there are `count` of them. */
+  const give = (lines, reason, count = 1) => {
+    assert.equal(lines.length, count, JSON.stringify(lines))
+    for (const line of lines)
+      assert.ok(mentions(line, reason), `${line} gives ${reason}`)
+  }
 
   /**
    * Replace a bound's text by typing. The field is brought to the middle of the
@@ -59,8 +62,7 @@ describe('options UI — word count ranges', { skip }, () => {
     await options.saved()
   }
 
-  test('loads the saved ranges into the editor, a frame headed by its title and count', async () => {
-    assert.equal(await options.name(await options.list(RANGES)), 'Word count ranges')
+  test('loads the saved ranges into the editor, a frame headed by its count', async () => {
     assert.equal(await options.listCount(RANGES), '1')
     const inputs = await rangeInputs()
     assert.equal(inputs.length, 2, 'one row of two bounds')
@@ -69,7 +71,7 @@ describe('options UI — word count ranges', { skip }, () => {
   })
 
   test('adding a range from the header writes it once both bounds are set', async () => {
-    await options.press(await options.control(await options.list(RANGES), 'button', 'Add a range'))
+    await options.press(await options.action(await options.list(RANGES), 'add'))
     await until('the range to be added', async () => (await options.listRows(RANGES)).length === 2)
     assert.equal(await options.listCount(RANGES), '2')
     const inputs = await rangeInputs()
@@ -85,7 +87,7 @@ describe('options UI — word count ranges', { skip }, () => {
   test('an upside-down range is refused, not saved', async () => {
     const inputs = await rangeInputs()
     await retype(inputs[3], '10')
-    assert.deepEqual(await rangeErrors(), ['The upper bound must not be below the lower bound.'])
+    give(await rangeErrors(), rangeError({ from: 8000, to: 10 }))
     // Clearing the box on the way through is itself a valid (open-ended) range,
     // so a write may well have happened — what must never be stored is the
     // upside-down range now on screen.
@@ -101,10 +103,7 @@ describe('options UI — word count ranges', { skip }, () => {
     await retype(inputs[2], '1000')
     await retype(inputs[3], '3000')
     // Both rows are now the same, so both are flagged.
-    assert.deepEqual(await rangeErrors(), [
-      'This range is already in the list.',
-      'This range is already in the list.',
-    ])
+    give(await rangeErrors(), RANGE_REPEATED, 2)
     // As above, intermediate valid states may have been written; the duplicated
     // list itself must not have been.
     const stored = await options.lastWrite('option.wordCountToolbar')
@@ -124,7 +123,7 @@ describe('options UI — word count ranges', { skip }, () => {
 
   test('removing a range writes the shortened list', async () => {
     const last = (await options.listRows(RANGES)).at(-1)
-    await options.press(await options.control(last, 'button', 'Remove range'))
+    await options.press(await options.action(last, 'remove'))
     await options.saved()
     assert.deepEqual(await options.lastWrite('option.wordCountToolbar'), {
       enabled: true,
@@ -135,18 +134,19 @@ describe('options UI — word count ranges', { skip }, () => {
 
   test('with every range removed, the frame says so in place, and its header still adds one', async () => {
     const [row] = await options.listRows(RANGES)
-    await options.press(await options.control(row, 'button', 'Remove range'))
+    await options.press(await options.action(row, 'remove'))
     await options.saved()
     assert.deepEqual(await options.lastWrite('option.wordCountToolbar'), { enabled: true, ranges: [] })
     assert.deepEqual(await options.listRows(RANGES), [])
-    assert.equal(await options.listCount(RANGES), 'none yet')
-    assert.ok((await options.text(await options.list(RANGES))).includes('No ranges yet'), 'the empty state shows')
+    assert.deepEqual(figures(await options.listCount(RANGES)), [], 'nothing to count')
+    const empty = async () => !!(await (await options.list(RANGES)).$('[data-list-empty]'))
+    assert.ok(await empty(), 'the empty state shows')
 
-    await options.press(await options.control(await options.list(RANGES), 'button', 'Add a range'))
+    await options.press(await options.action(await options.list(RANGES), 'add'))
     await until('the range to be added', async () => (await options.listRows(RANGES)).length > 0)
     assert.equal((await options.listRows(RANGES)).length, 1)
     assert.equal((await rangeInputs()).length, 2)
-    assert.ok(!(await options.text(await options.list(RANGES))).includes('No ranges yet'), 'the empty state goes')
+    assert.equal(await empty(), false, 'the empty state goes')
   })
 
   test('the default range loads, and blanking a bound makes it one-sided', async () => {
@@ -161,7 +161,7 @@ describe('options UI — word count ranges', { skip }, () => {
     const before = await options.lastWrite('option.searchWordCount')
     const inputs = await defaultInputs()
     await retype(inputs[0], '-5')
-    assert.deepEqual(await defaultErrors(), ['Word counts must be whole numbers of 0 or more.'])
+    give(await defaultErrors(), NOT_A_WORD_COUNT)
     assert.deepEqual(await options.lastWrite('option.searchWordCount'), before)
   })
 

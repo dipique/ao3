@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { formatWordCountRange, parseBoundInput, rangeError } from '#common'
+import { formatWordCountRange, NOT_A_WORD_COUNT, parseBoundInput, rangeError } from '#common'
 
 const { enabled, from, to } = useOption('searchWordCount')
 
@@ -22,7 +22,7 @@ const parsed = computed(() => {
 
 const error = computed(() => {
   if (!parsed.value)
-    return 'Word counts must be whole numbers of 0 or more.'
+    return NOT_A_WORD_COUNT
   return rangeError(parsed.value)
 })
 
@@ -73,7 +73,7 @@ watch([from, to], ([nextFrom, nextTo]) => {
         />
         <span shrink-0>words</span>
       </div>
-      <p v-if="error" flex="~ items-start gap-1.5" text="[11.5px] default-fg" leading="[16px]">
+      <p v-if="error" data-error flex="~ items-start gap-1.5" text="[11.5px] default-fg" leading="[16px]">
         <SeverityGlyph severity="destructive" class="mt-px shrink-0 text-[13px]" />
         <span>{{ error }}</span>
       </p>

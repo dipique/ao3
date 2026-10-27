@@ -29,7 +29,7 @@ function mountView(count) {
   document.body.replaceChildren(window.__view.el)
 }
 
-/** Runs in the page: what the view shows, as a reader reads it. */
+/** Runs in the page: what the view shows, as a reader reads it, its count line by the numbers it gives. */
 function shown() {
   const root = document.querySelector('.AO3E--search-view')
   const blurbs = [...root.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)')]
@@ -39,7 +39,7 @@ function shown() {
     page: root.querySelector('.AO3E--search-view--page[aria-current="page"]')?.textContent ?? null,
     titles: blurbs.map(li => li.querySelector('h4 a').textContent),
     alphaIncluded: alpha?.querySelector('.AO3E--search-view--toggle-include').getAttribute('aria-pressed') ?? null,
-    count: root.querySelector('.AO3E--search-view--count').textContent,
+    count: (root.querySelector('.AO3E--search-view--count').textContent.match(/\d+/g) ?? []).map(Number),
   }
 }
 
@@ -75,14 +75,14 @@ describe('SearchView.grow', { skip: skipWithoutChrome }, () => {
     await page.evaluate(mountView, 4)
     await includeAlpha()
     await press('.AO3E--search-view--page', '2')
-    assert.deepEqual(await page.evaluate(shown), { page: '2', titles: ['Work 3', 'Work 4'], alphaIncluded: 'true', count: 'Showing 3–4 of 4 works' })
+    assert.deepEqual(await page.evaluate(shown), { page: '2', titles: ['Work 3', 'Work 4'], alphaIncluded: 'true', count: [3, 4, 4] })
     await page.evaluate(() => {
       window.__before = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)')]
     })
 
     await page.evaluate(() => window.__view.grow(window.__make(Array.from({ length: 10 }, (_, i) => i + 1))))
 
-    assert.deepEqual(await page.evaluate(shown), { page: '2', titles: ['Work 3', 'Work 4'], alphaIncluded: 'true', count: 'Showing 3–4 of 6 (10) works' })
+    assert.deepEqual(await page.evaluate(shown), { page: '2', titles: ['Work 3', 'Work 4'], alphaIncluded: 'true', count: [3, 4, 6, 10] })
     assert.ok(await page.evaluate(() => {
       const now = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)')]
       return now.length === window.__before.length && now.every((li, i) => li === window.__before[i])
@@ -98,7 +98,7 @@ describe('SearchView.grow', { skip: skipWithoutChrome }, () => {
 
     await page.evaluate(() => window.__view.grow(window.__make([1, 2, 3, 7, 8])))
 
-    assert.deepEqual(await page.evaluate(shown), { page: '2', titles: ['Work 3'], alphaIncluded: 'true', count: 'Showing 3–3 of 3 (5) works' })
+    assert.deepEqual(await page.evaluate(shown), { page: '2', titles: ['Work 3'], alphaIncluded: 'true', count: [3, 3, 3, 5] })
     assert.deepEqual(await page.evaluate(() => window.__view.getWorks().map(w => w.workId)), ['1', '2', '3', '7', '8'])
   })
 
@@ -107,7 +107,8 @@ describe('SearchView.grow', { skip: skipWithoutChrome }, () => {
     await includeAlpha()
 
     await page.evaluate(() => window.__view.grow(window.__make([7, 8])))
-    assert.equal((await page.evaluate(shown)).count, 'No works match')
+    const none = await page.evaluate(shown)
+    assert.deepEqual([none.titles, none.count], [[], []], 'no works match')
     assert.deepEqual(await page.evaluate(() => [...window.__view.getState().filter.facets.fandoms.include]), ['Alpha'])
 
     await page.evaluate(() => window.__view.grow(window.__make([7, 8, 1, 2])))

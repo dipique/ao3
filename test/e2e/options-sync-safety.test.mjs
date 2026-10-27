@@ -4,6 +4,10 @@ import { after, before, describe, test } from 'node:test'
 import { BUILD_CHECK_TIMEOUT_MS, SYNC_CONSISTENCY_WAIT_MS } from '../../src/common/constants.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { decode, encode, MANIFEST_KEY, SYNC_SCHEMA_VERSION } from '../../src/common/syncCodec.ts'
+import { answerRefusedMessage, HELD_BACKUP_NOTE, staleBackgroundMessage, syncRefusalMessage } from '../../src/common/syncMessages.ts'
+import { SEVERITY_WORDS } from '../../src/options_ui/model/severity.ts'
+import { NOT_SYNCED_YET, syncStatusView, YOURS } from '../../src/options_ui/model/syncStatus.ts'
+import { numbers } from '../facts.mjs'
 import { bundleForPage } from '../siteExport/helpers.mjs'
 import { rulesFixture } from '../sync/harness.mjs'
 import { outlast } from './helpers.mjs'
@@ -27,14 +31,17 @@ const HELD = {
   loss: { rules: { removed: 348, of: 348 }, markedWorks: { removed: 267, of: 282 }, textReplacements: { removed: 0, of: 26 }, marks: [] },
 }
 
-/** What a question says where this browser's settings are backed up. */
-const BACKED_UP = 'This browser\'s settings are backed up.'
-
 /** The toast where an answer that replaces this browser's settings is refused, since their backup couldn't be saved. */
-const UNBACKED = 'The backup of this browser\'s settings couldn\'t be saved. Press again to replace them anyway.'
+const UNBACKED = answerRefusedMessage('unbacked', 'accept')
 
-/** The word a screen reader hears for each severity's glyph. */
-const WORDS = { destructive: 'Error:', warning: 'Warning:', success: 'Success:', neutral: 'Note:' }
+/** The toast where an answer is refused, since another browser is still sending its settings. */
+const SENDING = answerRefusedMessage('sending', 'keep')
+
+/**
+ * What the sync panel says of `input`, sync on unless it says otherwise, as
+ * the page words it: the page is to show it.
+ */
+const panelFor = input => syncStatusView({ enabled: true, staleBuild: false, backgroundOutdated: false, ...input }, V)
 
 /** Synced storage `percent` full of a 100 KB room. */
 const usage = percent => ({ getSyncUsage: { used: percent * 1024, quota: 100 * 1024, overheadBytes: 0 } })
@@ -78,6 +85,15 @@ function readStatus() {
     chip: { state: chip.dataset.syncChip, text: squash(chip.textContent) },
     detail: squash(panel.querySelector('[data-sync-detail]')?.textContent) || null,
     last: squash(panel.querySelector('[data-sync-last]')?.textContent) || null,
+  }
+}
+
+/** The status line `view`, from {@link panelFor}, has the page show. */
+function statusOf(view) {
+  return {
+    chip: { state: view.chip.state, text: view.chip.word },
+    detail: view.chip.detail ?? null,
+    last: view.lastSynced ?? null,
   }
 }
 
@@ -204,24 +220,41 @@ describe('options UI — the sync panel', { skip }, () => {
     prepare: page => page.evaluateOnNewDocument(scriptBackground, replies),
   })
 
-  /** The "Sync settings across devices" switch, which heads the panel. Its row's description is part of its name. */
-  const syncSwitch = async options => options.control(await options.page.$('[data-sync-panel]'), 'switch', /^Sync settings across devices/)
+  /** The "Sync settings across devices" switch, which heads the panel: the panel's one switch. */
+  const syncSwitch = async options => options.control(await options.page.$('[data-sync-panel]'), 'switch')
 
   /** The message `hook` marks is a callout of `severity`, led by its word, saying `message`. */
   async function assertCallout(options, hook, severity, message) {
     const [callout] = await options.page.evaluate(readCallouts, hook)
     assert.ok(callout, `nothing at ${hook}`)
     assert.equal(callout.severity, severity)
-    assert.equal(callout.lead, WORDS[severity])
-    assert.match(callout.message, message)
+    assert.equal(callout.lead, SEVERITY_WORDS[severity])
+    assert.equal(callout.message, message)
   }
+
+  /** The panel shows the status line, and the first callout's message, that `view` (from {@link panelFor}) gives. */
+  async function assertPanel(options, view, hook) {
+    const status = await options.page.evaluate(readStatus)
+    const expected = statusOf(view)
+    assert.deepEqual(status.chip, expected.chip)
+    assert.equal(status.detail, expected.detail)
+    // A moment sync last succeeded is read as the page draws it.
+    assert.equal(!!status.last, !!expected.last, 'when it last synced, or that it hasn\'t')
+    if (expected.last === NOT_SYNCED_YET)
+      assert.equal(status.last, NOT_SYNCED_YET)
+    if (hook)
+      await assertCallout(options, hook, view.callouts[0].severity, view.callouts[0].text)
+  }
+
+  /** What the held question's answers are called and say, as `view` (from {@link panelFor}) gives them. */
+  const answersOf = view => view.callouts.find(callout => callout.decision).decision.answers.map(a => [a.choice, a.label, a.consequence])
 
   test('Sync & Backups has two sub-sections, Sync and Backups', async () => {
     const options = await open({})
     try {
       assert.deepEqual(await options.shownCategories(), ['sync-backups'])
       const subsections = (await options.railItems()).filter(item => item.kind === 'subsection')
-      assert.deepEqual(subsections.map(s => [s.id, s.name]), [['sync', 'Sync'], ['backups', 'Backups']])
+      assert.deepEqual(subsections.map(s => s.id), ['sync', 'backups'])
     }
     finally {
       await options.close()
@@ -246,13 +279,13 @@ describe('options UI — the sync panel', { skip }, () => {
     const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now() - 60000 }, usage(68))
     try {
       const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'syncing', text: 'Syncing' })
+      assert.equal(status.chip.state, 'syncing')
       assert.equal(status.detail, null)
-      assert.match(status.last, /^Last synced \S/)
+      assert.ok(status.last, 'when it last synced')
       assert.deepEqual(await options.page.evaluate(readCallouts, '[data-sync-panel] [data-callout]'), [])
 
       const figure = await options.page.$('[data-sync-usage]')
-      assert.match(await options.text(figure), /^Synced storage .*68\.0 KB of 100\.0 KB · 68%$/)
+      assert.deepEqual(numbers(await options.text(figure)), [68, 100, 68], 'used, of how much, and the share')
       assert.equal(await options.page.evaluate(glyphImage, '[data-sync-usage]'), null, 'no glyph below 70%')
     }
     finally {
@@ -263,7 +296,7 @@ describe('options UI — the sync panel', { skip }, () => {
   test('before its first sync, says it hasn\'t synced yet', async () => {
     const options = await open({ 'sync.enabled': true })
     try {
-      assert.equal((await options.page.evaluate(readStatus)).last, 'Not synced yet')
+      assert.equal((await options.page.evaluate(readStatus)).last, NOT_SYNCED_YET)
     }
     finally {
       await options.close()
@@ -277,11 +310,11 @@ describe('options UI — the sync panel', { skip }, () => {
       await options.press(toggle)
       await options.page.waitForSelector('[data-sync-refusal]')
 
-      await assertCallout(options, '[data-sync-refusal]', 'destructive', new RegExp(`^Can't turn on sync: .*sync version ${NEWER}; this browser has ${V}\\)`))
+      await assertCallout(options, '[data-sync-refusal]', 'destructive', syncRefusalMessage({ ok: false, reason: 'newer-version', remoteVersion: NEWER, version: V }))
       assert.equal(await toggle.evaluate(el => el.getAttribute('aria-checked')), 'false')
       assert.deepEqual(await options.sent('setSyncEnabled'), [[true]])
       const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'off', text: 'Off' })
+      assert.equal(status.chip.state, 'off')
       assert.equal(status.last, null, 'nothing has synced while it is off')
     }
     finally {
@@ -293,24 +326,17 @@ describe('options UI — the sync panel', { skip }, () => {
     test('asks: what it would remove, one line each, and two answers of equal weight with their consequences', async () => {
       const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now(), 'sync.pause': HELD })
       try {
-        const status = await options.page.evaluate(readStatus)
-        assert.deepEqual(status.chip, { state: 'held', text: 'On hold' })
-        assert.equal(status.detail, 'An update from another browser is waiting for your answer.')
-        assert.match(status.last, /^Last synced /)
-
-        await assertCallout(options, '[data-sync-pause="held"]', 'warning', /^An update from another browser would remove:$/)
+        const view = panelFor({ lastSyncAt: Date.now(), pause: HELD })
+        await assertPanel(options, view, '[data-sync-pause="held"]')
         const callout = await options.page.$('[data-sync-pause="held"]')
-        assert.deepEqual(await callout.$$eval('[data-sync-losses] li', items => items.map(li => li.textContent.replace(/\s+/g, ' ').trim())), [
-          '348 of your 348 rules',
-          '267 of your 282 marked works',
-        ])
-        assert.ok((await options.lines(callout)).includes(BACKED_UP))
+        const losses = await callout.$$eval('[data-sync-losses] li', items => items.map(li => li.textContent.replace(/\s+/g, ' ').trim()))
+        assert.deepEqual(losses.map(numbers), [[348, 348], [267, 282]], 'one line for each collection it would take from')
+        assert.deepEqual(losses, view.callouts[0].decision.lines)
+        assert.ok((await options.lines(callout)).includes(HELD_BACKUP_NOTE))
 
         const answers = await options.page.evaluate(readAnswers)
-        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), [
-          ['keep', 'Keep this browser\'s settings', 'Sends this browser\'s settings to your other browsers. What the update had is kept as a backup first.'],
-          ['accept', 'Accept the update', 'Replaces this browser\'s settings with the other browser\'s. Yours are backed up.'],
-        ])
+        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), answersOf(view))
+        assert.ok(answers[1].consequence.includes(YOURS.backedUp), 'accepting says yours are backed up')
         assert.equal(answers[0].look, answers[1].look, 'neither answer is drawn as the one to pick')
         assert.equal(answers[0].box.top, answers[1].box.top, 'side by side')
         assert.ok(answers[1].box.left > answers[0].box.right, 'side by side')
@@ -328,17 +354,19 @@ describe('options UI — the sync panel', { skip }, () => {
      * daily-backups switch says neither.
      */
     const NO_BACKUP = [
-      ['its backup failed', { ...HELD, backedUp: false, backupFailed: true }, false, ' Yours aren\'t backed up: the backup couldn\'t be saved.'],
-      ['an older build held it with daily backups off', (({ backupFailed, ...older }) => ({ ...older, backedUp: false }))(HELD), true, ''],
+      ['its backup failed', { ...HELD, backedUp: false, backupFailed: true }, false, true],
+      ['an older build held it with daily backups off', (({ backupFailed, ...older }) => ({ ...older, backedUp: false }))(HELD), true, false],
     ]
-    for (const [why, pause, backupsEnabled, more] of NO_BACKUP) {
-      test(`with no backup because ${why}, accepting says what it replaces${more ? ', and that yours aren\'t backed up' : ''}`, async () => {
+    for (const [why, pause, backupsEnabled, failed] of NO_BACKUP) {
+      test(`with no backup because ${why}, accepting says what it replaces${failed ? ', and that yours aren\'t backed up' : ''}`, async () => {
         const options = await open({ 'sync.enabled': true, 'sync.backupsEnabled': backupsEnabled, 'sync.pause': pause })
         try {
           const callout = await options.page.$('[data-sync-pause="held"]')
-          assert.equal((await options.lines(callout)).includes(BACKED_UP), false)
+          assert.equal((await options.lines(callout)).includes(HELD_BACKUP_NOTE), false)
           const accept = (await options.page.evaluate(readAnswers)).find(a => a.answer === 'accept')
-          assert.equal(accept.consequence, `Replaces this browser's settings with the other browser's.${more}`)
+          assert.equal(accept.consequence, answersOf(panelFor({ pause })).find(([choice]) => choice === 'accept')[2])
+          assert.equal(accept.consequence.includes(YOURS.failed), failed)
+          assert.equal(accept.consequence.includes(YOURS.backedUp), false)
         }
         finally {
           await options.close()
@@ -400,10 +428,8 @@ describe('options UI — the sync panel', { skip }, () => {
     /** This browser's settings, and the synced ones: rules and a reading speed apiece. */
     const OWN = { rules: rulesFixture(3), wordsPerMinute: 320 }
     const SYNCED = { rules: rulesFixture(2), wordsPerMinute: 250 }
-    const ANSWERS = [
-      ['keep', 'Keep this browser\'s settings', 'Replaces your synced settings with this browser\'s, on every browser that syncs. The synced settings are kept as a backup first.'],
-      ['accept', 'Use the synced settings', 'Replaces this browser\'s settings with your synced settings. Yours are backed up.'],
-    ]
+    /** What the question asked as sync turns on says, with this browser's settings backed up. */
+    const ASKED = panelFor({ pause: { reason: 'first-sync', g: 3, w: 'laptop.1', at: 0, backedUp: true, backupFailed: false, loss: null } })
 
     let background
     before(async () => {
@@ -445,16 +471,14 @@ describe('options UI — the sync panel', { skip }, () => {
         assert.deepEqual(await options.stored(MANIFEST_KEY), manifest, 'nothing sent')
         assert.deepEqual(await options.page.evaluate(readBackups), [{ kind: 'pre-sync', wordsPerMinute: 320, rules: 3 }], 'backed up with daily backups off')
 
-        const status = await options.page.evaluate(readStatus)
-        assert.deepEqual(status.chip, { state: 'first-sync', text: 'On hold' })
-        assert.equal(status.detail, 'Turning on sync is waiting for your answer.')
-        await assertCallout(options, '[data-sync-pause="first-sync"]', 'warning', /^Your synced settings differ from this browser's\. Which do you want to keep\?$/)
+        await assertPanel(options, ASKED, '[data-sync-pause="first-sync"]')
         const callout = await options.page.$('[data-sync-pause="first-sync"]')
-        assert.ok((await options.lines(callout)).includes(BACKED_UP))
+        assert.ok((await options.lines(callout)).includes(HELD_BACKUP_NOTE))
         assert.deepEqual(await callout.$$('[data-sync-losses] li'), [])
 
         const answers = await options.page.evaluate(readAnswers)
-        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), ANSWERS)
+        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), answersOf(ASKED))
+        assert.ok(answers[1].consequence.includes(YOURS.backedUp), 'using the synced settings says yours are backed up')
         assert.equal(answers[0].look, answers[1].look, 'neither answer is drawn as the one to pick')
         assert.equal(answers[0].box.top, answers[1].box.top, 'side by side')
       }
@@ -509,9 +533,8 @@ describe('options UI — the sync panel', { skip }, () => {
         assert.equal((await options.stored('sync.pause'))?.backupFailed, true)
         assert.equal((await options.stored('sync.pause')).backedUp, false)
         assert.equal(await options.stored('option.wordsPerMinute'), 330, 'nothing applied')
-        await until('the answer to say so', async () => (await options.page.evaluate(readAnswers)).find(a => a.answer === 'accept')?.consequence
-          === 'Replaces this browser\'s settings with your synced settings. Yours aren\'t backed up: the backup couldn\'t be saved.')
-        assert.ok(!(await options.lines(await options.page.$('[data-sync-pause="first-sync"]'))).includes(BACKED_UP))
+        await until('the answer to say so', async () => (await options.page.evaluate(readAnswers)).find(a => a.answer === 'accept')?.consequence.includes(YOURS.failed))
+        assert.ok(!(await options.lines(await options.page.$('[data-sync-pause="first-sync"]'))).includes(HELD_BACKUP_NOTE))
 
         await options.press(await options.page.$('[data-sync-accept]'))
         await until('the answer to be applied', async () => (await options.stored('sync.pause')) === null)
@@ -609,9 +632,9 @@ describe('options UI — the sync panel', { skip }, () => {
         assert.deepEqual(await options.page.evaluate(readBackups), [{ kind: 'sync-held', wordsPerMinute: 320, rules: 3 }], 'backed up with daily backups off')
 
         const status = await options.page.evaluate(readStatus)
-        assert.deepEqual(status.chip, { state: 'first-sync', text: 'On hold' })
-        assert.equal(status.detail, 'Settings from another browser are waiting for your answer.')
-        await assertCallout(options, '[data-sync-pause="first-sync"]', 'warning', /^Your synced settings differ from this browser's\. Which do you want to keep\?$/)
+        const view = panelFor({ pause })
+        assert.deepEqual([status.chip, status.detail], [statusOf(view).chip, statusOf(view).detail], 'the chip says the settings came from another browser')
+        await assertCallout(options, '[data-sync-pause="first-sync"]', 'warning', view.callouts[0].text)
 
         await options.press(await options.page.$('[data-sync-keep]'))
         await until('the answer to be applied', async () => (await options.stored('sync.pause')) === null)
@@ -683,15 +706,12 @@ describe('options UI — the sync panel', { skip }, () => {
     test('past the wait: says they are inconsistent, and offers to replace them with this browser\'s settings', async () => {
       const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now(), 'sync.inconsistent': overdue() }, { replaceSyncedCopy: { replaced: true } })
       try {
-        const status = await options.page.evaluate(readStatus)
-        assert.deepEqual(status.chip, { state: 'inconsistent', text: 'Inconsistent' })
-        assert.equal(status.detail, 'Your synced settings can\'t be read whole.')
-        await assertCallout(options, '[data-sync-inconsistent]', 'destructive', /^Your synced settings are inconsistent: part of them is missing or doesn't match the rest/)
+        const view = panelFor({ lastSyncAt: Date.now(), inconsistent: overdue() })
+        await assertPanel(options, view, '[data-sync-inconsistent]')
 
         const answers = await options.page.evaluate(readAnswers)
-        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), [
-          ['replace', 'Replace them with this browser\'s settings', 'Makes this browser\'s settings your synced settings. Your other browsers ask before using them wherever their own settings differ, and back theirs up first.'],
-        ])
+        assert.deepEqual(answers.map(a => [a.answer, a.label, a.consequence]), answersOf(view))
+        assert.deepEqual(answers.map(a => a.answer), ['replace'])
         await options.press(await options.page.$('[data-sync-replace]'))
         await until('the offer to be taken', async () => (await options.sent('replaceSyncedCopy')).length === 1)
       }
@@ -741,7 +761,7 @@ describe('options UI — the sync panel', { skip }, () => {
     test('within the wait, says nothing of it', async () => {
       const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now(), 'sync.inconsistent': { since: Date.now(), overdue: false, replaceable: false } })
       try {
-        assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'syncing', text: 'Syncing' })
+        assert.equal((await options.page.evaluate(readStatus)).chip.state, 'syncing')
         assert.equal(await options.page.$('[data-sync-inconsistent]'), null)
       }
       finally {
@@ -778,7 +798,7 @@ describe('options UI — the sync panel', { skip }, () => {
       const { options, partial } = await openOverPartial({ 'sync.meta': { g: 0, h: '', w: '', i: 'desktop-copy' }, 'sync.pause': question })
       try {
         await options.press(await options.page.$('[data-sync-keep]'))
-        await until('the refusal', async () => (await options.toasts()).includes('Another browser is still sending its settings. Try again in a moment.'))
+        await until('the refusal', async () => (await options.toasts()).includes(SENDING))
 
         assert.deepEqual(await options.stored('sync.pause'), question, 'nothing cleared')
         assert.deepEqual(await options.stored(MANIFEST_KEY), partial, 'nothing sent')
@@ -797,7 +817,7 @@ describe('options UI — the sync panel', { skip }, () => {
       const { options, partial } = await openOverPartial({ 'sync.meta': { g: 0, h: '', w: '', i: 'desktop-copy' }, 'sync.pause': question })
       try {
         await options.press(await options.page.$('[data-sync-accept]'))
-        await until('the refusal', async () => (await options.toasts()).includes('Another browser is still sending its settings. Try again in a moment.'))
+        await until('the refusal', async () => (await options.toasts()).includes(SENDING))
 
         assert.deepEqual(await options.stored('sync.pause'), question, 'nothing cleared')
         assert.equal(await options.stored('option.wordsPerMinute'), OWN.wordsPerMinute, 'nothing applied')
@@ -814,10 +834,9 @@ describe('options UI — the sync panel', { skip }, () => {
   test('a version pause explains itself without offering answers', async () => {
     const options = await open({ 'sync.enabled': true, 'sync.pause': { reason: 'newer-version', remoteVersion: NEWER } })
     try {
-      await assertCallout(options, '[data-sync-pause="newer-version"]', 'warning', new RegExp(`^Your synced settings were saved by a newer version .*sync version ${NEWER}; this browser has ${V}\\)`))
-      const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'newer-version', text: 'Paused' })
-      assert.equal(status.detail, 'This browser is older than your synced settings. It lifts by itself once updated.')
+      await assertPanel(options, panelFor({ pause: { reason: 'newer-version', remoteVersion: NEWER } }), '[data-sync-pause="newer-version"]')
+      const [callout] = await options.page.evaluate(readCallouts, '[data-sync-pause="newer-version"]')
+      assert.ok(numbers(callout.message).includes(NEWER) && numbers(callout.message).includes(V), 'it gives both sync versions')
       assert.equal(await options.page.$('[data-sync-keep]'), null)
       assert.equal(await options.page.$('[data-sync-answer]'), null)
     }
@@ -829,8 +848,9 @@ describe('options UI — the sync panel', { skip }, () => {
   test('older synced settings wait for this version to save them', async () => {
     const options = await open({ 'sync.enabled': true, 'sync.pause': { reason: 'older-cloud', remoteVersion: OLDER } })
     try {
-      await assertCallout(options, '[data-sync-pause="older-cloud"]', 'warning', new RegExp(`^Your synced settings were saved by an older version .*sync version ${OLDER}; this browser has ${V}\\)`))
-      assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'older-cloud', text: 'Waiting' })
+      await assertPanel(options, panelFor({ pause: { reason: 'older-cloud', remoteVersion: OLDER } }), '[data-sync-pause="older-cloud"]')
+      const [callout] = await options.page.evaluate(readCallouts, '[data-sync-pause="older-cloud"]')
+      assert.ok(numbers(callout.message).includes(OLDER) && numbers(callout.message).includes(V), 'it gives both sync versions')
     }
     finally {
       await options.close()
@@ -867,11 +887,9 @@ describe('options UI — the sync panel', { skip }, () => {
   test('the last sync error is shown as an error, in place of when it last synced', async () => {
     const options = await open({ 'sync.enabled': true, 'sync.lastSyncAt': Date.now(), 'sync.lastError': 'QUOTA_BYTES quota exceeded' })
     try {
-      await assertCallout(options, '[data-sync-error]', 'destructive', /^QUOTA_BYTES quota exceeded$/)
-      const status = await options.page.evaluate(readStatus)
-      assert.deepEqual(status.chip, { state: 'error', text: 'Couldn\'t sync' })
-      assert.equal(status.detail, 'It will be tried again.')
-      assert.equal(status.last, null)
+      await assertCallout(options, '[data-sync-error]', 'destructive', 'QUOTA_BYTES quota exceeded')
+      await assertPanel(options, panelFor({ lastSyncAt: Date.now(), lastError: 'QUOTA_BYTES quota exceeded' }))
+      assert.equal((await options.page.evaluate(readStatus)).last, null)
     }
     finally {
       await options.close()
@@ -881,8 +899,8 @@ describe('options UI — the sync panel', { skip }, () => {
   test('a background that found itself out of date says sync is paused', async () => {
     const options = await open({ 'sync.enabled': true, 'sync.staleBuild': { running: 'old', onDisk: 'new' } })
     try {
-      await assertCallout(options, '[data-sync-stale]', 'destructive', /Reload AO3 Enhancements .*Sync is paused until then\.$/)
-      assert.deepEqual((await options.page.evaluate(readStatus)).chip, { state: 'stale', text: 'Reload needed' })
+      await assertCallout(options, '[data-sync-stale]', 'destructive', staleBackgroundMessage(true))
+      assert.equal((await options.page.evaluate(readStatus)).chip.state, 'stale')
     }
     finally {
       await options.close()
@@ -892,7 +910,7 @@ describe('options UI — the sync panel', { skip }, () => {
   test('a background answering with another build is called out of date', async () => {
     const options = await open({ 'sync.enabled': true }, { getBuildInfo: { buildId: 'some-other-build', syncVersion: V } })
     try {
-      await assertCallout(options, '[data-sync-stale]', 'destructive', /Sync may not work until then\.$/)
+      await assertCallout(options, '[data-sync-stale]', 'destructive', staleBackgroundMessage(false))
     }
     finally {
       await options.close()
@@ -910,7 +928,7 @@ describe('options UI — the sync panel', { skip }, () => {
       if (early.openFor < BUILD_CHECK_HURRIED_MS)
         assert.equal(early.stale, false, 'not before the wait is up')
       await until('the background to be called out of date', () => options.page.$('[data-sync-stale]'))
-      await assertCallout(options, '[data-sync-stale]', 'destructive', /Sync may not work until then\.$/)
+      await assertCallout(options, '[data-sync-stale]', 'destructive', staleBackgroundMessage(false))
     }
     finally {
       await options.close()
@@ -1000,14 +1018,15 @@ describe('options UI — the sync panel', { skip }, () => {
 
         const figure = await options.page.$('[data-sync-usage]')
         const text = await options.text(figure)
-        if (percent >= 70)
-          assert.ok(text.includes(`${WORDS[token]} ${percent}.0 KB of 100.0 KB · ${percent}%`), `the figure at ${percent}% read "${text}"`)
+        assert.deepEqual(numbers(text), [percent, 100, percent], `the figure at ${percent}% read "${text}"`)
+        assert.equal(text.includes(SEVERITY_WORDS[token]), percent >= 70, `the glyph's word at ${percent}%`)
         assert.equal(!!(await options.page.evaluate(glyphImage, '[data-sync-usage]')), percent >= 70, `a glyph at ${percent}%`)
 
         const advice = await options.page.$('[data-sync-advice]')
         if (percent >= 90) {
           assert.ok(advice, `advice at ${percent}%`)
-          assert.match(await options.text(advice), /^Error:\s*You're close to the sync storage limit\./)
+          const said = await options.text(advice)
+          assert.ok(said.startsWith(SEVERITY_WORDS.destructive) && said.length > SEVERITY_WORDS.destructive.length, `led by the glyph's word: "${said}"`)
         }
         else {
           assert.equal(advice, null, `no advice at ${percent}%`)

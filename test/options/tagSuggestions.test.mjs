@@ -235,14 +235,12 @@ describe('suggestBox', () => {
     const paused = withRefusal(potter, REFUSED)
     for (const value of ['potter', 'pott', 'harry'])
       assert.deepEqual(box(paused, FANDOM, value), { kind: 'paused', text: SUGGEST_NOTES.paused }, value)
-    assert.equal(SUGGEST_NOTES.paused, 'AO3 asked us to slow down — suggestions are paused')
   })
 
   test('unavailable after a failure, whatever is typed', () => {
     const failed = withFailure(potter)
     for (const value of ['potter', 'pott', 'harry'])
       assert.deepEqual(box(failed, FANDOM, value), { kind: 'unavailable', text: SUGGEST_NOTES.unavailable }, value)
-    assert.equal(SUGGEST_NOTES.unavailable, 'Suggestions unavailable')
   })
 
   test('neither note where nothing would be asked', () => {

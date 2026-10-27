@@ -15,12 +15,7 @@ import {
 } from '#common'
 import { markedForLaterIds } from '#content_script/markedForLaterIndex.js'
 
-/**
- * The Status value for a work carrying no verdict — nothing in the `read`
- * trigger group. Its own value rather than an absence, so it can be included
- * ("only what I haven't read") and excluded ("only what I have") like any other.
- */
-export const UNREAD = 'Unread'
+import { UNREAD } from './engine.ts'
 
 /**
  * Stamp each work with its Status facet values — everything the reader has (or

@@ -103,7 +103,7 @@ const howId = useId()
           clear-label="Clear the filter"
           @keydown.esc="escape"
         />
-        <span v-if="busy" class="saved-lists__busy saved-lists__busy--head">
+        <span v-if="busy" class="saved-lists__busy saved-lists__busy--head" data-busy>
           <span class="saved-lists__spinner i-tabler-loader-2 motion-safe:animate-spin" aria-hidden="true" />
           {{ busy }}
         </span>
@@ -119,11 +119,11 @@ const howId = useId()
       </template>
 
       <template #bands>
-        <p v-if="busy" class="saved-lists__band saved-lists__busy--band">
+        <p v-if="busy" class="saved-lists__band saved-lists__busy--band" data-busy>
           <span class="saved-lists__spinner i-tabler-loader-2 motion-safe:animate-spin" aria-hidden="true" />
           {{ busy }}
         </p>
-        <p v-if="!enabled" class="saved-lists__band">
+        <p v-if="!enabled" class="saved-lists__band" data-saved-lists-band="review-off">
           <span class="saved-lists__band-glyph i-tabler-player-pause" aria-hidden="true" />
           <span>Review is off — <b>Tracked lists</b> is switched off above. Titles and dates are kept.</span>
         </p>
@@ -137,13 +137,13 @@ const howId = useId()
 
       <template #empty>
         <template v-if="savedRows.length">
-          <b>No lists match “{{ filter.trim() }}”</b>
+          <b data-saved-lists-empty="no-match">No lists match “{{ filter.trim() }}”</b>
         </template>
         <template v-else-if="loading">
           Looking for saved lists…
         </template>
         <template v-else>
-          <b>No saved lists yet</b>Use <em>Track this search</em> in the floating toolbar on a search, a tag’s works or a
+          <b data-saved-lists-empty="none">No saved lists yet</b>Use <em>Track this search</em> in the floating toolbar on a search, a tag’s works or a
           series — or open one on AO3 and press its search button to keep a copy. It will appear here.
         </template>
       </template>

@@ -62,6 +62,13 @@ export interface MenuItem {
   icon?: Node | (() => Node) | null
   /** The row's text. */
   label: string
+  /** What the row does, as a short verb: its `data-ao3e-action`, which finds it whatever its label says. */
+  action?: string
+  /**
+   * What the row acts on or sets, where its {@link action} alone doesn't say —
+   * a mark's id, a priority, a range: its `data-ao3e-value`.
+   */
+  value?: string
   /**
    * How long this row's effect lasts. Consecutive rows sharing a scope are
    * grouped under one heading; see {@link MenuScope}.
@@ -162,6 +169,14 @@ function makeRow(): { el: HTMLButtonElement, set: (item: MenuItem) => void } {
     el.classList.toggle(ACTIVE_CLASS, !!item.active)
     el.classList.toggle(DANGER_CLASS, !!item.danger)
     el.disabled = !!item.disabled
+    if (item.action)
+      el.dataset.ao3eAction = item.action
+    else
+      delete el.dataset.ao3eAction
+    if (item.value !== undefined)
+      el.dataset.ao3eValue = item.value
+    else
+      delete el.dataset.ao3eValue
     el.replaceChildren(
       <span class={ICON_CLASS}>{resolveIcon(item.icon)}</span>,
       <span class={LABEL_CLASS}>{item.label}</span>,

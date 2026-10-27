@@ -94,19 +94,19 @@ function run(start: (row: SiteExportListRow) => unknown): void {
 
     <template v-if="tile.figure && tile.figures">
       <div class="tile__figure">
-        <b>{{ tile.figure.count }}</b>{{ ' ' }}<span>{{ tile.figure.detail }}</span>
+        <b data-tile-figure="count">{{ tile.figure.count }}</b>{{ ' ' }}<span data-tile-figure="detail">{{ tile.figure.detail }}</span>
       </div>
       <!-- The job's own bar stands in for the copy's while the job is here. -->
       <BucketBar v-if="tile.bar && !tile.job" :bar="tile.bar" />
       <div class="tile__legend">
         <span>
           <span v-if="!tile.job" class="tile__key tile__key--cached" aria-hidden="true" />
-          <b>{{ tile.figures.cached }}</b> cached ({{ tile.figures.size }})
+          <b data-tile-figure="cached">{{ tile.figures.cached }}</b> cached (<span data-tile-figure="size">{{ tile.figures.size }}</span>)
         </span>
         <span v-if="tile.figures.uncached">
           <span v-if="!tile.job" class="tile__key tile__key--uncached" aria-hidden="true" />
-          <b>{{ tile.figures.uncached }}</b> uncached<template v-if="tile.figures.failed">
-            · <b>{{ tile.figures.failed }}</b> failed
+          <b data-tile-figure="uncached">{{ tile.figures.uncached }}</b> uncached<template v-if="tile.figures.failed">
+            · <b data-tile-figure="failed">{{ tile.figures.failed }}</b> failed
           </template>
         </span>
       </div>
@@ -115,23 +115,23 @@ function run(start: (row: SiteExportListRow) => unknown): void {
     <SiteExportProgress v-if="tile.job" :view="tile.actions === 'cancel' ? foreign : null">
       <template v-if="tile.actions !== 'offline'" #foot>
         <template v-if="tile.actions === 'stop'">
-          <button type="button" class="outline-btn small-btn" @click="stop()">
+          <button type="button" class="outline-btn small-btn" data-action="pause" @click="stop()">
             <span class="i-tabler-player-pause" aria-hidden="true" />
             Pause
           </button>
-          <button type="button" class="outline-btn small-btn" @click="cancel()">
+          <button type="button" class="outline-btn small-btn" data-action="cancel" @click="cancel()">
             Cancel
           </button>
         </template>
-        <button v-else-if="tile.actions === 'cancel'" type="button" class="outline-btn small-btn" @click="foreign && cancelForeign(foreign)">
+        <button v-else-if="tile.actions === 'cancel'" type="button" class="outline-btn small-btn" data-action="cancel" @click="foreign && cancelForeign(foreign)">
           Cancel
         </button>
         <template v-else>
-          <button type="button" class="primary-btn small-btn" @click="resume()">
+          <button type="button" class="primary-btn small-btn" data-action="resume" @click="resume()">
             <span class="i-tabler-player-play" aria-hidden="true" />
             Continue
           </button>
-          <button type="button" class="ghost-btn small-btn" @click="discard()">
+          <button type="button" class="ghost-btn small-btn" data-action="discard" @click="discard()">
             Discard
           </button>
         </template>
@@ -155,6 +155,7 @@ function run(start: (row: SiteExportListRow) => unknown): void {
         :title="withReason(refreshLabel, tile.refreshOff)"
         :disabled="!!tile.refreshOff"
         :aria-describedby="tile.refreshOff ? refreshOffId : undefined"
+        data-action="refresh"
         @click="run(refreshList)"
       >
         <span class="i-tabler-refresh" aria-hidden="true" />
@@ -166,6 +167,7 @@ function run(start: (row: SiteExportListRow) => unknown): void {
         :title="withReason(cacheLabel, tile.offlineOff)"
         :disabled="!!tile.offlineOff"
         :aria-describedby="tile.offlineOff ? offlineOffId : undefined"
+        data-action="cache"
         @click="run(cacheWorks)"
       >
         <span class="i-tabler-cloud-download" aria-hidden="true" />
@@ -177,6 +179,7 @@ function run(start: (row: SiteExportListRow) => unknown): void {
         :title="withReason(downloadLabel, tile.refreshOff)"
         :disabled="!!tile.refreshOff"
         :aria-describedby="tile.refreshOff ? refreshOffId : undefined"
+        data-action="download"
         @click="run(downloadSite)"
       >
         <span class="i-tabler-download" aria-hidden="true" />

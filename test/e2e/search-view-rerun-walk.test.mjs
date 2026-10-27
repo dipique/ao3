@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { figures } from '../facts.mjs'
 import { ensureBuilt, findChrome, installMock, storedListIds } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import { ARCHIVE, blurb, inject, launch, listingPage, openTab, rerun, stored, visit } from './trackedPages.mjs'
@@ -81,10 +82,17 @@ const drawn = (tab, selectors) => tab.evaluate(list => list.map(selector =>
 const hidden = (tab, selectors) => tab.evaluate(list => list.map(selector =>
   [...document.querySelectorAll(selector)].every(el => getComputedStyle(el).display === 'none')), selectors)
 
-const progressText = tab => tab.$eval(PROGRESS, el => el.textContent.trim()).catch(() => null)
+/** The pages `selector` says are loaded, and in all, as `done/total`; null while it is off. */
+const pagesIn = async (tab, selector) => {
+  const text = await tab.$eval(selector, el => el.textContent).catch(() => null)
+  return text === null ? null : figures(text).join('/')
+}
 
-/** What the view's note says of the walk once the view is up with its first page, or null while it is off. */
-const walkNote = tab => tab.$eval('.AO3E--search-view--updating-on .AO3E--search-view--updating-text', el => el.textContent.trim()).catch(() => null)
+/** What the progress panel says of the walk before the view is up. */
+const progressText = tab => pagesIn(tab, PROGRESS)
+
+/** What the view's note says of the walk once the view is up with its first page. */
+const walkNote = tab => pagesIn(tab, '.AO3E--search-view--updating-on .AO3E--search-view--updating-text')
 
 /** Write an option, which re-runs the page, and wait for the run to finish. */
 const writeOption = (tab, name, value) => rerun(tab, () => tab.evaluate((key, next) => window.browser.storage.local.set({ [key]: next }), `option.${name}`, value))
@@ -140,7 +148,7 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
    */
   const halfWalked = async ({ tab, requests }) => {
     await until('the walk to ask for both pages', () => walks(requests).length === 2)
-    await until('the first page to be on screen', async () => await walkNote(tab) === 'Loaded 1 of 2 pages…')
+    await until('the first page to be on screen', async () => await walkNote(tab) === '1/2')
   }
 
   test('pressed, its first page is up while it walks on; the re-run puts it back still walking, then the rest, drawn as the options now say, and no page is fetched twice', async () => {
@@ -155,7 +163,7 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
 
       await writeOption(tab, 'searchPerPage', 25)
       await until('the view to be back', async () => await walkNote(tab) !== null)
-      assert.equal(await walkNote(tab), 'Loaded 1 of 2 pages…', 'the same walk, where it had got to')
+      assert.equal(await walkNote(tab), '1/2', 'the same walk, where it had got to')
       assert.deepEqual(await shownIds(tab), IDS.slice(0, PER_PAGE))
       assert.deepEqual(await hidden(tab, NATIVE), [true, true, true], 'the listing stays out of the way')
 
@@ -179,13 +187,13 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
       await visit(tab, LISTING)
       await tab.click(BUTTON)
       await until('the walk to ask for both pages', () => walks(requests).length === 2)
-      await until('the progress to be up', async () => await progressText(tab) === 'Loaded 0 of 2 pages…')
+      await until('the progress to be up', async () => await progressText(tab) === '0/2')
 
       await writeOption(tab, 'searchPerPage', 25)
-      await until('the progress to be back', async () => await progressText(tab) === 'Loaded 0 of 2 pages…')
+      await until('the progress to be back', async () => await progressText(tab) === '0/2')
 
       page.releaseFirst()
-      await until('the first page to be on screen', async () => await walkNote(tab) === 'Loaded 1 of 2 pages…')
+      await until('the first page to be on screen', async () => await walkNote(tab) === '1/2')
       assert.deepEqual(await shownIds(tab), IDS.slice(0, PER_PAGE))
       assert.equal(await tab.$(PROGRESS), null)
 
@@ -268,7 +276,7 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
 
       await writeOption(tab, 'searchPerPage', 51)
       await until('the view to be back', async () => await walkNote(tab) !== null)
-      assert.equal(await walkNote(tab), 'Loaded 1 of 2 pages…')
+      assert.equal(await walkNote(tab), '1/2')
 
       page.release()
       await until('the walk to end', async () => await walkNote(tab) === null)
@@ -296,7 +304,7 @@ describe('a search view\'s first walk across a re-run', { skip }, () => {
 
       await writeOption(tab, 'searchPerPage', 51)
       await until('the view to be back', async () => await walkNote(tab) !== null)
-      assert.equal(await walkNote(tab), 'Loaded 1 of 2 pages…')
+      assert.equal(await walkNote(tab), '1/2')
 
       page.release()
       await until('the walk to end', async () => await walkNote(tab) === null)

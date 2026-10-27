@@ -1,6 +1,9 @@
 const DATE_AND_TIME: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' }
 const TIME: Intl.DateTimeFormatOptions = { timeStyle: 'short' }
 
+/** What a recent moment's day is called in place of its date. */
+export const RECENT_DAY = { today: 'Today', yesterday: 'Yesterday' } as const
+
 /**
  * A moment as the options page writes one: a medium date and a short time, in
  * the reader's locale. Given `now`, a moment on the same calendar day reads
@@ -13,9 +16,9 @@ export function formatMoment(at: number, now?: number): string {
     const yesterday = new Date(today)
     yesterday.setDate(yesterday.getDate() - 1)
     if (day === today)
-      return `Today, ${new Date(at).toLocaleTimeString(undefined, TIME)}`
+      return `${RECENT_DAY.today}, ${new Date(at).toLocaleTimeString(undefined, TIME)}`
     if (day === yesterday.getTime())
-      return `Yesterday, ${new Date(at).toLocaleTimeString(undefined, TIME)}`
+      return `${RECENT_DAY.yesterday}, ${new Date(at).toLocaleTimeString(undefined, TIME)}`
   }
   return new Date(at).toLocaleString(undefined, DATE_AND_TIME)
 }
@@ -38,10 +41,13 @@ const RELATIVE_STEPS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
   ['year', Number.POSITIVE_INFINITY],
 ]
 
+/** What {@link timeAgo} says of a moment that never happened. */
+export const NEVER = 'never'
+
 /** How long before `now` a moment was, in the reader's locale: "22 minutes ago", "yesterday"; "never" for none (0). */
 export function timeAgo(at: number, now: number): string {
   if (!at)
-    return 'never'
+    return NEVER
   let value = (at - now) / 1000
   for (const [unit, span] of RELATIVE_STEPS) {
     if (Math.abs(value) < span)

@@ -58,6 +58,9 @@ export interface JobView {
  */
 const PHASE_WORDS: Readonly<Record<ExportJobPhase, string>> = { refreshing: 'refreshing', caching: 'caching', exporting: 'downloading' }
 
+/** What the job line says while the runner has said nothing of its own: before it does, and once it has stopped. */
+export const JOB_LINE = { working: 'Working…', paused: 'Paused', stopped: 'Stopped', finished: 'Finished' } as const
+
 /** What the job is doing, in the word that names it: its phase, or "working" for a phase not yet known. */
 export function jobVerb(view: Pick<JobView, 'phase'>): string {
   return view.phase ? PHASE_WORDS[view.phase] : 'working'
@@ -79,7 +82,7 @@ export function jobView(status: JobStatus, names: (key: string) => string, now: 
     state: 'running',
     done: job.done,
     total: job.total,
-    line: status.message || 'Working…',
+    line: status.message || JOB_LINE.working,
     warnings: status.warnings,
     failures: { shown: job.errors, more: Math.max(0, job.errorCount - job.errors.length) },
   }
@@ -93,12 +96,12 @@ export function jobView(status: JobStatus, names: (key: string) => string, now: 
 
   if (job.steps.length || status.error) {
     view.state = 'stopped'
-    view.line = status.error ? 'Stopped' : 'Paused'
+    view.line = status.error ? JOB_LINE.stopped : JOB_LINE.paused
     view.severity = status.error ? 'destructive' : 'neutral'
   }
   else {
     view.state = 'finished'
-    view.line = 'Finished'
+    view.line = JOB_LINE.finished
     view.severity = 'success'
   }
   return view

@@ -1410,8 +1410,9 @@ export function describeUpdate(
 type FilterVerb = 'include' | 'require' | 'exclude'
 
 const FILTER_VERBS: readonly FilterVerb[] = ['include', 'require', 'exclude']
-const ADDED_VERBS: Readonly<Record<FilterVerb, string>> = { include: 'Includes', require: 'Requires', exclude: 'Excludes' }
-const REMOVED_VERBS: Readonly<Record<FilterVerb, string>> = { include: 'No longer includes', require: 'No longer requires', exclude: 'No longer excludes' }
+/** What heads the names a filter selects each way: in a summary and a change adding them, and a change taking them away. */
+export const ADDED_VERBS: Readonly<Record<FilterVerb, string>> = { include: 'Includes', require: 'Requires', exclude: 'Excludes' }
+export const REMOVED_VERBS: Readonly<Record<FilterVerb, string>> = { include: 'No longer includes', require: 'No longer requires', exclude: 'No longer excludes' }
 
 /** One layer's changes, gathered, then written out in a fixed order by {@link changeLines}. */
 interface LayerChanges {
@@ -1492,7 +1493,7 @@ type FieldRule
     | { family: 'value', label: string, show: (value: string) => string }
 
 /** What the sidebar's and the search form's id fields hold the ids of. */
-const ID_NOUNS: Readonly<Record<string, string>> = {
+export const ID_NOUNS: Readonly<Record<string, string>> = {
   rating: 'rating',
   archive_warning: 'warning',
   category: 'category',

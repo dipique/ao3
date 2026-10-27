@@ -70,7 +70,7 @@ defineProps<{
       <SeverityGlyph severity="destructive" class="list-row__glyph mt-px shrink-0 text-[13px]" />
       <span>{{ error }}</span>
     </div>
-    <div v-else-if="$slots.meta" class="list-row__meta">
+    <div v-else-if="$slots.meta" data-list-meta class="list-row__meta">
       <slot name="meta" />
     </div>
     <div v-if="$slots.actions" class="list-row__actions">

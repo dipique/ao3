@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { planSavedLists, storedListRefs } from '../../src/common/savedLists.ts'
+import { figures } from '../facts.mjs'
 import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
 import { startOptions, stubArchive, until } from './optionsPage.mjs'
-import { ARCHIVE, blurb, keptStore, launch, listingPage, navigateBy, openTab, pillText, stored, visit } from './trackedPages.mjs'
+import { ARCHIVE, blurb, keptStore, launch, listingPage, navigateBy, openTab, pillRow, stored, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -111,11 +112,11 @@ describe('search a filtered listing\'s works', { skip }, () => {
 
     test('the offer sits at the end of the listing\'s own row of actions', async () => {
       await visit(tab, LISTING)
-      const found = await tab.$eval(BUTTON, (button) => {
+      const after = await tab.$eval(BUTTON, (button) => {
         const items = [...button.closest('ul.navigation.actions').children]
-        return { text: button.textContent.trim(), after: items[items.indexOf(button.closest('li')) - 1]?.textContent.trim() }
+        return items[items.indexOf(button.closest('li')) - 1]?.textContent.trim()
       })
-      assert.deepEqual(found, { text: 'Search these works', after: 'Filters' })
+      assert.equal(after, 'Filters', 'right after AO3\'s own last action')
       assert.deepEqual(walks(requests), [], 'nothing is asked of AO3 until it is pressed')
     })
 
@@ -171,9 +172,9 @@ describe('search a filtered listing\'s works', { skip }, () => {
       await visit(tab, LISTING)
       await tab.click(BUTTON)
       await tab.waitForSelector('.AO3E--search-host--gate')
-      const gate = await tab.$eval('.AO3E--search-host--gate', el => el.textContent.replace(/\s+/g, ' '))
-      assert.match(gate, /This list holds 40 works/)
-      assert.match(gate, /Load the first 20/)
+      const gate = await tab.$eval('.AO3E--search-host--gate-body', el => el.textContent)
+      assert.deepEqual(figures(gate), [PER_PAGE, 2 * PER_PAGE], 'how many the list holds, and how many would be loaded')
+      assert.deepEqual(figures(await tab.$eval('.AO3E--search-host--gate-load', el => el.textContent)), [PER_PAGE])
       assert.deepEqual(walks(requests), [], 'nothing is walked before the reader agrees')
 
       await tab.click('.AO3E--search-host--gate-cancel')
@@ -200,7 +201,7 @@ describe('search a filtered listing\'s works', { skip }, () => {
       await visit(tab, `${LISTING}#ao3e-list=${list.id}`)
       await until('the view to be up with the list\'s filter', async () => (await shownIds(tab)).length > 0)
       assert.deepEqual(await shownIds(tab), IDS.filter(id => !DRACO.has(id)))
-      await until('the pill to follow the view', async () => await pillText(tab) === 'Refining “Bees, no Draco”')
+      await until('the pill to follow the view', async () => await pillRow(tab) === `refining:${list.id}:same`)
     }
     finally {
       await tab.close()
@@ -268,7 +269,7 @@ describe('search a filtered listing\'s works', { skip }, () => {
       await visit(tab, `${LISTING}#ao3e-list=${list.id}`)
       await until('the view to be up with the list\'s filter', async () => (await shownIds(tab)).length > 0)
       assert.deepEqual(await shownIds(tab), IDS.filter(id => !DRACO.has(id)))
-      await until('the pill to follow the view', async () => await pillText(tab) === 'Refining “Bees, no Draco”')
+      await until('the pill to follow the view', async () => await pillRow(tab) === `refining:${list.id}:same`)
       assert.equal(await tab.$(BUTTON), null, 'the listing still offers no view of its own')
     }
     finally {
@@ -344,7 +345,7 @@ describe('a listing between dates', { skip }, () => {
       },
     })
     try {
-      await options.press(await options.control(await options.savedListDetails(list.id), 'button', 'Refresh list'))
+      await options.press(await options.action(await options.savedListDetails(list.id), 'refresh'))
       await until('the refresh to write the copy', async () => (await options.lastWrite('cache.searchLists'))?.[KEY] != null)
       const read = archive.asked.filter(url => isListing(new URL(url)))
       assert.ok(read.length > 0)
@@ -353,7 +354,7 @@ describe('a listing between dates', { skip }, () => {
       assert.deepEqual(copy.descriptor, { sourceId: 'works-filter', label: 'Tag: Bees', listUrl: WHOLE })
       assert.deepEqual(storedListIds(copy).sort(), [...IDS].sort(), 'every work of the listing')
 
-      const viewEdit = await (await options.control(await options.savedList(list.id), 'link', `View or edit ${list.title} on AO3`)).evaluate(a => a.href)
+      const viewEdit = await (await options.action(await options.savedList(list.id), 'view-edit')).evaluate(a => a.href)
       assert.equal(isListing(new URL(viewEdit)), true, viewEdit)
       assert.equal(between(viewEdit), false, viewEdit)
       assert.deepEqual(options.problems(), [])

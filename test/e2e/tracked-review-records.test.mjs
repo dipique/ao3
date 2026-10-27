@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, launch, openWindow } from './helpers.mjs'
 import { linkWrites, persistentMock, relayWrites, rerun, settled, stored } from './trackedPages.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
+import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, resetWorkIds, reviewDrawn, reviewStatus, statusIs, TODAY, trackedOption, works } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -90,7 +90,13 @@ describe('tracked review: from the records', { skip }, () => {
     [...document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)')]
       .map(li => li.id.replace('work_', '')))
 
-  const status = tab => tab.evaluate(() => document.querySelector('.AO3E--tracked-review--bar--status')?.textContent?.trim() ?? null)
+  /** Where the status line stands: its kind, and where a pending window is being read. */
+  const status = async (tab) => {
+    const { kind, reading } = await reviewStatus(tab)
+    return { kind, reading }
+  }
+  const UP_TO_DATE = { kind: 'current', reading: null }
+  const READING_HERE = { kind: 'pending', reading: 'here' }
 
   const ids = (from, to) => solo.works.filter(work => work.filed >= from && work.filed <= to).map(work => work.id)
 
@@ -101,7 +107,7 @@ describe('tracked review: from the records', { skip }, () => {
       await reviewDrawn(tab)
       assert.ok(listRequests(fetched).length > 0, 'the first open read the list')
       assert.deepEqual(await shownIds(tab), ids(since, since + 1))
-      assert.match(await status(tab), /^Up to date as of /)
+      assert.deepEqual(await status(tab), UP_TO_DATE)
 
       const before = listRequests(fetched).length
       await load(tab)
@@ -139,13 +145,13 @@ describe('tracked review: from the records', { skip }, () => {
         await second.tab.waitForFunction(() => !!document.querySelector('.AO3E--tracked-review--bar--status'))
         assert.ok(second.held.length > 0, 'the reading is waiting on the archive')
         assert.deepEqual(await shownIds(second.tab), ids(since, TODAY - 1), 'the stored works, drawn before the archive answers')
-        assert.match(await status(second.tab), /^Still reading 1 of 1 list for /)
+        assert.deepEqual(await status(second.tab), READING_HERE)
 
         second.release()
         await reviewDrawn(second.tab)
         await second.tab.waitForFunction(id => !!document.querySelector(`#work_${id}`), {}, late[0].id)
         assert.deepEqual((await shownIds(second.tab)).slice(0, 3), ids(since, since).slice(0, 3), 'nothing before it moved')
-        assert.match(await status(second.tab), /^Up to date as of /)
+        assert.deepEqual(await status(second.tab), UP_TO_DATE)
       }
       finally {
         await second.tab.close()
@@ -182,7 +188,7 @@ describe('tracked review: from the records', { skip }, () => {
     const { tab, release, held } = await open({ store, hold: url => url.pathname.includes('/tags/') && url.searchParams.get('page') === '2' })
     try {
       await load(tab)
-      await tab.waitForFunction(() => (document.querySelector('.AO3E--tracked-review--bar--status')?.textContent ?? '').startsWith('Still reading'))
+      await statusIs(tab, 'pending', 'here')
       assert.ok(held.length > 0)
       const end = await tab.evaluate(async () => (await browser.storage.local.get('cache.trackedReview'))['cache.trackedReview'].end)
       await rerun(tab, () => tab.click('.AO3E--tracked-review--bar--mark'))
@@ -211,16 +217,16 @@ describe('tracked review: from the records', { skip }, () => {
       await linkWrites([reader.tab, follower.tab])
       await load(follower.tab, REVIEW_URL.replace('#ao3e-tracked', ''))
       await load(reader.tab)
-      await reader.tab.waitForFunction(() => document.querySelector('.AO3E--tracked-review--bar--status')?.textContent?.startsWith('Still reading'))
+      await statusIs(reader.tab, 'pending', 'here')
       await follower.tab.click('.AO3E--tracked-review--button')
-      await follower.tab.waitForFunction(() => document.querySelector('.AO3E--tracked-review--bar--status')?.textContent?.includes('in another tab'))
+      await statusIs(follower.tab, 'pending', 'elsewhere')
 
       holding = false
       reader.release()
       await reviewDrawn(reader.tab)
       await follower.tab.waitForFunction(count => document.querySelectorAll('.AO3E--search-view--results > li.blurb').length === count, {}, solo.works.length)
       assert.equal(listRequests(follower.fetched).length, 0, 'the second tab asked AO3 for nothing')
-      assert.match(await status(follower.tab), /^Up to date as of /)
+      assert.deepEqual(await status(follower.tab), UP_TO_DATE)
     }
     finally {
       await reader.tab.close()
@@ -239,17 +245,19 @@ describe('tracked review: from the records', { skip }, () => {
     const lists = [alpha, beta]
     const store = { ...seed, 'option.trackedLists': trackedOption(lists, { target: 10, reviewedThrough: start - 1 }) }
     const { tab, release } = await open({ store, lists, hold: url => url.pathname.includes('/beta/') && url.searchParams.get('page') === '2' })
+    // No rule hides anything here, so a work drawn collapsed is one holding its slot.
     const collapsed = () => tab.evaluate(() => [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
-      .filter(li => li.textContent.includes('Moved to a later review'))
+      .filter(li => li.querySelector('.AO3E--hide-works--msg'))
       .map(li => li.id.replace('work_', '')))
     try {
       await load(tab)
       const later = alpha.works.filter(work => work.filed > start).slice(0, 8).map(work => work.id)
       await tab.waitForFunction(count => [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
-        .filter(li => li.textContent.includes('Moved to a later review'))
+        .filter(li => li.querySelector('.AO3E--hide-works--msg'))
         .length === count, {}, later.length)
       assert.deepEqual((await collapsed()).sort(), later.sort(), 'Alpha’s works past the new end hold their slots')
-      assert.ok((await status(tab)).startsWith('Still reading 1 of 2 lists for '))
+      assert.deepEqual(await status(tab), READING_HERE)
+      assert.equal((await reviewStatus(tab)).lists, 'Beta', 'Beta is still being read')
 
       release()
       await reviewDrawn(tab)
@@ -272,13 +280,13 @@ describe('tracked review: from the records', { skip }, () => {
     const { tab, release } = await open({ store, lists, hold: url => url.pathname.includes('/quiet/') })
     try {
       await load(tab)
-      await tab.waitForFunction(() => (document.querySelector('.AO3E--tracked-review--bar--status')?.textContent ?? '').startsWith('Still reading'))
+      await statusIs(tab, 'pending', 'here')
       assert.ok(await tab.$('.AO3E--search-host.AO3E--tracked-review'), 'the view is up, empty, while the list is read')
 
       release()
       await tab.waitForFunction(() => !document.querySelector('.AO3E--search-host'))
       await tab.waitForFunction(() => [...document.querySelectorAll('body > div')]
-        .some(el => [...el.shadowRoot?.querySelectorAll('.toast button.action') ?? []].some(button => button.textContent.trim() === 'Mark reviewed')))
+        .some(el => !!el.shadowRoot?.querySelector('.toast[data-ao3e-toast="nothing-to-review"] button.action')))
     }
     finally {
       await tab.close()

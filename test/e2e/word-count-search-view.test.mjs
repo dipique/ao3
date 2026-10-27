@@ -3,20 +3,20 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { serializeWordCountQuery } from '../../src/common/wordCount.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { menuClosed, openMenu, settled, viewDrawn } from './trackedPages.mjs'
+import { menuClosed, menuRows, openMenu, pickRow, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
 const READINGS_URL = 'https://archiveofourown.org/users/me/readings?show=to-read'
 
+const RANGES = [{ from: 1000, to: 3000 }, { from: 5000, to: 100000 }]
+
 const SEED = {
   'option.searchMarkedForLater': true,
-  'option.wordCountToolbar': {
-    enabled: true,
-    ranges: [{ from: 1000, to: 3000 }, { from: 5000, to: 100000 }],
-  },
+  'option.wordCountToolbar': { enabled: true, ranges: RANGES },
 }
 
 function blurb(id, title, words) {
@@ -104,46 +104,24 @@ describe('word-count range menu in the search view', { skip }, () => {
     await openMenu(page, () => page.evaluate(() => {
       document.querySelector('.AO3E--search-view--results dd.words').click()
     }))
-    return page.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .map(el => el.querySelector('.AO3E--menu--label').textContent))
+    return menuRows(page)
   }
 
-  /** The rows of one labelled section of the open menu, in order. */
-  const sectionLabels = section => page.evaluate((s) => {
-    const group = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--group')]
-      .find(g => g.getAttribute('aria-label') === s)
-    return group
-      ? [...group.querySelectorAll('.AO3E--menu--label')].map(el => el.textContent)
-      : null
-  }, section)
+  /** The values of the rows that do `action`, in order. */
+  const valuesOf = (rows, action) => rows.filter(row => row.action === action).map(row => row.value)
 
-  /** Click the row labelled exactly `label` inside the section headed `section`. */
-  const pickInSection = async (section, label) => {
-    await page.evaluate((s, l) => {
-      const group = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--group')]
-        .find(g => g.getAttribute('aria-label') === s)
-      const row = [...group.querySelectorAll('.AO3E--menu--item')]
-        .find(el => el.querySelector('.AO3E--menu--label').textContent === l)
-      row.click()
-    }, section, label)
-    await menuClosed(page)
-  }
-
-  const pick = async (prefix) => {
-    await page.evaluate((p) => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.textContent.startsWith(p)).click()
-    }, prefix)
+  /** Click the row that does `action` — to `value`, when given — and wait for the menu to close behind it. */
+  const pick = async (action, value) => {
+    assert.ok(await pickRow(page, action, value), `no ${action} row ${value ?? ''}`)
     await menuClosed(page)
   }
 
   test('the word counts in the view carry the menu, with the ranges and the bound sections', async () => {
     assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'], 'the view opened with every work')
-    const labels = await openMenuOnFirstWordCount()
-    assert.deepEqual(labels.filter(l => l.includes('words')).length, 2, labels.join(' | '))
-    assert.ok(!labels.some(l => l.startsWith('Clear')), 'nothing to clear yet')
-    assert.deepEqual(await sectionLabels('Set lower bound'), ['1,000', '5,000'])
+    const rows = await openMenuOnFirstWordCount()
+    assert.deepEqual(valuesOf(rows, 'range'), RANGES.map(serializeWordCountQuery))
+    assert.ok(!rows.some(row => row.action === 'clear'), 'nothing to clear yet')
+    assert.deepEqual(valuesOf(rows, 'from'), ['1000', '5000'])
   })
 
   test('a pick drives the view\'s own word-count filter, not AO3, and clearing it brings the list back', async () => {
@@ -151,7 +129,7 @@ describe('word-count range menu in the search view', { skip }, () => {
     // tested case by case in `test/wordCount/ranges.test.mjs`, and which works a
     // bound keeps is the engine's, in `test/searchView/engine.test.mjs`; here,
     // that the menu reaches the view's filter and the list shows the result.
-    await pick('5,000')
+    await pick('range', serializeWordCountQuery(RANGES[1]))
     assert.deepEqual(await wordBounds(), { min: '5000', max: '100000' })
     // 7,000 and 40,000 are inside 5,000–100,000; the 2,000-word one is not.
     assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one'])
@@ -159,12 +137,12 @@ describe('word-count range menu in the search view', { skip }, () => {
     assert.equal(page.url(), READINGS_URL)
 
     await openMenuOnFirstWordCount()
-    await pickInSection('Set lower bound', '1,000')
+    await pick('from', '1000')
     assert.deepEqual(await wordBounds(), { min: '1000', max: '100000' }, 'a bound section writes its bound alone')
     assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'])
 
     await openMenuOnFirstWordCount()
-    await pick('Clear')
+    await pick('clear')
     assert.deepEqual(await wordBounds(), { min: '', max: '' })
     assert.deepEqual((await visibleTitles()).sort(), ['A long one', 'A middling one', 'A short one'])
   })

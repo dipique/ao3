@@ -93,7 +93,7 @@ const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
 <template>
   <DropdownMenu v-if="menu" :modal="false">
     <DropdownMenuTrigger>
-      <button type="button" class="icon-btn" :aria-label="`More for ${name}`" :title="menu.title">
+      <button type="button" class="icon-btn" :aria-label="`More for ${name}`" :title="menu.title" data-action="more">
         <span class="i-tabler-dots" text="[16px]" aria-hidden="true" />
       </button>
     </DropdownMenuTrigger>
@@ -101,6 +101,8 @@ const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
       <template v-for="item in menu.items" :key="item.kind">
         <DropdownMenuItem
           v-if="item.kind === 'remove'"
+          :data-action="item.kind"
+          :data-armed="confirm.armed(removeId) || undefined"
           :class="[ITEM, confirm.armed(removeId) ? ARMED : '']"
           @select="remove"
         >
@@ -111,6 +113,7 @@ const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
         </DropdownMenuItem>
         <DropdownMenuItem
           v-else
+          :data-action="item.kind"
           :disabled="!!item.off"
           :title="withReason(JOBS[item.kind].name, item.off)"
           :aria-describedby="reasonId(item)"

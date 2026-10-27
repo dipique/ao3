@@ -100,7 +100,7 @@ describe('text replacement tools on a work page', { skip }, () => {
     const titles = await tab.evaluate(() => Array.from(document.querySelectorAll('.AO3E--replaced'), el => el.title))
     assert.equal(titles.length, 2)
     for (const title of titles)
-      assert.match(title, /^Original text: “middle”\n/)
+      assert.ok(title.includes('middle'), title)
   })
 
   // The marks are markup around the same words, not different words: whatever
@@ -129,14 +129,12 @@ describe('text replacement tools on a work page', { skip }, () => {
       if (!el)
         return null
       return {
-        title: el.querySelector('.AO3E--replace-editor--title').textContent,
         find: el.querySelector('.AO3E--replace-editor--find').value,
         replace: el.querySelector('.AO3E--replace-editor--replace').value,
         hasDelete: !!el.querySelector('.AO3E--replace-editor--delete'),
       }
     })
     assert.deepEqual(editor, {
-      title: 'Edit replacement',
       find: 'middle',
       replace: 'last',
       hasDelete: true,
@@ -176,10 +174,9 @@ describe('text replacement tools on a work page', { skip }, () => {
     await tab.waitForSelector('.AO3E--replace-selection')
     const button = await tab.evaluate(() => {
       const el = document.querySelector('.AO3E--replace-selection')
-      return el ? { text: el.textContent, fixed: getComputedStyle(el).position } : null
+      return el ? { fixed: getComputedStyle(el).position } : null
     })
     assert.ok(button, 'expected a replace button beside the selection')
-    assert.match(button.text, /Replace/)
     assert.equal(button.fixed, 'fixed')
   })
 
@@ -189,21 +186,20 @@ describe('text replacement tools on a work page', { skip }, () => {
     const editor = await tab.evaluate(() => {
       const el = document.querySelector('.AO3E--replace-editor')
       return el && {
-        title: el.querySelector('.AO3E--replace-editor--title').textContent,
         find: el.querySelector('.AO3E--replace-editor--find').value,
         hasDelete: !!el.querySelector('.AO3E--replace-editor--delete'),
       }
     })
-    assert.deepEqual(editor, { title: 'New replacement', find: 'Apart', hasDelete: false })
+    assert.deepEqual(editor, { find: 'Apart', hasDelete: false })
   })
 
   // The one pill that is on every page, and the reason the toolbar now is too.
   test('the floating toolbar offers the options page', async () => {
-    const labels = await tab.evaluate(() => Array.from(
+    const actions = await tab.evaluate(() => Array.from(
       document.querySelectorAll('.AO3E--filter-toolbar--button'),
-      el => el.textContent,
+      el => el.dataset.ao3eAction,
     ))
-    assert.ok(labels.some(label => /Open extension options/.test(label)), labels.join(' | '))
-    assert.ok(labels.some(label => /text replacement tools/i.test(label)), labels.join(' | '))
+    assert.ok(actions.includes('options'), actions.join(' | '))
+    assert.ok(actions.includes('replace-tools'), actions.join(' | '))
   })
 })

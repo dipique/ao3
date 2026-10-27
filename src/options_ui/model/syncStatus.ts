@@ -100,6 +100,19 @@ const USAGE_WARNING_PCT = 70
 /** …and from this one `destructive`, with advice. */
 const USAGE_FULL_PCT = 90
 
+/**
+ * What taking the other settings over this browser's says of this browser's
+ * own: `backedUp` as they were when sync asked, or `failed` where that backup
+ * couldn't be saved.
+ */
+export const YOURS = {
+  backedUp: 'Yours are backed up.',
+  failed: 'Yours aren\'t backed up: the backup couldn\'t be saved.',
+} as const
+
+/** When sync last succeeded, before it ever has. */
+export const NOT_SYNCED_YET = 'Not synced yet'
+
 const SYNCING: SyncChip = { state: 'syncing', word: 'Syncing', severity: 'success' }
 const OFF: SyncChip = { state: 'off', word: 'Off', severity: 'neutral' }
 
@@ -218,7 +231,7 @@ function inconsistentState(record: Inconsistency): State {
  */
 function heldDecision(pause: Extract<SyncPause, { reason: 'held' }>): SyncDecision {
   const replaces = 'Replaces this browser\'s settings with the other browser\'s.'
-  const yours = pause.backedUp ? ' Yours are backed up.' : pause.backupFailed ? ' Yours aren\'t backed up: the backup couldn\'t be saved.' : ''
+  const yours = pause.backedUp ? ` ${YOURS.backedUp}` : pause.backupFailed ? ` ${YOURS.failed}` : ''
   return {
     lines: pullLossParts(pause.loss),
     backup: pause.backedUp ? HELD_BACKUP_NOTE : null,
@@ -237,7 +250,7 @@ function heldDecision(pause: Extract<SyncPause, { reason: 'held' }>): SyncDecisi
  * that the backup couldn't be saved.
  */
 function firstSyncDecision(pause: Extract<SyncPause, { reason: 'first-sync' }>): SyncDecision {
-  const yours = pause.backedUp ? 'Yours are backed up.' : 'Yours aren\'t backed up: the backup couldn\'t be saved.'
+  const yours = pause.backedUp ? YOURS.backedUp : YOURS.failed
   return {
     lines: pause.loss ? pullLossParts(pause.loss) : [],
     backup: pause.backedUp ? HELD_BACKUP_NOTE : null,
@@ -254,7 +267,7 @@ function bySeverity(states: State[]): State[] {
 }
 
 function lastSynced(at: number): string {
-  return at ? `Last synced ${formatMoment(at)}` : 'Not synced yet'
+  return at ? `Last synced ${formatMoment(at)}` : NOT_SYNCED_YET
 }
 
 /**

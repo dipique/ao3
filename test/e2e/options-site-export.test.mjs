@@ -5,10 +5,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
+import { describeTextSearch } from '../../src/content_script/searchView/textSearch.ts'
+import { SITE_SHELL_ID } from '../../src/content_script/siteExport/payload.ts'
+import { formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { CONFIRM_MS } from '../../src/options_ui/model/confirmInPlace.ts'
-import { blurbsOnRemove, OFFLINE_OFF } from '../../src/options_ui/model/savedListRows.ts'
+import { jobVerb } from '../../src/options_ui/model/jobView.ts'
+import { PROFILE_LISTS } from '../../src/options_ui/model/profileLists.ts'
+import { blurbsOnRemove, COPY_REMOVAL, NEEDS_VISIT_NOTE, OFFLINE_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { serveDir, storedListIds, storedLists } from './helpers.mjs'
-import { captureDownloads, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
+import { captureDownloads, figures, mentions, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
 
 const ARCHIVE = 'https://archiveofourown.org'
 const CACHE_KEY = 'marked-for-later:tester'
@@ -22,6 +28,27 @@ const TILE = 'marked-for-later'
 const CHANGES_ROW = 'offline-reading-changes-made-in-an-export'
 const CACHE_ROW = 'offline-reading-cached-work-text'
 const PRUNE_ROW = 'offline-reading-discard-unneeded-blurbs-automatically'
+/** What a caching job is said to be doing. */
+const CACHING = jobVerb({ phase: 'caching' })
+
+/**
+ * The control is off, and says why in its tooltip and in what describes it:
+ * `reason`, or a reason that names it.
+ */
+async function saysOff(options, control, reason) {
+  assert.equal(await control.evaluate(el => el.disabled), true, `${await control.evaluate(el => el.dataset.action)} should be off`)
+  assert.ok(mentions(await control.evaluate(el => el.title), reason), `the tooltip should give ${reason}`)
+  assert.ok(mentions(await options.description(control), reason), `the description should give ${reason}`)
+}
+
+/** The control is on, with no reason to give. */
+async function saysOn(control) {
+  assert.equal(await control.evaluate(el => el.disabled), false, `${await control.evaluate(el => el.dataset.action)} should be on`)
+  assert.equal(await control.evaluate(el => el.getAttribute('aria-describedby')), null)
+}
+
+/** Whether a control that asks a second time is asking now. */
+const armed = control => control.evaluate(el => el.hasAttribute('data-armed'))
 
 /**
  * The site export, driven end to end from Lists: the reader's Marked for
@@ -236,32 +263,32 @@ describe('options UI — site export', { skip }, () => {
   /** The reader's Marked for Later's tile. */
   const tile = () => options.tile(TILE)
 
-  /** Press the button with this name on the tile. */
-  const pressInTile = async (name) => {
-    await options.press(await options.control(await tile(), 'button', name))
+  /** Press the control on the tile that does `action`. */
+  const pressInTile = async (action) => {
+    await options.press(await options.action(await tile(), action))
   }
 
   const lastWrite = key => options.lastWrite(key)
 
   /** Everything the tile says: its name, its figures and whatever sits under it. */
   const tileText = async () => options.text(await tile())
-  /** The tile's text, a line each as it is laid out. */
-  const tileLines = async () => options.lines(await tile())
+  /** A figure the tile shows. */
+  const figure = part => options.tileFigure(TILE, part)
 
-  /** Open the tile's More menu from the keyboard, and press the item whose name begins with `name`. */
-  async function pressInMore(name) {
-    const more = await options.control(await tile(), 'button', 'More for Marked for Later')
+  /** Open the tile's More menu from the keyboard, and press the item that does `action`. */
+  async function pressInMore(action) {
+    const more = await options.action(await tile(), 'more')
     await more.focus()
     await page.keyboard.press('Enter')
     await until('the menu to open', async () => (await options.controls(page, 'menuitem')).length > 0)
-    await options.press(await options.control(page, 'menuitem', new RegExp(`^${name}`)))
+    await options.press(await options.menuItem(action))
   }
 
   test('the reader\'s Marked for Later is a tile, read out from the snapshot and the cache, and a list stored before descriptors a row', async () => {
-    await until('the tile to read its copy', async () => (await tileLines()).includes('2 works · as of 3 hours ago'))
-    const lines = await tileLines()
-    assert.ok(lines.includes('0 cached (0 B)'), JSON.stringify(lines))
-    assert.ok(lines.includes('2 uncached'), JSON.stringify(lines))
+    await until('the tile to read its copy', async () => await figure('count') === '2')
+    assert.equal(await figure('cached'), '0')
+    assert.equal(await figure('size'), formatBytes(0))
+    assert.equal(await figure('uncached'), '2')
     assert.deepEqual(await options.savedListIds(), [copyRow(OLD_KEY)])
   })
 
@@ -273,11 +300,10 @@ describe('options UI — site export', { skip }, () => {
   test('each list links to itself on AO3, descriptor or not', async () => {
     const link = handle => handle.evaluate(el => ({
       href: el.getAttribute('href'),
-      text: el.textContent.trim(),
       target: el.getAttribute('target'),
     }))
 
-    const stored = await link(await options.control(await tile(), 'link', 'View Marked for Later on AO3'))
+    const stored = await link(await options.control(await tile(), 'link'))
     assert.equal(stored.href, `${ARCHIVE}/users/tester/readings?show=to-read#ao3e-open=marked-for-later`)
     // A new tab: the point is to come back here and press Refresh afterwards.
     assert.equal(stored.target, '_blank')
@@ -285,9 +311,8 @@ describe('options UI — site export', { skip }, () => {
     // The v1 row has no descriptor to read an address out of, so it is rebuilt
     // from the cache key — and this is the row that most needs it, since opening
     // the list is the only way to make its buttons work again.
-    const old = await link(await options.control(await options.savedList(copyRow(OLD_KEY)), 'link', `Open ${OLD_KEY} on AO3`))
+    const old = await link(await options.action(await options.savedList(copyRow(OLD_KEY)), 'open'))
     assert.equal(old.href, `${ARCHIVE}/users/olduser/readings?show=to-read`)
-    assert.equal(old.text, 'Open on AO3')
     assert.equal(old.target, '_blank')
   })
 
@@ -299,18 +324,16 @@ describe('options UI — site export', { skip }, () => {
     // of the wait.
     await page.evaluate((id) => {
       const look = () => {
-        const tile = document.querySelector(`[data-tile="${id}"]`)
-        const text = tile?.textContent.replace(/\s+/g, ' ').trim() ?? ''
-        if (!/trying again in/.test(text))
+        const line = document.querySelector(`[data-tile="${id}"] [data-job-state="waiting"]`)
+        if (!line)
           return false
-        const line = tile.querySelector('[data-job-state]')
-        window.__waitSeen = { text, state: line ? { state: line.dataset.jobState, wait: line.dataset.jobWait ?? null } : null }
+        window.__waitSeen = { text: line.textContent.replace(/\s+/g, ' ').trim(), state: { state: line.dataset.jobState, wait: line.dataset.jobWait ?? null } }
         return true
       }
       const watch = new MutationObserver(() => look() && watch.disconnect())
       watch.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true })
     }, TILE)
-    await pressInTile('Cache works')
+    await pressInTile('cache')
 
     await page.waitForFunction(() => window.__waitSeen)
     ;({ text: waitLine, state: waitState } = await page.evaluate(() => window.__waitSeen))
@@ -349,7 +372,8 @@ describe('options UI — site export', { skip }, () => {
     // A pause of minutes with every worker inside it is indistinguishable from
     // a hang, so the tile says why it is quiet and how long for — and that it
     // is AO3 refusing us, not the extension pacing itself.
-    assert.match(waitLine, /AO3 asked us to slow down — trying again in [0-9:]+/)
+    assert.ok(mentions(waitLine, WAIT_WORDS.refused), waitLine)
+    assert.match(waitLine, /\b\d+s|\b\d+:\d\d/, 'and how long for')
     assert.deepEqual(waitState, { state: 'waiting', wait: 'refused' })
 
     const index = await lastWrite('workTextIndex')
@@ -372,12 +396,12 @@ describe('options UI — site export', { skip }, () => {
 
   test('the run finishes, clearing the job and updating the tile', async () => {
     await until('the job record to be cleared', async () => await options.stored('siteExportJob') === null)
-    await until('the tile to count what was cached', async () => (await tileLines()).some(line => /^2 cached \(/.test(line)))
-    assert.doesNotMatch(await tileText(), /uncached/)
+    await until('the tile to count what was cached', async () => await figure('cached') === '2')
+    assert.equal(await figure('uncached'), null)
   })
 
   test('"Refresh list" re-scrapes the listing and its saved-work index', async () => {
-    await pressInTile('Refresh list')
+    await pressInTile('refresh')
     await until('the snapshot to be rewritten', async () => {
       const lists = await lastWrite('cache.searchLists')
       return storedListIds(lists?.[CACHE_KEY]).length === 3
@@ -387,8 +411,8 @@ describe('options UI — site export', { skip }, () => {
     assert.equal(marked.userId, 'tester')
     assert.ok(marked.ids.length > 0)
 
-    await until('the tile to count the refreshed list', async () => (await tileLines()).some(line => line.startsWith('3 works · as of')))
-    assert.ok((await tileLines()).includes('1 uncached'), JSON.stringify(await tileLines()))
+    await until('the tile to count the refreshed list', async () => await figure('count') === '3')
+    assert.equal(await figure('uncached'), '1')
   })
 
   /** The exported page behind the last download `saveAs` asked for. */
@@ -414,7 +438,7 @@ describe('options UI — site export', { skip }, () => {
   }, entry)
 
   test('"Download Offline Copy" refreshes, caches and writes one HTML file', async () => {
-    await pressInTile('Download Offline Copy')
+    await pressInTile('download')
     await until('the download to be handed over', () => page.evaluate(() => window.__downloads.length > 0), 40000)
 
     const { name, html, data } = await lastDownload()
@@ -438,8 +462,9 @@ describe('options UI — site export', { skip }, () => {
     const { html } = await lastDownload()
     // The shell is static, so this is what a reader sees when the browser
     // refuses to run it — which is what Safari does with a local file.
-    assert.match(html, /This page needs JavaScript, and none is running/)
-    assert.match(html, /Microsoft Edge/)
+    const shell = new RegExp(`<div id="${SITE_SHELL_ID}" class="ao3e-site-inert">([\\s\\S]*?)</div>`).exec(html)
+    assert.ok(shell, 'the file starts inert')
+    assert.ok(shell[1].replace(/<[^>]+>/g, '').trim(), 'and says so')
   })
 
   test('the manifest accounts for every work in the list', async () => {
@@ -507,7 +532,7 @@ describe('options UI — site export', { skip }, () => {
     const watch = req => req.url().startsWith(ARCHIVE) && requests.push(req.url())
     page.on('request', watch)
 
-    await pressInMore('Download without refreshing')
+    await pressInMore('download-cached')
 
     await until('the second download', () => page.evaluate(n => window.__downloads.length > n, before))
     page.off('request', watch)
@@ -551,9 +576,9 @@ describe('options UI — site export', { skip }, () => {
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
 
       // The inert shell was replaced, so the scripts ran.
-      assert.doesNotMatch(await reader.content(), /This page needs JavaScript, and none is running/)
+      assert.equal(await reader.$eval(`#${SITE_SHELL_ID}`, el => el.classList.contains('ao3e-site-inert')), false)
       assert.equal(await reader.$$eval('.AO3E--search-view--results > li', els => els.length), 3)
-      assert.match(await reader.$eval('.AO3E--search-view--count', el => el.textContent), /of 3 works$/)
+      assert.match(await reader.$eval('.AO3E--search-view--count', el => el.textContent), /\b3\b/)
 
       // Storage was probed, not assumed — and a `file:` origin passes.
       assert.equal(await reader.$eval('.AO3E--site--status', el => el.dataset.ao3eWritable), 'true')
@@ -609,10 +634,13 @@ describe('options UI — site export', { skip }, () => {
     const VISIBLE = '.AO3E--search-view--results > li:not(.AO3E--search-view--hidden)'
     const visibleIds = () => reader.$$eval(VISIBLE, els => els.map(el => el.id))
     const statusLine = () => reader.$eval('.AO3E--search-view--text-status', el => el.textContent)
+    /** What the line under the box says before a search, and once one has found `hits` of the three works. */
+    const IDLE = describeTextSearch({ kind: 'idle', searchable: 3, total: 3 })
+    const found = hits => describeTextSearch({ kind: 'done', hits, searched: 3, unavailable: 0 })
     try {
       await reader.goto(fileUrl(dir, 'library.html'), { waitUntil: 'load' })
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
-      assert.equal(await statusLine(), 'Searches the saved text of all 3 works')
+      assert.equal(await statusLine(), IDLE)
 
       await reader.type('.AO3E--search-view--text-input', '"of work 12"')
       await reader.keyboard.press('Enter')
@@ -622,7 +650,7 @@ describe('options UI — site export', { skip }, () => {
         VISIBLE,
       )
       assert.deepEqual(await visibleIds(), ['work_12'])
-      assert.equal(await statusLine(), 'Found in 1 of 3 works')
+      assert.equal(await statusLine(), found(1))
 
       // Why it matched, cut from the work's own text with the match marked.
       await reader.waitForSelector('#work_12 .AO3E--search-view--snippet mark', { timeout: 10000 })
@@ -650,19 +678,19 @@ describe('options UI — site export', { skip }, () => {
       await reader.click('.AO3E--search-view--text-input', { count: 3 })
       await reader.type('.AO3E--search-view--text-input', 'rewritten')
       await reader.waitForFunction(sel => document.querySelectorAll(sel).length === 3, { timeout: 10000 }, VISIBLE)
-      await reader.waitForFunction(() => document.querySelector('.AO3E--search-view--text-status').textContent === 'Found in 3 of 3 works')
+      await reader.waitForFunction(text => document.querySelector('.AO3E--search-view--text-status').textContent === text, {}, found(3))
       assert.equal(await reader.$$eval('.AO3E--search-view--snippet mark', els => els.length), 3)
 
       // Emptying the box takes the search away, and its excerpts with it.
       await reader.click('.AO3E--search-view--text-input', { count: 3 })
       await reader.keyboard.press('Backspace')
       await reader.waitForFunction(() => document.querySelectorAll('.AO3E--search-view--snippet').length === 0, { timeout: 10000 })
-      assert.equal(await statusLine(), 'Searches the saved text of all 3 works')
+      assert.equal(await statusLine(), IDLE)
 
       // Something no work's text holds leaves nothing showing.
       await reader.type('.AO3E--search-view--text-input', 'dragon')
       await reader.waitForFunction(sel => document.querySelectorAll(sel).length === 0, { timeout: 10000 }, VISIBLE)
-      assert.equal(await statusLine(), 'Not found in any of 3 works')
+      assert.equal(await statusLine(), found(0))
 
       assert.deepEqual(errors, [])
     }
@@ -822,7 +850,7 @@ describe('options UI — site export', { skip }, () => {
     const pending = () => reader.$eval('.AO3E--site--status', el => ({
       count: el.dataset.ao3ePending,
       writable: el.dataset.ao3eWritable,
-      text: el.textContent,
+      shown: !el.querySelector('.AO3E--site--status-pending').hidden,
     }))
 
     try {
@@ -841,8 +869,8 @@ describe('options UI — site export', { skip }, () => {
       const before = await pending()
       assert.equal(before.count, '0')
       assert.equal(before.writable, 'true', 'a `file:` origin keeps what is written to it')
-      assert.doesNotMatch(before.text, /not yet exported/)
-      assert.match(before.text, /export changes/i, 'the panel should name the way out')
+      assert.equal(before.shown, false, 'nothing is said to be waiting')
+      assert.ok(await reader.$('.AO3E--site--status-export'), 'the panel should offer the way out')
 
       // Right-click a work and mark it — the extension's own work menu, running
       // in a file with no extension under it.
@@ -851,15 +879,15 @@ describe('options UI — site export', { skip }, () => {
         link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
       })
       await reader.waitForSelector('.AO3E--menu .AO3E--menu--item', { timeout: 5000 })
-      assert.ok(await reader.evaluate(() => {
+      assert.ok(await reader.evaluate((label) => {
         const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-          .find(el => el.textContent.startsWith('Mark as boring'))
+          .find(el => el.textContent.toLowerCase().includes(label.toLowerCase()))
         row?.click()
         return !!row
-      }), 'the work menu should offer the marks that travelled with the export')
+      }, SEED['option.workMarks'].marks.boring.label), 'the work menu should offer the marks that travelled with the export')
 
       await until('the change to be counted', async () => (await pending()).count === '1')
-      assert.match((await pending()).text, /1 change not yet exported/)
+      assert.equal((await pending()).shown, true, 'and said to be waiting')
 
       // `boring` aliases `read`, and this list is one AO3 itself holds — so the
       // op is the one with a second half only the archive can do.
@@ -903,7 +931,7 @@ describe('options UI — site export', { skip }, () => {
       assert.deepEqual(written.ops, recorded, 'the file is the journal, verbatim')
 
       await until('the count to be cleared', async () => (await pending()).count === '0')
-      assert.match(await reader.$eval('.AO3E--site--status', el => el.textContent), /Saved 1 change as ao3e-changes-/)
+      assert.ok(mentions(await reader.$eval('.AO3E--site--status', el => el.textContent), handed.name), 'the panel names the file it saved')
 
       // Exported is exported: the mark left, so the next open has nothing to
       // warn about — which is only true if the file's own record of it survived.
@@ -1042,13 +1070,17 @@ describe('options UI — site export', { skip }, () => {
      * first import raises sits over this row, and with the dialog stubbed there
      * is nothing left here that a real click buys.
      */
-    const importFile = async (label = 'Import changes') => {
+    const importFile = async () => {
       await handOver()
-      await options.press(await options.control(await options.row(CHANGES_ROW), 'button', label))
+      await options.press(await options.action(await options.row(CHANGES_ROW), 'import'))
     }
 
     const marks = () => options.stored('option.workMarks')
-    const reportLine = async () => options.text(await options.row(CHANGES_ROW))
+    /** The figures the row reports the last import by, smallest first. */
+    const reported = async () => {
+      const summary = await (await options.row(CHANGES_ROW)).$('[data-change-summary]')
+      return summary ? figures(await options.text(summary)) : []
+    }
 
     // Nothing here knows about work 11 yet: the mark was made in a file, on
     // another origin, with no extension under it.
@@ -1070,15 +1102,15 @@ describe('options UI — site export', { skip }, () => {
     assert.match(marked[0].body, /_method=patch/)
     assert.match(marked[0].body, /authenticity_token=a-token/)
 
-    assert.match(await reportLine(), /applied 1 · 1 marked read on AO3/)
+    await until('the import to report', async () => (await reported()).length > 0)
+    assert.deepEqual(await reported(), [1, 1], 'one applied, and one marked read on AO3')
 
     // What the second import reads, and the only thing that makes it free.
     const ledger = await options.stored('cache.appliedChangeOps')
     assert.equal(ledger.length, 1)
 
     await importFile()
-    await until('the second import to report', async () => /already applied/.test(await reportLine()))
-    assert.match(await reportLine(), /applied 0 · 1 already applied/)
+    await until('the second import to report', async () => (await reported()).join() === '0,1')
     assert.deepEqual(marked.map(entry => entry.workId), ['11'], 'AO3 is not asked twice')
   })
 
@@ -1094,30 +1126,30 @@ describe('options UI — site export', { skip }, () => {
    */
   test('removing asks first, says what becomes of the blurbs, and keeps the work text', async () => {
     const old = await options.savedListDetails(copyRow(OLD_KEY))
-    const removeOld = await options.control(old, 'button', 'Remove offline copy')
+    const removeOld = await options.action(old, 'remove-copy')
     const says = async () => options.text(old)
-    assert.ok((await says()).includes(blurbsOnRemove(false)), 'the blurbs wait for Discard orphans')
+    assert.ok(mentions(await says(), blurbsOnRemove(false)), 'the blurbs wait for Discard orphans')
 
     // An armed Remove that isn't pressed again goes back to asking nothing.
     await options.press(removeOld)
-    await until('it to ask', async () => await options.name(removeOld) === 'Remove it?')
-    await until('it to stop asking', async () => await options.name(removeOld) === 'Remove offline copy', CONFIRM_MS * 4)
+    await until('it to ask', () => armed(removeOld))
+    await until('it to stop asking', async () => !(await armed(removeOld)), CONFIRM_MS * 4)
     assert.ok(OLD_KEY in await options.stored('cache.searchLists'), 'asking must not remove anything')
 
     // With Discard unneeded blurbs automatically on, it says they go now.
     const prune = async () => options.control(await options.row(PRUNE_ROW), 'switch')
     await options.press(await prune())
     await until('blurbs to be discarded automatically', async () => await lastWrite('option.pruneOrphanedBlurbs') === true)
-    await until('the row to say the blurbs go now', async () => (await says()).includes(blurbsOnRemove(true)))
+    await until('the row to say the blurbs go now', async () => mentions(await says(), blurbsOnRemove(true)))
     await options.press(await prune())
     await until('blurbs to wait for Discard orphans again', async () => await lastWrite('option.pruneOrphanedBlurbs') === false)
 
     // The tile's first press arms Remove, which says what it keeps, and
     // removes nothing; the second removes the copy, and only the copy.
-    await pressInMore('Remove offline copy')
-    const remove = await options.control(page, 'menuitem', /^Remove offline copy\?/)
-    assert.match(await options.name(remove), /Its cached work text stays\./)
-    assert.ok((await options.name(remove)).endsWith(blurbsOnRemove(false)), 'the blurbs wait for Discard orphans')
+    await pressInMore('remove')
+    const remove = await options.menuItem('remove')
+    await until('the first press to arm it', () => armed(remove))
+    assert.ok(mentions(await options.name(remove), blurbsOnRemove(false)), 'the blurbs wait for Discard orphans')
     assert.ok(CACHE_KEY in await options.stored('cache.searchLists'), 'arming must not remove anything')
 
     const textBefore = await options.stored('workTextIndex')
@@ -1125,7 +1157,7 @@ describe('options UI — site export', { skip }, () => {
     await until('the copy to go', async () => !(CACHE_KEY in await options.stored('cache.searchLists')))
     const snapshots = await options.stored('cache.searchLists')
     assert.deepEqual(Object.keys(snapshots), [OLD_KEY], 'only the copy asked for goes')
-    await until('the tile to say how a copy is kept', async () => /None yet\./.test(await tileText()))
+    await until('the tile to say how a copy is kept', async () => mentions(await tileText(), PROFILE_LISTS.find(list => list.id === TILE).empty))
 
     const textAfter = await options.stored('workTextIndex')
     assert.deepEqual(Object.keys(textAfter).sort(), Object.keys(textBefore).sort())
@@ -1143,8 +1175,6 @@ describe('options UI — site export', { skip }, () => {
    * the only snapshot left holds work 21, which was never cached.
    */
   test('what the deleted list stranded can be discarded on its own', async () => {
-    const cacheRow = async () => options.text(await options.row(CACHE_ROW))
-
     /**
      * The row's first button is the discard, and everything about it that this
      * test needs is on the button itself: whether it is offered at all, and what
@@ -1152,22 +1182,19 @@ describe('options UI — site export', { skip }, () => {
      * counts the orphans, what the confirmation says — is copy, and pinning a
      * test to copy makes every rewrite a failing build.
      */
-    const discardButton = async () => options.control(await options.row(CACHE_ROW), 'button')
+    const discardButton = async () => options.action(await options.row(CACHE_ROW), 'discard-orphans')
 
     const offered = async () => !(await (await discardButton()).evaluate(button => button.disabled))
 
-    /** Press the discard, and say what it offered when it was pressed. */
+    /** Press the discard. */
     const discard = async () => {
       const button = await discardButton()
       assert.ok(await offered(), 'the cache row should be offering an enabled discard button')
-      const label = await options.text(button)
       await options.press(button)
-      return label
     }
 
     // Enabled only once the row has counted what the deleted list stranded.
     await until('the row to offer the discard', offered)
-    assert.match(await cacheRow(), /orphan/i, 'and to say what it is offering to remove')
 
     /**
      * Twice, like its neighbour — the first press turns the label into a
@@ -1175,10 +1202,9 @@ describe('options UI — site export', { skip }, () => {
      * import is: the toast the list removal raised sits over this row, and a
      * real click lands on the toast instead of the button.
      */
-    const asked = await discard()
-    await until('the confirmation', async () => (await cacheRow()).includes('3'))
-    const confirmed = await discard()
-    assert.notEqual(confirmed, asked, 'the second press should be a different offer from the first')
+    await discard()
+    await until('the confirmation', async () => armed(await discardButton()))
+    await discard()
 
     await until('the cache to empty', async () => {
       const store = await options.stored('workTextIndex')
@@ -1224,11 +1250,10 @@ describe('options UI — site export, one job at a time', { skip }, () => {
   const OTHER = 'tag-works:Coffee%20Shop%20AU'
   /** Stored before descriptors existed: nothing here can fetch it again. */
   const UNDESCRIBED = 'tag-works:Old%20Tag'
-  const JOB_OFF = 'off for now: one job at a time, and Marked for Later is caching'
+  /** What the list the job is on is called, which every control the job turns off names. */
+  const HOLDER = 'Marked for Later'
   /** The rows of the three stored lists, none of which a saved list is at. */
   const ROWS = { [MINE]: copyRow(MINE), [OTHER]: copyRow(OTHER), [UNDESCRIBED]: copyRow(UNDESCRIBED) }
-  /** What the other list is called: the title its record will take. */
-  const OTHER_NAME = 'Tag: Coffee Shop AU'
   const HOURS_AGO = Date.now() - 3 * 60 * 60 * 1000
 
   const seed = {
@@ -1299,83 +1324,71 @@ describe('options UI — site export, one job at a time', { skip }, () => {
   })
 
   const row = key => options.savedList(ROWS[key])
-  /** A button on a row, its details opened first. */
-  const button = async (key, name) => options.control(await options.savedListDetails(ROWS[key]), 'button', name)
-  const cacheButton = async name => options.control(await options.row(CACHE_ROW), 'button', name)
+  /** A control on a row, its details opened first: in its `details`, or in its `actions`, beside it. */
+  const button = async (key, action, part = 'details') => options.action(await (await options.savedListDetails(ROWS[key])).$(`[data-saved-list-part="${part}"]`), action)
+  /** A control on a row wherever it is: the job's own, under it. */
+  const inRow = async (key, action) => options.action(await row(key), action)
+  const cacheButton = async action => options.action(await options.row(CACHE_ROW), action)
   const jobState = async key => (await row(key)).evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
   const jobWrites = () => page.evaluate(() => window.__writes.filter(w => 'siteExportJob' in w).length)
+  /** What a row's Caching cell says. */
+  const caching = async key => options.text(await (await row(key)).$('[data-saved-list-part="caching"]'))
+  /** The notice over every row while a job runs, or null with none. */
+  const busy = async () => (await options.list('saved-lists')).$('[data-busy]')
 
-  /** The control is off, and says why in its tooltip, after its own label, and in what describes it. */
-  async function saysOff(control, label, reason) {
-    assert.equal(await control.evaluate(el => el.disabled), true, `${label} should be off`)
-    assert.equal(await control.evaluate(el => el.title), `${label} — ${reason}`)
-    assert.equal(await options.description(control), `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`)
-  }
-
-  /** The control is on, with no reason to give. */
-  async function saysOn(control, label) {
-    assert.equal(await control.evaluate(el => el.disabled), false, `${label} should be on`)
-    assert.equal(await control.evaluate(el => el.getAttribute('aria-describedby')), null)
-  }
-
-  /** The other list's offline controls, by name, with the label each one's tooltip starts with. */
-  const OTHER_CONTROLS = [
-    [`Download ${OTHER_NAME}`, 'Refresh, cache, then save this list as one HTML file'],
-    ['Refresh list', `Refresh the list of works in ${OTHER_NAME}`],
-    ['Cache works', 'Cache this list\'s works'],
-    ['Download', 'Refresh, cache, then save this list as one HTML file'],
-  ]
+  /** The other list's offline controls, by part and action. */
+  const OTHER_CONTROLS = [['actions', 'download'], ['details', 'refresh'], ['details', 'cache'], ['details', 'download']]
   /** The other list's link-like controls, whose tooltip is the reason alone while they are off. */
-  const OTHER_LINKS = ['Refresh the list first, then cache']
+  const OTHER_LINKS = [['details', 'refresh-first']]
 
   test('a list saved before it could be fetched again says what brings its controls back', async () => {
-    for (const name of [`Download ${UNDESCRIBED}`, 'Refresh list', 'Cache works', 'Download', 'Refresh the list first, then cache']) {
-      const control = await button(UNDESCRIBED, name)
-      assert.equal(await control.evaluate(el => el.disabled), true, `${name} should be off`)
-      assert.match(await control.evaluate(el => el.title), /off until you open it on AO3 and press its search button/i)
-      assert.equal(await options.description(control), `${OFFLINE_OFF.undescribed.charAt(0).toUpperCase()}${OFFLINE_OFF.undescribed.slice(1)}.`)
+    for (const [part, action] of [...OTHER_CONTROLS, ...OTHER_LINKS]) {
+      const control = await button(UNDESCRIBED, action, part)
+      assert.equal(await control.evaluate(el => el.disabled), true, `${action} should be off`)
+      assert.ok(mentions(await control.evaluate(el => el.title), OFFLINE_OFF.undescribed), `${action}'s tooltip should give the reason`)
+      assert.ok(mentions(await options.description(control), OFFLINE_OFF.undescribed), `${action}'s description should give the reason`)
     }
-    assert.match(await options.text(await row(UNDESCRIBED)), /Needs user help\. Open on AO3 using the link beside its name and press the search button\./)
+    assert.ok(mentions(await options.text(await row(UNDESCRIBED)), NEEDS_VISIT_NOTE), 'the row says what to do')
   })
 
   test('while one list caches, every other list\'s offline controls name the list that holds the job', async () => {
-    await options.press(await button(MINE, 'Cache works'))
+    await options.press(await button(MINE, 'cache'))
     await until('the job to be running', async () => await jobState(MINE) === 'running')
 
-    for (const [name, label] of OTHER_CONTROLS)
-      await saysOff(await button(OTHER, name), label, JOB_OFF)
-    for (const name of OTHER_LINKS) {
-      const control = await button(OTHER, name)
-      assert.equal(await control.evaluate(el => el.disabled), true, `${name} should be off`)
-      assert.equal(await options.description(control), `${JOB_OFF.charAt(0).toUpperCase()}${JOB_OFF.slice(1)}.`)
+    for (const [part, action] of OTHER_CONTROLS)
+      await saysOff(options, await button(OTHER, action, part), HOLDER)
+    for (const [part, action] of OTHER_LINKS) {
+      const control = await button(OTHER, action, part)
+      assert.equal(await control.evaluate(el => el.disabled), true, `${action} should be off`)
+      assert.ok(mentions(await options.description(control), HOLDER), `${action}'s description should name the list with the job`)
     }
     // Said in the row as well, where the reader is looking, and over every row.
-    assert.match(await options.text(await row(OTHER)), /Off for now: one job at a time, and Marked for Later is caching\./)
-    assert.match(await options.text(await options.list('saved-lists')), /One job at a time — Marked for Later is caching/)
+    assert.ok(mentions(await options.text(await row(OTHER)), HOLDER), 'the row says which list has the job')
+    assert.ok(mentions(await options.text(await busy()), HOLDER), 'and so does the notice over every row')
     // And on the rail, from any category.
     const railJob = await options.page.$eval('[data-rail] [data-rail-job]', el => ({ title: el.title, text: el.textContent.trim() }))
-    assert.equal(railJob.title, 'A job is running: caching Marked for Later')
+    assert.ok(mentions(railJob.title, HOLDER) && mentions(railJob.title, CACHING), railJob.title)
     assert.match(railJob.text, /\/2$/)
     // Tracking asks AO3 for nothing, so no job turns it off.
-    const toggle = await options.control(await row(OTHER), 'switch', `Track ${OTHER_NAME}`)
+    const toggle = await options.control(await row(OTHER), 'switch')
     assert.equal(await toggle.evaluate(el => el.disabled), false)
 
     // A list nothing can fetch keeps its own reason.
-    assert.match(await options.description(await button(UNDESCRIBED, 'Cache works')), /^Off until you open it on AO3/)
+    assert.ok(mentions(await options.description(await button(UNDESCRIBED, 'cache')), OFFLINE_OFF.undescribed))
 
     // The list the job is on: its Download is Pause, its caching says so, and its copy can't be removed from under it.
-    assert.ok(await options.control(await row(MINE), 'button', 'Pause caching Marked for Later'))
-    assert.match(await options.text(await row(MINE)), /caching now/)
-    await saysOff(await button(MINE, 'Remove offline copy'), 'Remove offline copy', 'off while this list is caching')
+    assert.ok(await inRow(MINE, 'pause'))
+    assert.ok(mentions(await caching(MINE), CACHING), 'its caching says it is caching now')
+    await saysOff(options, await button(MINE, 'remove-copy'), CACHING)
 
     // Nor can the work text it is writing.
-    for (const name of ['Discard orphans', 'Delete cached text'])
-      await saysOff(await cacheButton(name), name, 'off while Marked for Later is caching')
+    for (const action of ['discard-orphans', 'delete-cached'])
+      await saysOff(options, await cacheButton(action), HOLDER)
   })
 
   test('Pause leaves the job stored, offering to continue or discard it, and frees every other control', async () => {
     const before = await jobWrites()
-    await options.press(await button(MINE, 'Pause caching Marked for Later'))
+    await options.press(await inRow(MINE, 'pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(MINE) === 'stopped')
 
     // As written: the storage stand-in keeps the runner's own object, which a
@@ -1386,36 +1399,36 @@ describe('options UI — site export, one job at a time', { skip }, () => {
     assert.deepEqual([...job.queue].sort(), ['31', '32'], 'the works it was fetching go back on the queue')
     assert.equal(job.done, 0)
 
-    await button(MINE, 'Continue')
-    await button(MINE, 'Discard')
-    for (const [name, label] of OTHER_CONTROLS)
-      await saysOn(await button(OTHER, name), label)
-    assert.doesNotMatch(await options.text(await row(OTHER)), /one job at a time/i)
-    assert.doesNotMatch(await options.text(await options.list('saved-lists')), /One job at a time/)
+    await inRow(MINE, 'resume')
+    await inRow(MINE, 'discard')
+    for (const [part, action] of OTHER_CONTROLS)
+      await saysOn(await button(OTHER, action, part))
+    assert.ok(!mentions(await options.text(await row(OTHER)), HOLDER), 'the row has no job to name')
+    assert.equal(await busy(), null, 'nor is there one over every row')
     assert.equal(await options.page.$('[data-rail] [data-rail-job]'), null, 'and nothing runs on the rail')
-    await saysOn(await button(MINE, 'Remove offline copy'), 'Remove offline copy')
-    for (const name of ['Discard orphans', 'Delete cached text'])
-      await saysOn(await cacheButton(name), name)
+    await saysOn(await button(MINE, 'remove-copy'))
+    for (const action of ['discard-orphans', 'delete-cached'])
+      await saysOn(await cacheButton(action))
   })
 
   test('Discard throws the stopped job away', async () => {
-    await options.press(await button(MINE, 'Discard'))
+    await options.press(await inRow(MINE, 'discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
     await until('the row to stop offering it', async () => await jobState(MINE) === null)
-    assert.deepEqual(await options.controls(await row(MINE), 'button', 'Continue'), [])
+    assert.deepEqual(await options.actions(await row(MINE), 'resume'), [])
   })
 
   test('Continue picks a stopped job up where it left off, and finishing it clears it', async () => {
-    await options.press(await button(MINE, 'Cache works'))
+    await options.press(await button(MINE, 'cache'))
     await until('the job to be running', async () => await jobState(MINE) === 'running')
     const before = await jobWrites()
-    await options.press(await button(MINE, 'Pause caching Marked for Later'))
+    await options.press(await inRow(MINE, 'pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(MINE) === 'stopped')
     const stopped = await options.lastWrite('siteExportJob')
 
-    await options.press(await button(MINE, 'Continue'))
+    await options.press(await inRow(MINE, 'resume'))
     await until('the job to run again', async () => await jobState(MINE) === 'running')
-    await saysOff(await button(OTHER, 'Cache works'), 'Cache this list\'s works', JOB_OFF)
+    await saysOff(options, await button(OTHER, 'cache'), HOLDER)
 
     release()
     await until('the finished job to be cleared', async () => await options.stored('siteExportJob') === null)
@@ -1428,7 +1441,7 @@ describe('options UI — site export, one job at a time', { skip }, () => {
     assert.equal(finished.done, 2)
     const index = await options.stored('workTextIndex')
     assert.ok(index['31']?.size > 0 && index['32']?.size > 0, 'both works were fetched')
-    await saysOn(await button(OTHER, 'Cache works'), 'Cache this list\'s works')
+    await saysOn(await button(OTHER, 'cache'))
   })
 
   /**
@@ -1438,12 +1451,12 @@ describe('options UI — site export, one job at a time', { skip }, () => {
    */
   test('each of a row\'s actions starts its own job', async () => {
     const actions = [
-      [async () => options.control(await row(MINE), 'button', 'Download Marked for Later'), ['refreshing', 'caching', 'exporting']],
-      [() => button(MINE, 'Refresh list'), ['refreshing']],
-      [() => button(MINE, 'Cache works'), ['caching']],
-      [() => button(MINE, 'Download'), ['refreshing', 'caching', 'exporting']],
-      [() => button(MINE, 'Refresh the list first, then cache'), ['refreshing', 'caching']],
-      [() => button(MINE, 'Download without refreshing'), ['exporting']],
+      [() => button(MINE, 'download', 'actions'), ['refreshing', 'caching', 'exporting']],
+      [() => button(MINE, 'refresh'), ['refreshing']],
+      [() => button(MINE, 'cache'), ['caching']],
+      [() => button(MINE, 'download'), ['refreshing', 'caching', 'exporting']],
+      [() => button(MINE, 'refresh-first'), ['refreshing', 'caching']],
+      [() => button(MINE, 'download-cached'), ['exporting']],
     ]
     for (const [control, steps] of actions) {
       const before = await jobWrites()
@@ -1458,16 +1471,16 @@ describe('options UI — site export, one job at a time', { skip }, () => {
   })
 
   test('removing a copy with a stopped job on it discards the job too', async () => {
-    await options.press(await button(OTHER, 'Cache works'))
+    await options.press(await button(OTHER, 'cache'))
     await until('the job to be running', async () => await jobState(OTHER) === 'running')
     const before = await jobWrites()
-    await options.press(await options.control(await row(OTHER), 'button', `Pause caching ${OTHER_NAME}`))
+    await options.press(await inRow(OTHER, 'pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(OTHER) === 'stopped')
 
-    const remove = await button(OTHER, 'Remove offline copy')
-    assert.match(await options.text(await row(OTHER)), /Its stopped job is discarded with it\./)
+    const remove = await button(OTHER, 'remove-copy')
+    assert.ok(mentions(await options.text(await row(OTHER)), COPY_REMOVAL.discardsJob), 'it says the job goes with it')
     await options.press(remove)
-    await until('it to ask', async () => await options.name(remove) === 'Remove it?')
+    await until('it to ask', () => armed(remove))
     await options.press(remove)
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
     await until('the copy to go', async () => !(OTHER in await options.stored('cache.searchLists')))
@@ -1495,7 +1508,6 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
   }
   const LIST = 'l4tte'
   const NAME = 'Latte art'
-  const OWN = 'off while this list is caching'
 
   const seed = {
     'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [] },
@@ -1541,33 +1553,28 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
   const row = () => options.savedList(LIST)
   const details = () => options.savedListDetails(LIST)
   const jobState = async () => (await row()).evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
-
-  /** The control is off, and says why in its tooltip, after its own label, and in what describes it. */
-  async function saysOff(control, label, reason) {
-    assert.equal(await control.evaluate(el => el.disabled), true, `${label} should be off`)
-    assert.equal(await control.evaluate(el => el.title), `${label} — ${reason}`)
-    assert.equal(await options.description(control), `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`)
-  }
+  /** What the row offers beside it. */
+  const besideRow = async () => (await row()).$('[data-saved-list-part="actions"]')
 
   test('stopped, its line is under the row, with Continue and Discard, and removing the copy says it goes too', async () => {
     await until('the row to show the job', async () => await jobState() === 'stopped')
-    assert.ok(await options.control(await row(), 'button', 'Continue'))
-    assert.ok(await options.control(await row(), 'button', 'Discard'))
-    assert.deepEqual(await options.controls(await row(), 'button', `Download ${NAME}`), [], 'its Download waits on the job')
-    assert.match(await options.text(await details()), /Its stopped job is discarded with it\./)
+    assert.ok(await options.action(await row(), 'resume'))
+    assert.ok(await options.action(await row(), 'discard'))
+    assert.deepEqual(await options.actions(await besideRow(), 'download'), [], 'its Download waits on the job')
+    assert.ok(mentions(await options.text(await details()), COPY_REMOVAL.discardsJob), 'removing its copy says the job goes too')
   })
 
   test('running, the row is busy itself: Pause, caching now, and neither removal can take a copy from under it', async () => {
-    await options.press(await options.control(await row(), 'button', 'Continue'))
+    await options.press(await options.action(await row(), 'resume'))
     await until('the job to run', async () => await jobState() === 'running')
-    assert.ok(await options.control(await row(), 'button', `Pause caching ${NAME}`))
-    assert.match(await options.text(await row()), /caching now/)
-    await saysOff(await options.control(await details(), 'button', 'Cache works'), 'Cache this list\'s works', OWN)
+    assert.ok(await options.action(await besideRow(), 'pause'))
+    assert.ok(mentions(await options.text(await (await row()).$('[data-saved-list-part="caching"]')), CACHING), 'its caching says it is caching now')
+    await saysOff(options, await options.action(await details(), 'cache'), CACHING)
 
-    const removeCopy = await options.control(await details(), 'button', 'Remove offline copy')
-    const removeList = await options.control(await details(), 'button', 'Remove list')
-    await saysOff(removeCopy, 'Remove offline copy', OWN)
-    await saysOff(removeList, 'Remove list', OWN)
+    const removeCopy = await options.action(await details(), 'remove-copy')
+    const removeList = await options.action(await details(), 'remove-list')
+    await saysOff(options, removeCopy, CACHING)
+    await saysOff(options, removeList, CACHING)
     for (const remove of [removeCopy, removeList]) {
       await options.press(remove)
       await options.press(remove)
@@ -1580,11 +1587,11 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
   })
 
   test('stopped again, Remove offline copy takes both copies and the job on the older', async () => {
-    await options.press(await options.control(await row(), 'button', `Pause caching ${NAME}`))
+    await options.press(await options.action(await besideRow(), 'pause'))
     await until('the job to stop', async () => await jobState() === 'stopped')
-    const remove = await options.control(await details(), 'button', 'Remove offline copy')
+    const remove = await options.action(await details(), 'remove-copy')
     await options.press(remove)
-    await until('it to ask', async () => await options.name(remove) === 'Remove it?')
+    await until('it to ask', () => armed(remove))
     await options.press(remove)
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
     await until('both copies to go', async () => {
@@ -1606,7 +1613,6 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
  */
 describe('options UI — a saved list\'s job, from the keyboard', { skip }, () => {
   const KEY = 'tag-works:Coffee%20Shop%20AU'
-  const NAME = 'Tag: Coffee Shop AU'
   let session
   let options
 
@@ -1630,41 +1636,45 @@ describe('options UI — a saved list\'s job, from the keyboard', { skip }, () =
 
   const row = () => options.savedList(copyRow(KEY))
   const jobState = async () => (await row()).evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
-  /** What has focus now, by its accessible name. */
-  const focused = async () => {
-    const handle = await options.page.evaluateHandle(() => document.activeElement)
-    return await handle.evaluate(el => !el || el === document.body) ? 'nothing: the page itself' : options.name(handle)
-  }
+  /** The row's Download, beside it. */
+  const downloads = async () => options.actions(await (await row()).$('[data-saved-list-part="actions"]'), 'download')
+  /** What has focus now, by what it does: a control of the row's. */
+  const focused = () => options.page.evaluate((key) => {
+    const el = document.activeElement
+    if (!el || el === document.body)
+      return 'nothing: the page itself'
+    return el.closest(`[data-saved-list="${key}"]`) ? el.dataset.action ?? 'a control that does nothing' : 'something outside the row'
+  }, copyRow(KEY))
   async function pressKey(control) {
     await control.focus()
     await options.page.keyboard.press('Enter')
   }
 
   test('Download hands focus to Pause', async () => {
-    await until('the copy to be read', async () => (await options.controls(await row(), 'button', `Download ${NAME}`)).length === 1)
-    await pressKey(await options.control(await row(), 'button', `Download ${NAME}`))
+    await until('the copy to be read', async () => (await downloads()).length === 1)
+    await pressKey((await downloads())[0])
     await until('the job to run', async () => await jobState() === 'running')
-    assert.equal(await focused(), `Pause refreshing ${NAME}`)
+    assert.equal(await focused(), 'pause')
   })
 
   test('Pause hands it to the row\'s details, beside the place it left', async () => {
     await options.page.keyboard.press('Enter')
     await until('the job to stop', async () => await jobState() === 'stopped')
-    assert.equal(await focused(), `Details for ${NAME}`)
+    assert.equal(await focused(), 'details')
   })
 
   test('Continue hands it to Pause', async () => {
-    await pressKey(await options.control(await row(), 'button', 'Continue'))
+    await pressKey(await options.action(await row(), 'resume'))
     await until('the job to run again', async () => await jobState() === 'running')
-    assert.equal(await focused(), `Pause refreshing ${NAME}`)
+    assert.equal(await focused(), 'pause')
   })
 
   test('Discard hands it to Download', async () => {
     await options.page.keyboard.press('Enter')
     await until('the job to stop', async () => await jobState() === 'stopped')
-    await pressKey(await options.control(await row(), 'button', 'Discard'))
+    await pressKey(await options.action(await row(), 'discard'))
     await until('the job to go', async () => await jobState() === null)
-    assert.equal(await focused(), `Download ${NAME}`)
+    assert.equal(await focused(), 'download')
   })
 
   test('nothing threw along the way, and no Pause was logged as an error', () => {

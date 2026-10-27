@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { mentions } from '../facts.mjs'
 import { ensureBuilt, findChrome, serveDist } from './helpers.mjs'
 import { openOptions, until } from './optionsPage.mjs'
 import {
   ARCHIVE,
-  clickBoxButton,
+  clickBoxAction,
   diffLines,
   launch,
   openBox,
   persistentMock,
+  pillRow,
   pillText,
   refiningMark,
   rerun,
@@ -123,6 +125,20 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
   })
 
   const lists = async () => (await storedOption(tab))?.lists ?? []
+  /** The pill is in `row`, for the one list, and names it. */
+  const pillIs = async (row) => {
+    const [list] = await lists()
+    assert.equal(await pillRow(tab), row.replace('<id>', list.id))
+    assert.ok(mentions(await pillText(tab), TITLE), `the pill should name ${TITLE}`)
+  }
+  /** The one line of the box's diff, which names each of `names`. */
+  const diffNames = async (...names) => {
+    const [line, ...more] = await diffLines(tab)
+    assert.deepEqual(more, [])
+    for (const name of names)
+      assert.ok(mentions(line, name), `${line} should name ${name}`)
+    return line
+  }
 
   /** Whether the tracking pill's box is showing. */
   const boxOpen = () => tab.$eval(TRACK_BOX, box => !box.hidden)
@@ -163,13 +179,13 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     await tab.click('.AO3E--search-tag-works--link')
     await viewDrawn()
     assert.equal(await viewOpen(), true)
-    assert.equal(await pillText(tab), 'Track this search')
+    assert.equal(await pillRow(tab), 'new')
 
     await toggleExclude('Draco Malfoy')
     assert.deepEqual(await shownIds(), idsWithout('Draco Malfoy'))
 
     await openBox(tab)
-    await rerun(tab, () => clickBoxButton(tab, 'Track'))
+    await rerun(tab, () => clickBoxAction(tab, 'track'))
 
     const [list] = await lists()
     assert.equal(list.kind, 'tag-works')
@@ -183,21 +199,21 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     await viewDrawn()
     assert.equal(await viewOpen(), true)
     assert.equal(await excluded('Draco Malfoy'), true)
-    assert.equal(await pillText(tab), `Tracked as “${TITLE}”`)
+    await pillIs('exact:<id>')
   })
 
   test('the pill follows the view’s filter as it changes', async () => {
     // The same tag unfiltered is the list's root but not the list.
     await toggleExclude('Draco Malfoy')
-    assert.equal(await pillText(tab), 'Track or update…')
+    assert.equal(await pillRow(tab), `same-root:${(await lists())[0].id}`)
     await toggleExclude('Draco Malfoy')
-    assert.equal(await pillText(tab), `Tracked as “${TITLE}”`)
+    await pillIs('exact:<id>')
   })
 
   test('the options row links to the list’s own page', async () => {
     const [list] = await lists()
     const options = await openOptions(browser, server, { seed: { 'option.trackedLists': await storedOption(tab) }, hash: '#saved-lists' })
-    link = await (await options.control(await options.savedList(list.id), 'link', /^View or edit /)).evaluate(a => a.href)
+    link = await (await options.action(await options.savedList(list.id), 'view-edit')).evaluate(a => a.href)
     await options.close()
     assert.equal(link, `${TAG_URL}#ao3e-list=${list.id}`)
   })
@@ -241,7 +257,7 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     assert.equal(await excluded('Draco Malfoy'), true)
     assert.deepEqual(await shownIds(), idsWithout('Draco Malfoy'))
     assert.deepEqual(await refiningMark(tab), { id: list.id, restore: false }, 'put back, and not to be put back again')
-    assert.equal(await pillText(tab), `Refining “${TITLE}”`)
+    await pillIs('refining:<id>:same')
   })
 
   test('a second exclusion and Update change the stored filter', async () => {
@@ -249,11 +265,11 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
     // The box is open while the reader works in the view (whose toggles are
     // clicked here without the pointer, so the toolbar stays open).
     await openBox(tab)
-    assert.equal(await pillText(tab), `Refining “${TITLE}”`)
+    await pillIs('refining:<id>:same')
     await toggleExclude('Ron Weasley')
-    assert.equal(await pillText(tab), `Update “${TITLE}”`, 'the pill follows the view')
+    await pillIs('refining:<id>:changed')
     assert.equal(await boxOpen(), true, 'and the box it grew stays open')
-    assert.deepEqual(await diffLines(tab), ['Excludes: Ron Weasley'])
+    const ron = await diffNames('Ron Weasley')
 
     // A title typed into the open box, then another change in the view: the
     // same pill, so the box is redrawn where it is, and keeps what was typed.
@@ -264,12 +280,12 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
       input.dataset.e2eMarker = 'same box'
     }, renamed)
     await toggleExclude('Hermione Granger')
-    assert.deepEqual(await diffLines(tab), ['Excludes: Hermione Granger, Ron Weasley'])
+    await diffNames('Hermione Granger', 'Ron Weasley')
     await toggleExclude('Hermione Granger')
-    assert.deepEqual(await diffLines(tab), ['Excludes: Ron Weasley'])
+    assert.equal(await diffNames('Ron Weasley'), ron)
     assert.deepEqual(await tab.$eval(TITLE_INPUT, input => [input.value, input.dataset.e2eMarker]), [renamed, 'same box'])
 
-    await rerun(tab, () => clickBoxButton(tab, `Update “${TITLE}”`))
+    await rerun(tab, () => clickBoxAction(tab, 'update'))
 
     const [updated] = await lists()
     assert.deepEqual(updated.filter, { facets: { characters: { ex: ['Draco Malfoy', 'Ron Weasley'] } } })

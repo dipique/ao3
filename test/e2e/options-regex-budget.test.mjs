@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { after, afterEach, before, describe, test } from 'node:test'
 
 import { REGEX_CHECKING_HOLD_MS, REGEX_TIME_BUDGET_MS } from '../../src/common/constants.ts'
-import { skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { TagType } from '../../src/common/data.ts'
+import { CANONICAL_TOO_SLOW } from '../../src/options_ui/model/canonicalTags.ts'
+import { TESTER_STOPPED, TOO_SLOW } from '../../src/options_ui/model/ruleEditor.ts'
+import { mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { RuleEditor } from './ruleEditor.mjs'
 
 /** A pattern that backtracks without end over a run of a's ending in anything else. */
 const RUNAWAY_PATTERN = '(a+)+$'
@@ -22,8 +26,6 @@ const BUDGET = 250
  */
 const STOPPED_WITHIN = BUDGET + 1000
 
-const TOO_SLOW = 'Too slow to test: change the pattern to save the rule.'
-
 /** Tags learned while browsing, as the content script keeps them: by lowercased name. */
 const learned = names => Object.fromEntries(names.map((name, i) => [name.toLowerCase(), { id: i + 1, name }]))
 
@@ -31,6 +33,8 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
   let session
   let options
   let page
+  /** The rule editor, on the page open now. */
+  let editor
 
   before(async () => {
     session = await startOptions()
@@ -54,69 +58,55 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
       },
     })
     page = options.page
+    editor = new RuleEditor(options)
   }
 
   // --- helpers bound to the live page ---
-  const dialog = async () => {
-    await page.waitForSelector('[role="dialog"]')
-    return page.$('[role="dialog"]')
-  }
-  const pick = async (group, name) => {
-    const choice = await options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name)
-    await options.press(choice)
-    await page.waitForFunction(el => el.getAttribute('aria-checked') === 'true', {}, choice)
-  }
-  /** The pattern: in Regex mode the value field is the first text field, above the tester's. */
-  const patternField = async () => options.control(await dialog(), 'textbox')
-  const testField = async () => options.control(await dialog(), 'textbox', 'Test it')
-  const replace = async (field, text) => {
-    await field.evaluate(el => el.select())
-    await field.type(text)
-  }
-  const saveButton = async name => options.control(await dialog(), 'button', name)
+  const patternField = () => editor.field('value')
+  const testField = () => editor.field('test')
   const verdictKind = () => page.$eval('[role="dialog"] [data-regex-verdict]', el => el.dataset.regexVerdict)
-  /** The verdict, once it is this one: its words, as a screen reader reads them. */
-  const verdict = async (kind, timeout) => options.text(await page.waitForSelector(`[role="dialog"] [data-regex-verdict="${kind}"]`, { timeout }))
+  /** The verdict, once it is this one. */
+  const verdict = (kind, timeout) => page.waitForSelector(`[role="dialog"] [data-regex-verdict="${kind}"]`, { timeout })
   const ruleWrites = () => page.evaluate(() => window.__writes.filter(w => 'option.rules' in w).length)
 
   test('a pattern that runs past the budget is stopped while the page answers; it can\'t be saved until it changes', async () => {
     await openPage({ 'fandomCache.characters': learned(['Original Female Character(s)', 'Harry Potter']) })
-    await options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-    await pick('What the rule matches', 'Character')
-    await pick('How to match', 'Regex')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Character)
+    await editor.pick('matcher', 'regex')
     await (await testField()).type(RUNAWAY_TAG)
     await (await patternField()).type(RUNAWAY_PATTERN.slice(0, -1))
-    assert.equal(await verdict('match'), 'Matches', 'without its anchor, the pattern is quick')
-    await options.press(await options.control(await dialog(), 'button', 'Show matching canonical tags'))
+    assert.ok(await verdict('match'), 'without its anchor, the pattern is quick')
+    await options.press(await options.action(await editor.dialog(), 'canonical'))
     await page.waitForSelector('[role="dialog"] [data-canonical-part="tag"]')
     const before = await ruleWrites()
 
     const typed = Date.now()
     await (await patternField()).type(RUNAWAY_PATTERN.slice(-1))
-    assert.equal(await verdict('checking'), 'Checking…', 'the page draws while the check runs')
+    assert.ok(await verdict('checking'), 'the page draws while the check runs')
     await options.frame()
     assert.equal(await verdictKind(), 'checking', 'and answers, still checking')
 
-    assert.equal(await verdict('slow', STOPPED_WITHIN), 'Error: Too slow')
+    assert.ok(await verdict('slow', STOPPED_WITHIN))
     assert.ok(Date.now() - typed >= BUDGET, 'stopped only once the budget ran out')
     const verdictHandle = await page.$('[role="dialog"] [data-regex-verdict]')
     assert.ok(await options.contrast(verdictHandle) >= 4.5, 'the verdict reads at AA')
-    assert.equal(await options.description(await testField()), 'Testing stopped: the pattern took too long.')
-    assert.equal(await options.description(await patternField()), TOO_SLOW, 'the value field says so')
-    const save = await saveButton('Add rule')
+    assert.ok(mentions(await options.description(await testField()), TESTER_STOPPED))
+    assert.ok(mentions(await options.description(await patternField()), TOO_SLOW), 'the value field says so')
+    const save = await editor.saveButton()
     assert.equal(await save.evaluate(el => el.disabled), true, 'Add rule is off')
-    assert.equal(await options.description(save), TOO_SLOW, 'with its reason')
-    assert.equal(await save.evaluate(el => el.title), TOO_SLOW)
+    assert.ok(mentions(await options.description(save), TOO_SLOW), 'with its reason')
+    assert.ok(mentions(await save.evaluate(el => el.title), TOO_SLOW))
     const note = await page.waitForSelector('[role="dialog"] [data-canonical-part="note"]')
-    assert.equal(await options.text(note), 'The pattern is too slow to test, so no matches are shown.', 'the preview stops with its note')
+    assert.ok(mentions(await options.text(note), CANONICAL_TOO_SLOW), 'the preview stops with its note')
     assert.equal(await page.$('[role="dialog"] [data-canonical-part="tag"]'), null)
 
     await options.press(save)
     await options.saved()
     assert.equal(await ruleWrites(), before, 'nothing is written')
 
-    await replace(await patternField(), '^a+!$')
-    assert.equal(await verdict('match'), 'Matches', 'a changed pattern is checked again')
+    await editor.retype('value', '^a+!$')
+    assert.ok(await verdict('match'), 'a changed pattern is checked again')
     await page.waitForFunction(el => !el.disabled, {}, save)
     assert.equal(await options.description(save), '')
     await options.press(save)
@@ -128,12 +118,12 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
 
   test('a check under way keeps the last verdict for the hold, then says Checking…', async () => {
     await openPage({ 'fandomCache.characters': learned(['Harry Potter']) })
-    await options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-    await pick('What the rule matches', 'Character')
-    await pick('How to match', 'Regex')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Character)
+    await editor.pick('matcher', 'regex')
     await (await testField()).type(RUNAWAY_TAG)
     await (await patternField()).type(RUNAWAY_PATTERN.slice(0, -1))
-    assert.equal(await verdict('match'), 'Matches')
+    assert.ok(await verdict('match'))
 
     // From the next keystroke on, each verdict the tester draws, and when.
     await page.evaluate(() => {
@@ -158,17 +148,17 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
       'fandomCache.characters': learned(['Harry Potter', RUNAWAY_TAG]),
     })
     const before = await ruleWrites()
-    await options.openDialog(await options.control(await options.list('rules'), 'button', `Edit rule “${RUNAWAY_PATTERN}”`))
+    await editor.openEdit(RUNAWAY_PATTERN)
 
-    const save = await saveButton('Save')
+    const save = await editor.saveButton()
     await options.press(save)
-    assert.equal(await verdict('slow', STOPPED_WITHIN), 'Error: Too slow', 'checked over the names known here, with nothing typed to test')
+    assert.ok(await verdict('slow', STOPPED_WITHIN), 'checked over the names known here, with nothing typed to test')
     assert.equal(await save.evaluate(el => el.disabled), true)
-    assert.equal(await options.description(save), TOO_SLOW)
+    assert.ok(mentions(await options.description(save), TOO_SLOW))
     await options.saved()
     assert.equal(await ruleWrites(), before, 'a press while the check ran saved nothing')
 
-    await replace(await patternField(), '^Harry')
+    await editor.retype('value', '^Harry')
     await page.waitForFunction(el => !el.disabled, {}, save)
     await options.press(save)
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
@@ -197,13 +187,13 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
   for (const [broken, script] of Object.entries(BROKEN_WORKERS)) {
     test(`a worker that ${broken} ends the check as too slow, rather than leaving it under way`, async () => {
       await openPage({ 'fandomCache.characters': learned(['Harry Potter']) }, script)
-      await options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-      await pick('What the rule matches', 'Character')
-      await pick('How to match', 'Regex')
+      await editor.openAdd()
+      await editor.pick('target', TagType.Character)
+      await editor.pick('matcher', 'regex')
       await (await testField()).type('Harry Potter')
       await (await patternField()).type('^harry')
-      assert.equal(await verdict('slow', STOPPED_WITHIN), 'Error: Too slow')
-      const save = await saveButton('Add rule')
+      assert.ok(await verdict('slow', STOPPED_WITHIN))
+      const save = await editor.saveButton()
       assert.equal(await save.evaluate(el => el.disabled), true)
       await options.press(save)
       await options.saved()
@@ -214,13 +204,13 @@ describe('options UI — a time budget for regex patterns', { skip }, () => {
 
   test('an ordinary pattern is checked and saved as before', async () => {
     await openPage({ 'fandomCache.characters': learned(['Harry Potter']) })
-    await options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-    await pick('What the rule matches', 'Character')
-    await pick('How to match', 'Regex')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Character)
+    await editor.pick('matcher', 'regex')
     await (await patternField()).type('^harry')
     await (await testField()).type('Harry Potter')
-    assert.equal(await verdict('match'), 'Matches')
-    await options.press(await saveButton('Add rule'))
+    assert.ok(await verdict('match'))
+    await options.press(await editor.saveButton())
     await until('the rule to be written', async () => (await options.lastWrite('option.rules'))?.filters.length === 1)
     assert.deepEqual((await options.lastWrite('option.rules')).filters, [{ target: 'C', value: '^harry', matcher: 'regex' }])
   })

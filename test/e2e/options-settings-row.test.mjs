@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { skip, startOptions, until } from './optionsPage.mjs'
+import { mentions, skip, startOptions, until } from './optionsPage.mjs'
 
 const WIDE = { width: 1280, height: 800 }
-const SEARCH = 'Search settings by name or description'
+const SEARCH = '[data-settings-search]'
 
 const MASTER = 'link-menus-right-click-menus'
 const MASTER_KEY = 'option.contextMenusEnabled'
@@ -19,7 +19,6 @@ const DEPENDENTS = {
 }
 /** Not gated: with menus off it still drives the capture buttons and the entity toolbars. */
 const MARK_FOR_LATER = 'link-menus-mark-a-work-for-later'
-const REASON = 'Off while Right-click menus is off'
 
 /** A mix of on and off, so a value lost or flipped on the way through shows. */
 const SEEDED = {
@@ -50,15 +49,22 @@ describe('options UI — the settings row', { skip }, () => {
   const checked = async (options, id) => (await switchOf(options, id)).evaluate(el => el.getAttribute('aria-checked') === 'true')
   const disabled = async (options, id) => (await switchOf(options, id)).evaluate(el => el.disabled)
   const descriptionShown = async (options, id) => (await options.row(id)).$eval('[data-row-part="description"]', el => el.checkVisibility())
+  /** A row's part, `title` or `description`, as it reads. */
+  const partOf = async (options, id, part) => (await options.row(id)).$eval(`[data-row-part="${part}"]`, el => el.textContent.replace(/\s+/g, ' ').trim())
 
-  /** Each gated row's state, by id: whether its switch is on, inert, why, and whether its description shows. */
+  /**
+   * Each gated row's state, by id: whether its switch is on, inert, whether it
+   * says why, naming the master, and whether its description shows.
+   */
   const dependents = async (options) => {
+    const master = await partOf(options, MASTER, 'title')
     const state = {}
     for (const id of Object.keys(DEPENDENTS)) {
+      const reason = await options.description(await switchOf(options, id))
       state[id] = {
         on: await checked(options, id),
         inert: await disabled(options, id),
-        reason: await options.description(await switchOf(options, id)),
+        reason: reason === '' ? null : mentions(reason, master),
         description: await descriptionShown(options, id),
       }
     }
@@ -68,7 +74,7 @@ describe('options UI — the settings row', { skip }, () => {
   const expected = ({ inert, description }) => Object.fromEntries(Object.entries(DEPENDENTS).map(([id, key]) => [id, {
     on: SEEDED[key],
     inert,
-    reason: inert ? REASON : '',
+    reason: inert ? true : null,
     description,
   }]))
 
@@ -132,13 +138,17 @@ describe('options UI — the settings row', { skip }, () => {
     test('a settings search shows an inert row\'s description, where its hit is', async () => {
       const options = await session.open({ hash: '#link-menus', viewport: WIDE, seed: { ...SEEDED, [MASTER_KEY]: false } })
       try {
-        const box = await options.control(options.page, 'textbox', SEARCH)
-        await box.type('byline')
-        const row = await options.row('link-menus-hide-or-highlight-an-author')
+        const id = 'link-menus-hide-or-highlight-an-author'
+        // A word of the row's description that its title doesn't have, so the hit is there.
+        const title = (await partOf(options, id, 'title')).toLowerCase()
+        const word = (await partOf(options, id, 'description')).split(/[^a-z]+/i).filter(w => w.length >= 4 && !title.includes(w.toLowerCase())).sort((a, b) => b.length - a.length)[0]
+        assert.ok(word, 'the description has a word of its own')
+        await (await options.page.$(SEARCH)).type(word)
+        const row = await options.row(id)
         await until('the search to mark its hit', () => row.$('[data-row-part="description"] mark'))
         assert.equal(await row.evaluate(el => el.checkVisibility()), true)
-        assert.equal(await descriptionShown(options, 'link-menus-hide-or-highlight-an-author'), true)
-        assert.equal(await row.$eval('[data-row-part="description"] mark', el => el.textContent), 'byline')
+        assert.equal(await descriptionShown(options, id), true)
+        assert.equal((await row.$eval('[data-row-part="description"] mark', el => el.textContent)).toLowerCase(), word.toLowerCase())
         assert.equal(await disabled(options, 'link-menus-hide-or-highlight-an-author'), true)
       }
       finally {
@@ -149,25 +159,22 @@ describe('options UI — the settings row', { skip }, () => {
 
   describe('badges', () => {
     const BADGES = {
-      'link-menus-open-menus-with-a-left-click': ['Changes every click'],
-      'link-menus-subscribe-to-an-author': ['Needs login'],
-      'link-menus-mute-an-author': ['Needs login'],
-      'link-menus-mark-a-work-for-later': ['Needs login'],
-      'page-controls-collapsible-dashboard-sidebar': ['This device'],
-      'work-text-reader-mode': ['This device'],
+      'link-menus-open-menus-with-a-left-click': ['every-click'],
+      'link-menus-subscribe-to-an-author': ['needs-login'],
+      'link-menus-mute-an-author': ['needs-login'],
+      'link-menus-mark-a-work-for-later': ['needs-login'],
+      'page-controls-collapsible-dashboard-sidebar': ['this-device'],
+      'work-text-reader-mode': ['this-device'],
       'link-menus-menu-on-tags': [],
     }
-    /** The phrases the badges stand in for. */
-    const PHRASES = /logged in|this device only/i
 
-    test('sit beside the title, in place of the phrase in the description', async () => {
+    test('sit beside the title, each with a tooltip', async () => {
       const options = await session.open({ hash: '#link-menus', viewport: WIDE })
       try {
         for (const [id, badges] of Object.entries(BADGES)) {
           const row = await options.row(id)
-          assert.deepEqual(await row.$$eval('[data-row-part="title"] [data-badge]', els => els.map(el => el.textContent.trim())), badges, id)
-          const description = await row.$eval('[data-row-part="description"]', el => el.textContent)
-          assert.doesNotMatch(description, PHRASES, id)
+          const drawn = await row.$$eval('[data-row-part="title"] [data-badge]', els => els.map(el => ({ badge: el.dataset.badge, said: !!el.textContent.trim() && !!el.title })))
+          assert.deepEqual(drawn, badges.map(badge => ({ badge, said: true })), id)
         }
       }
       finally {

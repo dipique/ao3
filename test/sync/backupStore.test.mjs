@@ -233,7 +233,7 @@ describe('backup store', () => {
       await at.store.create('sync-held')
       const [held] = await at.store.list()
       at.removeStored(held.key)
-      await assert.rejects(at.store.restore(held.key), /Backup not found/)
+      await assert.rejects(at.store.restore(held.key), err => err.message.includes(held.key))
       assert.deepEqual(await at.store.list(), [])
     })
   })

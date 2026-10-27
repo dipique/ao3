@@ -101,6 +101,7 @@ const showErrors = ref(false)
           v-if="view.failures.shown.length"
           type="button"
           class="failures touch-target input-ring"
+          data-action="failures"
           :aria-expanded="showErrors"
           @click.prevent="showErrors = !showErrors"
         >

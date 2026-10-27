@@ -70,6 +70,7 @@ const showProblems = ref(false)
         type="button"
         class="outline-btn rounded-r-none!"
         :disabled="importingChanges"
+        data-action="import"
         @click.prevent="start(true)"
       >
         <Icon i-tabler-upload text="[13px]" />{{ importingChanges ? 'Importing…' : 'Import changes' }}
@@ -102,7 +103,7 @@ const showProblems = ref(false)
 
     <template #extra>
       <div v-if="changeReport" flex="~ col gap-1" pt-1>
-        <p text="[12.5px] muted-fg" leading="[18px]">
+        <p text="[12.5px] muted-fg" leading="[18px]" data-change-summary>
           {{ summary }}
         </p>
         <div v-if="problems.length" flex="~ col gap-1">

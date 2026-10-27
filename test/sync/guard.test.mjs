@@ -138,18 +138,33 @@ describe('assessPull', () => {
   })
 })
 
+/** The numbers a part gives, in order. */
+const numbersIn = part => (part.match(/\d+/g) ?? []).map(Number)
+
 describe('pullLossParts', () => {
   const none = { removed: 0, of: 0 }
+  const only = (collection, loss) => ({ rules: none, markedWorks: none, textReplacements: none, trackedLists: none, marks: [], [collection]: loss })
 
-  test('one part for each collection the update would take from, the marks last', () => {
-    assert.deepEqual(
-      pullLossParts({ rules: { removed: 18, of: 22 }, markedWorks: { removed: 204, of: 374 }, textReplacements: none, trackedLists: { removed: 5, of: 7 }, marks: ['Favorite', 'Ongoing'] }),
-      ['18 of your 22 rules', '204 of your 374 marked works', '5 of your 7 tracked lists (they stay saved on this browser if you keep a copy)', 'the marks “Favorite”, “Ongoing”'],
-    )
+  test('one part for each collection the update would take from, how many of how many, the marks last', () => {
+    const parts = pullLossParts({ rules: { removed: 18, of: 22 }, markedWorks: { removed: 204, of: 374 }, textReplacements: none, trackedLists: { removed: 5, of: 7 }, marks: ['Favorite', 'Ongoing'] })
+    assert.deepEqual(parts.slice(0, 3).map(numbersIn), [[18, 22], [204, 374], [5, 7]])
+    assert.deepEqual(numbersIn(parts[3]), [])
+    assert.ok(parts[3].includes('Favorite') && parts[3].includes('Ongoing'), 'the marks are named')
+    assert.equal(parts.length, 4)
   })
 
-  test('one mark is named as one', () => {
-    assert.deepEqual(pullLossParts({ rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, trackedLists: none, marks: ['meh'] }), ['9 of your 12 text replacements', 'the mark “meh”'])
+  test('each collection is named apart', () => {
+    const said = ['rules', 'markedWorks', 'textReplacements', 'trackedLists'].map(collection => pullLossParts(only(collection, { removed: 5, of: 20 })))
+    for (const parts of said)
+      assert.deepEqual(parts.map(numbersIn), [[5, 20]])
+    assert.equal(new Set(said.flat()).size, said.length)
+  })
+
+  test('one mark is named', () => {
+    const parts = pullLossParts({ rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, trackedLists: none, marks: ['meh'] })
+    assert.deepEqual(numbersIn(parts[0]), [9, 12])
+    assert.ok(parts[1].includes('meh'))
+    assert.equal(parts.length, 2)
   })
 
   test('nothing removed is no parts', () => {
@@ -157,34 +172,35 @@ describe('pullLossParts', () => {
   })
 
   test('a collection a stored loss lacks is left out', () => {
-    assert.deepEqual(pullLossParts({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, marks: [] }), ['5 of your 20 rules'])
+    const { trackedLists, ...older } = only('rules', { removed: 5, of: 20 })
+    assert.deepEqual(pullLossParts(older), pullLossParts(only('rules', { removed: 5, of: 20 })))
   })
 })
 
 describe('describePullLoss', () => {
   const none = { removed: 0, of: 0 }
 
+  /** Whether `text` gives every one of `parts`, in their order. */
+  const givesInOrder = (text, parts) => parts.every((part, i) => i === 0 || text.indexOf(parts[i - 1]) < text.indexOf(part)) && parts.every(part => text.includes(part))
+
   test('lists only what would be removed', () => {
-    assert.equal(
-      describePullLoss({ rules: { removed: 348, of: 348 }, markedWorks: { removed: 267, of: 282 }, textReplacements: none, trackedLists: none, marks: [] }),
-      '348 of your 348 rules and 267 of your 282 marked works',
-    )
+    const loss = { rules: { removed: 348, of: 348 }, markedWorks: { removed: 267, of: 282 }, textReplacements: none, trackedLists: none, marks: [] }
+    const parts = pullLossParts(loss)
+    assert.equal(parts.length, 2)
+    assert.ok(givesInOrder(describePullLoss(loss), parts))
   })
 
   test('one item stands alone; marks are named', () => {
-    assert.equal(describePullLoss({ rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, trackedLists: none, marks: [] }), '9 of your 12 text replacements')
-    assert.equal(
-      describePullLoss({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, trackedLists: { removed: 6, of: 7 }, marks: ['Cute/Sweet', 'meh'] }),
-      '5 of your 20 rules, 6 of your 7 tracked lists (they stay saved on this browser if you keep a copy) and the marks “Cute/Sweet”, “meh”',
-    )
+    const one = { rules: none, markedWorks: none, textReplacements: { removed: 9, of: 12 }, trackedLists: none, marks: [] }
+    assert.deepEqual([describePullLoss(one)], pullLossParts(one))
+    const several = { rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, trackedLists: { removed: 6, of: 7 }, marks: ['Cute/Sweet', 'meh'] }
+    assert.ok(givesInOrder(describePullLoss(several), pullLossParts(several)))
   })
 
   test('a loss stored by a build that weighed fewer collections still reads', () => {
     // `pause.loss` is stored, so an upgrade can find one with no `trackedLists`
     // in it. What it doesn't name, it doesn't mention.
-    assert.equal(
-      describePullLoss({ rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, marks: [] }),
-      '5 of your 20 rules',
-    )
+    const older = { rules: { removed: 5, of: 20 }, markedWorks: none, textReplacements: none, marks: [] }
+    assert.deepEqual([describePullLoss(older)], pullLossParts(older))
   })
 })

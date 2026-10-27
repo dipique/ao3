@@ -22,14 +22,15 @@ import { ensureBuilt, findChrome, hurryTimers, installMock, launch, openWindow, 
  *   details opened or not ({@link OptionsPage.savedList},
  *   {@link OptionsPage.savedListDetails});
  * - a profile list's tile by its `data-tile` ({@link OptionsPage.tile});
- * - a control inside either by its role and accessible name
- *   ({@link OptionsPage.control}), what it is described by
+ * - a control inside either by what it does, its `data-action`
+ *   ({@link OptionsPage.action}), or by its role ({@link OptionsPage.control}),
+ *   what it is described by
  *   ({@link OptionsPage.description}), and what its tooltip says
  *   ({@link OptionsPage.tooltip});
  * - a dialog, opened and closed ({@link OptionsPage.openDialog},
  *   {@link OptionsPage.closeDialog}), and a menu, opened from its trigger,
  *   read, and closed ({@link OptionsPage.openMenu},
- *   {@link OptionsPage.menuItems}, {@link OptionsPage.menuItem},
+ *   {@link OptionsPage.menuActions}, {@link OptionsPage.menuItem},
  *   {@link OptionsPage.closeMenu});
  * - what the page stored, read back from the storage mock rather than off the
  *   screen ({@link OptionsPage.stored}, {@link OptionsPage.lastWrite}) once it
@@ -138,6 +139,8 @@ export async function until(what, check, ms = 20000) {
     await sleep(50)
   }
 }
+
+export { figures, mentions } from '../facts.mjs'
 
 /** Where every request the options page makes of AO3 goes. */
 export const ARCHIVE = 'https://archiveofourown.org'
@@ -555,6 +558,16 @@ export class OptionsPage {
     return handle
   }
 
+  /**
+   * A figure a tile shows, by its `data-tile-figure`: `count` and its `detail`,
+   * and under its bar `cached`, `size`, `uncached` and `failed`. Null where
+   * the tile shows none.
+   */
+  async tileFigure(id, part) {
+    const handle = await (await this.tile(id)).$(`[data-tile-figure="${part}"]`)
+    return handle && handle.evaluate(el => el.textContent.trim())
+  }
+
   /** The count in the list's header, as it reads: the frame's short count where it is too narrow for the whole. */
   async listCount(id) {
     const handle = await (await this.list(id)).$('[data-list-count]')
@@ -640,6 +653,21 @@ export class OptionsPage {
     return handle
   }
 
+  /**
+   * Every control in `scope` that does `action`, by its `data-action`, in
+   * document order: found by what it does, so rewording it fails no test.
+   */
+  actions(scope, action) {
+    return scope.$$(`[data-action="${action}"]`)
+  }
+
+  /** The first control in `scope` that does `action` ({@link actions}). */
+  async action(scope, action) {
+    const handle = await scope.$(`[data-action="${action}"]`)
+    assert.ok(handle, `no control that does ${action}`)
+    return handle
+  }
+
   /** What a screen reader would call the element. */
   name(handle) {
     return handle.evaluate(accessibleName)
@@ -683,14 +711,16 @@ export class OptionsPage {
     await until('the menu to open', async () => (await this.controls(this.page, 'menuitem')).length > 0)
   }
 
-  /** The open menu's items' names, in order: what each is called, then what it does. */
-  async menuItems() {
-    return Promise.all((await this.controls(this.page, 'menuitem')).map(item => this.name(item)))
+  /** What each of the open menu's items does, by its `data-action`, in order. */
+  menuActions() {
+    return this.page.$$eval('[role="menuitem"]', items => items.map(item => item.dataset.action ?? null))
   }
 
-  /** The open menu's item whose name begins with `start`. */
-  menuItem(start) {
-    return this.control(this.page, 'menuitem', new RegExp(`^${start.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+  /** The open menu's item that does `action`. */
+  async menuItem(action) {
+    const handle = await this.page.$(`[role="menuitem"][data-action="${action}"]`)
+    assert.ok(handle, `no menu item that does ${action}`)
+    return handle
   }
 
   /** Press Escape, which closes the open menu, and wait until it has gone. */

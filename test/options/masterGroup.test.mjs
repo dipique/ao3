@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { dependentState } from '../../src/options_ui/model/masterGroup.ts'
+import { mentions } from '../facts.mjs'
 
 const MASTER = 'Right-click menus'
 
@@ -12,18 +13,14 @@ describe('dependentState', () => {
   })
 
   test('with the master off, they are inert, say why by the master\'s name, and fold their descriptions away', () => {
-    assert.deepEqual(dependentState({ title: MASTER, on: false }, false), {
-      inert: true,
-      reason: 'Off while Right-click menus is off',
-      folded: true,
-    })
+    const { reason, ...state } = dependentState({ title: MASTER, on: false }, false)
+    assert.deepEqual(state, { inert: true, folded: true })
+    assert.ok(mentions(reason, MASTER), reason)
   })
 
   test('a settings search unfolds them, so a hit in a description is in sight', () => {
-    assert.deepEqual(dependentState({ title: MASTER, on: false }, true), {
-      inert: true,
-      reason: 'Off while Right-click menus is off',
-      folded: false,
-    })
+    const { reason, ...state } = dependentState({ title: MASTER, on: false }, true)
+    assert.deepEqual(state, { inert: true, folded: false })
+    assert.ok(mentions(reason, MASTER), reason)
   })
 })

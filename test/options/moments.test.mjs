@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { formatMoment, timeAgo } from '../../src/options_ui/model/moments.ts'
+import { formatMoment, NEVER, RECENT_DAY, timeAgo } from '../../src/options_ui/model/moments.ts'
 
 const NOW = new Date(2026, 9, 3, 18, 4).getTime()
 
 const time = at => new Date(at).toLocaleTimeString(undefined, { timeStyle: 'short' })
 const dated = at => new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+/** `at`, as `now` writes it: named by its day, `today` or `yesterday`, in place of its date, and its time. */
+function namesDay(at, now, day) {
+  const text = formatMoment(at, now)
+  assert.ok(text.includes(RECENT_DAY[day]), `${text} should name the day`)
+  assert.ok(text.includes(time(at)), `${text} should give the time`)
+  assert.notEqual(text, dated(at))
+}
 
 describe('formatMoment', () => {
   test('is a medium date and a short time', () => {
@@ -21,21 +29,21 @@ describe('formatMoment', () => {
   test('names today, from its first minute', () => {
     const afternoon = new Date(2026, 9, 3, 14, 46).getTime()
     const midnight = new Date(2026, 9, 3, 0, 0).getTime()
-    assert.equal(formatMoment(afternoon, NOW), `Today, ${time(afternoon)}`)
-    assert.equal(formatMoment(midnight, NOW), `Today, ${time(midnight)}`)
+    namesDay(afternoon, NOW, 'today')
+    namesDay(midnight, NOW, 'today')
   })
 
   test('names yesterday, to its last minute', () => {
     const evening = new Date(2026, 9, 2, 18, 46).getTime()
     const late = new Date(2026, 9, 2, 23, 59).getTime()
-    assert.equal(formatMoment(evening, NOW), `Yesterday, ${time(evening)}`)
-    assert.equal(formatMoment(late, NOW), `Yesterday, ${time(late)}`)
+    namesDay(evening, NOW, 'yesterday')
+    namesDay(late, NOW, 'yesterday')
   })
 
   test('yesterday is the calendar day before, across a month\'s end', () => {
     const now = new Date(2026, 10, 1, 0, 30).getTime()
     const at = new Date(2026, 9, 31, 23, 50).getTime()
-    assert.equal(formatMoment(at, now), `Yesterday, ${time(at)}`)
+    namesDay(at, now, 'yesterday')
   })
 
   test('dates anything older', () => {
@@ -70,6 +78,6 @@ describe('timeAgo', () => {
   })
 
   test('a moment that never happened is never', () => {
-    assert.equal(timeAgo(0, NOW), 'never')
+    assert.equal(timeAgo(0, NOW), NEVER)
   })
 })

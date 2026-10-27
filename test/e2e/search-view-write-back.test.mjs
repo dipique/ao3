@@ -5,7 +5,7 @@ import { createDefaultMarks, packIds } from '../../src/common/workMarks.ts'
 import { isFresh, refreshIntervalMs } from '../../src/content_script/searchView/freshness.ts'
 import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { ARCHIVE, blurb, keptStore, launch, openMenu, openTab, rerun, stored, visit } from './trackedPages.mjs'
+import { ARCHIVE, blurb, keptStore, launch, openMenu, openTab, pickRow, rerun, stored, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -112,12 +112,7 @@ describe('a kept copy written back while the read behind it is unfinished', { sk
         await openMenu(tab, () => tab.evaluate((id) => {
           document.querySelector(`#work_${id} h4.heading .AO3E--indicator--mark-saved`).click()
         }, TAKEN))
-        await until('the menu to offer to mark it read', () => tab.evaluate(() => {
-          const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-            .find(el => !el.disabled && el.textContent.trim().startsWith('Mark as read'))
-          row?.click()
-          return !!row
-        }))
+        await until('the menu to offer to mark it read', () => pickRow(tab, 'unmark-for-later'))
       },
     },
     {

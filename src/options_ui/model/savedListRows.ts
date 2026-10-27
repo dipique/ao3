@@ -300,7 +300,23 @@ export const STOP_NOTE = 'It stays a Saved list, title and all. Tracking it agai
 /** What stopping tracking keeps of a list at an address that isn't the archive's, which can't be tracked again. */
 export const NOT_ARCHIVE_STOP_NOTE = 'It stays a Saved list, title and all, but can\'t be tracked again: its address isn\'t a page on AO3.'
 
-const STATUS_TIPS = {
+/** What a row's Status cell calls the list's state. */
+export const STATUS_WORDS = {
+  tracked: 'Tracked',
+  saved: 'Saved',
+  trackedPending: 'Tracked (pending)',
+  savedPending: 'Saved (pending)',
+} as const
+
+/** The line under a row's status word, where it isn't the day tracking began. */
+export const STATUS_DETAILS = {
+  notTracked: 'not tracked',
+  notArchive: 'not an AO3 address',
+  needsVisit: 'needs one visit',
+} as const
+
+/** What each status means, for its tooltip. */
+export const STATUS_TIPS = {
   tracked: 'Tracked for your review: its new and updated works are gathered there. It does everything any other saved list does as well.',
   saved: 'Saved: kept, refreshed, cached and editable like any list, but not tracked for review. Switch it on to track it from today.',
   notSearch: 'Saved: kept, refreshed and cached like any list. Only a search, an uncommon tag or a series can be tracked for review.',
@@ -310,7 +326,7 @@ const STATUS_TIPS = {
 } as const
 
 /** Why a row that can never be tracked from here has no switch at all. */
-const NO_SWITCH = {
+export const NO_SWITCH = {
   needsVisit: 'Can\'t be tracked until it has been opened on AO3 once',
   notSearch: 'Can\'t be tracked: only a search, an uncommon tag or a series can be',
 } as const
@@ -332,20 +348,20 @@ export function statusCell(row: SavedListRow): SavedListStatusCell {
   const tracked = row.status === 'tracked'
   const switchTitle = withReason(tracked ? 'Track this list for review' : 'Track this list for review, from today on', row.trackOff)
   if (row.pending === 'needs-visit')
-    return { word: 'Saved (pending)', detail: 'needs one visit', tip: STATUS_TIPS.needsVisit, toggle: { kind: 'none', title: NO_SWITCH.needsVisit } }
+    return { word: STATUS_WORDS.savedPending, detail: STATUS_DETAILS.needsVisit, tip: STATUS_TIPS.needsVisit, toggle: { kind: 'none', title: NO_SWITCH.needsVisit } }
   if (row.pending === 'not-archive') {
     return {
-      word: `${tracked ? 'Tracked' : 'Saved'} (pending)`,
-      detail: 'not an AO3 address',
+      word: tracked ? STATUS_WORDS.trackedPending : STATUS_WORDS.savedPending,
+      detail: STATUS_DETAILS.notArchive,
       tip: tracked ? STATUS_TIPS.trackedNotArchive : STATUS_TIPS.savedNotArchive,
       toggle: { kind: 'switch', title: switchTitle },
     }
   }
   if (row.trackOff === TRACK_OFF.notSearch)
-    return { word: 'Saved', detail: 'not tracked', tip: STATUS_TIPS.notSearch, toggle: { kind: 'none', title: NO_SWITCH.notSearch } }
+    return { word: STATUS_WORDS.saved, detail: STATUS_DETAILS.notTracked, tip: STATUS_TIPS.notSearch, toggle: { kind: 'none', title: NO_SWITCH.notSearch } }
   return tracked
-    ? { word: 'Tracked', detail: row.since === undefined ? '' : `since ${formatDay(row.since)}`, tip: STATUS_TIPS.tracked, toggle: { kind: 'switch', title: switchTitle } }
-    : { word: 'Saved', detail: 'not tracked', tip: STATUS_TIPS.saved, toggle: { kind: 'switch', title: switchTitle } }
+    ? { word: STATUS_WORDS.tracked, detail: row.since === undefined ? '' : `since ${formatDay(row.since)}`, tip: STATUS_TIPS.tracked, toggle: { kind: 'switch', title: switchTitle } }
+    : { word: STATUS_WORDS.saved, detail: STATUS_DETAILS.notTracked, tip: STATUS_TIPS.saved, toggle: { kind: 'switch', title: switchTitle } }
 }
 
 /** A count and the noun it counts. */
@@ -457,12 +473,43 @@ export interface SavedListOfflineDetails {
   remove: SavedListRemove | null
 }
 
+/**
+ * What the Offline copy half says with no copy: `opens` where the list's open
+ * URL keeps one; `elsewhere` where it has none, so one is kept from its page.
+ */
+export const NO_COPY = {
+  opens: 'None yet. Open it on AO3 to keep a copy: from then on, it refreshes from here.',
+  elsewhere: 'None yet. Open the list on AO3 and press the search button there: a copy is kept from then on, and refreshes from here.',
+} as const
+
+/** What Remove offline copy says, beyond what it does to the blurbs and the cached works. */
+export const COPY_REMOVAL = {
+  reopens: 'Opening the list on AO3 again brings it straight back.',
+  discardsJob: 'Its stopped job is discarded with it.',
+} as const
+
+/** What Remove list says, beyond the lists that keep its copy. */
+export const LIST_REMOVAL = {
+  forgets: 'Forgets the list and its title.',
+  forgetsTracked: 'Forgets the list and its title, and stops tracking it.',
+  neverFetched: 'Its address isn\'t a page on AO3, so nothing was ever fetched for it.',
+  copyGoes: 'Its offline copy goes too.',
+  textStays: 'Cached work text stays.',
+  stopInstead: 'To keep it without reviewing it, stop tracking it instead.',
+} as const
+
+/** What the Tracking half says of a list that isn't tracked, or can't be. */
+export const TRACKING_STATE = {
+  notTracked: 'Not tracked. Tracking starts from today, so nothing from before it reaches the review.',
+  notTrackedWithCopy: 'Not tracked. Tracking starts from today: however many works the offline copy already holds, none of them reaches the review.',
+  needsVisit: 'Can\'t be tracked until it has been opened on AO3 once — the same visit that lets it refresh.',
+  notSearch: 'Can\'t be tracked: only a search, an uncommon tag or a series can be.',
+} as const
+
 export function offlineDetails(row: SavedListRow, view: JobView, now: number, prune: boolean): SavedListOfflineDetails {
   const { caching } = row
   if (caching.kind !== 'copy') {
-    const empty = row.open
-      ? 'None yet. Open it on AO3 to keep a copy: from then on, it refreshes from here.'
-      : 'None yet. Open the list on AO3 and press the search button there: a copy is kept from then on, and refreshes from here.'
+    const empty = row.open ? NO_COPY.opens : NO_COPY.elsewhere
     return { summary: null, empty, note: null, off: null, refreshOff: null, refreshNote: null, retry: 0, cached: 0, remove: null }
   }
 
@@ -484,11 +531,11 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
   const removing = [blurbsOnRemove(prune)]
   if (cached)
     removing.push(`The ${counted(cached, 'cached work', 'cached works')} (${formatBytes(bytes)}) ${cached === 1 ? 'stays' : 'stay'}, since another list may be reading the same copies.`)
-  removing.push('Opening the list on AO3 again brings it straight back.')
+  removing.push(COPY_REMOVAL.reopens)
   if (others.length)
     removing.push(`${titlesInWords(others)} ${others.length === 1 ? 'shares this copy, and loses' : 'share this copy, and lose'} it too.`)
   if (jobHere(row, view) && view.state === 'stopped')
-    removing.push('Its stopped job is discarded with it.')
+    removing.push(COPY_REMOVAL.discardsJob)
 
   return {
     summary: summary.join(' · '),
@@ -526,35 +573,33 @@ export function trackingDetails(row: SavedListRow, view: JobView, prune: boolean
   const copyKeys = row.caching.kind === 'copy' ? row.caching.keys : null
   const removeList = (note: string): SavedListRemove | null => (row.titleEditable ? { off: copyKeys ? removeOff(view, copyKeys) : null, note } : null)
   const tracked = row.status === 'tracked'
-  const stopsTracking = tracked ? ', and stops tracking it' : ''
+  const forgets = tracked ? LIST_REMOVAL.forgetsTracked : LIST_REMOVAL.forgets
   if (row.pending === 'not-archive') {
     return {
       ...none,
       problem: NOT_ARCHIVE_NOTE,
       action: tracked ? { kind: 'stop', off: row.trackOff ?? null, note: NOT_ARCHIVE_STOP_NOTE } : null,
-      remove: removeList(`Forgets the list and its title${stopsTracking}. Its address isn't a page on AO3, so nothing was ever fetched for it.`),
+      remove: removeList(`${forgets} ${LIST_REMOVAL.neverFetched}`),
     }
   }
   if (row.pending === 'needs-visit')
-    return { ...none, state: 'Can\'t be tracked until it has been opened on AO3 once — the same visit that lets it refresh.', muted: true }
+    return { ...none, state: TRACKING_STATE.needsVisit, muted: true }
   if (row.trackOff === TRACK_OFF.notSearch)
-    return { ...none, state: 'Can\'t be tracked: only a search, an uncommon tag or a series can be.', muted: true }
+    return { ...none, state: TRACKING_STATE.notSearch, muted: true }
 
   const state = tracked
     ? `Tracked since ${formatDay(row.since ?? 0)}. Its new and updated works turn up in your review.`
-    : copyKeys
-      ? 'Not tracked. Tracking starts from today: however many works the offline copy already holds, none of them reaches the review.'
-      : 'Not tracked. Tracking starts from today, so nothing from before it reaches the review.'
+    : copyKeys ? TRACKING_STATE.notTrackedWithCopy : TRACKING_STATE.notTracked
 
   const others = row.sameAddressAs
-  const removing = [`Forgets the list and its title${stopsTracking}.`]
+  const removing: string[] = [forgets]
   if (copyKeys) {
     removing.push(others.length
       ? `Its offline copy stays: ${titlesInWords(others)} ${others.length === 1 ? 'searches' : 'search'} the same thing.`
-      : `Its offline copy goes too. ${blurbsOnRemove(prune)} Cached work text stays.`)
+      : `${LIST_REMOVAL.copyGoes} ${blurbsOnRemove(prune)} ${LIST_REMOVAL.textStays}`)
   }
   if (tracked)
-    removing.push('To keep it without reviewing it, stop tracking it instead.')
+    removing.push(LIST_REMOVAL.stopInstead)
 
   return {
     state,

@@ -2,27 +2,30 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
+import { mentions } from '../facts.mjs'
 import { ensureBuilt, findChrome } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import {
   ARCHIVE,
-  boxButtons,
-  boxText,
-  clickBoxButton,
+  boxActions,
+  boxWarnings,
+  clickBoxAction,
   diffLines,
   launch,
+  LIST_CHOOSER,
   listingPage,
   navigateBy,
   openBox,
   openTab,
   openToolbar,
+  pillRow,
   pillText,
   refiningMark,
   rerun,
   searchPage,
   storedOption,
   TITLE_INPUT,
-  toasts,
+  toastNamed,
   TRACK_BOX,
   visit,
 } from './trackedPages.mjs'
@@ -59,8 +62,21 @@ function route(url) {
   return null
 }
 
+/** The pill is in `row`, and names the list `title`. */
+async function pillIs(tab, row, title) {
+  assert.equal(await pillRow(tab), row)
+  assert.ok(mentions(await pillText(tab), title), `the pill should name ${title}`)
+}
+
+/** Whether each line of the box's diff names its own one of `names`, in order. */
+async function diffNames(tab, names) {
+  const lines = await diffLines(tab)
+  assert.equal(lines.length, names.length, JSON.stringify(lines))
+  lines.forEach((line, i) => assert.ok(mentions(line, names[i]), `${line} should name ${names[i]}`))
+}
+
 /** The chooser's lists, and which is picked. */
-const chooser = tab => tab.$eval(`${TRACK_BOX} select[aria-label="List to update"]`, select => ({
+const chooser = tab => tab.$eval(LIST_CHOOSER, select => ({
   options: [...select.options].map(option => option.textContent.trim()),
   value: select.value,
 }))
@@ -94,28 +110,30 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
   test('a page no list is, but two share the root of, offers to track or update', async () => {
     await visit(tab, BOTH_OUT)
     await openBox(tab)
-    assert.equal(await pillText(tab), 'Track or update…')
-    const text = await boxText(tab)
-    assert.match(text, /Update a list/)
-    assert.match(text, /Track as a new list/)
+    assert.equal(await pillRow(tab), 'same-root:nodraco,hpdone')
+    assert.deepEqual(await boxActions(tab), ['update', 'refine', 'track', 'cancel'], 'update or refine a list, or track the page as a new one')
   })
 
   test('the lists to update are chosen between by title, and only those with the root', async () => {
     const got = await chooser(tab)
     assert.deepEqual(got.options, ['Harry Potter, complete', 'Harry Potter, no Draco'])
     assert.equal(got.value, 'hpdone')
-    assert.deepEqual(await diffLines(tab), ['Excludes: Draco Malfoy, Ron Weasley', 'Completion: complete only → any'])
-    assert.deepEqual(await boxButtons(tab), ['Update “Harry Potter, complete”', 'Refine “Harry Potter, complete”', 'Track', 'Cancel'])
+    const [excludes, completion, ...more] = await diffLines(tab)
+    assert.deepEqual(more, [])
+    assert.ok(mentions(excludes, 'Draco Malfoy') && mentions(excludes, 'Ron Weasley'), excludes)
+    assert.ok(completion, 'and the completion it no longer asks for')
+    for (const action of ['update', 'refine'])
+      assert.ok(mentions(await tab.$eval(`${TRACK_BOX} [data-ao3e-action="${action}"]`, el => el.textContent), 'Harry Potter, complete'), `${action} names the list picked`)
   })
 
   test('choosing another list says what updating that one would change', async () => {
-    await tab.select(`${TRACK_BOX} select`, 'nodraco')
-    assert.deepEqual(await diffLines(tab), ['Excludes: Ron Weasley'])
-    assert.ok((await boxButtons(tab)).includes('Update “Harry Potter, no Draco”'))
+    await tab.select(LIST_CHOOSER, 'nodraco')
+    await diffNames(tab, ['Ron Weasley'])
+    assert.ok(mentions(await tab.$eval(`${TRACK_BOX} [data-ao3e-action="update"]`, el => el.textContent), 'Harry Potter, no Draco'), 'update names the list picked')
   })
 
   test('Update rewrites that list in place, keeping its tracking start', async () => {
-    await rerun(tab, () => clickBoxButton(tab, 'Update “Harry Potter, no Draco”'))
+    await rerun(tab, () => clickBoxAction(tab, 'update'))
     const updated = await list('nodraco')
     assert.equal(updated.url, normalizeTrackedUrl(BOTH_OUT).url)
     assert.equal(updated.tracked, true)
@@ -126,12 +144,12 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     // didn't know: that the tag is a fandom.
     assert.deepEqual(await list('hpdone'), { ...COMPLETE, type: 'fandom', entity: 'Harry Potter - J. K. Rowling' })
     assert.deepEqual(await list('sherl'), SHERLOCK)
-    assert.ok((await toasts(tab)).includes('Updated “Harry Potter, no Draco”.'))
+    assert.ok(mentions((await toastNamed(tab, 'updated'))?.message ?? '', 'Harry Potter, no Draco'), 'the update is said, naming the list')
     assert.equal(await refiningMark(tab), null, 'nothing was being refined, and nothing is now')
 
     // The page is that list now.
     await openToolbar(tab)
-    assert.equal(await pillText(tab), 'Tracked as “Harry Potter, no Draco”')
+    await pillIs(tab, 'exact:nodraco', 'Harry Potter, no Draco')
   })
 
   /**
@@ -149,14 +167,14 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
   test('Refine opens the chosen list\'s own page, refining it', async () => {
     await visit(tab, `${ARCHIVE}${HP_PATH}?work_search%5Blanguage_id%5D=en`)
     await openBox(tab)
-    assert.equal(await pillText(tab), 'Track or update…')
+    assert.equal(await pillRow(tab), 'same-root:nodraco,hpdone')
     assert.equal((await chooser(tab)).value, 'hpdone')
-    await navigateBy(tab, () => clickBoxButton(tab, 'Refine “Harry Potter, complete”'))
+    await navigateBy(tab, () => clickBoxAction(tab, 'refine'))
 
     assert.equal(await tab.evaluate(() => location.href), `${ARCHIVE}${COMPLETE.url}`)
     assert.deepEqual(await refiningMark(tab), { id: 'hpdone', restore: true })
     await openBox(tab)
-    assert.equal(await pillText(tab), 'Refining “Harry Potter, complete”')
+    await pillIs(tab, 'refining:hpdone:same', 'Harry Potter, complete')
   })
 
   test('an update that would duplicate another list is refused, and says which', async () => {
@@ -164,27 +182,29 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     // so the update is offered — and warned about.
     await visit(tab, BOTH_OUT)
     await openBox(tab)
-    assert.equal(await pillText(tab), 'Update “Harry Potter, complete”')
-    assert.match(await boxText(tab), /This search is already tracked as “Harry Potter, no Draco”, so “Harry Potter, complete” can't become it\./)
+    await pillIs(tab, 'refining:hpdone:changed', 'Harry Potter, complete')
+    assert.deepEqual(await boxWarnings(tab), ['twin'])
+    assert.ok(mentions(await tab.$eval(`${TRACK_BOX} [data-ao3e-warn="twin"]`, el => el.textContent), 'Harry Potter, no Draco'), 'the warning names the list it would duplicate')
 
     const before = await storedOption(tab)
-    await clickBoxButton(tab, 'Update “Harry Potter, complete”')
-    const refusal = async () => (await toasts(tab)).find(text => text.startsWith('This search is already tracked as'))
+    await clickBoxAction(tab, 'update')
+    const refusal = () => toastNamed(tab, 'refused-duplicate')
     await until('the refusal', refusal)
     assert.deepEqual(await storedOption(tab), before, 'nothing is written')
-    const said = await refusal()
-    assert.match(said, /“Harry Potter, no Draco” \(Fandom: Harry Potter - J\. K\. Rowling\), so “Harry Potter, complete” was left as it was\./)
+    const said = (await refusal()).message
+    for (const fact of ['Harry Potter, no Draco', 'Fandom: Harry Potter - J. K. Rowling', 'Harry Potter, complete'])
+      assert.ok(mentions(said, fact), `the refusal names ${fact}: ${said}`)
     assert.deepEqual(await refiningMark(tab), { id: 'hpdone', restore: true }, 'and the tab is still refining')
   })
 
   test('Track makes a new list, titled for what it searches', async () => {
-    await clickBoxButton(tab, 'Stop refining')
+    await clickBoxAction(tab, 'stop-refining')
     await visit(tab, `${ARCHIVE}/works?work_search%5Bcomplete%5D=F&${HP_QUERY}`)
     await openBox(tab)
-    assert.equal(await pillText(tab), 'Track or update…')
+    assert.match(await pillRow(tab), /^same-root:/)
     // The category comes from the blurbs, which file the fandom in their heading.
-    assert.equal(await tab.$eval(`${TRACK_BOX} input[aria-label="Title for this list"]`, el => el.value), 'Fandom: Harry Potter - J. K. Rowling')
-    await rerun(tab, () => clickBoxButton(tab, 'Track'))
+    assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Fandom: Harry Potter - J. K. Rowling')
+    await rerun(tab, () => clickBoxAction(tab, 'track'))
     const lists = (await storedOption(tab)).lists
     assert.equal(lists.length, 4)
     const added = lists.at(-1)
@@ -237,23 +257,19 @@ describe('tracked lists: updating a works search without words from an edited se
     await browser?.close()
   })
 
-  const label = `“${HP_SEARCH.alias}”`
-
   test('the same fandom with another character offers to update the list it came from', async () => {
     await visit(tab, RON_INSTEAD)
     assert.equal(await refiningMark(tab), null)
     await openBox(tab)
-    assert.equal(await pillText(tab), 'Track or update…')
-    const text = await boxText(tab)
-    assert.match(text, /Update a list/)
-    assert.ok(text.includes(label), text)
-    assert.doesNotMatch(text, /This changes what/, 'the list keeps its root')
-    assert.deepEqual(await diffLines(tab), ['Includes: Ron Weasley', 'No longer includes: Draco Malfoy'])
-    assert.deepEqual(await boxButtons(tab), [`Update ${label}`, `Refine ${label}`, 'Track', 'Cancel'])
+    assert.equal(await pillRow(tab), 'same-root:hpsrch')
+    assert.ok(mentions(await tab.$eval(TRACK_BOX, el => el.textContent), HP_SEARCH.alias), 'the box names the list it would update')
+    assert.deepEqual(await boxWarnings(tab), [], 'the list keeps its root')
+    await diffNames(tab, ['Ron Weasley', 'Draco Malfoy'])
+    assert.deepEqual(await boxActions(tab), ['update', 'refine', 'track', 'cancel'])
   })
 
   test('Update rewrites it in place, as the search it now is', async () => {
-    await rerun(tab, () => clickBoxButton(tab, `Update ${label}`))
+    await rerun(tab, () => clickBoxAction(tab, 'update'))
     const lists = (await storedOption(tab)).lists
     assert.equal(lists.length, 1)
     assert.deepEqual(lists[0], {
@@ -261,13 +277,13 @@ describe('tracked lists: updating a works search without words from an edited se
       url: '/works/search?work_search[fandom_names]=Harry+Potter+-+J.+K.+Rowling&work_search[character_names]=Ron+Weasley',
     })
     await openToolbar(tab)
-    assert.equal(await pillText(tab), `Tracked as ${label}`)
+    await pillIs(tab, 'exact:hpsrch', HP_SEARCH.alias)
   })
 
   test('another fandom with the same character is no list\'s', async () => {
     await visit(tab, `${ARCHIVE}/works/search?work_search%5Bfandom_names%5D=Sherlock+%28TV%29&work_search%5Bcharacter_names%5D=Ron+Weasley`)
     await openBox(tab)
-    assert.equal(await pillText(tab), 'Track this search')
+    assert.equal(await pillRow(tab), 'new')
     assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Search: Sherlock (TV)')
   })
 })

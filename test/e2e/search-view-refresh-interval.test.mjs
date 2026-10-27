@@ -302,11 +302,11 @@ describe('Reload listings, on the options page', { skip }, () => {
       assert.equal(await own.evaluate((el, next) => el.nextElementSibling === next, row), true, 'the row straight after Reload your own lists')
 
       const select = await options.control(row, 'combobox')
-      assert.equal(await options.text(select), 'Every time')
+      assert.equal(await select.evaluate(el => el.dataset.value), '0', 'every time, until a time is picked')
       await select.evaluate(el => window.scrollBy({ top: el.getBoundingClientRect().top - window.innerHeight / 2, behavior: 'instant' }))
       await select.click()
       await options.page.waitForSelector('[role="option"]')
-      await (await options.control(options.page, 'option', 'After 6 hours')).click()
+      await (await options.page.$('[role="option"][data-value="6"]')).click()
       await until('the hours to be stored', async () => await options.stored('option.searchListingsRefreshHours') === 6)
       assert.equal(await options.stored('option.searchProfileListsRefreshHours'), null, 'and only its own option')
     }

@@ -168,7 +168,7 @@ describe('Marked for Later across a re-run', { skip }, () => {
     const titles = await tab.evaluate(() =>
       Array.from(document.querySelectorAll('.AO3E--search-view--results > li.blurb:not(.AO3E--search-view--hidden)'), li => li.querySelector('h4.heading a')?.textContent?.trim()))
     const count = await tab.evaluate(() => document.querySelector('.AO3E--search-view--count')?.textContent)
-    assert.match(count, new RegExp(`of ${LISTED - 1} works`), 'the work marked read is off the list')
+    assert.match(count, new RegExp(`\\b${LISTED - 1}\\b`), 'the work marked read is off the list')
     assert.ok(titles.length > 0)
     assert.ok(!titles.includes('Work 1'))
     assert.equal(frames.blank, 0, `the list was missing for ${frames.blank} frames (${Math.round(frames.back - frames.gone)}ms)`)

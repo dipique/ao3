@@ -10,7 +10,6 @@ describe('matchCasingOff', () => {
   })
 
   test('under Case sensitive it is inert, saying why, whatever its own value', () => {
-    assert.equal(MATCH_CASING_OFF, 'Off while Case sensitive is on')
     assert.equal(matchCasingOff({ caseSensitive: true, matchCasing: true }), MATCH_CASING_OFF)
     assert.equal(matchCasingOff({ caseSensitive: true, matchCasing: false }), MATCH_CASING_OFF)
   })

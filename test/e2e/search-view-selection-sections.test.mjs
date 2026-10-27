@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { menuClosed, openMenu, pressFacet, settled, viewDrawn } from './trackedPages.mjs'
+import { menuClosed, openMenu, pickRow, pressFacet, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -43,7 +43,7 @@ const HTML = `<!doctype html>
   </div>
 </body></html>`
 
-const GROUP = 'Additional Tags'
+const GROUP = 'freeforms'
 
 /**
  * A facet group keeps its selected values in a collapsible section per
@@ -88,7 +88,7 @@ describe('the search view selection sections', { skip }, () => {
   })
 
   /** The same toggle from the other end: a blurb's tag menu inside the view. */
-  const toggleFromTagMenu = async (value, label) => {
+  const toggleFromTagMenu = async (value, dir) => {
     await openMenu(page, () => page.evaluate((want) => {
       const link = [...document.querySelectorAll('.AO3E--search-view--results ul.tags a.tag')]
         .find(a => a.textContent.trim() === want)
@@ -96,100 +96,93 @@ describe('the search view selection sections', { skip }, () => {
         throw new Error(`no tag link reading "${want}" in the results`)
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
     }, value))
-    await page.evaluate((l) => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => el.textContent.startsWith(l))
-      if (!row)
-        throw new Error(`no "${l}" row on the tag menu`)
-      row.click()
-    }, label)
+    assert.ok(await pickRow(page, dir, value), `no ${dir} row for ${value} on the tag menu`)
     await menuClosed(page)
   }
 
-  /** Where `value`'s row sits in `group`, and whether the reader can see it. */
+  /**
+   * Where `value`'s row sits in the facet `group`: the section's direction, or
+   * null outside them, and whether the reader can see it.
+   */
   const placement = (group, value) => page.evaluate(([g, want]) => {
-    const details = [...document.querySelectorAll('.AO3E--search-view--group')]
-      .find(d => d.querySelector('.AO3E--search-view--group-label').textContent.trim().startsWith(g))
+    const details = document.querySelector(`.AO3E--search-view--group[data-ao3e-facet="${g}"]`)
     const row = [...details.querySelectorAll('.AO3E--search-view--row')]
       .find(r => r.querySelector('.AO3E--search-view--row-name')?.textContent === want)
     if (!row)
       return null
     const section = row.closest('.AO3E--search-view--sel')
     return {
-      section: section ? section.querySelector('.AO3E--search-view--sel-label').textContent : null,
+      section: section ? ['include', 'require', 'exclude'].find(dir => section.classList.contains(`AO3E--search-view--sel-${dir}`)) : null,
       // offsetParent is null for anything display:none, at any depth.
       visible: row.offsetParent !== null,
-      // What the section heading says it holds, for a value shut away inside one.
+      // How many the section heading says it holds, for a value shut away inside one.
       heading: section && !section.classList.contains('AO3E--search-view--hidden')
-        ? section.querySelector('.AO3E--search-view--sel-head').textContent.trim()
+        ? Number(section.querySelector('.AO3E--search-view--sel-count').textContent)
         : null,
     }
   }, [group, value])
 
-  /** Click a group's section heading, e.g. "Excluded". */
-  const clickHeading = async (group, label) => {
+  /** Click the heading of a group's section of `dir`, e.g. `exclude`. */
+  const clickHeading = async (group, dir) => {
     await page.evaluate(([g, want]) => {
-      const details = [...document.querySelectorAll('.AO3E--search-view--group')]
-        .find(d => d.querySelector('.AO3E--search-view--group-label').textContent.trim().startsWith(g))
-      const head = [...details.querySelectorAll('.AO3E--search-view--sel-head')]
-        .find(h => h.querySelector('.AO3E--search-view--sel-label').textContent === want)
+      const head = document.querySelector(`.AO3E--search-view--group[data-ao3e-facet="${g}"] .AO3E--search-view--sel-${want} .AO3E--search-view--sel-head`)
       if (!head)
-        throw new Error(`no "${want}" heading in ${g}`)
+        throw new Error(`no ${want} heading in ${g}`)
       head.click()
-    }, [group, label])
+    }, [group, dir])
   }
 
   test('files an excluded value under a heading that starts shut', async () => {
     await pressFacet(page, 'Fluff', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Fluff'), {
-      section: 'Excluded',
+      section: 'exclude',
       visible: false,
-      heading: 'Excluded1',
+      heading: 1,
     })
   })
 
   test('leaves the other two sections open, so their values stay in sight', async () => {
     await pressFacet(page, 'Angst', 'include')
-    assert.deepEqual(await placement(GROUP, 'Angst'), { section: 'Included', visible: true, heading: 'Included1' })
+    assert.deepEqual(await placement(GROUP, 'Angst'), { section: 'include', visible: true, heading: 1 })
 
     await pressFacet(page, 'Angst', 'require')
-    assert.deepEqual(await placement(GROUP, 'Angst'), { section: 'Required', visible: true, heading: 'Required1' })
+    assert.deepEqual(await placement(GROUP, 'Angst'), { section: 'require', visible: true, heading: 1 })
   })
 
   test('keeps a shut section shut as more values land in it', async () => {
     await pressFacet(page, 'Quiet', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Quiet'), {
-      section: 'Excluded',
+      section: 'exclude',
       visible: false,
-      heading: 'Excluded2',
+      heading: 2,
     })
   })
 
   test('opens on the heading, and stays open for the next value', async () => {
-    await clickHeading(GROUP, 'Excluded')
-    assert.deepEqual(await placement(GROUP, 'Fluff'), { section: 'Excluded', visible: true, heading: 'Excluded2' })
+    await clickHeading(GROUP, 'exclude')
+    assert.deepEqual(await placement(GROUP, 'Fluff'), { section: 'exclude', visible: true, heading: 2 })
 
     await pressFacet(page, 'Hurt/Comfort', 'exclude')
-    assert.deepEqual(await placement(GROUP, 'Hurt/Comfort'), { section: 'Excluded', visible: true, heading: 'Excluded3' })
+    assert.deepEqual(await placement(GROUP, 'Hurt/Comfort'), { section: 'exclude', visible: true, heading: 3 })
   })
 
   test('a blurb tag menu files its value in the same place a facet row would', async () => {
-    await clickHeading(GROUP, 'Excluded')
+    await clickHeading(GROUP, 'exclude')
     await pressFacet(page, 'Angst', 'require')
     assert.equal((await placement(GROUP, 'Angst'))?.section, null, 'Angst starts unselected')
 
     // "Both at once" carries Angst and is still on the page, so its menu is the
     // way in. The row has to end up exactly where the facet button puts it.
-    await toggleFromTagMenu('Angst', 'Exclude')
+    await toggleFromTagMenu('Angst', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Angst'), {
-      section: 'Excluded',
+      section: 'exclude',
       visible: false,
-      heading: 'Excluded4',
+      heading: 4,
     })
   })
 
   test('leaves an unselected value outside the sections', async () => {
-    assert.deepEqual(await placement(GROUP, 'Quiet'), { section: 'Excluded', visible: false, heading: 'Excluded4' })
+    assert.deepEqual(await placement(GROUP, 'Quiet'), { section: 'exclude', visible: false, heading: 4 })
     await pressFacet(page, 'Quiet', 'exclude')
     assert.deepEqual(await placement(GROUP, 'Quiet'), { section: null, visible: true, heading: null })
   })

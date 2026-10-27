@@ -9,9 +9,13 @@ describe('phrases', () => {
     assert.equal(sentence(''), '')
   })
 
-  test('a control\'s tooltip says what it does, then why it is off, after a dash', () => {
-    assert.equal(withReason('Cache this list\'s works', 'off while this list is caching'), 'Cache this list\'s works — off while this list is caching')
-    assert.equal(withReason('Cache this list\'s works', null), 'Cache this list\'s works')
-    assert.equal(withReason('Cache this list\'s works', undefined), 'Cache this list\'s works')
+  test('a control\'s tooltip says what it does, then why it is off', () => {
+    const label = 'Cache this list\'s works'
+    const reason = 'off while this list is caching'
+    const tooltip = withReason(label, reason)
+    assert.ok(tooltip.startsWith(label), 'what it does comes first')
+    assert.ok(tooltip.endsWith(reason), 'then why it is off')
+    assert.equal(withReason(label, null), label)
+    assert.equal(withReason(label, undefined), label)
   })
 })

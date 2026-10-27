@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test'
 
-import { ARCHIVE, contrastRatio, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { TagType } from '../../src/common/data.ts'
+import { SUGGEST_NOTES } from '../../src/options_ui/model/tagSuggestions.ts'
+import { ARCHIVE, contrastRatio, mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { RuleEditor } from './ruleEditor.mjs'
 
 /** AO3's answers to its tag autocomplete, recorded signed out and trimmed to a few names each, keyed by request. */
 const RECORDED = JSON.parse(readFileSync(new URL('../options/ao3-autocomplete.json', import.meta.url), 'utf8'))
@@ -19,9 +22,6 @@ const recordedReply = url => ({ json: recorded(new URL(url).pathname) })
 /** The request for `term` from AO3's autocomplete for `kind`, as the stub sees it. */
 const asking = (kind, term) => `${ARCHIVE}/autocomplete/${kind}?term=${encodeURIComponent(term)}`
 
-const PAUSED = 'AO3 asked us to slow down — suggestions are paused'
-const UNAVAILABLE = 'Suggestions unavailable'
-
 /** One rule, for Edit to open. */
 const SEED = { 'option.rules': { enabled: true, filters: [{ target: 'f', value: 'Harry Potter - J. K. Rowling', matcher: 'exact' }], colors: {} } }
 
@@ -29,6 +29,8 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
   let session
   let options
   let page
+  /** The rule editor, on the page open now. */
+  let editor
   /** What the page asked the stand-in for AO3 for, and gave up on. */
   let archive
   /** How the stand-in answers each request. A test may change it before it types. */
@@ -51,27 +53,14 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
       },
     })
     page = options.page
+    editor = new RuleEditor(options)
   })
 
   afterEach(() => options?.close())
 
   // --- helpers bound to the live page ---
-  const dialog = async () => {
-    await page.waitForSelector('[role="dialog"]')
-    return page.$('[role="dialog"]')
-  }
-  const openAddRule = async () => options.openDialog(await options.control(await options.list('rules'), 'button', 'Add a rule'))
-  /** One of a radio group's choices, the group by its name, such as “What the rule matches”, once it is the one chosen. */
-  const pick = async (group, name) => {
-    const choice = await options.control(await options.control(await dialog(), 'radiogroup', group), 'radio', name)
-    await options.press(choice)
-    await page.waitForFunction(el => el.getAttribute('aria-checked') === 'true', {}, choice)
-  }
   /** The value field: a combobox while it offers suggestions, a plain text field otherwise. */
-  const valueField = async () => {
-    const [combobox] = await options.controls(await dialog(), 'combobox')
-    return combobox ?? options.control(await dialog(), 'textbox')
-  }
+  const valueField = () => editor.field('value')
   const typeValue = async text => (await valueField()).type(text)
   const fieldValue = async () => (await valueField()).evaluate(el => el.value)
   const expanded = async () => (await valueField()).evaluate(el => el.getAttribute('aria-expanded'))
@@ -94,17 +83,10 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
   }
   /** The box's note, once it is this one. */
   const note = kind => page.waitForSelector(`[role="dialog"] [data-suggest="${kind}"]`)
-  /** Add rule, or Save when editing; the dialog closes and the rules are written. */
-  const saveDialog = async (name) => {
-    await options.press(await options.control(await dialog(), 'button', name))
-    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-    await options.saved()
-  }
-  const storedRule = async value => (await options.lastWrite('option.rules'))?.filters?.find(f => f.value === value)
 
   test('three fast keystrokes make one request, and its names show with the typed letters marked', async () => {
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
     await typeValue('pot')
     await showsSuggestions()
 
@@ -116,8 +98,8 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
   })
 
   test('a pick writes AO3\'s spelling', async () => {
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
     await typeValue('harry potter')
     await showsSuggestions()
 
@@ -126,14 +108,14 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     assert.equal(await expanded(), 'false', 'a pick closes the list')
     assert.deepEqual(await suggestions(), [])
 
-    await saveDialog('Add rule')
-    assert.deepEqual(await storedRule('Harry Potter - J. K. Rowling'), { target: 'f', value: 'Harry Potter - J. K. Rowling', matcher: 'exact' })
+    await editor.save()
+    assert.deepEqual(await editor.written('Harry Potter - J. K. Rowling'), { target: 'f', value: 'Harry Potter - J. K. Rowling', matcher: 'exact' })
     assert.deepEqual(archive.asked, [asking('fandom', 'harry potter')])
   })
 
   test('the arrows and Enter pick too, and Escape closes the list before the dialog', async () => {
-    await openAddRule()
-    await pick('What the rule matches', 'Character')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Character)
     await typeValue('potter')
     await showsSuggestions()
     assert.deepEqual(await suggestions(), CHARACTERS)
@@ -173,8 +155,9 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
         },
       })
       page = options.page
-      await openAddRule()
-      await pick('What the rule matches', 'Fandom')
+      editor = new RuleEditor(options)
+      await editor.openAdd()
+      await editor.pick('target', TagType.Fandom)
       await typeValue('pot')
       await showsSuggestions()
       await page.keyboard.press('ArrowDown')
@@ -192,8 +175,8 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
   })
 
   test('answers are kept while the dialog is open, and asked for again once it reopens', async () => {
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
     await typeValue('pot')
     await showsSuggestions()
     await typeValue('t')
@@ -206,8 +189,8 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
     await page.keyboard.press('Escape')
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'))
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
     await typeValue('pot')
     await showsSuggestions()
     assert.deepEqual(archive.asked, [asking('fandom', 'pot'), asking('fandom', 'pott'), asking('fandom', 'pot')])
@@ -220,8 +203,8 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
       answerPot = () => resolve({ json: [{ id: 'Too Late', name: 'Too Late' }] })
     })
     reply = url => (url === asking('fandom', 'pot') ? potAnswer : recordedReply(url))
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
     await typeValue('pot')
     await until('“pot” to be asked', () => archive.asked.length === 1)
     await typeValue('t')
@@ -238,12 +221,12 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
   test('a 429 pauses suggestions, nothing is sent while it lasts, and they resume when it ends', async () => {
     let calls = 0
     reply = url => (calls++ === 0 ? { status: 429, headers: { 'retry-after': '2' }, body: 'slow down' } : recordedReply(url))
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
     await typeValue('pot')
 
     const paused = await note('paused')
-    assert.equal(await options.text(paused), PAUSED)
+    assert.ok(mentions(await options.text(paused), SUGGEST_NOTES.paused))
     assert.ok(await options.contrast(paused) >= 4.5, 'the note reads at AA')
     await typeValue('t')
     await options.suggestionsAsked(archive)
@@ -257,43 +240,43 @@ describe('options UI — tag suggestions from AO3', { skip }, () => {
 
   test('a network failure says so once, asks nothing more, and the rule still saves', async () => {
     reply = () => 'fail'
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
     await typeValue('pot')
 
     const unavailable = await note('unavailable')
-    assert.equal(await options.text(unavailable), UNAVAILABLE)
+    assert.ok(mentions(await options.text(unavailable), SUGGEST_NOTES.unavailable))
     assert.ok(await options.contrast(unavailable) >= 4.5, 'the note reads at AA')
     await typeValue('ter')
     await options.suggestionsAsked(archive)
     assert.deepEqual(archive.asked, [asking('fandom', 'pot')], 'no retry')
     assert.equal(await page.$$eval('[role="dialog"] [data-suggest]', boxes => boxes.length), 1, 'one note')
 
-    await saveDialog('Add rule')
-    assert.deepEqual(await storedRule('potter'), { target: 'f', value: 'potter', matcher: 'exact' })
+    await editor.save()
+    assert.deepEqual(await editor.written('potter'), { target: 'f', value: 'potter', matcher: 'exact' })
   })
 
   test('nothing is asked on opening a rule, in Contains or Regex mode, or for an author; a rating offers the archive\'s names', async () => {
-    await options.openDialog(await options.control(await options.list('rules'), 'button', 'Edit rule “Harry Potter - J. K. Rowling”'))
+    await editor.openEdit('Harry Potter - J. K. Rowling')
     await options.suggestionsAsked(archive)
     await options.closeDialog()
 
-    await openAddRule()
-    await pick('What the rule matches', 'Fandom')
-    await pick('How to match', 'Contains')
+    await editor.openAdd()
+    await editor.pick('target', TagType.Fandom)
+    await editor.pick('matcher', 'contains')
     await typeValue('potter')
     await options.suggestionsAsked(archive)
-    await pick('How to match', 'Regex')
+    await editor.pick('matcher', 'regex')
     await typeValue('s')
     await options.suggestionsAsked(archive)
-    await pick('What the rule matches', 'Author')
-    await pick('How to match', 'Exact')
+    await editor.pick('target', 'author')
+    await editor.pick('matcher', 'exact')
     await typeValue('x')
     await options.suggestionsAsked(archive)
     assert.equal(await page.$('[role="dialog"] [data-suggest]'), null, 'no suggestions shown')
     assert.deepEqual(archive.asked, [])
 
-    await pick('What the rule matches', 'Rating')
+    await editor.pick('target', TagType.Rating)
     const field = await valueField()
     await field.evaluate(el => el.select())
     await field.type('teen')

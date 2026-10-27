@@ -9,6 +9,8 @@ export interface ToastOptions {
   /** Milliseconds before it goes. `0` keeps it up until it is closed or {@link ToastHandle.hide}den. */
   timeout?: number
   type?: 'success' | 'error'
+  /** Which toast it is, as a short name: its `data-ao3e-toast`, which finds it whatever its message says. */
+  name?: string
   /** A button under the message; clicking it runs `onClick` and dismisses the toast. */
   action?: { label: string, onClick: () => void }
   /** A link under the message, to `href`. */
@@ -71,11 +73,12 @@ class Toast {
   private held = false
   private readonly onHide: ToastOptions['onHide']
 
-  constructor(message: string, { timeout = 5000, type, action, link, onHide }: ToastOptions = {}) {
+  constructor(message: string, { timeout = 5000, type, name, action, link, onHide }: ToastOptions = {}) {
     this.el = (
       <div
         class="toast"
         data-type={type}
+        data-ao3e-toast={name}
         aria-live="polite"
         aria-atomic="true"
         aria-role="alert"

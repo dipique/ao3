@@ -129,7 +129,7 @@ export class SearchReadWorks extends Unit {
     // Nothing marked means nothing to look for, and a whole history read to
     // discover it. Say so instead.
     if (!wanted.size) {
-      toast('You haven’t marked any works as read yet.', { type: 'error' })
+      toast('You haven’t marked any works as read yet.', { type: 'error', name: 'nothing-marked' })
       return
     }
     // The Status facet's "Marked for later" value is read synchronously per work

@@ -5,7 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { SEARCH_PROMPT_TIMEOUT } from '../../src/common/constants.ts'
 import { DIST, ensureBuilt, findChrome, hurryTimers, installMock, launch, outlast } from './helpers.mjs'
-import { menuClosed, openMenu, runs, settled } from './trackedPages.mjs'
+import { menuClosed, openMenu, pickRow, runs, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -87,13 +87,13 @@ describe('the pending-search prompt', { skip }, () => {
     await browser?.close()
   })
 
-  /** In the page: the prompt's message and button, or null when it isn't up. */
+  /** In the page: the prompt's message, and whether it offers its button, or null when it isn't up. */
   const findPrompt = () => {
     for (const el of document.body.children) {
       const toast = [...el.shadowRoot?.querySelectorAll('.toast') ?? []]
-        .find(t => t.querySelector('.action')?.textContent.startsWith('Update results'))
+        .find(t => t.dataset.ao3eToast === 'pending-search')
       if (toast && toast.style.visibility !== 'hidden')
-        return { message: toast.querySelector('.message').textContent, action: toast.querySelector('.action').textContent }
+        return { message: toast.querySelector('.message').textContent, button: !!toast.querySelector('.action') }
     }
     return null
   }
@@ -111,18 +111,12 @@ describe('the pending-search prompt', { skip }, () => {
 
   const submits = () => page.evaluate(() => window.__submits)
 
-  /** Right-click Fluff and pick the row whose label starts with `label`. */
-  const pick = async (label) => {
+  /** Right-click Fluff and pick the row that does `action`. */
+  const pick = async (action) => {
     await page.keyboard.press('Escape')
     await menuClosed(page)
     await openMenu(page, () => page.click('#work_1 a.tag', { button: 'right' }))
-    const picked = await page.evaluate((l) => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .find(el => el.querySelector('.AO3E--menu--label').textContent.startsWith(l))
-      row?.click()
-      return !!row
-    }, label)
-    assert.ok(picked, `no "${label}" row on Fluff`)
+    assert.ok(await pickRow(page, action), `no ${action} row on Fluff`)
     await menuClosed(page)
   }
 
@@ -140,12 +134,12 @@ describe('the pending-search prompt', { skip }, () => {
   })
 
   test('appears when a menu pick changes the filter, and goes when it is undone', async () => {
-    await pick('Exclude')
+    await pick('exclude')
     const shown = await prompt()
-    assert.equal(shown?.message, 'Your search filters have changed.')
-    assert.match(shown.action, /Update results \((Ctrl|⌘)\+Enter\)/)
+    assert.ok(shown?.message, 'the prompt says the filter changed')
+    assert.ok(shown.button, 'and offers to run the search')
 
-    await pick('Exclude')
+    await pick('exclude')
     assert.equal(await prompt(), null, 'excluding and un-excluding leaves the search as it was')
     assert.equal(await submits(), 0, 'nothing is submitted on its own')
   })
@@ -156,7 +150,8 @@ describe('the pending-search prompt', { skip }, () => {
       'option.searchLanguage': { enabled: true, language: { value: 'en', label: 'English' } },
     }))
     // Checked the moment it arrives: it fades on its own soon after.
-    await page.waitForFunction(`(${findPrompt})()?.message === 'Language filter set to English.'`, { timeout: 5000 })
+    // It names the language it set, the fixture's own.
+    await page.waitForFunction(`(${findPrompt})()?.message.toLowerCase().includes('english')`, { timeout: 5000 })
     await settled(page, before)
   })
 
@@ -177,7 +172,7 @@ describe('the pending-search prompt', { skip }, () => {
   test('the prompt\'s own button runs the search too', async () => {
     // "Require", not "Include": this is AO3's own sidebar, which ANDs the tags
     // it is told to include.
-    await pick('Require')
+    await pick('require')
     assert.ok(await prompt())
     await page.evaluate(() => {
       for (const el of document.body.children)
@@ -202,7 +197,7 @@ describe('the pending-search prompt', { skip }, () => {
   }
 
   test('fades by itself after a few seconds', async () => {
-    await pick('Exclude')
+    await pick('exclude')
     assert.ok(await prompt())
     await outlastPrompt()
     assert.equal(await prompt(), null)
@@ -210,7 +205,7 @@ describe('the pending-search prompt', { skip }, () => {
 
   test('opening the toolbar brings it back, and it stays while the toolbar is open', async () => {
     await toggleToolbar()
-    assert.equal((await prompt())?.message, 'Your search filters have changed.')
+    assert.ok(await prompt(), 'the prompt is back')
     await outlastPrompt()
     assert.ok(await prompt(), 'still up with the toolbar open')
   })

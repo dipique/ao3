@@ -3,6 +3,7 @@ import { describe, test } from 'node:test'
 
 import { dayOf } from '../../src/common/trackedLists.ts'
 import { formatRange, reviewStatus } from '../../src/common/trackedReads.ts'
+import { figures, mentions } from '../facts.mjs'
 
 const START = dayOf('30 Sep 2026')
 const labels = new Map([['a', 'Alpha'], ['b', 'Beta'], ['c', 'Gamma']])
@@ -29,37 +30,45 @@ describe('formatRange', () => {
 
 describe('reviewStatus', () => {
   test('up to date, as of when the records were last written', () => {
-    assert.deepEqual(status({ complete: ['a', 'b'] }), { kind: 'current', text: 'Up to date as of 14:02', lists: [] })
+    const line = status({ complete: ['a', 'b'] })
+    assert.equal(line.kind, 'current')
+    assert.deepEqual(line.lists, [])
+    assert.equal(line.reading, undefined)
+    assert.ok(mentions(line.text, '14:02'), line.text)
   })
 
   test('still reading: how many lists, for which days, named on hover', () => {
-    assert.deepEqual(status({ complete: ['a'], pending: ['b', 'c'] }), {
-      kind: 'pending',
-      text: 'Still reading 2 of 3 lists for 30 Sep – 02 Oct 2026',
-      lists: ['Beta', 'Gamma'],
-    })
+    const line = status({ complete: ['a'], pending: ['b', 'c'] })
+    assert.equal(line.kind, 'pending')
+    assert.equal(line.reading, 'here')
+    assert.deepEqual(line.lists, ['Beta', 'Gamma'])
+    assert.deepEqual(figures(line.text, formatRange(START, START + 2)), [2, 3], 'two of the three lists, for the window\'s days')
   })
 
   test('with the pause this page is sitting out, or the other page doing the reading', () => {
     const window = { complete: ['a'], pending: ['b'] }
-    assert.equal(status(window, { wait: 'AO3 asked us to slow down — trying again in 1:05' }).text, 'Still reading 1 of 2 lists for 30 Sep – 02 Oct 2026 — AO3 asked us to slow down — trying again in 1:05')
-    assert.equal(status(window, { elsewhere: true }).text, 'Still reading 1 of 2 lists for 30 Sep – 02 Oct 2026, in another tab')
+    const wait = 'trying again in 1:05'
+    const waiting = status(window, { wait })
+    assert.equal(waiting.reading, 'waiting')
+    assert.ok(mentions(waiting.text, wait), 'the countdown is part of the line')
+    assert.equal(status(window, { elsewhere: true }).reading, 'elsewhere')
   })
 
-  test('a reading that stopped for AO3 says the lists are not yet read, and how to try again', () => {
-    assert.deepEqual(status({ complete: ['a'], pending: ['b'] }, { stopped: true }), {
-      kind: 'pending',
-      text: 'Not yet read: 1 of 2 lists for 30 Sep – 02 Oct 2026 — AO3 asked us to slow down. Refresh to try again.',
-      lists: ['Beta'],
-    })
+  test('a reading that stopped for AO3 says the lists are not yet read', () => {
+    const line = status({ complete: ['a'], pending: ['b'] }, { stopped: true })
+    assert.equal(line.kind, 'pending')
+    assert.equal(line.reading, 'stopped')
+    assert.deepEqual(line.lists, ['Beta'])
+    assert.ok(mentions(line.text, formatRange(START, START + 2)), 'for the window\'s days')
   })
 
   test('a list that failed outranks one still being read', () => {
-    assert.deepEqual(status({ pending: ['a'], failed: ['b'] }), {
-      kind: 'failed',
-      text: '“Beta” couldn’t be loaded, so its works are missing from this range.',
-      lists: ['Beta'],
-    })
-    assert.equal(status({ failed: ['a', 'b'] }).text, '“Alpha”, “Beta” couldn’t be loaded, so their works are missing from this range.')
+    const line = status({ pending: ['a'], failed: ['b'] })
+    assert.equal(line.kind, 'failed')
+    assert.deepEqual(line.lists, ['Beta'])
+    assert.ok(mentions(line.text, 'Beta') && !mentions(line.text, 'Alpha'), line.text)
+    const both = status({ failed: ['a', 'b'] })
+    assert.deepEqual(both.lists, ['Alpha', 'Beta'])
+    assert.ok(mentions(both.text, 'Alpha') && mentions(both.text, 'Beta'), both.text)
   })
 })

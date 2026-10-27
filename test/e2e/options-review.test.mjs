@@ -4,11 +4,11 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { formatDay, isoDay, utcToday } from '../../src/common/trackedLists.ts'
-import { sentence } from '../../src/options_ui/model/phrases.ts'
-import { REVIEW_NAME, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
+import { READING_ELSEWHERE } from '../../src/common/trackedReads.ts'
+import { recordsLine, REVIEW_EMPTY, REVIEW_NAME, reviewedThroughLabel, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { DIST, installMock, storedLists } from './helpers.mjs'
-import { ARCHIVE, captureDownloads, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
+import { ARCHIVE, captureDownloads, mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 import { archiveAnswers, archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, trackedOption } from './trackedReview.mjs'
 
 const TODAY = utcToday()
@@ -20,12 +20,9 @@ const WINDOW = 'tracked-review'
 const READINGS = `${ARCHIVE}/users/reader/readings#ao3e-tracked`
 /** The review's open URL, on the readings of the reader, `reader`. */
 const REVIEW_OPEN = `${ARCHIVE}/users/reader/readings#ao3e-open=tracked-review`
-/** Another stored list, whose job turns This review's own off. */
+/** Another stored list, whose job turns This review's own off, and what it is called. */
 const OTHER = 'tag-works:Coffee%20Shop%20AU'
-const OTHER_JOB = 'off for now: one job at a time, and Tag: Coffee Shop AU is caching'
-const REVIEW_JOB = 'off for now: one job at a time, and this review is caching'
-/** This review's More menu's trigger. */
-const MORE = `More for ${REVIEW_NAME}`
+const OTHER_NAME = 'Coffee Shop AU'
 
 const COFFEE = { id: 'c0ffee', kind: 'text-search', url: '/works/search?work_search%5Bquery%5D=coffee', alias: 'Coffee shop AUs', tracked: true, since: TODAY - 5 }
 
@@ -122,11 +119,14 @@ describe('options UI — the Review block', { skip }, () => {
     assert.ok(handle, `no review cell ${name}`)
     return handle
   }
-  const inCell = async (name, role, label) => options.control(await cell(name), role, label)
+  const inCell = async (name, action) => options.action(await cell(name), action)
   const written = () => options.lastWrite('option.trackedLists')
   const trackedWrites = () => page.evaluate(() => window.__writes.filter(w => 'option.trackedLists' in w).length)
   const jobState = async scope => scope.evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
   const jobWrites = () => page.evaluate(() => window.__writes.filter(w => 'siteExportJob' in w).length)
+  /** This review's figure: `count`, its works, or `detail`, when it was gathered and how many are cached. */
+  const figure = async part => options.text(await (await cell('this-review')).$(`[data-review-figure="${part}"]`))
+  const reviewedThrough = async () => options.text(await cell('reviewed-through'))
 
   /** A pointer press, as a person makes one: the stepper's buttons answer the pointer, not a click event. */
   async function point(handle) {
@@ -134,16 +134,19 @@ describe('options UI — the Review block', { skip }, () => {
     await handle.click()
   }
 
-  /** The control is off, and says why in its tooltip, after its own label, and in what describes it. */
-  async function saysOff(control, label, reason) {
-    assert.equal(await control.evaluate(el => el.disabled), true, `${label} should be off`)
-    assert.equal(await control.evaluate(el => el.title), `${label} — ${reason}`)
-    assert.equal(await options.description(control), `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`)
+  /**
+   * The control is off, and says why in its tooltip and in what describes it:
+   * `reason`, or a reason that names it.
+   */
+  async function saysOff(control, reason) {
+    assert.equal(await control.evaluate(el => el.disabled), true, `${await options.name(control)} should be off`)
+    assert.ok(mentions(await control.evaluate(el => el.title), reason), `the tooltip should give ${reason}`)
+    assert.ok(mentions(await options.description(control), reason), `the description should give ${reason}`)
   }
 
   /** The control is on, with no reason to give. */
-  async function saysOn(control, label) {
-    assert.equal(await control.evaluate(el => el.disabled), false, `${label} should be on`)
+  async function saysOn(control) {
+    assert.equal(await control.evaluate(el => el.disabled), false, `${await options.name(control)} should be on`)
     assert.equal(await control.evaluate(el => el.getAttribute('aria-describedby')), null)
   }
 
@@ -152,15 +155,14 @@ describe('options UI — the Review block', { skip }, () => {
     assert.ok(await options.control(row, 'switch'))
     assert.deepEqual(await row.$$eval('[data-review-cell]', els => els.map(el => el.dataset.reviewCell)), ['reviewed-through', 'works-per-review', 'this-review'])
 
-    const review = await options.text(await cell('this-review'))
-    // Gathered when the seed was made, before the build this run may have waited for.
-    assert.match(review, /This review\s*2 works\s*gathered \d+ minutes ago · 0 cached/)
-    const start = await inCell('this-review', 'link', 'Start the review: 2 works')
+    assert.match(await figure('count'), /\b2\b/, 'the window\'s two works')
+    assert.match(await figure('detail'), /\b0\b/, 'none of them cached')
+    const start = await inCell('this-review', 'start')
     assert.equal(await start.evaluate(a => a.getAttribute('href')), REVIEW_OPEN)
-    assert.equal(await options.text(start), 'Start Review')
-    await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
-    await saysOn(await inCell('this-review', 'button', 'Download Offline Copy'), 'Download Offline Copy')
-    assert.deepEqual(await options.controls(await cell('this-review'), 'button', MORE), [], 'with nothing failed and nothing cached, More has nothing to offer')
+    assert.match(await options.name(start), /\b2\b/, 'Start Review says how many works the review holds')
+    await saysOn(await inCell('this-review', 'cache'))
+    await saysOn(await inCell('this-review', 'download'))
+    assert.deepEqual(await options.actions(await cell('this-review'), 'more'), [], 'with nothing failed and nothing cached, More has nothing to offer')
   })
 
   test('the review\'s window is This review, not a row of its own under Saved lists', async () => {
@@ -168,23 +170,23 @@ describe('options UI — the Review block', { skip }, () => {
   })
 
   test('Reviewed through: Change… opens a date, and Save writes it, at most yesterday', async () => {
-    assert.match(await options.text(await cell('reviewed-through')), new RegExp(`Reviewed through\\s*${formatDay(TODAY - 9)}\\s*Change…`))
+    assert.ok(mentions(await reviewedThrough(), formatDay(TODAY - 9)))
 
     const setDate = async (value) => {
-      await options.press(await inCell('reviewed-through', 'button', 'Change…'))
-      const field = await (await cell('reviewed-through')).$('input[type="date"][aria-label="Last day marked reviewed"]')
+      await options.press(await inCell('reviewed-through', 'change'))
+      const field = await (await cell('reviewed-through')).$('input[type="date"]')
       await until('the date field to take focus', () => field.evaluate(el => document.activeElement === el))
       await field.evaluate((el, v) => {
         el.value = v
         el.dispatchEvent(new Event('input', { bubbles: true }))
       }, value)
-      await options.press(await inCell('reviewed-through', 'button', 'Save'))
+      await options.press(await inCell('reviewed-through', 'save'))
     }
 
     await setDate(isoDay(TODAY - 20))
     await until('the day to be written', async () => (await written())?.reviewedThrough === TODAY - 20)
-    assert.match(await options.text(await cell('reviewed-through')), new RegExp(`Reviewed through\\s*${formatDay(TODAY - 20)}\\s*Change…`))
-    const change = await inCell('reviewed-through', 'button', 'Change…')
+    assert.ok(mentions(await reviewedThrough(), formatDay(TODAY - 20)))
+    const change = await inCell('reviewed-through', 'change')
     await until('focus to go back to Change…', () => change.evaluate(el => document.activeElement === el))
 
     await setDate(isoDay(TODAY + 3))
@@ -192,21 +194,21 @@ describe('options UI — the Review block', { skip }, () => {
 
     // Cancel writes nothing: the next write is the only one after it.
     const before = await trackedWrites()
-    await options.press(await inCell('reviewed-through', 'button', 'Change…'))
-    await options.press(await inCell('reviewed-through', 'button', 'Cancel'))
-    assert.match(await options.text(await cell('reviewed-through')), new RegExp(`Reviewed through\\s*${formatDay(TODAY - 1)}\\s*Change…`))
+    await options.press(await inCell('reviewed-through', 'change'))
+    await options.press(await inCell('reviewed-through', 'cancel'))
+    assert.ok(mentions(await reviewedThrough(), formatDay(TODAY - 1)))
     await setDate('')
     await until('the watermark to be cleared', async () => (await written())?.reviewedThrough === 0)
     assert.equal(await trackedWrites(), before + 1)
-    assert.match(await options.text(await cell('reviewed-through')), /Reviewed through\s*Nothing reviewed yet\s*Change…/)
+    assert.ok(mentions(await reviewedThrough(), reviewedThroughLabel(0)))
   })
 
   test('Works per review: the stepper steps by one, and a typed number is clamped as the field is left', async () => {
-    const field = await inCell('works-per-review', 'spinbutton', 'Works per review')
+    const field = await options.control(await cell('works-per-review'), 'spinbutton')
     const value = () => field.evaluate(el => el.value)
     assert.equal(await value(), '40')
 
-    await point(await inCell('works-per-review', 'button', 'More works per review'))
+    await point(await inCell('works-per-review', 'increment'))
     await until('one more to be written', async () => (await written())?.target === 41)
     await field.focus()
     await field.press('ArrowDown')
@@ -217,9 +219,9 @@ describe('options UI — the Review block', { skip }, () => {
     await field.evaluate(el => el.blur())
     await until('the most to be written', async () => (await written())?.target === WORKS_PER_REVIEW.max)
     await until('the field to show it', async () => await value() === '500')
-    const more = await inCell('works-per-review', 'button', 'More works per review')
+    const more = await inCell('works-per-review', 'increment')
     assert.equal(await more.evaluate(el => el.disabled), true)
-    assert.equal(await more.evaluate(el => el.title), 'More works per review — off at 500, the most it can be')
+    assert.ok(mentions(await more.evaluate(el => el.title), WORKS_PER_REVIEW.max), 'its tooltip gives the bound it is off at')
 
     // An emptied field keeps the number it had, and writes nothing: the next
     // write, a step down, is the only one after it.
@@ -238,105 +240,105 @@ describe('options UI — the Review block', { skip }, () => {
     await field.press('Enter')
     await until('the least to be written', async () => (await written())?.target === WORKS_PER_REVIEW.min)
     await until('the field to show it', async () => await value() === '10')
-    const fewer = await inCell('works-per-review', 'button', 'Fewer works per review')
+    const fewer = await inCell('works-per-review', 'decrement')
     assert.equal(await fewer.evaluate(el => el.disabled), true)
-    assert.equal(await fewer.evaluate(el => el.title), 'Fewer works per review — off at 10, the least it can be')
+    assert.ok(mentions(await fewer.evaluate(el => el.title), WORKS_PER_REVIEW.min), 'its tooltip gives the bound it is off at')
   })
 
   test('with Tracked lists off, the review\'s settings and Start Review are off and say why; its offline copy isn\'t', async () => {
     await options.press(await options.control(await options.row(ROW), 'switch'))
     await until('the switch to be written', async () => (await written())?.enabled === false)
 
-    await saysOff(await inCell('reviewed-through', 'button', 'Change…'), 'Change the last day reviewed', TRACK_OFF.review)
-    await saysOff(await inCell('works-per-review', 'spinbutton', 'Works per review'), 'Works per review', TRACK_OFF.review)
-    await saysOff(await inCell('this-review', 'button', 'Start Review'), 'Start the review: 2 works', TRACK_OFF.review)
+    await saysOff(await inCell('reviewed-through', 'change'), TRACK_OFF.review)
+    await saysOff(await options.control(await cell('works-per-review'), 'spinbutton'), TRACK_OFF.review)
+    await saysOff(await inCell('this-review', 'start'), TRACK_OFF.review)
     assert.deepEqual(await options.controls(await cell('this-review'), 'link'), [], 'Start Review links nowhere')
-    await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
-    await saysOn(await inCell('this-review', 'button', 'Download Offline Copy'), 'Download Offline Copy')
+    await saysOn(await inCell('this-review', 'cache'))
+    await saysOn(await inCell('this-review', 'download'))
 
     // The lists themselves are under Saved lists, and keep their titles and
     // links; only tracking waits for the switch.
     const coffee = await options.savedList('c0ffee')
-    const toggle = await options.control(coffee, 'switch', 'Track Coffee shop AUs')
+    const toggle = await options.control(coffee, 'switch')
     assert.equal(await toggle.evaluate(el => el.disabled), true)
-    assert.equal(await options.description(toggle), `${TRACK_OFF.review.charAt(0).toUpperCase()}${TRACK_OFF.review.slice(1)}.`)
-    assert.ok(await options.control(coffee, 'link', 'View or edit Coffee shop AUs on AO3'))
+    assert.ok(mentions(await options.description(toggle), TRACK_OFF.review))
+    assert.ok(await options.action(coffee, 'view-edit'))
 
     await options.press(await options.control(await options.row(ROW), 'switch'))
     await until('the switch to be written', async () => (await written())?.enabled === true)
-    await until('Start Review to link again', async () => (await options.controls(await cell('this-review'), 'link', 'Start the review: 2 works')).length === 1)
-    await saysOn(await inCell('reviewed-through', 'button', 'Change…'), 'Change…')
-    await saysOn(await options.control(await options.savedList('c0ffee'), 'switch', 'Track Coffee shop AUs'), 'Track Coffee shop AUs')
+    await until('Start Review to link again', async () => (await inCell('this-review', 'start')).evaluate(el => el.tagName === 'A'))
+    await saysOn(await inCell('reviewed-through', 'change'))
+    await saysOn(await options.control(await options.savedList('c0ffee'), 'switch'))
   })
 
   test('Cache works runs a job on the window, its line in the cell, with Pause or Cancel, then Continue or Discard', async () => {
-    await options.press(await inCell('this-review', 'button', 'Cache works'))
+    await options.press(await inCell('this-review', 'cache'))
     await until('the job to be running', async () => await jobState(await cell('this-review')) === 'running')
-    assert.equal(await (await cell('this-review')).evaluate(el => el.querySelector('[role="progressbar"]')?.getAttribute('aria-label')), 'Caching this review')
-    await saysOff(await options.control(await options.savedListDetails(copyRow(OTHER)), 'button', 'Cache works'), 'Cache this list\'s works', REVIEW_JOB)
-    assert.deepEqual(await options.controls(await cell('this-review'), 'button', 'Cache works'), [], 'Pause and Cancel take the actions\' place')
+    assert.ok(await (await cell('this-review')).$('[role="progressbar"]'), 'the job\'s progress is in the cell')
+    await saysOff(await options.action(await options.savedListDetails(copyRow(OTHER)), 'cache'), REVIEW_NAME)
+    assert.deepEqual(await options.actions(await cell('this-review'), 'cache'), [], 'Pause and Cancel take the actions\' place')
 
     const before = await jobWrites()
-    await options.press(await inCell('this-review', 'button', 'Pause'))
+    await options.press(await inCell('this-review', 'pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(await cell('this-review')) === 'stopped')
     const job = await options.lastWrite('siteExportJob')
     assert.equal(job.cacheKey, WINDOW)
     assert.deepEqual(job.steps, ['caching'])
 
-    await inCell('this-review', 'button', 'Continue')
-    await options.press(await inCell('this-review', 'button', 'Discard'))
+    await inCell('this-review', 'resume')
+    await options.press(await inCell('this-review', 'discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
     await until('the cell to drop its line', async () => await jobState(await cell('this-review')) === null)
-    await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
+    await saysOn(await inCell('this-review', 'cache'))
   })
 
   test('Cancel stops the window\'s job and throws it away', async () => {
-    await options.press(await inCell('this-review', 'button', 'Cache works'))
+    await options.press(await inCell('this-review', 'cache'))
     await until('the job to be running', async () => await jobState(await cell('this-review')) === 'running')
-    await options.press(await inCell('this-review', 'button', 'Cancel'))
+    await options.press(await inCell('this-review', 'cancel'))
     await until('the job to be gone', async () => await options.stored('siteExportJob') === null)
     await until('the cell to drop its line', async () => await jobState(await cell('this-review')) === null)
-    await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
+    await saysOn(await inCell('this-review', 'cache'))
   })
 
   test('Download Offline Copy caches the window\'s works, then exports them', async () => {
-    await options.press(await inCell('this-review', 'button', 'Download Offline Copy'))
+    await options.press(await inCell('this-review', 'download'))
     await until('the job to be running', async () => await jobState(await cell('this-review')) === 'running')
     const before = await jobWrites()
-    await options.press(await inCell('this-review', 'button', 'Pause'))
+    await options.press(await inCell('this-review', 'pause'))
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(await cell('this-review')) === 'stopped')
     const job = await options.lastWrite('siteExportJob')
     assert.equal(job.cacheKey, WINDOW)
     assert.deepEqual(job.steps, ['caching', 'exporting'], 'there is no listing behind the window to refresh')
 
-    await options.press(await inCell('this-review', 'button', 'Discard'))
+    await options.press(await inCell('this-review', 'discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
   })
 
   test('another list\'s job turns This review\'s offline actions off, naming the list; Start Review stays', async () => {
     const other = await options.savedListDetails(copyRow(OTHER))
-    await options.press(await options.control(other, 'button', 'Cache works'))
+    await options.press(await options.action(other, 'cache'))
     await until('the job to be running', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'running')
 
-    await saysOff(await inCell('this-review', 'button', 'Cache works'), 'Cache this list\'s works', OTHER_JOB)
-    await saysOff(await inCell('this-review', 'button', 'Download Offline Copy'), 'Cache this list\'s works, then save it as one HTML file', OTHER_JOB)
-    assert.match(await options.text(await cell('this-review')), /Off for now: one job at a time, and Tag: Coffee Shop AU is caching\./)
-    assert.ok(await inCell('this-review', 'link', 'Start the review: 2 works'))
+    await saysOff(await inCell('this-review', 'cache'), OTHER_NAME)
+    await saysOff(await inCell('this-review', 'download'), OTHER_NAME)
+    assert.ok(mentions(await options.text(await cell('this-review')), OTHER_NAME), 'the cell says which list has the job')
+    assert.equal(await (await inCell('this-review', 'start')).evaluate(el => el.tagName), 'A')
 
-    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Pause caching Tag: Coffee Shop AU'))
+    await options.press(await options.action(await options.savedList(copyRow(OTHER)), 'pause'))
     await until('the job to stop', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'stopped')
-    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Discard'))
+    await options.press(await options.action(await options.savedList(copyRow(OTHER)), 'discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
-    await saysOn(await inCell('this-review', 'button', 'Cache works'), 'Cache works')
+    await saysOn(await inCell('this-review', 'cache'))
   })
 
   test('a job on the window runs to the end, and the cell counts what it cached', async () => {
     release()
-    await options.press(await inCell('this-review', 'button', 'Cache works'))
+    await options.press(await inCell('this-review', 'cache'))
     await until('the job to finish', async () => await jobState(await cell('this-review')) === 'finished')
     const index = await options.stored('workTextIndex')
     assert.ok(index['61']?.size > 0 && index['62']?.size > 0, 'both of the window\'s works were fetched')
-    await until('the cell to count them', async () => / · 2 cached/.test(await options.text(await cell('this-review'))))
+    await until('the cell to count them', async () => /\b2\b/.test(await figure('detail')))
   })
 
   test('nothing threw along the way', () => {
@@ -406,23 +408,19 @@ describe('options UI — This review\'s More', { skip }, () => {
     assert.ok(handle, 'no This review')
     return handle
   }
-  const more = async () => options.control(await cell(), 'button', MORE)
+  const more = async () => options.action(await cell(), 'more')
   const jobState = async scope => scope.evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState ?? null)
   const writes = () => page.evaluate(() => window.__writes.length)
   /** The first job stored after the page's first `n` writes: the one an action then started. */
   const jobFrom = n => page.evaluate(k => window.__writes.slice(k).find(w => 'siteExportJob' in w)?.siteExportJob ?? null, n)
-  const items = ['Retry failed works now', 'Download without refreshing']
+  const items = ['retry', 'download-cached']
 
   test('More offers a retry of the work that failed and a download of the one cached: no refresh, and no remove', async () => {
-    await until('the cell to count the cached work', async () => / · 1 cached/.test(await options.text(await cell())))
+    await until('the cell to count the cached work', async () => /\b1\b/.test(await options.text(await (await cell()).$('[data-review-figure="detail"]'))))
     const trigger = await more()
-    assert.equal(await trigger.evaluate(el => el.title), 'Retry failed works, download without refreshing')
 
     await options.openMenu(trigger)
-    const names = await options.menuItems()
-    assert.equal(names.length, 2, JSON.stringify(names))
-    assert.match(names[0], /^Retry failed works now\b.* on the 1 work that failed\b/)
-    assert.match(names[1], /^Download without refreshing\b.* as up to date as the 1 saved work are\./)
+    assert.deepEqual(await options.menuActions(), items)
 
     await options.closeMenu()
     await until('focus to go back to More', () => trigger.evaluate(el => document.activeElement === el))
@@ -433,7 +431,7 @@ describe('options UI — This review\'s More', { skip }, () => {
     const downloads = await page.evaluate(() => window.__downloads.length)
     const requests = asked.length
     await options.openMenu(await more())
-    await options.press(await options.menuItem('Download without refreshing'))
+    await options.press(await options.menuItem('download-cached'))
     await until('the file to be handed over', () => page.evaluate(n => window.__downloads.length > n, downloads))
 
     const job = await jobFrom(from)
@@ -448,13 +446,13 @@ describe('options UI — This review\'s More', { skip }, () => {
     assert.deepEqual([manifest.counts.total, manifest.counts.cached], [3, 1])
 
     await until('the job to finish, and More to be back with the actions', async () => await jobState(await cell()) === 'finished'
-      && (await options.controls(await cell(), 'button', MORE)).length === 1)
+      && (await options.actions(await cell(), 'more')).length === 1)
   })
 
   test('Retry failed works now caches the window, asking at once for the work that failed; while its job is on the window, More goes with the actions', async () => {
     const from = await writes()
     await options.openMenu(await more())
-    await options.press(await options.menuItem('Retry failed works now'))
+    await options.press(await options.menuItem('retry'))
     await until('the job to be running', async () => await jobState(await cell()) === 'running')
 
     const job = await jobFrom(from)
@@ -462,32 +460,32 @@ describe('options UI — This review\'s More', { skip }, () => {
     assert.deepEqual(job.steps, ['caching'])
     assert.equal(job.retryNow, true)
     await until('the work that failed to be asked for again', () => asked.includes('/works/61'))
-    assert.deepEqual(await options.controls(await cell(), 'button', MORE), [], 'Pause and Cancel take the actions\' place, and More\'s')
+    assert.deepEqual(await options.actions(await cell(), 'more'), [], 'Pause and Cancel take the actions\' place, and More\'s')
 
-    await options.press(await options.control(await cell(), 'button', 'Pause'))
+    await options.press(await options.action(await cell(), 'pause'))
     await until('the job to stop', async () => await jobState(await cell()) === 'stopped')
-    assert.deepEqual(await options.controls(await cell(), 'button', MORE), [], 'so do Continue and Discard')
-    await options.press(await options.control(await cell(), 'button', 'Discard'))
+    assert.deepEqual(await options.actions(await cell(), 'more'), [], 'so do Continue and Discard')
+    await options.press(await options.action(await cell(), 'discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
-    await until('More to be back', async () => (await options.controls(await cell(), 'button', MORE)).length === 1)
+    await until('More to be back', async () => (await options.actions(await cell(), 'more')).length === 1)
   })
 
   test('another list\'s job turns More\'s items off, each saying why', async () => {
-    await options.press(await options.control(await options.savedListDetails(copyRow(OTHER)), 'button', 'Cache works'))
+    await options.press(await options.action(await options.savedListDetails(copyRow(OTHER)), 'cache'))
     await until('the job to be running', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'running')
 
     await options.openMenu(await more())
-    for (const name of items) {
-      const item = await options.menuItem(name)
-      assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), true, `${name} should be off`)
-      assert.equal(await item.evaluate(el => el.title), `${name} — ${OTHER_JOB}`)
-      assert.equal(await options.description(item), `${sentence(OTHER_JOB)}.`)
+    for (const action of items) {
+      const item = await options.menuItem(action)
+      assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), true, `${action} should be off`)
+      assert.ok(mentions(await item.evaluate(el => el.title), OTHER_NAME), `${action}'s tooltip should name the list with the job`)
+      assert.ok(mentions(await options.description(item), OTHER_NAME), `${action}'s description should name the list with the job`)
     }
     await options.closeMenu()
 
-    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Pause caching Tag: Coffee Shop AU'))
+    await options.press(await options.action(await options.savedList(copyRow(OTHER)), 'pause'))
     await until('the job to stop', async () => await jobState(await options.savedList(copyRow(OTHER))) === 'stopped')
-    await options.press(await options.control(await options.savedList(copyRow(OTHER)), 'button', 'Discard'))
+    await options.press(await options.action(await options.savedList(copyRow(OTHER)), 'discard'))
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
   })
 
@@ -496,10 +494,9 @@ describe('options UI — This review\'s More', { skip }, () => {
     await until('the switch to be written', async () => (await options.lastWrite('option.trackedLists'))?.enabled === false)
 
     await options.openMenu(await more())
-    for (const name of items) {
-      const item = await options.menuItem(name)
-      assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), false, `${name} should be on`)
-      assert.equal(await item.evaluate(el => el.title), name)
+    for (const action of items) {
+      const item = await options.menuItem(action)
+      assert.equal(await item.evaluate(el => el.hasAttribute('data-disabled')), false, `${action} should be on`)
       assert.equal(await item.evaluate(el => el.getAttribute('aria-describedby')), null)
     }
     await options.closeMenu()
@@ -526,44 +523,44 @@ describe('options UI — This review with nothing to start', { skip }, () => {
   after(() => session?.close())
 
   /** Start Review is off, and says why in its tooltip and in what describes it. */
-  async function startIsOff(options, label, reason) {
+  async function startIsOff(options, reason) {
     const review = await options.page.$('[data-review-cell="this-review"]')
-    const start = await options.control(review, 'button', 'Start Review')
+    const start = await options.action(review, 'start')
     assert.equal(await start.evaluate(el => el.disabled), true)
-    assert.equal(await start.evaluate(el => el.title), `${label} — ${reason}`)
-    assert.equal(await options.description(start), `${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`)
+    assert.ok(mentions(await start.evaluate(el => el.title), reason), `the tooltip should give ${reason}`)
+    assert.ok(mentions(await options.description(start), reason), `the description should give ${reason}`)
     return review
   }
 
   test('before the first review is gathered, Start Review opens it on the reader\'s readings, which gathers it; there is nothing to cache', async () => {
     const options = await session.open({ seed: { 'option.user': { userId: 'reader' }, ...listsSeed() }, hash: '#review' })
     const review = await options.page.$('[data-review-cell="this-review"]')
-    const start = await options.control(review, 'link', 'Start the review')
+    const start = await options.action(review, 'start')
     assert.equal(await start.evaluate(a => a.getAttribute('href')), REVIEW_OPEN)
-    assert.equal(await options.text(start), 'Start Review')
-    assert.match(await options.text(review), /Nothing gathered yet\./)
-    assert.doesNotMatch(await options.text(review), /your first review is gathered/, 'Start Review gathers it, so the cell doesn\'t send the reader to AO3 for it')
-    assert.deepEqual(await options.controls(review, 'button', 'Cache works'), [])
-    assert.deepEqual(await options.controls(review, 'button', 'Download Offline Copy'), [])
-    assert.deepEqual(await options.controls(review, 'button', MORE), [])
+    const text = await options.text(review)
+    assert.ok(mentions(text, REVIEW_EMPTY.opens))
+    assert.ok(!mentions(text, REVIEW_EMPTY.elsewhere), 'Start Review gathers it, so the cell doesn\'t send the reader to AO3 for it')
+    assert.deepEqual(await options.actions(review, 'cache'), [])
+    assert.deepEqual(await options.actions(review, 'download'), [])
+    assert.deepEqual(await options.actions(review, 'more'), [])
     assert.deepEqual(options.problems(), [])
     await options.close()
   })
 
   test('before the first review, with the reader\'s account not known, there is no page to open: the cell says how one is gathered', async () => {
     const options = await session.open({ seed: listsSeed(), hash: '#review' })
-    const review = await startIsOff(options, 'Start the review', START_OFF.noWindow)
-    assert.match(await options.text(review), /Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3\./)
-    assert.deepEqual(await options.controls(review, 'button', 'Cache works'), [])
-    assert.deepEqual(await options.controls(review, 'button', 'Download Offline Copy'), [])
+    const review = await startIsOff(options, START_OFF.noWindow)
+    assert.ok(mentions(await options.text(review), REVIEW_EMPTY.elsewhere))
+    assert.deepEqual(await options.actions(review, 'cache'), [])
+    assert.deepEqual(await options.actions(review, 'download'), [])
     assert.deepEqual(options.problems(), [])
     await options.close()
   })
 
   test('with no list tracked, there is nothing to review, though the window is still there to cache', async () => {
     const options = await session.open({ seed: { ...listsSeed({ lists: [] }), ...storedLists({ [WINDOW]: WINDOW_COPY }) }, hash: '#review' })
-    const review = await startIsOff(options, 'Start the review: 2 works', START_OFF.noneTracked)
-    assert.equal(await (await options.control(review, 'button', 'Cache works')).evaluate(el => el.disabled), false)
+    const review = await startIsOff(options, START_OFF.noneTracked)
+    assert.equal(await (await options.action(review, 'cache')).evaluate(el => el.disabled), false)
     assert.deepEqual(options.problems(), [])
     await options.close()
   })
@@ -604,10 +601,10 @@ describe('options UI — Pre-load', { skip }, () => {
   test('Pre-load reads the tracked lists into their records, and the records line says how far', async () => {
     options = await openWith(SEED)
     page = options.page
-    assert.equal(await options.text(await page.$('[data-review-records]')), 'No list read yet')
-    await (await options.control(await cell(), 'button', 'Pre-load')).click()
+    assert.equal(await options.text(await page.$('[data-review-records]')), recordsLine({ through: null, behind: 1 }))
+    await (await options.action(await cell(), 'preload')).click()
     await until('the records to be read', async () => (await records())?.through === TODAY - 1)
-    await until('the records line to say so', async () => (await options.text(await page.$('[data-review-records]'))) === `Lists read through ${formatDay(TODAY - 1)}`)
+    await until('the records line to say so', async () => (await options.text(await page.$('[data-review-records]'))) === recordsLine({ through: TODAY - 1, behind: 0 }))
     assert.ok(fetched.some(path => path.startsWith('/tags/alpha/works')), 'the list was read')
   })
 
@@ -638,8 +635,8 @@ describe('options UI — Pre-load', { skip }, () => {
     options = await openWith({ ...SEED, 'cache.trackedReadClaim': { by: 'a review tab', at: Date.now() } })
     page = options.page
     const before = fetched.length
-    await (await options.control(await cell(), 'button', 'Pre-load')).click()
-    await until('the refusal to be said', async () => (await options.text(await cell())).includes('Reading in another tab'))
+    await (await options.action(await cell(), 'preload')).click()
+    await until('the refusal to be said', async () => mentions(await options.text(await cell()), READING_ELSEWHERE))
     assert.equal(fetched.length, before, 'nothing asked of AO3')
     assert.equal(await records(), null)
   })

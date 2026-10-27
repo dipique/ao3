@@ -5,7 +5,7 @@ import type { FollowState, ListRefresh, RefreshOutcome } from '#content_script/s
 import type { RefreshOptions, RefreshResult } from '#content_script/searchView/refresh.js'
 import type { Hold } from '#content_script/searchView/refreshClaim.ts'
 
-import { createLogger, options, readWorkIds, REVIEW_SOURCE_ID, reviewStart, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
+import { createLogger, options, READING_ELSEWHERE, readWorkIds, REVIEW_SOURCE_ID, reviewStart, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
 import { onArchiveWait, PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
@@ -21,6 +21,7 @@ import type { WorkFreshness } from './workText.ts'
 
 import { buildSiteExport } from './exportSite.ts'
 import { cacheWorkText } from './fetchWorkText.ts'
+import { REFRESH_REFUSED } from './refreshRefusals.ts'
 import { freshnessFromWork, planWorkCache } from './workText.ts'
 import { readWorkTextIndex } from './workTextCache.ts'
 
@@ -420,7 +421,7 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
 async function readReview(job: ExportJob, signal: AbortSignal): Promise<void> {
   const claim = await claimReads(PAGE_RUN)
   if (!claim)
-    throw new Error('Reading in another tab')
+    throw new Error(READING_ELSEWHERE)
   const either = new AbortController()
   const stop = (): void => either.abort()
   signal.addEventListener('abort', stop)
@@ -447,7 +448,7 @@ async function readReview(job: ExportJob, signal: AbortSignal): Promise<void> {
     }).catch((err: unknown) => {
       // Another page took the claim over: that is the reason, not the abort.
       if (claim.lost.aborted && !signal.aborted)
-        throw new Error('Reading in another tab')
+        throw new Error(READING_ELSEWHERE)
       throw err
     })
     if (outcome.blocked)
@@ -572,18 +573,10 @@ async function settleRefresh(job: ExportJob, result: RefreshResult): Promise<voi
   // The other two refusals are not going to resolve themselves by being retried
   // on a timer, so they stop the run and say what to do. The stored list is
   // untouched in both cases.
-  if (result.notWritten === 'logged-out') {
-    throw new Error(
-      'AO3 served the signed-out view, and this list is only visible to your own account. '
-      + 'Sign in to AO3 and try again — your stored copy of the list has been left as it was.',
-    )
-  }
-  if (result.notWritten === 'emptied') {
-    throw new Error(
-      'AO3 returned this list with no works in it, so it was left as it was rather than emptied. '
-      + 'Open the list on AO3 to check it, then try again.',
-    )
-  }
+  if (result.notWritten === 'logged-out')
+    throw new Error(REFRESH_REFUSED.loggedOut)
+  if (result.notWritten === 'emptied')
+    throw new Error(REFRESH_REFUSED.emptied)
 
   // The list has been replaced, so any queue planned against the old one is void.
   job.queue = []
@@ -827,12 +820,8 @@ async function selectionFor(
   if (descriptor.sourceId !== 'read-works')
     return { requireLogin: PRIVATE_SOURCES.has(descriptor.sourceId) }
   const workMarks = await options.get('workMarks')
-  if (!workMarks.enabled) {
-    throw new Error(
-      'This list is made from your marks, and Work marks is switched off, so it was left as it was rather than emptied. '
-      + 'Switch Work marks on, under Reading, then try again.',
-    )
-  }
+  if (!workMarks.enabled)
+    throw new Error(REFRESH_REFUSED.marksOff)
   const wanted = readWorkIds(workMarks)
   return {
     requireLogin: true,

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { builtinOpens, hostPage, listUrlFor, openAsk, openLink, openTarget, ownPageLink } from '../../src/common/listLinks.ts'
+import { BUILTIN_TITLES, builtinOpens, hostPage, listUrlFor, openAsk, openLink, openTarget, ownPageLink } from '../../src/common/listLinks.ts'
 import { isListId, onListPage } from '../../src/common/trackedLists.ts'
+import { mentions } from '../facts.mjs'
 
 const AO3 = 'https://archiveofourown.org'
 
@@ -17,6 +18,12 @@ const BUILTINS = [
 
 /** The fragment a page opened at `link` reads. */
 const hashOf = link => new URL(link, AO3).hash
+
+/** Where a link goes, once its name is seen to name the list `name`. */
+function named(link, name) {
+  assert.ok(link && mentions(link.label, name), `${link?.label} names ${name}`)
+  return link.href
+}
 
 describe('open URLs', () => {
   test('a saved list of every kind opens on its own page, by its id, and the page reads the list back', () => {
@@ -234,12 +241,12 @@ describe('where a link its page can\'t open points the reader', () => {
 
   test('an entry not yet filed is a list known here', () => {
     const entry = record('n3w', 'series-works', '/series/1234', { title: 'Pulled' })
-    assert.deepEqual(ownPageLink({ kind: 'list', id: 'n3w' }, [...LISTS, entry], NO_ACCOUNT), { label: 'Open “Pulled”', href: '/series/1234#ao3e-open=n3w' })
+    assert.equal(named(ownPageLink({ kind: 'list', id: 'n3w' }, [...LISTS, entry], NO_ACCOUNT), 'Pulled'), '/series/1234#ao3e-open=n3w')
   })
 
   test('a list with no title is named as the List source facet names it', () => {
     const list = record('b4re', 'series-works', '/series/9991', { title: '  ' })
-    assert.deepEqual(ownPageLink({ kind: 'list', id: 'b4re' }, [list], NO_ACCOUNT), { label: 'Open “/series/9991”', href: '/series/9991#ao3e-open=b4re' })
+    assert.equal(named(ownPageLink({ kind: 'list', id: 'b4re' }, [list], NO_ACCOUNT), '/series/9991'), '/series/9991#ao3e-open=b4re')
   })
 
   test('nothing for an id no list here has', () => {
@@ -259,17 +266,17 @@ describe('where a link its page can\'t open points the reader', () => {
 
   test('a saved list links its page whatever the lists without a record need', () => {
     const off = { ...NO_ACCOUNT, trackedLists: { lists: [] }, workMarks: { enabled: false } }
-    assert.deepEqual(ownPageLink({ kind: 'list', id: 's3r' }, LISTS, off), { label: 'Open “Series: Bees”', href: '/series/9991#ao3e-open=s3r' })
+    assert.equal(named(ownPageLink({ kind: 'list', id: 's3r' }, LISTS, off), 'Series: Bees'), '/series/9991#ao3e-open=s3r')
   })
 
   test('a list without a record, with the reader\'s account known: its open URL on their readings', () => {
     const links = [
-      [{ kind: 'marked-for-later' }, { label: 'Open Marked for Later', href: '/users/me/readings?show=to-read#ao3e-open=marked-for-later' }],
-      [{ kind: 'read-works' }, { label: 'Open Read works', href: '/users/me/readings#ao3e-open=read-works' }],
-      [{ kind: 'review' }, { label: 'Open the review', href: '/users/me/readings#ao3e-open=tracked-review' }],
+      [{ kind: 'marked-for-later' }, '/users/me/readings?show=to-read#ao3e-open=marked-for-later'],
+      [{ kind: 'read-works' }, '/users/me/readings#ao3e-open=read-works'],
+      [{ kind: 'review' }, '/users/me/readings#ao3e-open=tracked-review'],
     ]
-    for (const [ref, link] of links)
-      assert.deepEqual(ownPageLink(ref, LISTS, READER), link, ref.kind)
+    for (const [ref, href] of links)
+      assert.equal(named(ownPageLink(ref, LISTS, READER), BUILTIN_TITLES[ref.kind]), href, ref.kind)
   })
 
   test('a list without a record, with the reader\'s account not known: nothing, as it has no page', () => {
@@ -287,9 +294,9 @@ describe('where a link its page can\'t open points the reader', () => {
 
   test('each list without a record links its page wherever it opens, whatever the others need', () => {
     const nothingOn = { ...READER, trackedLists: { lists: [] }, workMarks: { enabled: false } }
-    assert.equal(ownPageLink({ kind: 'marked-for-later' }, LISTS, nothingOn)?.label, 'Open Marked for Later')
-    assert.equal(ownPageLink({ kind: 'review' }, LISTS, { ...READER, workMarks: { enabled: false } })?.label, 'Open the review')
-    assert.equal(ownPageLink({ kind: 'read-works' }, LISTS, { ...READER, trackedLists: { lists: [] } })?.label, 'Open Read works')
+    assert.ok(named(ownPageLink({ kind: 'marked-for-later' }, LISTS, nothingOn), BUILTIN_TITLES['marked-for-later']))
+    assert.ok(named(ownPageLink({ kind: 'review' }, LISTS, { ...READER, workMarks: { enabled: false } }), BUILTIN_TITLES.review))
+    assert.ok(named(ownPageLink({ kind: 'read-works' }, LISTS, { ...READER, trackedLists: { lists: [] } }), BUILTIN_TITLES['read-works']))
   })
 })
 

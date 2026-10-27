@@ -11,7 +11,7 @@ const { query, searching, matchCount, total } = useOptionSearch()
 
 <template>
   <div flex="~ col">
-    <p v-if="searching" text="xs muted-fg" pb-4>
+    <p v-if="searching" text="xs muted-fg" data-search-matches pb-4 :data-hits="matchCount" :data-total="total">
       {{ matchCount }} of {{ total }} settings match.
     </p>
 

@@ -51,13 +51,35 @@ export function installClock(base) {
 export function reviewDrawn(tab) {
   return tab.waitForFunction(() => {
     const bar = document.querySelector('.AO3E--tracked-review--bar')
-    const range = bar?.querySelector('.AO3E--tracked-review--bar--range')?.textContent ?? ''
+    const range = bar?.querySelector('.AO3E--tracked-review--bar--range')
     const status = bar?.querySelector('.AO3E--tracked-review--bar--status')
-    return !!bar && !bar.classList.contains('AO3E--tracked-review--bar--busy') && range !== '' && !range.startsWith('Gathering')
+    return !!bar && !bar.classList.contains('AO3E--tracked-review--bar--busy')
+      && !!range?.textContent && !range.hasAttribute('data-ao3e-gathering')
       && !!status && status.dataset.kind !== 'pending'
       && !!document.querySelector('.AO3E--search-host .AO3E--search-view--results')
       && !document.querySelector('.AO3E--search-host--progress, .AO3E--search-view--updating-on')
   })
+}
+
+/**
+ * Where the review's status line stands: its `kind` (`failed`, `pending`,
+ * `current`), where a pending window is being read (`here`, `waiting`,
+ * `elsewhere`, `stopped`), the lists it is about as its hover names them, and
+ * what it says. Null with no status line.
+ */
+export function reviewStatus(tab) {
+  return tab.evaluate(() => {
+    const el = document.querySelector('.AO3E--tracked-review--bar--status')
+    return el && { kind: el.dataset.kind, reading: el.dataset.ao3eReading ?? null, lists: el.title, text: el.textContent.trim() }
+  })
+}
+
+/** Wait until the review's status line has `kind`, and is read `reading` when given ({@link reviewStatus}). */
+export function statusIs(tab, kind, reading, { timeout } = {}) {
+  return tab.waitForFunction((k, r) => {
+    const el = document.querySelector('.AO3E--tracked-review--bar--status')
+    return el?.dataset.kind === k && (r === null || el.dataset.ao3eReading === r)
+  }, timeout === undefined ? {} : { timeout }, kind, reading ?? null)
 }
 
 /** Wind the page's clock on, in milliseconds. */

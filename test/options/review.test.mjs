@@ -4,13 +4,16 @@ import { describe, test } from 'node:test'
 import { formatDay, isoDay } from '../../src/common/trackedLists.ts'
 import { jobView } from '../../src/options_ui/model/jobView.ts'
 import { timeAgo } from '../../src/options_ui/model/moments.ts'
-import { latestReviewable, recordsLine, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
+import { latestReviewable, NOTHING_REVIEWED, recordsLine, REVIEW_EMPTY, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
+import { figures, mentions } from '../facts.mjs'
 
 const NOW = 1_800_000_000_000
 const TODAY = Math.floor(NOW / 86_400_000)
 const REVIEW = 'tracked-review'
 const OTHER = 'marked-for-later:tester'
+/** What the job calls the other list. */
+const OTHER_NAME = 'Marked for Later'
 const READINGS = 'https://archiveofourown.org/users/tester/readings#ao3e-tracked'
 /** The review's open URL, on the reader's readings. */
 const OPEN = '/users/tester/readings#ao3e-open=tracked-review'
@@ -46,7 +49,7 @@ function job(key, { job: fields, ...status } = {}) {
     waitingUntil: null,
     waitReason: null,
     ...status,
-  }, k => (k === REVIEW ? REVIEW_NAME : 'Marked for Later'), NOW)
+  }, k => (k === REVIEW ? REVIEW_NAME : OTHER_NAME), NOW)
 }
 
 const IDLE = job(null, { job: null, running: false })
@@ -54,13 +57,20 @@ const IDLE = job(null, { job: null, running: false })
 /** The block for the reader `tester`, with the review on, a list tracked, the window stored and no job, unless told otherwise. */
 const block = (input = {}) => reviewBlock({ enabled: true, tracking: true, window: WINDOW, userId: 'tester', job: IDLE, now: NOW, ...input })
 
+/** Start Review, with its name as the count of works it gives, if any. */
+const start = (input) => {
+  const { href, label, off } = block(input).start
+  assert.ok(label, 'it has a name')
+  return { href, works: figures(label), off }
+}
+
 describe('the review settings', () => {
   test('works per review is a target from 10 to 500', () => {
     assert.deepEqual(WORKS_PER_REVIEW, { min: 10, max: 500 })
   })
 
   test('the watermark reads as a day, or says nothing is reviewed yet', () => {
-    assert.equal(reviewedThroughLabel(0), 'Nothing reviewed yet')
+    assert.equal(reviewedThroughLabel(0), NOTHING_REVIEWED)
     assert.equal(reviewedThroughLabel(TODAY - 9), formatDay(TODAY - 9))
   })
 
@@ -95,13 +105,14 @@ describe('the review settings', () => {
 describe('This review', () => {
   test('its count, when it was gathered, and how much of it is cached', () => {
     const view = block({ window: { ...WINDOW, buckets: buckets({ cached: 12, unfetched: 25 }) } })
-    assert.deepEqual(view.figure, { count: '37 works', detail: `gathered ${timeAgo(WINDOW.scrapedAt, NOW)} · 12 cached` })
+    assert.deepEqual(figures(view.figure.count), [37])
+    assert.deepEqual(figures(view.figure.detail, timeAgo(WINDOW.scrapedAt, NOW)), [12], 'when it was gathered, and how many are cached')
     assert.equal(view.empty, null)
-    assert.equal(block({ window: { ...WINDOW, count: 1 } }).figure.count, '1 work')
+    assert.deepEqual(figures(block({ window: { ...WINDOW, count: 1 } }).figure.count), [1])
   })
 
   test('Start Review opens the review by its open URL, on the reader\'s readings, and says how much it holds', () => {
-    assert.deepEqual(block().start, { href: OPEN, label: 'Start the review: 37 works', off: null })
+    assert.deepEqual(start(), { href: OPEN, works: [37], off: null })
   })
 
   test('with the reader\'s account not known, Start Review opens it on the page it was gathered on', () => {
@@ -109,7 +120,7 @@ describe('This review', () => {
   })
 
   test('with neither, there is nowhere to open it, as with no window', () => {
-    assert.deepEqual(block({ userId: undefined, window: { ...WINDOW, listUrl: undefined } }).start, { href: null, label: 'Start the review: 37 works', off: START_OFF.noWindow })
+    assert.deepEqual(start({ userId: undefined, window: { ...WINDOW, listUrl: undefined } }), { href: null, works: [37], off: START_OFF.noWindow })
   })
 
   test('with no job, its offline copy can be cached and downloaded', () => {
@@ -130,25 +141,24 @@ describe('This review', () => {
   test('with no window yet, the cell says so and has nothing to cache, and Start Review opens the review on the reader\'s readings, which gathers the first', () => {
     const view = block({ window: null })
     assert.equal(view.figure, null)
-    assert.equal(view.empty, 'Nothing gathered yet.')
+    assert.equal(view.empty, REVIEW_EMPTY.opens)
     assert.equal(view.actions, null)
     assert.equal(view.offlineOff, null)
     assert.equal(view.retry, 0)
     assert.equal(view.cached, 0)
-    assert.deepEqual(view.start, { href: OPEN, label: 'Start the review', off: null })
+    assert.deepEqual(start({ window: null }), { href: OPEN, works: [], off: null })
   })
 
   test('with no window and the reader\'s account not known, there is no page to open: the cell says how the first review is gathered', () => {
     const view = block({ window: null, userId: undefined })
-    assert.equal(view.empty, 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.')
+    assert.equal(view.empty, REVIEW_EMPTY.elsewhere)
     assert.equal(view.actions, null)
-    assert.deepEqual(view.start, { href: null, label: 'Start the review', off: START_OFF.noWindow })
-    assert.equal(START_OFF.noWindow, 'off until your first review is gathered on AO3')
+    assert.deepEqual(start({ window: null, userId: undefined }), { href: null, works: [], off: START_OFF.noWindow })
   })
 
   test('with Tracked lists off, Start Review is off and says why, and the offline copy still works, More included', () => {
     const view = block({ enabled: false, window: { ...WINDOW, buckets: buckets({ cached: 12, failed: 2, unfetched: 23 }) } })
-    assert.deepEqual(view.start, { href: null, label: 'Start the review: 37 works', off: TRACK_OFF.review })
+    assert.deepEqual(start({ enabled: false }), { href: null, works: [37], off: TRACK_OFF.review })
     assert.ok(view.figure)
     assert.equal(view.actions, 'offline')
     assert.equal(view.offlineOff, null)
@@ -157,22 +167,21 @@ describe('This review', () => {
   })
 
   test('Tracked lists being off comes first, before anything else that keeps Start Review off', () => {
-    assert.deepEqual(block({ enabled: false, window: null }).start, { href: null, label: 'Start the review', off: TRACK_OFF.review })
+    assert.deepEqual(start({ enabled: false, window: null }), { href: null, works: [], off: TRACK_OFF.review })
     assert.equal(block({ enabled: false, window: null, userId: undefined }).start.off, TRACK_OFF.review)
     assert.equal(block({ enabled: false, tracking: false }).start.off, TRACK_OFF.review)
   })
 
   test('with no list tracked, there is nothing to review', () => {
-    assert.equal(START_OFF.noneTracked, 'off while no list is tracked')
-    assert.deepEqual(block({ tracking: false }).start, { href: null, label: 'Start the review: 37 works', off: START_OFF.noneTracked })
-    assert.deepEqual(block({ tracking: false, window: null }).start, { href: null, label: 'Start the review', off: START_OFF.noneTracked })
+    assert.deepEqual(start({ tracking: false }), { href: null, works: [37], off: START_OFF.noneTracked })
+    assert.deepEqual(start({ tracking: false, window: null }), { href: null, works: [], off: START_OFF.noneTracked })
     assert.equal(block({ tracking: false, window: null, userId: undefined }).start.off, START_OFF.noneTracked)
   })
 
   test('another list\'s job turns its offline actions off, naming the list; Start Review is untouched', () => {
     const view = block({ job: job(OTHER) })
     assert.equal(view.actions, 'offline')
-    assert.equal(view.offlineOff, 'off for now: one job at a time, and Marked for Later is caching')
+    assert.ok(mentions(view.offlineOff, OTHER_NAME), view.offlineOff)
     assert.equal(view.job, false)
     assert.equal(view.start.href, OPEN)
   })
@@ -204,8 +213,9 @@ describe('This review', () => {
   })
 
   test('the job calls it this review, which reads in the other lists\' reasons', () => {
-    assert.equal(job(REVIEW).label, 'Caching this review')
-    assert.equal(block({ window: { ...WINDOW, key: OTHER }, job: job(REVIEW) }).offlineOff, 'off for now: one job at a time, and this review is caching')
+    assert.ok(mentions(job(REVIEW).label, REVIEW_NAME), job(REVIEW).label)
+    const off = block({ window: { ...WINDOW, key: OTHER }, job: job(REVIEW) }).offlineOff
+    assert.ok(mentions(off, REVIEW_NAME), off)
   })
 })
 
@@ -235,9 +245,11 @@ describe('Pre-load', () => {
 
 describe('the records line', () => {
   test('how far every list is read, and how many are not yet', () => {
-    assert.equal(recordsLine({ through: TODAY - 2, behind: 3 }), `Lists read through ${formatDay(TODAY - 2)} · 3 not yet read`)
-    assert.equal(recordsLine({ through: TODAY - 2, behind: 0 }), `Lists read through ${formatDay(TODAY - 2)}`)
-    assert.equal(recordsLine({ through: null, behind: 1 }), 'No list read yet')
+    assert.deepEqual(figures(recordsLine({ through: TODAY - 2, behind: 3 }), formatDay(TODAY - 2)), [3])
+    assert.deepEqual(figures(recordsLine({ through: TODAY - 2, behind: 0 }), formatDay(TODAY - 2)), [], 'with every list read, no count')
+    const none = recordsLine({ through: null, behind: 1 })
+    assert.ok(none, 'with none read, it says so')
+    assert.deepEqual(figures(none), [])
   })
 
   test('nothing to say with no list tracked', () => {

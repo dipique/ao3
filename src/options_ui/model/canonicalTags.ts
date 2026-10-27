@@ -7,7 +7,7 @@ import type { SuggestRequest, SuggestState } from './tagSuggestions.ts'
 
 import { isTagTarget, TagType } from '../../common/data.ts'
 import { compilePattern } from './regexCheck.ts'
-import { CHECKING, suggestSource } from './ruleEditor.ts'
+import { CHECKING, NO_PATTERN, suggestSource } from './ruleEditor.ts'
 import { markSpans } from './settingsSearch.ts'
 import { MIN_TERM, suggestRequest, whenDue } from './tagSuggestions.ts'
 
@@ -358,7 +358,8 @@ export interface CanonicalPreview {
 
 const BLANK: CanonicalPreview = { head: null, sources: null, rows: [], more: null, empty: null, note: null }
 
-const NOUNS: Record<'tag' | TagType, string> = {
+/** What the head line calls the tags it counts, by the rule's target. */
+export const CANONICAL_NOUNS: Record<'tag' | TagType, string> = {
   tag: 'tags',
   [TagType.Rating]: 'Ratings',
   [TagType.ArchiveWarning]: 'Archive Warnings',
@@ -370,32 +371,33 @@ const NOUNS: Record<'tag' | TagType, string> = {
 }
 
 /** Why AO3's part is missing. */
-const NOTES = {
+export const CANONICAL_NOTES = {
   refused: 'AO3 asked us to slow down',
   failed: 'AO3’s suggestions are unavailable',
   paced: 'Requests to AO3 are pausing for a moment',
 } as const
 
 /** What the preview says, in place of any names, of a pattern stopped for running past its time budget. */
-const TOO_SLOW = 'The pattern is too slow to test, so no matches are shown.'
+export const CANONICAL_TOO_SLOW = 'The pattern is too slow to test, so no matches are shown.'
 
 /** What a note adds while there are names known here to show. */
 const LOCAL_ONLY = ' — showing known tags only'
 
-const ASKING = 'Asking AO3…'
+/** The note while a press waits for AO3. */
+export const ASKING_AO3 = 'Asking AO3…'
 
 function askNote(state: SuggestState, asks: readonly CanonicalAsk[], local: boolean): string | null {
   const paths = asks.map(({ request }) => request.path)
   if (!paths.length)
     return null
   const why = state.pausedUntil
-    ? NOTES.refused
+    ? CANONICAL_NOTES.refused
     : state.failed
-      ? NOTES.failed
-      : state.skipped !== null && paths.includes(state.skipped) ? NOTES.paced : null
+      ? CANONICAL_NOTES.failed
+      : state.skipped !== null && paths.includes(state.skipped) ? CANONICAL_NOTES.paced : null
   if (why)
     return local ? `${why}${LOCAL_ONLY}` : why
-  return state.asking !== null && paths.includes(state.asking) ? ASKING : null
+  return state.asking !== null && paths.includes(state.asking) ? ASKING_AO3 : null
 }
 
 const count = (n: number) => n.toLocaleString('en')
@@ -419,7 +421,13 @@ export function answeredNames(local: readonly PoolTag[], asks: readonly Canonica
   return knownOnce([...local, ...tags]).map(tag => tag.name).filter(name => !known.has(name))
 }
 
-const LOADING: CanonicalPreview = { ...BLANK, head: 'Loading the known tags…' }
+/** The head line in place of a count, while the names known here load, or while the pattern is one the engine refuses. */
+export const CANONICAL_HEADS = {
+  loading: 'Loading the known tags…',
+  invalid: 'Fix the pattern to see matches',
+} as const
+
+const LOADING: CanonicalPreview = { ...BLANK, head: CANONICAL_HEADS.loading }
 
 const UNDER_WAY: CanonicalPreview = { ...BLANK, head: CHECKING }
 
@@ -440,11 +448,11 @@ export function canonicalPreview(input: { target: RuleTarget, pattern: string, l
   if (!local)
     return LOADING
   if (!pattern.trim())
-    return { ...BLANK, head: 'No pattern yet' }
+    return { ...BLANK, head: NO_PATTERN }
   if (typeof compilePattern(pattern) === 'string')
-    return { ...BLANK, head: 'Fix the pattern to see matches' }
+    return { ...BLANK, head: CANONICAL_HEADS.invalid }
   if (check.kind === 'slow' || answers.kind === 'slow')
-    return { ...BLANK, note: TOO_SLOW }
+    return { ...BLANK, note: CANONICAL_TOO_SLOW }
   if (check.kind === 'running' || answers.kind === 'running')
     return UNDER_WAY
 
@@ -458,7 +466,7 @@ export function canonicalPreview(input: { target: RuleTarget, pattern: string, l
   }
   const found = canonicalMatches([...local, ...ao3], spanOf, CANONICAL_CAP)
 
-  const noun = isTagTarget(target) ? NOUNS[target] : NOUNS.tag
+  const noun = isTagTarget(target) ? CANONICAL_NOUNS[target] : CANONICAL_NOUNS.tag
   const note = askNote(state, asks, local.length > 0)
   if (!found.poolSize && !answered.length)
     return { ...BLANK, note, empty: note ? null : `No known canonical ${noun}, and nothing in the pattern to ask AO3 for.` }

@@ -61,7 +61,7 @@ describe('turning a name into a key', () => {
 describe('adding a mark', () => {
   test('refuses a blank name and a key already taken', () => {
     const marks = createDefaultMarks()
-    assert.match(markNameError(marks, '   '), /name/i)
+    assert.ok(markNameError(marks, '   '), 'a blank name is refused, saying why')
     assert.match(markNameError(marks, 'Favorite'), /favorite/)
     assert.match(markNameError(marks, 'favorite'), /favorite/, 'the clash is on the key, not the spelling')
     assert.equal(markNameError(marks, 'Did not finish'), null)

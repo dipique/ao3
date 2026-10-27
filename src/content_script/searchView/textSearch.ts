@@ -309,7 +309,8 @@ export type TextSearchPhase
     | { kind: 'done', hits: number, searched: number, unavailable: number }
     | { kind: 'failed', message: string }
 
-const NOTHING_TO_SEARCH = 'No work here has saved text to search'
+/** What the line says where none of the works has saved text to search. */
+export const NOTHING_TO_SEARCH = 'No work here has saved text to search'
 
 function works(n: number): string {
   return `${n} ${n === 1 ? 'work' : 'works'}`

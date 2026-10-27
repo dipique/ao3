@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { READINESS_LABELS } from '../../src/common/workProgress.ts'
+import { UNREAD } from '../../src/content_script/searchView/engine.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import { pressFacet, settled, viewDrawn } from './trackedPages.mjs'
@@ -130,8 +132,7 @@ describe('the Status facet in the search view', { skip }, () => {
 
   /** The Status group's rows: value, drill-down count, and whether "include" is on. */
   const statusRows = () => page.evaluate(() => {
-    const group = [...document.querySelectorAll('.AO3E--search-view--group')]
-      .find(g => g.querySelector('.AO3E--search-view--group-label')?.textContent.trim().startsWith('Status'))
+    const group = document.querySelector('.AO3E--search-view--group[data-ao3e-facet="status"]')
     if (!group)
       return null
     return [...group.querySelectorAll('.AO3E--search-view--row')].map(row => ({
@@ -156,9 +157,9 @@ describe('the Status facet in the search view', { skip }, () => {
     // before it renders.
     assert.deepEqual(
       rows.map(r => r.value).sort(),
-      ['Caught up', 'Marked for later', 'Ongoing', 'Ready', 'Unread'],
+      [READINESS_LABELS.caughtUp, 'Marked for later', 'Ongoing', READINESS_LABELS.ready, UNREAD].sort(),
     )
-    assert.deepEqual(rows.filter(r => r.included).map(r => r.value), ['Ready'])
+    assert.deepEqual(rows.filter(r => r.included).map(r => r.value), [READINESS_LABELS.ready])
   })
 
   test('so the view shows what the facet leaves, and collapses nothing: the facet is the only filter', async () => {
@@ -173,16 +174,17 @@ describe('the Status facet in the search view', { skip }, () => {
   })
 
   test('the selection lands in the stored search-view prefs', async () => {
-    await until('the Status selection to be stored', async () => (await storedStatus())?.join() === 'Ready')
-    assert.deepEqual(await storedStatus(), ['Ready'])
+    await until('the Status selection to be stored', async () => (await storedStatus())?.join() === READINESS_LABELS.ready)
+    assert.deepEqual(await storedStatus(), [READINESS_LABELS.ready])
   })
 
   test('pressing Caught up as well brings the whole list back, and that selection is stored too, so it is what opens next time', async () => {
-    await pressFacet(page, 'Caught up')
+    await pressFacet(page, READINESS_LABELS.caughtUp)
     assert.deepEqual((await visibleTitles()).sort(), ['All caught up', 'Never marked', 'Still going'])
     const rows = await statusRows()
-    assert.deepEqual(rows.filter(r => r.included).map(r => r.value).sort(), ['Caught up', 'Ready'])
-    await until('the new Status selection to be stored', async () => (await storedStatus())?.includes('Caught up'))
-    assert.deepEqual([...await storedStatus()].sort(), ['Caught up', 'Ready'])
+    const both = [READINESS_LABELS.caughtUp, READINESS_LABELS.ready].sort()
+    assert.deepEqual(rows.filter(r => r.included).map(r => r.value).sort(), both)
+    await until('the new Status selection to be stored', async () => (await storedStatus())?.includes(READINESS_LABELS.caughtUp))
+    assert.deepEqual([...await storedStatus()].sort(), both)
   })
 })

@@ -283,10 +283,13 @@ export function filterMenuItems(filter: FilterTarget | null, value: string, suff
   if (!filter)
     return []
   return filter.dirs.map((dir) => {
-    const shown = DIR_ITEMS[presentDir(filter, dir)]
+    const presented = presentDir(filter, dir)
+    const shown = DIR_ITEMS[presented]
     return {
       icon: shown.icon,
       label: shown.label(suffix),
+      action: presented,
+      value,
       scope: 'search' as const,
       active: filter.isSelected(dir, value),
       onSelect: () => filter.toggle(dir, value),

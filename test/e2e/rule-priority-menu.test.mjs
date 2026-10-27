@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, beforeEach, describe, test } from 'node:test'
 
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { menuClosed, openMenu, settled } from './trackedPages.mjs'
+import { menuClosed, menuRows, openMenu, pickRow, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -97,35 +97,26 @@ describe('rule priority from the tag menu', { skip }, () => {
     await settled(page)
   })
 
-  /** Right-click the tag link reading `text` in a blurb; returns the menu's own row labels. */
+  /** Right-click the tag link reading `text` in a blurb; returns the menu's own rows, not its submenu's. */
   const openMenuOn = async (text, blurb = 'work_1') => {
     await openMenu(page, () => page.evaluate((want, id) => {
       const link = [...document.querySelectorAll(`#${id} ul.tags a.tag`)]
         .find(a => a.textContent.trim() === want)
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
     }, text, blurb))
-    return page.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-        .filter(el => !el.closest('.AO3E--menu--submenu'))
-        .map(el => el.querySelector('.AO3E--menu--label').textContent))
+    return (await menuRows(page)).filter(row => !row.submenu)
+  }
+  const actions = rows => rows.map(row => row.action)
+  /** The values of the rows that do `action`. */
+  const valuesOf = (rows, action) => rows.filter(row => row.action === action).map(row => row.value)
+
+  /** Click the row that does `action` — to `value`, when given — in the menu or its open submenu. */
+  const click = async (action, value) => {
+    assert.ok(await pickRow(page, action, value), `no ${action} row ${value ?? ''}`)
   }
 
-  /** Click the row reading `label`, in the menu or its open submenu. */
-  const click = label => page.evaluate((want) => {
-    const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      .find(el => el.textContent === want)
-    if (!row)
-      throw new Error(`no menu row reading "${want}"`)
-    row.click()
-  }, label)
-
-  /** The open submenu's rows, as label, and whether each is current and offered. */
-  const submenuRows = () => page.evaluate(() =>
-    [...document.querySelectorAll('.AO3E--menu--submenu .AO3E--menu--item')].map(el => ({
-      label: el.textContent,
-      active: el.classList.contains('AO3E--menu--active'),
-      disabled: el.disabled,
-    })))
+  /** The open submenu's rows: the priority each sets, and whether each is current and offered. */
+  const submenuRows = async () => (await menuRows(page)).filter(row => row.submenu)
 
   const storedRule = value => page.evaluate(async (want) => {
     const { 'option.rules': rules } = await window.browser.storage.local.get('option.rules')
@@ -133,38 +124,38 @@ describe('rule priority from the tag menu', { skip }, () => {
   }, value)
 
   test('is offered only for a rule whose priority decides anything', async () => {
-    assert.ok((await openMenuOn('Fluff')).includes('Update Priority'))
-    assert.ok(!(await openMenuOn('Waff')).includes('Update Priority'), 'a highlight never enters the contest')
-    assert.ok(!(await openMenuOn('Angst')).includes('Update Priority'), 'no rule, nothing to weigh')
+    assert.ok(actions(await openMenuOn('Fluff')).includes('priority'))
+    assert.ok(!actions(await openMenuOn('Waff')).includes('priority'), 'a highlight never enters the contest')
+    assert.ok(!actions(await openMenuOn('Angst')).includes('priority'), 'no rule, nothing to weigh')
   })
 
   test('lists every priority, the current one marked and not offered, and sets the one picked', async () => {
     await openMenuOn('Fluff')
-    await click('Update Priority')
+    await click('priority')
     const rows = await submenuRows()
-    assert.deepEqual(rows.map(r => r.label), Array.from({ length: 10 }, (_, i) => `Priority ${i}`))
-    assert.deepEqual(rows.filter(r => r.active).map(r => r.label), ['Priority 6'])
-    assert.deepEqual(rows.filter(r => r.disabled).map(r => r.label), ['Priority 6'])
+    assert.deepEqual(valuesOf(rows, 'set-priority'), Array.from({ length: 10 }, (_, i) => String(i)))
+    assert.deepEqual(rows.filter(r => r.active).map(r => r.value), ['6'])
+    assert.deepEqual(rows.filter(r => r.disabled).map(r => r.value), ['6'])
 
-    await click('Priority 2')
+    await click('set-priority', '2')
     await menuClosed(page)
     assert.deepEqual(await storedRule('Fluff'), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'collapse', priority: 2 })
   })
 
   test('opens beside the menu when pointed at, and goes when another row is', async () => {
     await openMenuOn('Fluff')
-    const rowAt = label => page.evaluate((want) => {
-      const row = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].find(el => el.textContent === want)
+    const rowAt = action => page.evaluate((want) => {
+      const row = document.querySelector(`.AO3E--menu .AO3E--menu--item[data-ao3e-action="${want}"]`)
       const { x, y, width, height } = row.getBoundingClientRect()
       return { x: x + width / 2, y: y + height / 2 }
-    }, label)
+    }, action)
 
-    const parent = await rowAt('Update Priority')
+    const parent = await rowAt('priority')
     await page.mouse.move(parent.x, parent.y)
     await page.waitForSelector('.AO3E--menu--submenu')
     assert.equal((await submenuRows()).length, 10)
 
-    const other = await rowAt('Clear')
+    const other = await rowAt('clear')
     await page.mouse.move(other.x, other.y)
     await page.waitForFunction(() => !document.querySelector('.AO3E--menu--submenu'))
     assert.ok(await page.$('.AO3E--menu'), 'the menu itself stays open')
@@ -172,19 +163,18 @@ describe('rule priority from the tag menu', { skip }, () => {
 
   test('switching the rule to another behaviour keeps its priority', async () => {
     await openMenuOn('Fluff')
-    await click('Hide works with tag')
+    await click('hide')
     await menuClosed(page)
     assert.deepEqual(await storedRule('Fluff'), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'hide', priority: 6 })
   })
 
   test('an "always show" offers the hide it overrides on this work, at that rule’s own priority', async () => {
-    const label = 'Overriding Fandom "Soft Fandom" (priority 0)'
-    const labels = await openMenuOn('Keeper', 'work_2')
-    assert.ok(labels.includes(label), labels.join(' | '))
+    const rows = await openMenuOn('Keeper', 'work_2')
+    assert.deepEqual(valuesOf(rows, 'overriding'), ['Soft Fandom'])
 
-    await click(label)
-    assert.deepEqual((await submenuRows()).filter(r => r.active).map(r => r.label), ['Priority 0'])
-    await click('Priority 5')
+    await click('overriding', 'Soft Fandom')
+    assert.deepEqual((await submenuRows()).filter(r => r.active).map(r => r.value), ['0'])
+    await click('set-priority', '5')
     await menuClosed(page)
     assert.deepEqual(await storedRule('Soft Fandom'), { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse', priority: 5 })
     await page.waitForFunction(() => document.getElementById('work_2').dataset.ao3eHiddenBy === 'tags')
@@ -193,14 +183,14 @@ describe('rule priority from the tag menu', { skip }, () => {
   test('lists only the hides this force-show outranks by itself', async () => {
     // "Hard Fandom" collapses at 5: above "Keeper" at 4, so it's "Override" at 9 holding it off.
     const keeper = await openMenuOn('Keeper', 'work_3')
-    assert.ok(!keeper.some(l => l.startsWith('Overriding')), keeper.join(' | '))
+    assert.deepEqual(valuesOf(keeper, 'overriding'), [])
     const override = await openMenuOn('Override', 'work_3')
-    assert.ok(override.includes('Overriding Fandom "Hard Fandom" (priority 5)'), override.join(' | '))
+    assert.deepEqual(valuesOf(override, 'overriding'), ['Hard Fandom'])
   })
 
   test('a force-show overriding nothing on this work offers nothing', async () => {
-    const labels = await openMenuOn('Keeper', 'work_4')
-    assert.ok(labels.includes('Update Priority'), 'the menu is the force-show’s own')
-    assert.ok(!labels.some(l => l.startsWith('Overriding')), labels.join(' | '))
+    const rows = await openMenuOn('Keeper', 'work_4')
+    assert.ok(actions(rows).includes('priority'), 'the menu is the force-show’s own')
+    assert.deepEqual(valuesOf(rows, 'overriding'), [])
   })
 })

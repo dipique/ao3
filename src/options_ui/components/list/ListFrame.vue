@@ -91,13 +91,14 @@ defineExpose({ reveal })
         class="icon-btn"
         :aria-label="addLabel"
         :title="addLabel"
+        data-action="add"
         @click="emit('add', $event)"
       >
         <span class="i-tabler-plus" text="[15px]" aria-hidden="true" />
       </button>
     </div>
     <slot name="bands" />
-    <div v-if="empty" class="list-frame__empty">
+    <div v-if="empty" data-list-empty class="list-frame__empty">
       <slot name="empty" />
     </div>
     <div

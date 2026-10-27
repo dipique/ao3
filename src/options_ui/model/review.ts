@@ -37,9 +37,22 @@ export const START_OFF = {
   noWindow: 'off until your first review is gathered on AO3',
 } as const
 
+/**
+ * What This review says with no window yet: `opens` where Start Review has a
+ * page to open, which gathers the first review itself; `elsewhere` where it
+ * has none, so the reader is told where one is gathered.
+ */
+export const REVIEW_EMPTY = {
+  opens: 'Nothing gathered yet.',
+  elsewhere: 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.',
+} as const
+
+/** What Reviewed through says before any day is marked reviewed. */
+export const NOTHING_REVIEWED = 'Nothing reviewed yet'
+
 /** The watermark as the reader reads it. */
 export function reviewedThroughLabel(day: Day): string {
-  return day > 0 ? formatDay(day) : 'Nothing reviewed yet'
+  return day > 0 ? formatDay(day) : NOTHING_REVIEWED
 }
 
 /**
@@ -133,9 +146,7 @@ export function reviewBlock({ enabled, tracking, window, userId, job, now }: Rev
       settingsOff,
       figure: null,
       // With a page to open, Start Review gathers the first review itself.
-      empty: open
-        ? 'Nothing gathered yet.'
-        : 'Nothing gathered yet: your first review is gathered when you open Tracked on your readings page on AO3.',
+      empty: open ? REVIEW_EMPTY.opens : REVIEW_EMPTY.elsewhere,
       actions: here ? actions : null,
       offlineOff: null,
       job: here,

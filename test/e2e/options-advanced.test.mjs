@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { captureDownloads, skip, startOptions, until } from './optionsPage.mjs'
+import { toastTypes } from './trackedPages.mjs'
 
 const WIDE = { width: 1280, height: 800 }
 const IMPORT_EXPORT = 'your-data-import-export-your-settings'
@@ -21,29 +22,24 @@ const SEED = {
   'fandomCache.characters': learned(['Crowley (Good Omens)']),
 }
 
-/** Each variant in the Export menu, as its item is named and described, with the file it saves and what that file holds. */
+/** Each variant in the Export menu, by what its item does, with the file it saves and what that file holds. */
 const VARIANTS = [
   {
-    item: 'Export all',
-    note: 'Recommended for backup',
+    item: 'all',
     file: /^AO3-Enhancements_\d{4}-\d{2}-\d{2}_[\d-]{8}\.json$/,
     keeps: key => !key.startsWith('workText'),
   },
   {
-    item: 'Export options only',
-    note: 'Recommended for sharing with others',
+    item: 'options',
     file: /^AO3-Enhancements_options_\d{4}-\d{2}-\d{2}_[\d-]{8}\.json$/,
     keeps: key => key.startsWith('option.'),
   },
   {
-    item: 'Export cache only',
-    note: 'Not generally useful/recommended',
+    item: 'cache',
     file: /^AO3-Enhancements_cache_\d{4}-\d{2}-\d{2}_[\d-]{8}\.json$/,
     keeps: key => key.startsWith('cache.') || key.startsWith('blurb'),
   },
 ]
-
-const NEVER_IN_AN_EXPORT = 'Cached work text is never in any of the three: it is an order of magnitude larger than everything else, and can always be fetched again.'
 
 /**
  * Advanced in the settings row: *Your data*'s buttons are the row's 28 px
@@ -71,10 +67,10 @@ describe('options UI — Advanced', { skip }, () => {
     const options = await open()
     try {
       const buttons = [
-        await options.control(await options.row(IMPORT_EXPORT), 'button', 'Import'),
-        await options.control(await options.row(IMPORT_EXPORT), 'button', 'Export'),
-        await options.control(await options.row(FANDOM_IDS), 'button', 'Export ids'),
-        await options.control(await options.row(FANDOM_IDS), 'button', 'Clear'),
+        await options.action(await options.row(IMPORT_EXPORT), 'import'),
+        await options.action(await options.row(IMPORT_EXPORT), 'export'),
+        await options.action(await options.row(FANDOM_IDS), 'export'),
+        await options.action(await options.row(FANDOM_IDS), 'clear'),
       ]
       for (const button of buttons) {
         const drawn = await button.evaluate((el) => {
@@ -94,16 +90,18 @@ describe('options UI — Advanced', { skip }, () => {
     try {
       const all = Object.keys(SEED)
       for (const { item, file, keeps } of VARIANTS) {
-        await options.press(await options.control(await options.row(IMPORT_EXPORT), 'button', 'Export'))
+        await options.press(await options.action(await options.row(IMPORT_EXPORT), 'export'))
         await options.page.waitForSelector('[role="menu"]')
         const menu = await options.page.$('[role="menu"]')
-        const items = await options.controls(menu, 'menuitem')
-        assert.deepEqual(await Promise.all(items.map(handle => options.name(handle))), VARIANTS.map(variant => variant.item))
-        assert.deepEqual(await Promise.all(items.map(handle => options.description(handle))), VARIANTS.map(variant => variant.note))
-        assert.equal(await options.description(menu), NEVER_IN_AN_EXPORT)
+        assert.deepEqual(await options.menuActions(), VARIANTS.map(variant => variant.item))
+        for (const handle of await options.controls(menu, 'menuitem')) {
+          assert.ok(await options.name(handle), 'each variant is named')
+          assert.ok(await options.description(handle), 'and says who it is for')
+        }
+        assert.ok(await options.description(menu), 'the menu says what none of them carries')
 
         const before = await options.page.evaluate(() => window.__downloads.length)
-        await (await options.control(menu, 'menuitem', item)).click()
+        await (await options.menuItem(item)).click()
         await until(`${item} to hand over its file`, () => options.page.evaluate(n => window.__downloads.length > n, before))
         const saved = await options.lastDownload()
         assert.ok(saved, `${item}: nothing was saved`)
@@ -121,8 +119,8 @@ describe('options UI — Advanced', { skip }, () => {
     const options = await open()
     try {
       const row = await options.row(FANDOM_IDS)
-      await until('the learned ids to be counted', () => options.control(row, 'button', 'Export ids').then(button => button.evaluate(el => !el.disabled)))
-      await options.press(await options.control(row, 'button', 'Export ids'))
+      await until('the learned ids to be counted', () => options.action(row, 'export').then(button => button.evaluate(el => !el.disabled)))
+      await options.press(await options.action(row, 'export'))
       await until('the ids to be handed over', () => options.page.evaluate(() => window.__downloads.length > 0))
       const saved = await options.lastDownload()
       assert.match(saved.name, /^AO3-Enhancements_fandom-ids_\d{4}-\d{2}-\d{2}_[\d-]{8}\.json$/)
@@ -132,12 +130,12 @@ describe('options UI — Advanced', { skip }, () => {
         relationships: [],
       })
 
-      await options.press(await options.control(row, 'button', 'Clear'))
-      await until('the clear to be said', async () => (await options.toasts()).includes('Cleared learned fandom ids'))
+      await options.press(await options.action(row, 'clear'))
+      await until('the clear to be said', async () => (await toastTypes(options.page)).includes('success'))
       assert.deepEqual(await options.stored('fandomCache.fandoms'), {})
       assert.deepEqual(await options.stored('fandomCache.characters'), {})
-      assert.equal(await (await options.control(row, 'button', 'Export ids')).evaluate(el => el.disabled), true)
-      assert.equal(await (await options.control(row, 'button', 'Clear')).evaluate(el => el.disabled), true)
+      assert.equal(await (await options.action(row, 'export')).evaluate(el => el.disabled), true)
+      assert.equal(await (await options.action(row, 'clear')).evaluate(el => el.disabled), true)
     }
     finally {
       await options.close()

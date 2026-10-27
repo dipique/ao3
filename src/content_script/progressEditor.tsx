@@ -53,10 +53,10 @@ export interface ProgressEditorOptions {
 }
 
 /** One quick way to move the date field on; pressed again, it adds again. */
-const DATE_PRESETS: { label: string, shift: DateShift }[] = [
-  { label: '+1 week', shift: { months: 0, days: 7 } },
-  { label: '+1 month', shift: { months: 1, days: 0 } },
-  { label: '+3 months', shift: { months: 3, days: 0 } },
+const DATE_PRESETS: { label: string, action: string, shift: DateShift }[] = [
+  { label: '+1 week', action: 'add-week', shift: { months: 0, days: 7 } },
+  { label: '+1 month', action: 'add-month', shift: { months: 1, days: 0 } },
+  { label: '+3 months', action: 'add-quarter', shift: { months: 3, days: 0 } },
 ]
 
 /** Open the chapter/wait-until editor for one work. */
@@ -90,8 +90,8 @@ export function openProgressEditor(opts: ProgressEditorOptions): void {
   dateInput.value = fromEpochDays(opts.progress?.waitUntil ?? today)
 
   let run: PresetRun | null = null
-  const presets = DATE_PRESETS.map(({ label, shift }) => {
-    const btn = (<button type="button" class={cx('preset')}>{label}</button>) as HTMLElement as HTMLButtonElement
+  const presets = DATE_PRESETS.map(({ label, action, shift }) => {
+    const btn = (<button type="button" class={cx('preset')} data-ao3e-action={action}>{label}</button>) as HTMLElement as HTMLButtonElement
     btn.addEventListener('click', () => {
       run = applyDatePreset(toEpochDays(dateInput.value), today, shift, run)
       dateInput.value = fromEpochDays(run.value)
@@ -99,7 +99,7 @@ export function openProgressEditor(opts: ProgressEditorOptions): void {
     return btn
   })
   const clearDate = (
-    <button type="button" class={cx('preset')} title="Remove the wait-until date">Clear</button>
+    <button type="button" class={cx('preset')} data-ao3e-action="clear" title="Remove the wait-until date">Clear</button>
   ) as HTMLElement as HTMLButtonElement
   clearDate.addEventListener('click', () => {
     dateInput.value = ''

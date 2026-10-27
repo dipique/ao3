@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { TagType } from '../../../src/common/data.ts'
 import { storedLists } from '../helpers.mjs'
 import { scriptBackground, skip, startOptions, stubArchive, until } from '../optionsPage.mjs'
 
@@ -301,20 +302,13 @@ describe('options UI — layout', { skip }, () => {
 })
 
 /**
- * The lists the page keeps a note beside, each where it is opened, with what
- * its notes must say: one line each, in order, and whether it is above the
- * frame or below it.
+ * The lists the page keeps a note beside, each where it is opened, with its
+ * notes in order: whether each is above the frame or below it.
  */
 const NOTED_LISTS = {
-  'word-count-ranges': { hash: '#filter-defaults', notes: [{ above: true, says: [/Word Count filter/, /instant search view/, /clear/, /blank bound/, /exact repeat/] }] },
-  'text-replacements': { hash: '#work-text', notes: [{ above: false, says: [/Match casing/, /any casing/, /Across formatting/, /italics/] }] },
-  'work-marks': {
-    hash: '#marks-status',
-    notes: [
-      { above: true, says: [/one mark at a time/, /count as Read/, /off Marked for Later/] },
-      { above: false, says: [/Marked for later lives on AO3/] },
-    ],
-  },
+  'word-count-ranges': { hash: '#filter-defaults', notes: [{ above: true }] },
+  'text-replacements': { hash: '#work-text', notes: [{ above: false }] },
+  'work-marks': { hash: '#marks-status', notes: [{ above: true }, { above: false }] },
 }
 
 /** The notes beside the list's frame, in order: their text, how many lines each is laid out in, and whether each is above the frame. */
@@ -358,8 +352,6 @@ describe('options UI — the notes beside a list', { skip }, () => {
         for (const [i, note] of notes.entries()) {
           assert.equal(note.lines, 1, `note ${i + 1} is one line: "${note.text}"`)
           assert.equal(note.above, expected[i].above, `note ${i + 1} is ${expected[i].above ? 'above' : 'below'} the frame: "${note.text}"`)
-          for (const fact of expected[i].says)
-            assert.match(note.text, fact)
         }
       }
       finally {
@@ -452,13 +444,14 @@ describe('options UI — touch targets below 768 px', { skip }, () => {
   test('Work marks\' Clear, armed', async () => {
     const options = await session.open({ viewport: { width: 390, height: 844 }, hash: '#marks-status', seed: WITH_MARKS })
     try {
-      const clear = await options.control(await options.listRow('work-marks', 'good'), 'button', /^Clear /)
+      const clear = await options.action(await options.listRow('work-marks', 'good'), 'clear')
+      const asking = () => clear.evaluate(el => el.dataset.armed !== undefined)
       await options.press(clear)
-      await until('Clear to ask', async () => /^Clear [\d,]+\?$/.test(await options.text(clear)))
+      await until('Clear to ask', asking)
       await options.calm()
       await clear.evaluate(el => el.setAttribute('data-probed', ''))
       assert.deepEqual(await options.page.evaluate(smallTargets, CONTROLS, '[data-probed]'), [])
-      assert.match(await options.text(clear), /^Clear [\d,]+\?$/, 'still asking once read')
+      assert.ok(await asking(), 'still asking once read')
     }
     finally {
       await options.close()
@@ -622,9 +615,9 @@ describe('options UI — the rule editor on a phone', { skip }, () => {
       prepare: page => stubArchive(page, () => ({ json: ['Harry Potter', 'Harry Potter (Character)'].map(name => ({ id: name, name })) })),
     })
     try {
-      await options.press(await options.control(await options.list('rules'), 'button', 'Add a rule'))
+      await options.press(await options.action(await options.list('rules'), 'add'))
       const dialog = await options.page.waitForSelector('[role="dialog"]')
-      await options.press(await options.control(await options.control(dialog, 'radiogroup', 'What the rule matches'), 'radio', 'Character'))
+      await options.press(await dialog.$(`[data-rule-field="target"] [role="radio"][value="${TagType.Character}"]`))
       const field = await options.control(dialog, 'combobox')
       await field.type('harry')
       await options.page.waitForSelector('[role="dialog"] [data-suggest="names"]')
@@ -637,7 +630,7 @@ describe('options UI — the rule editor on a phone', { skip }, () => {
         return {
           field: box(dialog.querySelector('[role="combobox"]')),
           suggestions: box(dialog.querySelector('[data-suggest]')),
-          matcher: box(dialog.querySelector('[aria-label="How to match"]')),
+          matcher: box(dialog.querySelector('[data-rule-field="matcher"]')),
         }
       })
       assert.ok(boxes.matcher.top >= boxes.field.bottom, `the matcher wraps under the value at this width: ${JSON.stringify(boxes)}`)

@@ -7,7 +7,7 @@ import { createDefaultMarks, moveMark, packIds, packProgress } from '../../src/c
 import { addMonths, fromEpochDays, todayEpochDays } from '../../src/common/workProgress.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
-import { openMenu, settled } from './trackedPages.mjs'
+import { menuRows, openMenu, pickRow, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -120,9 +120,13 @@ describe('the work menu on a work page', { skip }, () => {
     return tab
   }
 
-  const menuLabels = tab => tab.evaluate(() =>
-    [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item .AO3E--menu--label')]
-      .map(el => el.textContent))
+  /** Whether the open menu offers to mark the work `markId`. */
+  const offersMark = async (tab, markId) =>
+    (await menuRows(tab)).some(row => row.action === 'mark' && row.value === markId)
+
+  /** The marks the open menu offers to set or take off, in order. */
+  const dispositions = async tab =>
+    (await menuRows(tab)).filter(row => row.action === 'mark' || row.action === 'unmark').map(row => row.value)
 
   /** Click the work's title, which opens its menu, and wait for the menu. */
   const openTitleMenu = tab => openMenu(tab, () => tab.click('#workskin > .preface.group > h2.title.heading'))
@@ -130,10 +134,9 @@ describe('the work menu on a work page', { skip }, () => {
   test('a plain left click on the title opens the menu', async () => {
     const tab = await open(WORK_URL)
     await openTitleMenu(tab)
-    const labels = await menuLabels(tab)
+    const offered = await offersMark(tab, 'continue')
     await tab.close()
-    assert.ok(labels.length > 0, 'the menu opened on a left click')
-    assert.ok(labels.some(l => l.startsWith('Mark as ongoing')), labels.join(' | '))
+    assert.ok(offered, 'the work menu opened on a left click')
   })
 
   test('a bare /chapters/:id permalink still gets the menu', async () => {
@@ -142,19 +145,15 @@ describe('the work menu on a work page', { skip }, () => {
     // and the reader handles carried on working.
     const tab = await open(CHAPTER_PERMALINK)
     await openTitleMenu(tab)
-    const labels = await menuLabels(tab)
+    const offered = await offersMark(tab, 'continue')
     await tab.close()
-    assert.ok(labels.length > 0, 'the menu opened on a chapter permalink')
-    assert.ok(labels.some(l => l.startsWith('Mark as ongoing')), labels.join(' | '))
+    assert.ok(offered, 'the work menu opened on a chapter permalink')
   })
 
   test('the wait-until field starts at today when no date is set', async () => {
     const tab = await open(WORK_URL)
     await openTitleMenu(tab)
-    await tab.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
-    })
+    assert.ok(await pickRow(tab, 'mark', 'continue'))
     await tab.waitForSelector('.AO3E--progress-editor')
     const value = await tab.$eval('.AO3E--progress-editor--date', el => el.value)
     await tab.close()
@@ -164,15 +163,9 @@ describe('the work menu on a work page', { skip }, () => {
   test('Clear still empties the field, so no date is genuinely unset', async () => {
     const tab = await open(WORK_URL)
     await openTitleMenu(tab)
-    await tab.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
-    })
+    assert.ok(await pickRow(tab, 'mark', 'continue'))
     await tab.waitForSelector('.AO3E--progress-editor')
-    await tab.evaluate(() => {
-      const buttons = [...document.querySelectorAll('.AO3E--progress-editor--preset')]
-      buttons.find(b => b.textContent === 'Clear')?.click()
-    })
+    await tab.evaluate(() => document.querySelector('.AO3E--progress-editor [data-ao3e-action="clear"]').click())
     const value = await tab.$eval('.AO3E--progress-editor--date', el => el.value)
     await tab.close()
     assert.equal(value, '')
@@ -181,14 +174,10 @@ describe('the work menu on a work page', { skip }, () => {
   test('pressing a preset twice adds it twice', async () => {
     const tab = await open(WORK_URL)
     await openTitleMenu(tab)
-    await tab.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
-    })
+    assert.ok(await pickRow(tab, 'mark', 'continue'))
     await tab.waitForSelector('.AO3E--progress-editor')
     await tab.evaluate(() => {
-      const quarter = [...document.querySelectorAll('.AO3E--progress-editor--preset')]
-        .find(b => b.textContent === '+3 months')
+      const quarter = document.querySelector('.AO3E--progress-editor [data-ao3e-action="add-quarter"]')
       quarter.click()
       quarter.click()
     })
@@ -203,10 +192,7 @@ describe('the work menu on a work page', { skip }, () => {
     // carrying a date. A real future date is still stored.
     const tab = await open(WORK_URL)
     await openTitleMenu(tab)
-    await tab.evaluate(() => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.querySelector('.AO3E--menu--label')?.textContent?.startsWith('Mark as ongoing'))?.click()
-    })
+    assert.ok(await pickRow(tab, 'mark', 'continue'))
     await tab.waitForSelector('.AO3E--progress-editor')
     await tab.evaluate(() => document.querySelector('.AO3E--progress-editor--save').click())
     await until('the ongoing mark to be written', () => tab.evaluate(() =>
@@ -233,23 +219,17 @@ describe('the work menu on a work page', { skip }, () => {
       'option.markForLaterToolbar': true,
     })
     await openTitleMenu(tab)
-    const rows = await tab.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
-        label: el.querySelector('.AO3E--menu--label').textContent,
-        scope: [...el.classList].find(c => c.startsWith('AO3E--menu--item--')) ?? null,
-      })))
+    const offered = await dispositions(tab)
+    const rows = await menuRows(tab)
     await tab.close()
 
-    const dispositions = rows
-      .filter(r => /^(?:Mark|Unmark) as /.test(r.label))
-      .map(r => r.label.replace(/^(?:Mark|Unmark) as /, '').replace(/…$/, ''))
-    assert.deepEqual(dispositions, ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'ongoing'])
+    assert.deepEqual(offered, ['read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'continue'])
 
     // Marked for Later is an AO3-side action, so it sits in its own scope group
     // rather than among the dispositions.
-    const mfl = rows.find(r => /Marked for Later|Mark for later/i.test(r.label))
-    assert.ok(mfl, rows.map(r => r.label).join(' | '))
-    assert.equal(mfl.scope, 'AO3E--menu--item--account')
+    const mfl = rows.find(r => r.action?.endsWith('-for-later'))
+    assert.ok(mfl, rows.map(r => r.action).join(' | '))
+    assert.equal(mfl.scope, 'account')
   })
 
   test('a reordered table reorders the menu', async () => {
@@ -259,14 +239,10 @@ describe('the work menu on a work page', { skip }, () => {
     const marks = moveMark(createDefaultMarks(), 'favorite', -10)
     const tab = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
     await openTitleMenu(tab)
-    const labels = await tab.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
+    const offered = await dispositions(tab)
     await tab.close()
 
-    const dispositions = labels
-      .filter(label => /^(?:Mark|Unmark) as /.test(label))
-      .map(label => label.replace(/^(?:Mark|Unmark) as /, '').replace(/…$/, ''))
-    assert.deepEqual(dispositions, ['favorite', 'read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'abandoned', 'ongoing'])
+    assert.deepEqual(offered, ['favorite', 'read', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'abandoned', 'continue'])
   })
 
   test('a mark switched off leaves the menu — unless the work carries it', async () => {
@@ -278,22 +254,20 @@ describe('the work menu on a work page', { skip }, () => {
 
     const clean = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
     await openTitleMenu(clean)
-    const offered = await clean.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
+    const offered = (await menuRows(clean)).filter(row => row.action === 'mark').map(row => row.value)
     await clean.close()
-    assert.ok(!offered.includes('Mark as boring'), offered.join(' | '))
-    assert.ok(!offered.includes('Mark as bad'), offered.join(' | '))
-    assert.ok(offered.includes('Mark as gross'), 'the marks still offered are untouched')
+    assert.ok(!offered.includes('boring'), offered.join(' | '))
+    assert.ok(!offered.includes('bad'), offered.join(' | '))
+    assert.ok(offered.includes('gross'), 'the marks still offered are untouched')
 
     const carried = createDefaultMarks()
     carried.boring.disabled = true
     carried.boring.items = packIds([WORK_ID])
     const marked = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks: carried } })
     await openTitleMenu(marked)
-    const withMark = await marked.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--label')].map(el => el.textContent))
+    const withMark = await menuRows(marked)
     await marked.close()
-    assert.ok(withMark.includes('Unmark as boring'), withMark.join(' | '))
+    assert.ok(withMark.some(row => row.action === 'unmark' && row.value === 'boring'), withMark.map(row => `${row.action} ${row.value}`).join(' | '))
   })
 
   test('an ongoing work drops the Marked-for-Later clock from its indicators', async () => {

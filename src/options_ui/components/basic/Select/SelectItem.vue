@@ -7,6 +7,7 @@ const props = defineProps<SelectItemProps>()
 <template>
   <RekaSelectItem
     v-bind="props"
+    :data-value="props.value ?? undefined"
     flex="~ items-center"
     bg="focus:input"
     text="sm"

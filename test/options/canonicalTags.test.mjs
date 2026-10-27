@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { ruleValueMatches, TagType } from '../../src/common/data.ts'
-import { answeredNames, CANONICAL_CAP, canonicalAsks, canonicalMatches, canonicalPool, canonicalPreview, knownOnce, literalRuns, nextAsk, offersCanonical, usesBundledFandoms, withPress } from '../../src/options_ui/model/canonicalTags.ts'
+import { answeredNames, ASKING_AO3, CANONICAL_CAP, CANONICAL_HEADS, CANONICAL_NOTES, CANONICAL_NOUNS, CANONICAL_TOO_SLOW, canonicalAsks, canonicalMatches, canonicalPool, canonicalPreview, knownOnce, literalRuns, nextAsk, offersCanonical, usesBundledFandoms, withPress } from '../../src/options_ui/model/canonicalTags.ts'
 import { ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
+import { CHECKING, NO_PATTERN } from '../../src/options_ui/model/ruleEditor.ts'
 import { NO_ANSWERS, withAnswer, withFailure, withRefusal } from '../../src/options_ui/model/tagSuggestions.ts'
+import { figures, mentions } from '../facts.mjs'
 
 const REFUSED = { reason: 'refused', until: 1_000_000 }
 const BREATHER = { reason: 'pacing', until: 1_000_000 }
@@ -303,10 +305,13 @@ describe('canonicalPreview', () => {
   const answered = withAnswer(withAnswer(NO_ANSWERS, original, ['Original Child Character(s)', 'Original Female Character(s)']), female, ['Female Shepard (Mass Effect)'])
   const preview = (input = {}) => ran({ target: TagType.Character, pattern: '^Original (Female|Child)', local, asks, state: answered, ...input })
 
+  const BLANK = { head: null, sources: null, rows: [], more: null, empty: null, note: null }
+
   test('counts the matches among every name known, and names AO3\'s part', () => {
     const shown = preview()
-    assert.equal(shown.head, '2 of 5 known canonical Characters')
-    assert.equal(shown.sources, 'plus AO3’s suggestions for “Original”, “Female”')
+    assert.deepEqual(figures(shown.head), [2, 5])
+    assert.ok(mentions(shown.head, CANONICAL_NOUNS[TagType.Character]), shown.head)
+    assert.ok(mentions(shown.sources, 'Original') && mentions(shown.sources, 'Female'), shown.sources)
     assert.deepEqual(shown.rows.map(row => row.name), ['Original Child Character(s)', 'Original Female Character(s)'])
     assert.equal(shown.rows[0].html, '<mark>Original Child</mark> Character(s)')
     assert.equal(shown.empty, null)
@@ -319,29 +324,31 @@ describe('canonicalPreview', () => {
   })
 
   test('names only the runs AO3 has answered, and none before it has', () => {
-    assert.equal(preview({ state: withAnswer(NO_ANSWERS, female, []) }).sources, 'plus AO3’s suggestions for “Female”')
+    const one = preview({ state: withAnswer(NO_ANSWERS, female, []) }).sources
+    assert.ok(mentions(one, 'Female') && !mentions(one, 'Original'), one)
     const none = preview({ state: NO_ANSWERS })
     assert.equal(none.sources, null)
-    assert.equal(none.head, '1 of 3 known canonical Characters')
+    assert.deepEqual(figures(none.head), [1, 3])
   })
 
   test('says while AO3 is being asked', () => {
     const asking = nextAsk(withPress(NO_ANSWERS), asks, null).state
-    assert.equal(preview({ state: asking }).note, 'Asking AO3…')
+    assert.equal(preview({ state: asking }).note, ASKING_AO3)
   })
 
-  test('under a refusal, offline, or due a breather, shows the known names only, with a note', () => {
+  test('under a refusal, offline, or due a breather, shows the known names only, with a note saying which', () => {
     const asked = nextAsk(withPress(NO_ANSWERS), asks, null).state
-    const notes = {
-      'AO3 asked us to slow down — showing known tags only': withRefusal(asked, REFUSED),
-      'AO3’s suggestions are unavailable — showing known tags only': withFailure(asked),
-      'Requests to AO3 are pausing for a moment — showing known tags only': nextAsk(withPress(NO_ANSWERS), asks, BREATHER).state,
+    const states = {
+      refused: withRefusal(asked, REFUSED),
+      failed: withFailure(asked),
+      paced: nextAsk(withPress(NO_ANSWERS), asks, BREATHER).state,
     }
-    for (const [note, state] of Object.entries(notes)) {
+    for (const [why, state] of Object.entries(states)) {
       const shown = preview({ state })
-      assert.equal(shown.note, note)
-      assert.equal(shown.head, '1 of 3 known canonical Characters', note)
-      assert.deepEqual(shown.rows.map(row => row.name), ['Original Female Character(s)'], note)
+      assert.ok(mentions(shown.note, CANONICAL_NOTES[why]), `${why}: ${shown.note}`)
+      assert.notEqual(shown.note, CANONICAL_NOTES[why], `${why}: the note says the known names show`)
+      assert.deepEqual(figures(shown.head), [1, 3], why)
+      assert.deepEqual(shown.rows.map(row => row.name), ['Original Female Character(s)'], why)
     }
   })
 
@@ -349,61 +356,59 @@ describe('canonicalPreview', () => {
     const freeform = canonicalAsks(TagType.Freeform, 'Fluff')
     const asked = nextAsk(withPress(NO_ANSWERS), freeform, null).state
     const shown = ran({ target: TagType.Freeform, pattern: 'Fluff', local: [], asks: freeform, state: withFailure(asked) })
-    assert.deepEqual(shown, { head: null, sources: null, rows: [], more: null, empty: null, note: 'AO3’s suggestions are unavailable' })
+    assert.deepEqual(shown, { ...BLANK, note: CANONICAL_NOTES.failed })
   })
 
   test('additional tags show AO3\'s answer, from it alone', () => {
     const freeform = canonicalAsks(TagType.Freeform, 'Fluff')
     const state = withAnswer(NO_ANSWERS, freeform[0].request, ['Fluff', 'Fluff and Angst', 'Angst'])
     const shown = ran({ target: TagType.Freeform, pattern: '^Fluff', local: [], asks: freeform, state })
-    assert.equal(shown.head, '2 of 3 known canonical Additional Tags')
-    assert.equal(shown.sources, 'from AO3’s suggestions for “Fluff”')
+    assert.deepEqual(figures(shown.head), [2, 3])
+    assert.ok(mentions(shown.head, CANONICAL_NOUNS[TagType.Freeform]), shown.head)
+    assert.ok(mentions(shown.sources, 'Fluff'), shown.sources)
   })
 
   test('with nothing known and nothing to ask, says so', () => {
     const shown = ran({ target: TagType.Freeform, pattern: '^.{3}$', local: [], asks: [], state: withPress(NO_ANSWERS) })
-    assert.deepEqual(shown, { head: null, sources: null, rows: [], more: null, empty: 'No known canonical Additional Tags, and nothing in the pattern to ask AO3 for.', note: null })
+    assert.ok(mentions(shown.empty ?? '', CANONICAL_NOUNS[TagType.Freeform]), shown.empty)
+    assert.deepEqual(shown, { ...BLANK, empty: shown.empty })
   })
 
   test('says when nothing matches', () => {
     const shown = preview({ pattern: '^Nobody$' })
-    assert.equal(shown.head, '0 of 5 known canonical Characters')
-    assert.equal(shown.empty, 'No canonical tags match this pattern.')
+    assert.deepEqual(figures(shown.head), [0, 5])
+    assert.deepEqual(shown.rows, [])
+    assert.ok(shown.empty, 'a line in place of the names')
   })
 
   test('shows the first fifty, and says so', () => {
     const many = pool(Array.from({ length: 1480 }, (_, i) => `Character ${i}`))
     const shown = ran({ target: TagType.Character, pattern: '^Character', local: many, asks: [], state: NO_ANSWERS })
-    assert.equal(shown.head, '1,480 of 1,480 known canonical Characters')
+    assert.deepEqual(figures(shown.head), [1480, 1480])
     assert.equal(shown.rows.length, CANONICAL_CAP)
-    assert.equal(shown.more, 'The first 50 are shown.')
+    assert.deepEqual(figures(shown.more ?? ''), [CANONICAL_CAP])
   })
 
   test('names the kind of tag, or any tag', () => {
-    const nouns = {
-      tag: 'tags',
-      [TagType.Fandom]: 'Fandoms',
-      [TagType.Relationship]: 'Relationships',
-      [TagType.Rating]: 'Ratings',
-      [TagType.ArchiveWarning]: 'Archive Warnings',
-      [TagType.Category]: 'Categories',
-    }
-    for (const [target, noun] of Object.entries(nouns)) {
+    for (const target of ['tag', TagType.Fandom, TagType.Relationship, TagType.Rating, TagType.ArchiveWarning, TagType.Category]) {
       const shown = ran({ target, pattern: 'x', local: pool(['x']), asks: [], state: NO_ANSWERS })
-      assert.equal(shown.head, `1 of 1 known canonical ${noun}`, target)
+      assert.deepEqual(figures(shown.head), [1, 1], target)
+      assert.ok(mentions(shown.head, CANONICAL_NOUNS[target]), `${target}: ${shown.head}`)
     }
+    const nouns = Object.values(CANONICAL_NOUNS)
+    assert.equal(new Set(nouns).size, nouns.length, 'each kind has its own')
   })
 
   test('while the known names load, says so', () => {
-    assert.deepEqual(preview({ local: null }), { head: 'Loading the known tags…', sources: null, rows: [], more: null, empty: null, note: null })
+    assert.deepEqual(preview({ local: null }), { ...BLANK, head: CANONICAL_HEADS.loading })
   })
 
   test('with no pattern, or one the engine refuses, shows no names', () => {
-    assert.deepEqual(preview({ pattern: '  ' }), { head: 'No pattern yet', sources: null, rows: [], more: null, empty: null, note: null })
-    assert.deepEqual(preview({ pattern: '(Original' }), { head: 'Fix the pattern to see matches', sources: null, rows: [], more: null, empty: null, note: null })
+    assert.deepEqual(preview({ pattern: '  ' }), { ...BLANK, head: NO_PATTERN })
+    assert.deepEqual(preview({ pattern: '(Original' }), { ...BLANK, head: CANONICAL_HEADS.invalid })
   })
 
-  const TOO_SLOW = { head: null, sources: null, rows: [], more: null, empty: null, note: 'The pattern is too slow to test, so no matches are shown.' }
+  const TOO_SLOW = { ...BLANK, note: CANONICAL_TOO_SLOW }
 
   test('stops, with a note, when the check of the pattern ran past the budget', () => {
     assert.deepEqual(preview({ check: { kind: 'slow', job: { pattern: '(a+)+$', subjects: [] } } }), TOO_SLOW)
@@ -414,7 +419,7 @@ describe('canonicalPreview', () => {
   })
 
   test('says it is checking while either runs, as the tester does, and nothing found: the editor keeps what it showed before', () => {
-    const checking = { head: 'Checking…', sources: null, rows: [], more: null, empty: null, note: null }
+    const checking = { ...BLANK, head: CHECKING }
     assert.deepEqual(preview({ check: { kind: 'running', last: null } }), checking)
     assert.deepEqual(preview({ answers: { kind: 'running', last: null } }), checking)
   })

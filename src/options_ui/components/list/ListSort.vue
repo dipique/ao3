@@ -25,7 +25,7 @@ function pick(value: AcceptableValue) {
 <template>
   <DropdownMenu :modal="false">
     <DropdownMenuTrigger>
-      <button type="button" class="icon-btn" :aria-label="name" :title="name">
+      <button type="button" class="icon-btn" :aria-label="name" :title="name" data-action="sort" :data-sort="sort">
         <span class="i-tabler-filter-2" text="[15px]" aria-hidden="true" />
       </button>
     </DropdownMenuTrigger>
@@ -35,6 +35,7 @@ function pick(value: AcceptableValue) {
           v-for="choice in choices"
           :key="choice.value"
           :value="choice.value"
+          :data-sort="choice.value"
           class="relative flex cursor-pointer select-none items-center rounded-[7px] py-1.5 pl-7 pr-3 text-[12.5px] input-ring data-[highlighted]:bg-[var(--row-hover)]"
         >
           <RekaDropdownMenuItemIndicator class="absolute left-2 grid place-items-center">

@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { describeProgress, hiddenLabel, todayEpochDays } from '../../src/common/workProgress.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
-import { menuClosed, openMenu, rerun, runs, settled } from './trackedPages.mjs'
+import { mentions, until } from './optionsPage.mjs'
+import { menuClosed, menuRows, openMenu, pickRow, rerun, runs, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -109,31 +110,26 @@ describe('the ongoing mark', { skip }, () => {
     await browser?.close()
   })
 
-  /** Right-click a work's title to open its menu, and read the rows back. */
+  /** Right-click a work's title to open its menu, and read back what its rows do. */
   const openWorkMenu = async (id) => {
     await openMenu(page, () => page.evaluate((workId) => {
       document.querySelector(`#work_${workId} h4.heading a`).dispatchEvent(
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
     }, id))
-    return page.evaluate(() =>
-      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')].map(el => ({
-        label: el.querySelector('.AO3E--menu--label').textContent,
-        disabled: el.disabled,
-      })))
+    return menuRows(page)
   }
+  /** Each row as what it does, and to what: `mark continue`, `update-latest 9`. */
+  const does = rows => rows.map(row => `${row.action} ${row.value}`)
 
-  const clickRow = async (prefix) => {
-    await page.evaluate((p) => {
-      const rows = [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
-      rows.find(el => el.textContent.startsWith(p)).click()
-    }, prefix)
+  const clickRow = async (action, value) => {
+    assert.ok(await pickRow(page, action, value), `no ${action} row ${value ?? ''}`)
     await menuClosed(page)
   }
 
   /** Pick "Mark as ongoing…" from the open menu, and wait for the editor it opens. */
   const openEditor = async () => {
-    await clickRow('Mark as ongoing…')
+    await clickRow('mark', 'continue')
     await page.waitForSelector('.AO3E--progress-editor')
   }
 
@@ -150,10 +146,10 @@ describe('the ongoing mark', { skip }, () => {
   let runsBeforeSave
 
   test('an unmarked work offers one row, and it opens the editor', async () => {
-    const labels = (await openWorkMenu(1)).map(i => i.label)
-    assert.ok(labels.includes('Mark as ongoing…'), labels.join(' | '))
-    assert.ok(!labels.some(l => l.startsWith('Update to')), 'nothing to update yet')
-    assert.ok(!labels.includes('Unmark as ongoing'), labels.join(' | '))
+    const rows = does(await openWorkMenu(1))
+    assert.ok(rows.includes('mark continue'), rows.join(' | '))
+    assert.ok(!rows.some(r => r.startsWith('update-')), 'nothing to update yet')
+    assert.ok(!rows.includes('unmark continue'), rows.join(' | '))
   })
 
   test('the editor prefills the published count, not the author\'s target', async () => {
@@ -205,33 +201,34 @@ describe('the ongoing mark', { skip }, () => {
     assert.equal(hiddenBy, 'marks')
     const reason = await page.evaluate(() =>
       document.getElementById('work_1')?.querySelector('.AO3E--hide-works--reasons')?.textContent ?? '')
-    assert.match(reason, /Ongoing \(No unread chapters\): A long one/)
+    assert.ok(mentions(reason, hiddenLabel('caughtUp', 'Ongoing')), reason)
+    assert.ok(mentions(reason, 'A long one'), reason)
   })
 
   test('the hover text says what is unread and what the date does', async () => {
     const title = await page.evaluate(() =>
       document.getElementById('work_1')?.querySelector('.AO3E--hide-works--reason-value')?.title ?? '')
-    assert.equal(title, 'No unread chapters\nReady (no Wait Until date set)')
+    assert.equal(title, describeProgress({ chapter: 9 }, 9, todayEpochDays()))
   })
 
   test('a marked work offers the update rows, with the current one inert', async () => {
     const items = await openWorkMenu(1)
-    const labels = items.map(i => i.label)
-    assert.ok(labels.includes('Update to latest chapter (9)'), labels.join(' | '))
-    assert.ok(labels.includes('Set wait-until date…'), labels.join(' | '))
-    assert.ok(labels.includes('Unmark as ongoing'), labels.join(' | '))
-    assert.ok(!labels.includes('Mark as ongoing…'), 'the marked work does not offer the first-time row')
+    const rows = does(items)
+    assert.ok(rows.includes('update-latest 9'), rows.join(' | '))
+    assert.ok(items.some(i => i.action === 'set-wait'), rows.join(' | '))
+    assert.ok(rows.includes('unmark continue'), rows.join(' | '))
+    assert.ok(!rows.includes('mark continue'), 'the marked work does not offer the first-time row')
     // This is a listing, not a work page, so there is no "current chapter".
-    assert.ok(!labels.some(l => l.startsWith('Update to current')), labels.join(' | '))
-    const latest = items.find(i => i.label.startsWith('Update to latest'))
+    assert.ok(!items.some(i => i.action === 'update-current'), rows.join(' | '))
+    const latest = items.find(i => i.action === 'update-latest')
     assert.equal(latest.disabled, true, 'already on chapter 9 — the row states where you are')
     await page.keyboard.press('Escape')
     await menuClosed(page)
   })
 
   test('an open-ended work reads its published count, ignoring the "?"', async () => {
-    const labels = (await openWorkMenu(2)).map(i => i.label)
-    assert.ok(labels.includes('Mark as ongoing…'), labels.join(' | '))
+    const rows = does(await openWorkMenu(2))
+    assert.ok(rows.includes('mark continue'), rows.join(' | '))
     await openEditor()
     const value = await page.$eval('.AO3E--progress-editor--chapter', el => el.value)
     assert.equal(value, '4')
@@ -250,7 +247,7 @@ describe('the ongoing mark', { skip }, () => {
 
     await openWorkMenu(3)
     const writes = await markWrites()
-    await clickRow('Update to latest chapter (1)')
+    await clickRow('update-latest', '1')
     assert.equal(await page.$('.AO3E--progress-editor'), null, 'no dialog for a one-click update')
     await until('the update to be written', async () => await markWrites() > writes)
     const mark = await lastMarks()

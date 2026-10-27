@@ -34,6 +34,8 @@ import { behaviorOf, clearRule, setPriorityOf, setRulePriority, toggleRuleBehavi
 /** One offered behaviour, and how it presents itself. */
 interface BehaviorRow {
   behavior: Exclude<FilterBehavior, 'none'>
+  /** The row's `data-ao3e-action`. */
+  action: string
   icon: () => Node
   /** `noun` is the thing the rule points at — "tag", "author", "work". */
   label: (noun: string) => string
@@ -44,10 +46,10 @@ interface BehaviorRow {
 }
 
 const BEHAVIOR_ROWS: BehaviorRow[] = [
-  { behavior: 'hide', icon: () => <MdiEyeOff />, label: noun => `Hide works with ${noun}`, danger: true },
-  { behavior: 'collapse', icon: () => <MdiArrowCollapseVertical />, label: noun => `Collapse works with ${noun}` },
-  { behavior: 'invert', icon: () => <MdiEyeCheck />, label: noun => `Always show works with ${noun}` },
-  { behavior: 'highlight', icon: () => <MdiStar />, label: noun => `Highlight ${noun}` },
+  { behavior: 'hide', action: 'hide', icon: () => <MdiEyeOff />, label: noun => `Hide works with ${noun}`, danger: true },
+  { behavior: 'collapse', action: 'collapse', icon: () => <MdiArrowCollapseVertical />, label: noun => `Collapse works with ${noun}` },
+  { behavior: 'invert', action: 'always-show', icon: () => <MdiEyeCheck />, label: noun => `Always show works with ${noun}` },
+  { behavior: 'highlight', action: 'highlight', icon: () => <MdiStar />, label: noun => `Highlight ${noun}` },
   {
     // Hides the tag itself wherever it's listed, leaving the work alone. Once
     // applied the tag is gone from the page, so undoing it is a settings job.
@@ -55,6 +57,7 @@ const BEHAVIOR_ROWS: BehaviorRow[] = [
     // of a tag list — which is the same test the options editor's rule dialog
     // gates its `hideFilter` option on.
     behavior: 'hideFilter',
+    action: 'hide-tag',
     icon: () => <MdiTagOff />,
     label: () => 'Hide useless tag',
     applies: key => isTagTarget(key.target),
@@ -100,6 +103,7 @@ export function ruleBehaviorItems(
     items.push({
       icon: icons?.[row.behavior] ?? row.icon,
       label: row.label(noun),
+      action: row.action,
       scope: 'settings',
       danger: row.danger,
       active: behavior === row.behavior,
@@ -113,6 +117,7 @@ export function ruleBehaviorItems(
     items.push({
       icon: () => <MdiFormatListNumbered />,
       label: 'Update Priority',
+      action: 'priority',
       scope: 'settings',
       submenu: priorityRows(rulePriority(rule), priority => setRulePriority(key, priority)),
     })
@@ -123,6 +128,7 @@ export function ruleBehaviorItems(
     items.push({
       icon: () => <MdiCloseCircleOutline />,
       label: 'Clear',
+      action: 'clear',
       scope: 'settings',
       onSelect: () => clearRule(key),
     })
@@ -136,6 +142,8 @@ function priorityRows(current: number, pick: (priority: number) => Promise<void>
   for (let priority = MIN_PRIORITY; priority <= MAX_PRIORITY; priority++) {
     rows.push({
       label: `Priority ${priority}`,
+      action: 'set-priority',
+      value: String(priority),
       scope: 'settings',
       active: priority === current,
       disabled: priority === current,
@@ -159,6 +167,8 @@ function overridingItems(strength: number, at: Element): MenuItem[] {
     .map(({ rule, subject, priority }) => ({
       icon: () => <MdiEyeOffOutline />,
       label: `Overriding ${subject} (priority ${priority})`,
+      action: 'overriding',
+      value: rule.value,
       scope: 'settings',
       submenu: priorityRows(priority, next => setPriorityOf(rule, next)),
     }))

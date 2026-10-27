@@ -137,16 +137,20 @@ describe('options UI — Reading', { skip }, () => {
         return { height: el.getBoundingClientRect().height, fontSize: style.fontSize, radius: style.borderTopLeftRadius }
       })
       assert.deepEqual(drawn, { height: 28, fontSize: '12.5px', radius: '7px' })
-      assert.equal(await options.text(select), 'Disabled')
+      const shown = () => select.evaluate(el => el.getAttribute('data-value'))
+      assert.equal(await shown(), null, 'no alignment forced')
 
       await select.evaluate(el => window.scrollBy({ top: el.getBoundingClientRect().top - window.innerHeight / 2, behavior: 'instant' }))
       await select.click()
       await options.page.waitForSelector('[role="option"]')
       await options.calm()
-      await (await options.control(options.page, 'option', 'Justified')).click()
+      const justify = await options.page.$('[role="option"][data-value="justify"]')
+      const label = await options.text(justify)
+      await justify.click()
       await options.saved()
       assert.equal(await options.lastWrite('option.forceAlignment'), 'justify')
-      assert.equal(await options.text(select), 'Justified')
+      assert.equal(await shown(), 'justify')
+      assert.equal(await options.text(select), label, 'the select shows the choice')
       assert.deepEqual(options.problems(), [])
     }
     finally {
