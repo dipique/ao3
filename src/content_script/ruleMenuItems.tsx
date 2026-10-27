@@ -1,6 +1,7 @@
 import MdiArrowCollapseVertical from '~icons/mdi/arrow-collapse-vertical.jsx'
 import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
+import MdiEyeOffOutline from '~icons/mdi/eye-off-outline.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiFormatListNumbered from '~icons/mdi/format-list-numbered.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
@@ -13,12 +14,14 @@ import React from '#dom'
 
 import type { MenuItem } from './contextMenu.tsx'
 
-import { behaviorOf, clearRule, setRulePriority, toggleRuleBehavior } from './persistentFilters.js'
+import { overruledOn } from './overruled.ts'
+import { behaviorOf, clearRule, setPriorityOf, setRulePriority, toggleRuleBehavior } from './persistentFilters.js'
 
 /**
  * The rows every menu that can write a rule offers — hide, collapse, always
  * show, highlight, and (for tags) hide the tag itself, plus the "Update
- * Priority" and "Clear" rows that appear once one of them is in force.
+ * Priority" and "Clear" rows that appear once one of them is in force, and on
+ * an "always show" a row for each hide it is holding off on the work at hand.
  *
  * The companion to `persistentFilters.ts`, which owns the other half of the same
  * concern: that module reads and writes the rule, this one draws it. Every
@@ -67,6 +70,12 @@ export interface RuleMenuOptions {
    * own iconography (an author byline hides behind a person, not an eye).
    */
   icons?: Partial<Record<FilterBehavior, () => Node>>
+  /**
+   * The link the menu was opened on. Inside a blurb, an "always show" lists the
+   * hide rules it outranks there (see `overruledOn`), each with a submenu to
+   * change that rule's priority.
+   */
+  at?: Element
 }
 
 /**
@@ -81,7 +90,7 @@ export interface RuleMenuOptions {
 export function ruleBehaviorItems(
   key: RuleKey,
   rule: Rule | undefined,
-  { noun, icons }: RuleMenuOptions,
+  { noun, icons, at }: RuleMenuOptions,
 ): MenuItem[] {
   const behavior = behaviorOf(rule)
   const items: MenuItem[] = []
@@ -100,8 +109,16 @@ export function ruleBehaviorItems(
   }
   // Priority only weighs in the contest over whether a work shows, which
   // highlighting, hiding the tag and a disabled rule never enter.
-  if (rule && ruleAffectsWorks(rule))
-    items.push(priorityItem(key, rulePriority(rule)))
+  if (rule && ruleAffectsWorks(rule)) {
+    items.push({
+      icon: () => <MdiFormatListNumbered />,
+      label: 'Update Priority',
+      scope: 'settings',
+      submenu: priorityRows(rulePriority(rule), priority => setRulePriority(key, priority)),
+    })
+  }
+  if (rule?.behavior === 'invert' && at)
+    items.push(...overridingItems(rulePriority(rule), at))
   if (behavior) {
     items.push({
       icon: () => <MdiCloseCircleOutline />,
@@ -113,22 +130,36 @@ export function ruleBehaviorItems(
   return items
 }
 
-/** The "Update Priority" row: a submenu of every priority, the current one marked and not offered. */
-function priorityItem(key: RuleKey, current: number): MenuItem {
-  const submenu: MenuItem[] = []
+/** A submenu of every priority, the current one marked and not offered. */
+function priorityRows(current: number, pick: (priority: number) => Promise<void>): MenuItem[] {
+  const rows: MenuItem[] = []
   for (let priority = MIN_PRIORITY; priority <= MAX_PRIORITY; priority++) {
-    submenu.push({
+    rows.push({
       label: `Priority ${priority}`,
       scope: 'settings',
       active: priority === current,
       disabled: priority === current,
-      onSelect: () => setRulePriority(key, priority),
+      onSelect: () => pick(priority),
     })
   }
-  return {
-    icon: () => <MdiFormatListNumbered />,
-    label: 'Update Priority',
-    scope: 'settings',
-    submenu,
-  }
+  return rows
+}
+
+/**
+ * A row for each hide rule a force-show at `strength` outranks on the blurb `at`
+ * sits in — by itself, so a hide that only a stronger force-show holds off is
+ * left to that one's menu. Each opens the hide rule's own priorities.
+ */
+function overridingItems(strength: number, at: Element): MenuItem[] {
+  const blurb = at.closest('.blurb')
+  if (!blurb)
+    return []
+  return overruledOn(blurb)
+    .filter(({ priority }) => priority <= strength)
+    .map(({ rule, subject, priority }) => ({
+      icon: () => <MdiEyeOffOutline />,
+      label: `Overriding ${subject} (priority ${priority})`,
+      scope: 'settings',
+      submenu: priorityRows(priority, next => setPriorityOf(rule, next)),
+    }))
 }

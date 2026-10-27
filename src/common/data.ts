@@ -576,7 +576,25 @@ export function toggleExactRule(rules: Rule[], key: RuleKey, behavior: FilterBeh
 
 /** `rules` with the key's exact rule set to `priority`, in place. Unchanged when the key has no rule. */
 export function setExactRulePriority(rules: Rule[], key: RuleKey, priority: number): Rule[] {
-  const target = findExactRule(rules, key)
+  return withPriority(rules, findExactRule(rules, key), priority)
+}
+
+/**
+ * `rules` with the stored rule equal to `rule`, field for field, set to
+ * `priority`, in place. For a rule known only by what it says — one a work was
+ * weighed against, which may match by `contains` or `regex` and so has no
+ * {@link RuleKey}. Unchanged when no stored rule is equal to it.
+ */
+export function setRulePriorityOf(rules: Rule[], rule: Rule, priority: number): Rule[] {
+  return withPriority(rules, rules.find(stored => sameRule(stored, rule)), priority)
+}
+
+function sameRule(a: Rule, b: Rule): boolean {
+  const keys = Object.keys(a) as (keyof Rule)[]
+  return keys.length === Object.keys(b).length && keys.every(k => a[k] === b[k])
+}
+
+function withPriority(rules: Rule[], target: Rule | undefined, priority: number): Rule[] {
   return rules.map((rule) => {
     if (rule !== target)
       return rule

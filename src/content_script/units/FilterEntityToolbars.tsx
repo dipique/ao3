@@ -356,7 +356,7 @@ abstract class FilterEntityToolbar extends Unit {
     // Read the freshest rules so the checked state is current.
     const { filters } = await options.get('rules')
     const key = entityKey(this.noun, id)
-    const items: MenuItem[] = ruleBehaviorItems(key, findExactRule(filters, key), { noun: this.noun })
+    const items: MenuItem[] = ruleBehaviorItems(key, findExactRule(filters, key), { noun: this.noun, at: link })
 
     if (this.marksEnabled())
       items.push(...this.markSetItems(id, link))

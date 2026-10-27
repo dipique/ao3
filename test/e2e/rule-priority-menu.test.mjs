@@ -9,7 +9,11 @@ import { menuClosed, openMenu, settled } from './trackedPages.mjs'
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
-/** A collapse rule raised to 6, a highlight, and a tag with no rule at all. */
+/**
+ * A collapse rule raised to 6, a highlight, and a tag with no rule at all; and
+ * for the works an "always show" keeps on the page, two fandom collapses (at 0
+ * and 5) and two force-shows (at their default 4, and at 9).
+ */
 const SEED = {
   'option.tagToolbar': true,
   'option.rules': {
@@ -18,8 +22,26 @@ const SEED = {
     filters: [
       { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'collapse', priority: 6 },
       { target: 'F', value: 'Waff', matcher: 'exact', behavior: 'highlight' },
+      { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse' },
+      { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'collapse', priority: 5 },
+      { target: 'F', value: 'Keeper', matcher: 'exact', behavior: 'invert' },
+      { target: 'F', value: 'Override', matcher: 'exact', behavior: 'invert', priority: 9 },
     ],
   },
+}
+
+/** A blurb in one fandom, carrying the given additional tags. */
+function shownBlurb(id, fandom, tags) {
+  return `
+    <li class="work blurb group" id="work_${id}">
+      <div class="header module">
+        <h4 class="heading"><a href="/works/${id}">Work ${id}</a></h4>
+        <h5 class="fandoms heading"><a class="tag" href="/tags/${encodeURIComponent(fandom)}/works">${fandom}</a></h5>
+      </div>
+      <ul class="tags commas">
+        ${tags.map(t => `<li class="freeforms"><a class="tag" href="/tags/${t}/works">${t}</a></li>`).join('')}
+      </ul>
+    </li>`
 }
 
 const PAGE = `
@@ -27,7 +49,7 @@ const PAGE = `
   <ol class="work index group">
     <li class="work blurb group" id="work_1">
       <div class="header module">
-        <h4 class="heading"><a href="/works/1">A work</a> by <a rel="author" href="/users/s/pseuds/s">s</a></h4>
+        <h4 class="heading"><a href="/works/1">A work</a></h4>
       </div>
       <ul class="tags commas">
         <li class="freeforms"><a class="tag" href="/tags/Fluff/works">Fluff</a></li>
@@ -35,6 +57,9 @@ const PAGE = `
         <li class="freeforms"><a class="tag" href="/tags/Angst/works">Angst</a></li>
       </ul>
     </li>
+    ${shownBlurb(2, 'Soft Fandom', ['Keeper'])}
+    ${shownBlurb(3, 'Hard Fandom', ['Keeper', 'Override'])}
+    ${shownBlurb(4, 'Plain Fandom', ['Keeper'])}
   </ol>
 </div>
 `
@@ -72,13 +97,13 @@ describe('rule priority from the tag menu', { skip }, () => {
     await settled(page)
   })
 
-  /** Right-click the blurb tag link reading `text`; returns the menu's own row labels. */
-  const openMenuOn = async (text) => {
-    await openMenu(page, () => page.evaluate((want) => {
-      const link = [...document.querySelectorAll('.blurb ul.tags a.tag')]
+  /** Right-click the tag link reading `text` in a blurb; returns the menu's own row labels. */
+  const openMenuOn = async (text, blurb = 'work_1') => {
+    await openMenu(page, () => page.evaluate((want, id) => {
+      const link = [...document.querySelectorAll(`#${id} ul.tags a.tag`)]
         .find(a => a.textContent.trim() === want)
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))
-    }, text))
+    }, text, blurb))
     return page.evaluate(() =>
       [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
         .filter(el => !el.closest('.AO3E--menu--submenu'))
@@ -150,5 +175,32 @@ describe('rule priority from the tag menu', { skip }, () => {
     await click('Hide works with tag')
     await menuClosed(page)
     assert.deepEqual(await storedRule('Fluff'), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'hide', priority: 6 })
+  })
+
+  test('an "always show" offers the hide it overrides on this work, at that rule’s own priority', async () => {
+    const label = 'Overriding Fandom "Soft Fandom" (priority 0)'
+    const labels = await openMenuOn('Keeper', 'work_2')
+    assert.ok(labels.includes(label), labels.join(' | '))
+
+    await click(label)
+    assert.deepEqual((await submenuRows()).filter(r => r.active).map(r => r.label), ['Priority 0'])
+    await click('Priority 5')
+    await menuClosed(page)
+    assert.deepEqual(await storedRule('Soft Fandom'), { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse', priority: 5 })
+    await page.waitForFunction(() => document.getElementById('work_2').dataset.ao3eHiddenBy === 'tags')
+  })
+
+  test('lists only the hides this force-show outranks by itself', async () => {
+    // "Hard Fandom" collapses at 5: above "Keeper" at 4, so it's "Override" at 9 holding it off.
+    const keeper = await openMenuOn('Keeper', 'work_3')
+    assert.ok(!keeper.some(l => l.startsWith('Overriding')), keeper.join(' | '))
+    const override = await openMenuOn('Override', 'work_3')
+    assert.ok(override.includes('Overriding Fandom "Hard Fandom" (priority 5)'), override.join(' | '))
+  })
+
+  test('a force-show overriding nothing on this work offers nothing', async () => {
+    const labels = await openMenuOn('Keeper', 'work_4')
+    assert.ok(labels.includes('Update Priority'), 'the menu is the force-show’s own')
+    assert.ok(!labels.some(l => l.startsWith('Overriding')), labels.join(' | '))
   })
 })

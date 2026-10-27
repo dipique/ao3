@@ -118,6 +118,7 @@ export class HideAuthorToolbar extends Unit {
       // An author byline hides behind a person rather than the generic eye.
       items.push(...ruleBehaviorItems(key, findExactRule(filters, key), {
         noun: 'author',
+        at: link,
         icons: { hide: () => <MdiAccountOff /> },
       }))
       if (author.pseud !== undefined) {

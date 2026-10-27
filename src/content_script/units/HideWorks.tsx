@@ -19,6 +19,7 @@ import {
   onFilterTargetChange,
 } from '#content_script/filterTarget.js'
 import { markIcon } from '#content_script/markIcons.js'
+import { forgetOverruled, type OverruledRule, recordOverruled } from '#content_script/overruled.ts'
 import { describeRemoval } from '#content_script/removalLog.js'
 import { recordRuleTiming } from '#content_script/ruleTiming.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -139,6 +140,12 @@ export interface HideVerdict {
    * excluding what it carries would quietly take it away.
    */
   excludes: HideExclusion[]
+  /**
+   * The hide rules that lost to a force-show: each matched subject's strongest,
+   * at or below the strongest "always show" on the work. The hides that aren't
+   * rules (marks, crossovers) are left out — there is no rule to name.
+   */
+  overruled: OverruledRule[]
 }
 
 function addReason(reasons: HideReasons, label: string, item: ReasonItem) {
@@ -272,6 +279,7 @@ export class HideWorks extends Unit {
 
   static override async clean(): Promise<void> {
     excludeButtons.length = 0
+    forgetOverruled()
     clearMenuTriggers()
     resetFilterSidebarCaches()
     const wrappers = document.querySelectorAll(`.${BLURB_WRAPPER_CLASS}`)
@@ -324,8 +332,9 @@ export class HideWorks extends Unit {
       // A search view's blurb was parsed already, when its list was read.
       const blurb = knownBlurb(blurbElement) ?? getBlurb(blurbElement)
       const matchStarted = performance.now()
-      const { mode, reasons, kinds } = this.processBlurb(blurb)
+      const { mode, reasons, kinds, overruled } = this.processBlurb(blurb)
       matchMs += performance.now() - matchStarted
+      recordOverruled(blurbElement, overruled)
 
       if (!mode)
         continue
@@ -537,7 +546,9 @@ export class HideWorks extends Unit {
     // Only a work that is actually gone has anything to hand a filter; on one
     // that survived, or was merely collapsed, the collected reasons describe a
     // work still on the page.
-    return { mode, reasons, kinds, excludes: mode === 'hide' ? excludes : [] }
+    const overruled = hides.flatMap(({ rule, priority }) =>
+      rule && priority <= bar ? [{ rule, subject: describeSubject(rule), priority }] : [])
+    return { mode, reasons, kinds, excludes: mode === 'hide' ? excludes : [], overruled }
   }
 
   /**
@@ -756,19 +767,23 @@ function hintNode(text: string): Node {
  * priority, which is otherwise invisible at exactly the moment it decided things.
  */
 function describeRule(rule: Rule): string {
+  const body = describeSubject(rule)
+  const priority = rulePriority(rule)
+  return priority === 0 ? body : `${body} (priority ${priority})`
+}
+
+/** What a rule matches, and how: `Fandom "Some Fandom"`, `Any tag contains "au"`. */
+function describeSubject(rule: Rule): string {
   const noun = ruleTargetLabel(rule.target)
   const value = rule.value.trim()
 
-  const body = (rule.target === 'work' || rule.target === 'series') && /^\d+$/.test(value)
+  return (rule.target === 'work' || rule.target === 'series') && /^\d+$/.test(value)
     ? `${noun} id ${value}`
     : rule.matcher === 'contains'
       ? `${noun} contains "${rule.value}"`
       : rule.matcher === 'regex'
         ? `${noun} matches /${rule.value}/`
         : `${noun} "${rule.value}"`
-
-  const priority = rulePriority(rule)
-  return priority === 0 ? body : `${body} (priority ${priority})`
 }
 
 /**

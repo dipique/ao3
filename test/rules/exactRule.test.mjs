@@ -5,6 +5,7 @@ import {
   findExactRule,
   replaceExactRule,
   setExactRulePriority,
+  setRulePriorityOf,
   toggleExactRule,
 } from '../../src/common/data.ts'
 
@@ -117,5 +118,23 @@ describe('setExactRulePriority', () => {
     const rules = [rule({ behavior: 'hide' })]
     setExactRulePriority(rules, fandom, 5)
     assert.deepEqual(rules, [rule({ behavior: 'hide' })])
+  })
+})
+
+describe('setRulePriorityOf', () => {
+  const regex = { target: 'f', value: 'Soft.*', matcher: 'regex', behavior: 'collapse' }
+
+  test('sets the priority of the stored rule equal to the one given, whatever its matcher', () => {
+    const rules = [rule({}), { ...regex }, rule({ value: 'B' })]
+    assert.deepEqual(setRulePriorityOf(rules, regex, 5), [rules[0], { ...regex, priority: 5 }, rules[2]])
+  })
+
+  test('a rule that differs in any field is not the one', () => {
+    const rules = [{ ...regex, color: '#fff' }, { ...regex, priority: 3 }]
+    assert.deepEqual(setRulePriorityOf(rules, regex, 5), rules)
+  })
+
+  test('stores the priority the way the exact-rule helpers do', () => {
+    assert.deepEqual(setRulePriorityOf([{ ...regex, priority: 2 }], { ...regex, priority: 2 }, 0), [regex])
   })
 })

@@ -66,7 +66,7 @@ export async function buildTagLinkMenu(entry: TagLinkEntry): Promise<MenuItem[]>
 
   const { filters } = await options.get('rules')
   const key = tagKey(entry.tag)
-  items.push(...ruleBehaviorItems(key, findExactRule(filters, key), { noun: entry.noun }))
+  items.push(...ruleBehaviorItems(key, findExactRule(filters, key), { noun: entry.noun, at: entry.link }))
 
   items.push(...standardLinkItems(entry.link))
   return items
