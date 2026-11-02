@@ -40,7 +40,8 @@ import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
 import { groupCountText, layoutFacetRows, leftOutNote, nameRanks } from './facetRows.ts'
 import { DEFAULT_STATUS, SIDEBAR_WIDTH } from './prefs.ts'
 import { pristineBlurb } from './pristine.ts'
-import { describeTextSearch, parseTextQuery } from './textSearch.ts'
+import { parseTextQuery, queryKey } from './textQuery.ts'
+import { describeTextSearch } from './textSearch.ts'
 
 const ROOT = VIEW_ROOT
 /** Body class while the filter column is being dragged — see ReaderMode, same idea. */
@@ -516,7 +517,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   const textSearch = config.textSearch
   const restoredText = textSearch ? config.initialState?.workText : undefined
   let textApplied: { query: string, hits: Set<string> } | null
-    = restoredText?.hits && parseTextQuery(restoredText.query).length
+    = restoredText?.hits && parseTextQuery(restoredText.query)
       ? { query: restoredText.query, hits: new Set(restoredText.hits) }
       : null
   let textRun: { query: string, controller: AbortController } | null = null
@@ -759,13 +760,13 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   function searchText(query: string, { restore = false } = {}): void {
     if (!textSearch)
       return
-    const terms = parseTextQuery(query)
+    const parsed = parseTextQuery(query)
     const asked = textRun?.query ?? textApplied?.query ?? ''
-    if (!restore && terms.join('\0') === parseTextQuery(asked).join('\0'))
+    if (!restore && queryKey(parsed) === queryKey(parseTextQuery(asked)))
       return
     textRun?.controller.abort()
     textRun = null
-    if (!terms.length) {
+    if (!parsed) {
       showTextCoverage()
       if (textApplied) {
         textApplied = null
@@ -1872,7 +1873,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   mountResults()
   renderFacets()
   render()
-  if (restoredText && parseTextQuery(restoredText.query).length)
+  if (restoredText && parseTextQuery(restoredText.query))
     searchText(restoredText.query, { restore: true })
   else
     showTextCoverage()

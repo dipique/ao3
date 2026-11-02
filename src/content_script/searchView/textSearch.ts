@@ -1,12 +1,14 @@
 /**
  * Searching inside works' own text — the half of the search view's work-text
- * search that decides anything: what a stored work's searchable text is, what a
- * query asks for, which works answer it, and the excerpt that shows why.
+ * search that decides anything: what a stored work's searchable text is, which
+ * works answer a query, and the excerpt that shows why. What a query asks for
+ * is `textQuery.ts`'s business, shared with the view's own search box.
  *
- * Pure — no `#common`, no `browser`, no DOM, no imports at all — so it loads
- * under a plain `node --test`. Where the text comes from is the host's business,
- * handed in as a {@link WorkTextSource}: an exported file unpacks its own
- * compressed copies, and the extension reads its work-text cache.
+ * Pure — no `#common`, no `browser`, no DOM, nothing but the equally pure
+ * `textQuery.ts` — so it loads under a plain `node --test`. Where the text
+ * comes from is the host's business, handed in as a {@link WorkTextSource}: an
+ * exported file unpacks its own compressed copies, and the extension reads its
+ * work-text cache.
  *
  * The text is far too big to match on every keystroke the way the view's own
  * search box matches titles and tags, so a search is a pass over the works, in
@@ -14,6 +16,8 @@
  * the next query: refining a search is the common case, and the second pass
  * should cost nothing but the matching.
  */
+
+import { foldText, parseTextQuery, queryMatches, queryTerms } from './textQuery.ts'
 
 /** Where a searcher gets the stored markup of each work. */
 export interface WorkTextSource {
@@ -34,7 +38,7 @@ export interface WorkTextSource {
 }
 
 export interface TextSearchResult {
-  /** The works whose text holds every term. */
+  /** The works whose text answers the query. */
   hits: Set<string>
   /** Works whose text was read and matched against. */
   searched: number
@@ -62,7 +66,7 @@ export interface TextSnippet {
 export interface WorkTextSearcher {
   has: (workId: string) => boolean
   search: (workIds: readonly string[], query: string, opts?: TextSearchOptions) => Promise<TextSearchResult>
-  /** Where the query first matches one work's text; null when it doesn't, or the work has no text. */
+  /** Where one work's text first holds a word or phrase the query looks for; null when it holds none, or the work has no text. */
   snippet: (workId: string, query: string) => Promise<TextSnippet | null>
 }
 
@@ -115,12 +119,6 @@ const NAMED_ENTITIES: Record<string, string> = {
   nbsp: ' ',
 }
 
-const SINGLE_QUOTES = /[‘’‚‛′ʼ]/g
-const DOUBLE_QUOTES = /[“”„‟″]/g
-
-/** A quoted phrase (to the end, if the quote is never closed), or a bare word. */
-const QUERY_TOKEN = /"([^"]*)"?|([^\s"]+)/g
-
 function decodeEntities(text: string): string {
   return text.replace(ENTITY, (entity, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
     if (name !== undefined)
@@ -140,36 +138,6 @@ export function workTextOf(html: string): string {
   const work = start === -1 ? html : html.slice(start)
   const text = work.replace(COMMENT, ' ').replace(BLOCK_TAG, ' ').replace(TAG, '')
   return decodeEntities(text).replace(/\s+/g, ' ').trim()
-}
-
-/**
- * Text as it is matched: lowercased, with curly quotes straightened, so a query
- * typed `don't` finds a work that prints `don’t`. Never changes the length (bar
- * the odd character whose lowercase form is longer), which is what lets a match
- * found in folded text be read back out of the original.
- */
-export function foldText(text: string): string {
-  return text.toLowerCase().replace(SINGLE_QUOTES, '\'').replace(DOUBLE_QUOTES, '"')
-}
-
-/**
- * A query's terms, folded: each word on its own, and each quoted run as one
- * phrase. Curly quotes delimit a phrase too, since a phone keyboard turns every
- * typed quote into one. A term given twice is kept once.
- */
-export function parseTextQuery(query: string): string[] {
-  const terms: string[] = []
-  for (const [, phrase, word] of foldText(query).matchAll(QUERY_TOKEN)) {
-    const term = (phrase ?? word ?? '').replace(/\s+/g, ' ').trim()
-    if (term && !terms.includes(term))
-      terms.push(term)
-  }
-  return terms
-}
-
-/** Whether folded text holds every term — anywhere, inside words too, as the view's own search box matches. */
-export function textMatches(folded: string, terms: readonly string[]): boolean {
-  return terms.every(term => folded.includes(term))
 }
 
 /**
@@ -239,7 +207,7 @@ export function createWorkTextSearcher(source: WorkTextSource): WorkTextSearcher
   async function search(workIds: readonly string[], query: string, opts: TextSearchOptions = {}): Promise<TextSearchResult> {
     const { signal, onProgress } = opts
     signal?.throwIfAborted()
-    const terms = parseTextQuery(query)
+    const asked = parseTextQuery(query)
     const ids = [...new Set(workIds)]
     const searchable = ids.filter(id => source.has(id))
     const hits = new Set<string>()
@@ -262,7 +230,7 @@ export function createWorkTextSearcher(source: WorkTextSource): WorkTextSearcher
           remember(id, text)
         }
         searched++
-        if (textMatches(text, terms))
+        if (queryMatches(asked, text))
           hits.add(id)
       }
       onProgress?.(Math.min(at + batchSize, searchable.length), searchable.length)
@@ -276,7 +244,7 @@ export function createWorkTextSearcher(source: WorkTextSource): WorkTextSearcher
   }
 
   function snippet(workId: string, query: string): Promise<TextSnippet | null> {
-    const terms = parseTextQuery(query)
+    const terms = queryTerms(parseTextQuery(query))
     if (!terms.length || !source.has(workId))
       return Promise.resolve(null)
     const key = terms.join('\u0000')

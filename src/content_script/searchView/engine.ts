@@ -1,6 +1,10 @@
 import type { Completion } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
+import type { TextQuery } from './textQuery.ts'
+
+import { foldText, parseTextQuery, queryMatches } from './textQuery.ts'
+
 /**
  * DOM-free filter/sort/facet engine for the in-memory search view. Operates on
  * a plain `Work[]` so it is reusable for any aggregated AO3 listing (and unit
@@ -291,11 +295,15 @@ export function readerFilter(f: FilterState, auto: ReadonlySet<string>, released
 // by the work object, so it's dropped automatically when works are replaced.
 const haystackCache = new WeakMap<Work, string>()
 
-/** Lowercased text blob a free-text query is matched against. */
+/**
+ * Folded text blob a free-text query is matched against. Each field's runs of
+ * whitespace are one space, so a phrase reads across a summary's line breaks;
+ * the fields are kept apart by a newline, which no phrase holds.
+ */
 function haystack(work: Work): string {
   let hay = haystackCache.get(work)
   if (hay === undefined) {
-    hay = [
+    hay = foldText([
       work.title,
       ...work.authors.map(a => a.text),
       work.summaryText,
@@ -307,17 +315,29 @@ function haystack(work: Work): string {
       ...work.categories,
       work.rating ?? '',
       work.language ?? '',
-    ].join(' \n ').toLowerCase()
+    ].map(field => field.replace(/\s+/g, ' ')).join(' \n '))
     haystackCache.set(work, hay)
   }
   return hay
+}
+
+// A filter is matched against every work in turn, so the last text read is kept.
+let parsedText = ''
+let parsedQuery: TextQuery | null = null
+
+function textQueryOf(f: FilterState): TextQuery | null {
+  if (f.text !== parsedText) {
+    parsedText = f.text
+    parsedQuery = parseTextQuery(f.text)
+  }
+  return parsedQuery
 }
 
 /**
  * Whether a work passes the filter. Semantics: within a facet group *included*
  * values are OR'd while *required* values are AND'd (the work must carry every
  * one); across groups they're AND'd; an excluded value anywhere drops the work
- * (exclude wins). Free text splits into terms that must all appear.
+ * (exclude wins). Free text is a query in the language `parseTextQuery` reads.
  *
  * `ignoreKey` skips one facet group's selections — used to compute drill-down
  * counts for that group (each value's count over works passing every *other*
@@ -329,13 +349,9 @@ export function matches(work: Work, f: FilterState, ignoreKey?: FacetKey): boole
   if (f.wordsMax !== null && work.words > f.wordsMax)
     return false
 
-  if (f.text.trim()) {
-    const hay = haystack(work)
-    for (const term of f.text.toLowerCase().split(/\s+/).filter(Boolean)) {
-      if (!hay.includes(term))
-        return false
-    }
-  }
+  const query = textQueryOf(f)
+  if (query && !queryMatches(query, haystack(work)))
+    return false
 
   for (const key of FACET_KEYS) {
     if (key === ignoreKey)
@@ -456,7 +472,7 @@ export interface ViewComputation {
  * other filter" without a separate pass per group.
  */
 export function computeView(works: Work[], f: FilterState): ViewComputation {
-  const textTerms = f.text.trim() ? f.text.toLowerCase().split(/\s+/).filter(Boolean) : []
+  const query = textQueryOf(f)
   // Only groups with a selection actually constrain matching.
   const activeKeys = FACET_KEYS.filter(k =>
     f.facets[k].include.size > 0 || f.facets[k].exclude.size > 0 || f.facets[k].require.size > 0,
@@ -481,11 +497,8 @@ export function computeView(works: Work[], f: FilterState): ViewComputation {
       continue
     if (f.wordsMax !== null && work.words > f.wordsMax)
       continue
-    if (textTerms.length) {
-      const hay = haystack(work)
-      if (!textTerms.every(term => hay.includes(term)))
-        continue
-    }
+    if (query && !queryMatches(query, haystack(work)))
+      continue
 
     let failKey: FacetKey | null = null
     let failCount = 0

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 // Node 25 strips the TS types on import; engine.ts is DOM-free and its only
-// non-erasable import is a type, so it loads without a build or a DOM.
+// runtime import is the pure textQuery.ts, so it loads without a build or a DOM.
 import {
   applyFilters,
   buildFacets,
@@ -134,6 +134,38 @@ describe('searchView in-memory engine', () => {
     assert.equal(matches(works[0], { ...emptyFilterState(), text: 'alpha' }), true)
     assert.equal(matches(works[0], { ...emptyFilterState(), text: 'naruto fluff' }), true)
     assert.equal(matches(works[0], { ...emptyFilterState(), text: 'naruto angst' }), false)
+  })
+
+  test('free text reads OR, NOT and parentheses', () => {
+    const shown = text => applyFilters(works, { ...emptyFilterState(), text }).map(w => w.workId)
+    assert.deepEqual(shown('alpha OR charlie'), ['1', '3'])
+    assert.deepEqual(shown('fluff NOT bleach'), ['1'])
+    assert.deepEqual(shown('NOT naruto'), ['3'])
+    assert.deepEqual(shown('(alpha OR charlie) angst'), ['3'])
+  })
+
+  test('computeView reads the free text as matches does', () => {
+    for (const text of ['alpha OR charlie', 'fluff NOT bleach', '(alpha OR charlie) angst', '"naruto"']) {
+      const { visible } = computeView(works, { ...emptyFilterState(), text })
+      assert.deepEqual([...visible].map(w => w.workId).sort(), applyFilters(works, { ...emptyFilterState(), text }).map(w => w.workId).sort(), text)
+    }
+  })
+
+  test('a quoted phrase has to appear as written', () => {
+    const phrase = { ...emptyFilterState(), text: '"slow burn"' }
+    assert.equal(matches(work({ summaryText: 'It is a slow burn.' }), phrase), true)
+    assert.equal(matches(work({ summaryText: 'Slow to burn.' }), phrase), false)
+    assert.equal(computeView([work({ summaryText: 'It is a slow burn.' })], phrase).visible.size, 1)
+  })
+
+  test('a phrase reads across a line break, but never from one field into the next', () => {
+    const phrase = { ...emptyFilterState(), text: '"slow burn"' }
+    assert.equal(matches(work({ summaryText: 'A slow\n\nburn.' }), phrase), true)
+    assert.equal(matches(work({ title: 'Slow', freeforms: ['Burn'] }), phrase), false)
+  })
+
+  test('a curly apostrophe in a blurb answers a straight one in the box', () => {
+    assert.equal(matches(work({ summaryText: 'They don’t talk.' }), { ...emptyFilterState(), text: 'don\'t' }), true)
   })
 
   test('word-count bounds are inclusive', () => {

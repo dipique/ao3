@@ -2,14 +2,13 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 // Node strips the TS types on import; textSearch.ts is pure (no `#common`, no
-// `browser`, no DOM, no imports at all), so it loads with a plain `node --test`.
+// `browser`, no DOM, nothing but the pure textQuery.ts), so it loads with a
+// plain `node --test`.
+import { foldText } from '../../src/content_script/searchView/textQuery.ts'
 import {
   createWorkTextSearcher,
   describeTextSearch,
-  foldText,
   NOTHING_TO_SEARCH,
-  parseTextQuery,
-  textMatches,
   textSnippet,
   workTextOf,
 } from '../../src/content_script/searchView/textSearch.ts'
@@ -47,61 +46,6 @@ describe('workTextOf', () => {
 
   test('collapses every run of whitespace, non-breaking spaces included', () => {
     assert.equal(workTextOf('<p>  one \n\n two  three\t</p>'), 'one two three')
-  })
-})
-
-describe('foldText', () => {
-  test('lowercases and straightens curly quotes without changing the length', () => {
-    const plain = 'Don’t say “Hello”'
-    const folded = foldText(plain)
-    assert.equal(folded, 'don\'t say "hello"')
-    assert.equal(folded.length, plain.length)
-  })
-})
-
-describe('parseTextQuery', () => {
-  test('splits on whitespace, folded', () => {
-    assert.deepEqual(parseTextQuery('  Dragon   Tea '), ['dragon', 'tea'])
-  })
-
-  test('a quoted run is one phrase, its inner spaces collapsed', () => {
-    assert.deepEqual(parseTextQuery('dragon "the  old house" tea'), ['dragon', 'the old house', 'tea'])
-  })
-
-  test('curly quotes delimit a phrase too — what a phone keyboard types', () => {
-    assert.deepEqual(parseTextQuery('“The Old House”'), ['the old house'])
-  })
-
-  test('an apostrophe stays inside its word, curly or not', () => {
-    assert.deepEqual(parseTextQuery('Don’t'), ['don\'t'])
-  })
-
-  test('an unclosed quote runs to the end', () => {
-    assert.deepEqual(parseTextQuery('tea "the old'), ['tea', 'the old'])
-  })
-
-  test('nothing to search for is no terms, and repeats count once', () => {
-    assert.deepEqual(parseTextQuery(''), [])
-    assert.deepEqual(parseTextQuery('   ""  " " '), [])
-    assert.deepEqual(parseTextQuery('tea Tea "tea"'), ['tea'])
-  })
-})
-
-describe('textMatches', () => {
-  const folded = foldText('The dragon drank tea in the old house.')
-
-  test('every term has to appear', () => {
-    assert.equal(textMatches(folded, ['dragon', 'tea']), true)
-    assert.equal(textMatches(folded, ['dragon', 'coffee']), false)
-  })
-
-  test('a phrase has to appear as written', () => {
-    assert.equal(textMatches(folded, ['the old house']), true)
-    assert.equal(textMatches(folded, ['the house']), false)
-  })
-
-  test('terms match inside words, as the view\'s own search box does', () => {
-    assert.equal(textMatches(folded, ['rag']), true)
   })
 })
 
@@ -172,6 +116,15 @@ describe('createWorkTextSearcher', () => {
     assert.deepEqual([...result.hits].sort(), ['1', '3'])
     assert.equal(result.searched, 3)
     assert.equal(result.unavailable, 0)
+  })
+
+  test('reads OR, NOT and parentheses', async () => {
+    const searcher = createWorkTextSearcher(library(WORKS))
+    const hits = async query => [...(await searcher.search(['1', '2', '3'], query)).hits].sort()
+    assert.deepEqual(await hits('sea OR again'), ['2', '3'])
+    assert.deepEqual(await hits('tea NOT again'), ['1'])
+    assert.deepEqual(await hits('NOT dragon'), ['2'])
+    assert.deepEqual(await hits('(sea OR again) tea'), ['3'])
   })
 
   test('a work with no saved text is counted, not loaded', async () => {
@@ -261,6 +214,12 @@ describe('createWorkTextSearcher', () => {
     assert.equal(await searcher.snippet('9', 'dragon'), null)
     assert.equal(await searcher.snippet('4', 'dragon'), null)
     assert.equal(await searcher.snippet('1', '  '), null)
+  })
+
+  test('a snippet never centres on a word the query excludes', async () => {
+    const searcher = createWorkTextSearcher(library(WORKS))
+    assert.equal((await searcher.snippet('1', 'tea OR NOT dragon')).match, 'tea')
+    assert.equal(await searcher.snippet('2', 'NOT dragon'), null)
   })
 
   test('asking for the same snippet twice reads the work once', async () => {
