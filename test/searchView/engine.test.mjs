@@ -7,6 +7,7 @@ import {
   applyFilters,
   buildFacets,
   buildFilteredFacets,
+  CACHED,
   cloneFilterState,
   completionOf,
   completionValue,
@@ -17,6 +18,7 @@ import {
   facetValues,
   layoutStablePages,
   matches,
+  NOT_CACHED,
   orderFacetKeys,
   readerFilter,
   sortWorks,
@@ -336,6 +338,22 @@ describe('the list-source facet', () => {
   })
 })
 
+describe('the offline-copy facet', () => {
+  test('reads whether the host stamped the work as cached, and is empty without it', () => {
+    assert.deepEqual(facetValues(work({ offline: CACHED }), 'offline'), [CACHED])
+    assert.deepEqual(facetValues(work({ offline: NOT_CACHED }), 'offline'), [NOT_CACHED])
+    // Only a site export knows which works it carries; everywhere else the group
+    // has no values, and so no place in the sidebar.
+    assert.deepEqual(facetValues(work(), 'offline'), [])
+    assert.deepEqual(buildFacets([work(), work()]).offline, [])
+  })
+
+  test('counts each side', () => {
+    const works = [work({ offline: CACHED }), work({ offline: CACHED }), work({ offline: NOT_CACHED })]
+    assert.deepEqual(buildFacets(works).offline.map(({ value, count }) => [value, count]).sort(), [[CACHED, 2], [NOT_CACHED, 1]])
+  })
+})
+
 describe('the saved facet order', () => {
   test('no saved order is the default one', () => {
     assert.deepEqual(orderFacetKeys(undefined), FACET_KEYS)
@@ -361,7 +379,7 @@ describe('the saved facet order', () => {
   })
 
   test('a key with none of its predecessors saved goes to the front', () => {
-    assert.deepEqual(orderFacetKeys(['language']), ['status', 'source', 'rating', 'warnings', 'categories', 'fandoms', 'relationships', 'characters', 'freeforms', 'language', 'completion'])
+    assert.deepEqual(orderFacetKeys(['language']), ['status', 'source', 'offline', 'rating', 'warnings', 'categories', 'fandoms', 'relationships', 'characters', 'freeforms', 'language', 'completion'])
   })
 
   test('every key comes back exactly once, whatever the saved order says', () => {
@@ -552,8 +570,8 @@ describe('the reader’s own filter', () => {
     assert.equal(own.facets.fandoms.exclude.size, 0)
   })
 
-  test('status and list source are left out', () => {
-    assert.deepEqual([...VIEW_ONLY_KEYS].sort(), ['source', 'status'])
+  test('status, list source and offline copy are left out', () => {
+    assert.deepEqual([...VIEW_ONLY_KEYS].sort(), ['offline', 'source', 'status'])
     const own = readerFilter(viewState(), auto, released)
     for (const key of VIEW_ONLY_KEYS) {
       const sel = own.facets[key]

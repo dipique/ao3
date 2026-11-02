@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { cachingBuckets } from '../../src/content_script/siteExport/workText.ts'
+import { cachedWorkIds, cachingBuckets } from '../../src/content_script/siteExport/workText.ts'
 
 const AT = Date.UTC(2026, 8, 7)
 
@@ -60,5 +60,26 @@ describe('cachingBuckets', () => {
 
   test('an empty list is all zeros', () => {
     assert.deepEqual(buckets([], { 1: meta() }), { total: 0, cached: 0, failed: 0, unfetched: 0, bytes: 0, staleFailures: 0 })
+  })
+})
+
+/**
+ * Every work the cache holds text for, whatever list it came from, newest copy
+ * first: what "Download all cached" writes into one file.
+ */
+describe('cachedWorkIds', () => {
+  test('only works with text, newest copy first', () => {
+    const got = cachedWorkIds({
+      1: meta({ fetchedAt: AT }),
+      2: meta({ size: 0, failure: 'restricted', attempts: 1 }),
+      3: meta({ fetchedAt: AT + 2000 }),
+      // An older copy kept through a failed refetch is still a copy.
+      4: meta({ fetchedAt: AT + 1000, failure: 'error', attempts: 1 }),
+    })
+    assert.deepEqual(got, ['3', '4', '1'])
+  })
+
+  test('an empty cache has nothing to write', () => {
+    assert.deepEqual(cachedWorkIds({}), [])
   })
 })

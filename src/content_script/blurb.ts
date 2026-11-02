@@ -210,6 +210,13 @@ export interface Work {
    */
   sources?: string[]
   /**
+   * Whether the site export this work is listed in carries its text — the
+   * "Offline copy" facet's one value. Stamped by the exported page, the only
+   * place that knows, and never by {@link parseWork}, for the same reasons as
+   * {@link Work.sources}.
+   */
+  offline?: string
+  /**
    * The reader's rules take this work out of the listing outright (as opposed to
    * collapsing it, which the view leaves to HideWorks to draw on the blurb). Such
    * a work is dropped from the results altogether — out of the facet counts, the

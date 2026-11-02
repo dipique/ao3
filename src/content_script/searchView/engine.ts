@@ -11,6 +11,7 @@ import type { Work } from '#content_script/blurb.js'
 export type FacetKey
   = | 'status'
     | 'source'
+    | 'offline'
     | 'rating'
     | 'warnings'
     | 'categories'
@@ -25,6 +26,7 @@ export type FacetKey
 export const FACET_KEYS: FacetKey[] = [
   'status',
   'source',
+  'offline',
   'rating',
   'warnings',
   'categories',
@@ -39,6 +41,7 @@ export const FACET_KEYS: FacetKey[] = [
 export const FACET_LABELS: Record<FacetKey, string> = {
   status: 'Status',
   source: 'List source',
+  offline: 'Offline copy',
   rating: 'Rating',
   warnings: 'Archive Warnings',
   categories: 'Categories',
@@ -125,6 +128,10 @@ export const WIP_VALUE = 'Work in Progress'
  */
 export const UNREAD = 'Unread'
 
+/** The two values of the `offline` facet group: whether a site export carries the work's text. */
+export const CACHED = 'Cached'
+export const NOT_CACHED = 'Not cached'
+
 export function facetValues(work: Work, key: FacetKey): string[] {
   switch (key) {
     // Precomputed by the host, not derived here: a work's statuses depend on the
@@ -137,6 +144,9 @@ export function facetValues(work: Work, key: FacetKey): string[] {
     // for a view assembled from several queries at once, and absent everywhere
     // else, so the group has no values and the sidebar leaves it out.
     case 'source': return work.sources ?? []
+    // Stamped by a site export, which alone knows what it carries; empty, and
+    // so no group, everywhere else.
+    case 'offline': return work.offline ? [work.offline] : []
     case 'rating': return work.rating ? [work.rating] : []
     case 'warnings': return work.warnings
     case 'categories': return work.categories
@@ -236,9 +246,10 @@ export function cloneFilterState(f: FilterState): FilterState {
  *
  * - **Status** depends on the reader's marks and on what day it is, and a list's
  *   review already leaves out the works the reader has dealt with;
- * - **List source** only exists in the review, which is assembled *from* lists.
+ * - **List source** only exists in the review, which is assembled *from* lists;
+ * - **Offline copy** only exists in a site export, and says what that file holds.
  */
-export const VIEW_ONLY_KEYS: readonly FacetKey[] = ['status', 'source']
+export const VIEW_ONLY_KEYS: readonly FacetKey[] = ['status', 'source', 'offline']
 
 /** How a view names one selected value in its bookkeeping: `key:value`. */
 export function facetValueKey(key: FacetKey, value: string): string {

@@ -85,8 +85,9 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 - **Learned fandom ids**: the fandom, character and relationship tag ids the extension picks up as you browse, which you can export or clear.
 - A saved list's offline copy, under Lists → Saved lists, downloads, with the full text of its works, as one self-contained HTML file that runs the same instant search view offline, on any device, with no extension installed. So do your own Marked for Later and read works, as the tiles under Lists → User profile lists, and the range you're reviewing, as This review under Lists → Review. Lists → Offline reading holds the rest of it.
   - Fetching runs one job at a time, waits out AO3's rate limits, and can be stopped and continued later.
-  - Marks you make while reading an export can be saved from it and replayed here with **Changes made in an export**.
-  - **Cached work text** and **Discard unneeded blurbs automatically** control what is kept on disk between exports.
+  - In an export, a work opens from the file however you open it, a new tab included; its page has reader mode and its title's menu of marks, and an **Offline copy** filter tells cached works from the rest. The filters open on the layout the list had on AO3, and remember yours while the browser keeps the file's storage.
+  - Marks you make while reading an export can be saved from it and replayed here with **Changes made in an export**. Each saved file holds every change made in that browser, so the newest one is all you need to load.
+  - **Cached work text** and **Discard unneeded blurbs automatically** control what is kept on disk between exports. **Download all cached** writes every cached work into one export, whichever list it came from, without asking AO3 for anything.
   - Safari won't run scripts in a local file. `src/site/serve.py` is a standard-library Python server for opening a folder of exports over your network instead.
 
 ### The options page

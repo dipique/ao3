@@ -77,6 +77,17 @@ export function decorateContainer(root: HTMLElement, options: Options): void {
 }
 
 /**
+ * Give a work's own page, drawn away from AO3, the menu its title has on AO3:
+ * the rules, the marks and the rest of the work menu. Run again over the same
+ * page, it hangs the menu on the title it finds and reuses the indicator
+ * already beside it.
+ */
+export function decorateWorkTitle(root: HTMLElement, options: Options): void {
+  pruneDetachedTriggers()
+  runUnit(FilterWorkToolbar, options, root)
+}
+
+/**
  * Draw one blurb as a work that is only holding its slot: the reason line and
  * "Show" button a rule-hidden work gets, over the same markup and the same
  * styles, so a frozen page layout ({@link file://./view.tsx}'s `stablePages`)

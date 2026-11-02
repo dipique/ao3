@@ -303,3 +303,66 @@ describe('site export — the status panel', { skip }, () => {
     assert.ok(said.y >= Math.max(button.bottom, line.bottom), 'the result should read after the row it reports on')
   })
 })
+
+/**
+ * A work's own page: the meta block the sanitizer keeps, with AO3's stats line
+ * nested in it. The meta block's labels float in a column of their own, and the
+ * stats line inside it is a row — so a rule written for the one quietly lands
+ * on the other.
+ */
+function workMetaPage() {
+  return skinned(`<div class="AO3E--site--work"><div class="ao3e-work" data-ao3e-work-id="11">
+  <dl class="work meta group">
+    <dt class="rating tags">Rating:</dt><dd class="rating tags"><ul class="commas"><li><a class="tag" href="#">General Audiences</a></li></ul></dd>
+    <dt class="stats">Stats:</dt><dd class="stats"><dl class="stats">
+      <dt class="published">Published:</dt><dd class="published">2025-01-01</dd>
+      <dt class="words">Words:</dt><dd class="words">5,000</dd>
+      <dt class="comments">Comments:</dt><dd class="comments">4</dd>
+      <dt class="kudos">Kudos:</dt><dd class="kudos">1</dd>
+    </dl></dd>
+  </dl>
+</div></div>`)
+}
+
+describe('site export — a work\'s page', { skip }, () => {
+  let browser
+  let view
+
+  before(async () => {
+    browser = await puppeteer.launch({ executablePath: chromePath, headless: true })
+    view = await browser.newPage()
+    await view.setViewport({ width: 1000, height: 900 })
+    await view.setContent(workMetaPage(), { waitUntil: 'load' })
+  }, { timeout: 120000 })
+
+  after(async () => browser?.close())
+
+  test('each statistic stands apart from the label of the next', async () => {
+    const gaps = await view.$$eval('dd.stats dl.stats > dd', els => els.map((dd) => {
+      const next = dd.nextElementSibling
+      if (!next)
+        return null
+      const a = dd.getBoundingClientRect()
+      const b = next.getBoundingClientRect()
+      return { stat: dd.className, sameLine: Math.abs(a.top - b.top) < 1, gap: b.left - a.right }
+    }).filter(Boolean))
+    assert.equal(gaps.length, 3)
+    for (const { stat, sameLine, gap } of gaps) {
+      if (sameLine)
+        assert.ok(gap >= 4, `${stat} runs into the next label (${gap}px apart)`)
+    }
+    assert.ok(gaps.some(g => g.sameLine), 'the statistics should share a line, as AO3 sets them')
+  })
+
+  test('each label sits beside its own value', async () => {
+    const pairs = await view.$$eval('dd.stats dl.stats > dt', els => els.map((dt) => {
+      const a = dt.getBoundingClientRect()
+      const b = dt.nextElementSibling.getBoundingClientRect()
+      return { label: dt.className, sameLine: Math.abs(a.top - b.top) < 1, gap: b.left - a.right }
+    }))
+    for (const { label, sameLine, gap } of pairs) {
+      assert.ok(sameLine, `${label} should share a line with its value`)
+      assert.ok(gap > 0 && gap < 12, `${label} should sit just before its value (${gap}px apart)`)
+    }
+  })
+})

@@ -224,6 +224,20 @@ body.ao3e-site {
   max-width: 46rem;
 }
 
+/*
+   With Reader mode on, the work's text sizes itself, so the column makes room
+   for it to be dragged wider; the meta block keeps the column's width.
+*/
+.AO3E--site--work[data-ao3e-sized] {
+  max-width: none;
+}
+
+.AO3E--site--work[data-ao3e-sized] .work.meta.group {
+  max-width: 46rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* Why a work in the list can't be opened from the file. */
 .AO3E--site--absent {
   color: var(--ao3e-site-muted);
@@ -579,6 +593,25 @@ body.ao3e-site {
 
 .ao3e-work .work.meta.group dd {
   margin: 0 0 0.3rem;
+}
+
+/*
+   The stats line nested in the meta block is a row of label/value pairs, not
+   another column: the two rules above would float each of its labels onto a
+   line of its own and butt every value against the next label.
+*/
+.ao3e-work .work.meta.group dl.stats {
+  margin: 0;
+}
+
+.ao3e-work .work.meta.group dl.stats dt {
+  float: none;
+  clear: none;
+  margin: 0 0.375em 0 0;
+}
+
+.ao3e-work .work.meta.group dl.stats dd {
+  margin: 0 0.75em 0 0;
 }
 
 .ao3e-work .work.meta.group ul {

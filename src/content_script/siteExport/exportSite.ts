@@ -1,14 +1,21 @@
 import type { Options, SnapshotDescriptor, ThemeOption } from '#common'
+import type { SearchViewPrefs } from '#content_script/searchView/prefs.js'
 
 import { getArchiveLink, LOCAL_ONLY, options, textReplacementActive } from '#common'
+import { readRecords, worksFromRecords } from '#content_script/searchView/blurbStore.js'
 import { readSnapshot } from '#content_script/searchView/cache.js'
+import { loadPrefs } from '#content_script/searchView/prefs.js'
+import { blurbFromWorkPage } from '#content_script/searchView/workPageBlurb.js'
 
 import type { CompressedWork } from './compress.ts'
 import type { SiteManifest, SiteManifestWork, SiteOptionsPayload } from './payload.ts'
+import type { WorkTextIndex } from './workText.ts'
 
 import { bakeTextReplacements } from './bake.ts'
 import { compressEntry } from './compress.ts'
 import {
+  ALL_CACHED,
+  ALL_CACHED_LABEL,
   buildManifest,
   rewriteWorkLinks,
   scriptJson,
@@ -18,11 +25,13 @@ import {
   statusFor,
 } from './payload.ts'
 import { siteBundle } from './siteBundle.ts'
+import { cachedWorkIds } from './workText.ts'
 import { readWorkTextIndex, readWorkTexts } from './workTextCache.ts'
 
 /**
  * Turn a stored list and its cached work text into the one HTML file a reader
- * carries away ({@link file://./payload.ts} says what goes in it).
+ * carries away ({@link file://./payload.ts} says what goes in it) — or, with no
+ * list behind it, every work the cache holds text for.
  *
  * The job runner's third step ({@link file://./job.ts}). It reads only what is
  * already on disk: no request goes to AO3 from here, which is why "Download
@@ -45,7 +54,7 @@ import { readWorkTextIndex, readWorkTexts } from './workTextCache.ts'
 const READ_BATCH = 20
 
 export interface BuildSiteExportOptions {
-  /** The snapshot to export — the key the search view stores it under. */
+  /** The snapshot to export — the key the search view stores it under — or {@link ALL_CACHED}. */
   cacheKey: string
   descriptor: SnapshotDescriptor
   signal?: AbortSignal
@@ -61,30 +70,36 @@ export interface SiteExportResult {
   manifest: SiteManifest
 }
 
+/** One work as the file lists it. */
+interface ListedWork {
+  workId: string
+  /**
+   * Its blurb, every link absolute; null where none is stored, and one is built
+   * from the work's own text once that is read.
+   */
+  blurbHtml: string | null
+}
+
+/** What a file is an export of, and the works it lists, in order. */
+interface ExportSource {
+  source: SiteManifest['source']
+  works: ListedWork[]
+  /** Epoch ms the works were listed. */
+  scrapedAt: number
+  /** Works in the list. */
+  listCount: number
+  layout?: Partial<SearchViewPrefs>
+}
+
 export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<SiteExportResult> {
-  const snapshot = await readSnapshot(opts.cacheKey)
-  if (!snapshot)
-    throw new Error(`There is no stored list for "${opts.descriptor.label}" any more. Refresh the list and try again.`)
-
-  const { scrapedAt } = snapshot
-  const listCount = snapshot.works.length
-
-  // One entry per work, in list order. A work listed twice — a series that
-  // appears under two fandoms, say — travels once.
-  const works: { workId: string, blurbHtml: string }[] = []
-  const seen = new Set<string>()
-  for (const work of snapshot.works) {
-    if (!work.workId || seen.has(work.workId))
-      continue
-    seen.add(work.workId)
-    works.push({ workId: work.workId, blurbHtml: absoluteLinks(work.el) })
-  }
-
   const [index, textSettings, optionsPayload] = await Promise.all([
     readWorkTextIndex(),
     options.get('textReplacements'),
     siteOptionsPayload(),
   ])
+  const { source, works, scrapedAt, listCount, layout } = opts.cacheKey === ALL_CACHED
+    ? await allCachedSource(index)
+    : await listSource(opts)
 
   /**
    * Which works this export carries text for, decided from the index before a
@@ -100,6 +115,7 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
 
   const generatedAt = Date.now()
   const manifestWorks: SiteManifestWork[] = []
+  const blurbsHtml: string[] = []
   const baked = textSettings.enabled && textSettings.rules.some(textReplacementActive)
 
   // The compressed works, as the JSON fragments they will be written out as.
@@ -118,6 +134,12 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
       const entry = index[work.workId]
       const html = texts[work.workId]
       done++
+
+      const blurbHtml = work.blurbHtml ?? (html ? blurbFromText(html, work.workId) : null)
+      // Nothing to show it by: no blurb was stored, and no text to build one from.
+      if (!blurbHtml)
+        continue
+      blurbsHtml.push(blurbHtml)
 
       if (!html) {
         manifestWorks.push({ id: work.workId, status: statusFor(entry, false) })
@@ -141,11 +163,7 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
 
   const manifest = buildManifest({
     generatedAt,
-    source: {
-      id: opts.descriptor.sourceId,
-      label: opts.descriptor.label,
-      listUrl: opts.descriptor.listUrl,
-    },
+    source,
     scrapedAt,
     listCount,
     works: manifestWorks,
@@ -155,7 +173,7 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
   // Blurbs travel as one entry: every facet and the filter want all of them at
   // once, and being near-identical markup they compress far better together than
   // one at a time.
-  const blurbs = await compressEntry(JSON.stringify(works.map(work => work.blurbHtml)))
+  const blurbs = await compressEntry(JSON.stringify(blurbsHtml))
 
   const blob = new Blob([
     siteShellHead(manifest, siteBundle),
@@ -165,13 +183,64 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
     scriptJson(optionsPayload),
     ',"blurbs":',
     scriptJson(blurbs),
+    ...layout ? [',"layout":', scriptJson(layout)] : [],
     ',"works":[',
     workJson.join(','),
     ']}',
     siteShellTail(siteBundle),
   ], { type: 'text/html;charset=utf-8' })
 
-  return { blob, fileName: exportFileName(opts.descriptor.label, new Date(generatedAt)), manifest }
+  return { blob, fileName: exportFileName(source.label, new Date(generatedAt)), manifest }
+}
+
+/** One stored list: its works in list order, and the layout its search view was given. */
+async function listSource(opts: BuildSiteExportOptions): Promise<ExportSource> {
+  const snapshot = await readSnapshot(opts.cacheKey)
+  if (!snapshot)
+    throw new Error(`There is no stored list for "${opts.descriptor.label}" any more. Refresh the list and try again.`)
+
+  // One entry per work, in list order. A work listed twice — a series that
+  // appears under two fandoms, say — travels once.
+  const works: ListedWork[] = []
+  const seen = new Set<string>()
+  for (const work of snapshot.works) {
+    if (!work.workId || seen.has(work.workId))
+      continue
+    seen.add(work.workId)
+    works.push({ workId: work.workId, blurbHtml: absoluteLinks(work.el) })
+  }
+
+  const layout = await loadPrefs(opts.descriptor.sourceId)
+  return {
+    source: { id: opts.descriptor.sourceId, label: opts.descriptor.label, listUrl: opts.descriptor.listUrl },
+    works,
+    scrapedAt: snapshot.scrapedAt,
+    listCount: snapshot.works.length,
+    layout: Object.keys(layout).length ? layout : undefined,
+  }
+}
+
+/**
+ * Every work whose text is cached, from whichever lists it came, the newest
+ * copy first. Each is shown by its stored blurb where one is kept, and
+ * otherwise by one built from its text, which holds everything a blurb says.
+ */
+async function allCachedSource(index: WorkTextIndex): Promise<ExportSource> {
+  const ids = cachedWorkIds(index)
+  const { works: stored } = worksFromRecords(ids, await readRecords(ids))
+  const blurbs = new Map(stored.map(work => [work.workId, absoluteLinks(work.el)]))
+  return {
+    source: { id: ALL_CACHED, label: ALL_CACHED_LABEL, listUrl: '' },
+    works: ids.map(workId => ({ workId, blurbHtml: blurbs.get(workId) ?? null })),
+    scrapedAt: Date.now(),
+    listCount: ids.length,
+  }
+}
+
+/** A blurb for a work with no stored one, from its cached text. */
+function blurbFromText(html: string, workId: string): string | null {
+  const blurb = blurbFromWorkPage(new DOMParser().parseFromString(html, 'text/html'), workId)
+  return blurb ? absoluteLinks(blurb) : null
 }
 
 /**

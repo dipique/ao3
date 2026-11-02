@@ -1056,7 +1056,9 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   protected override links(): EntityLink[] {
     const found = super.links()
     const title = workPageTitle(this.root)
-    const id = workPageId()
+    // A site export's copy of a work names its work on the copy itself, where
+    // there is no AO3 address or work navigation to read it from.
+    const id = title?.closest<HTMLElement>('[data-ao3e-work-id]')?.dataset.ao3eWorkId ?? workPageId()
     if (!title || !id)
       return found
     // The work page's own title opens on a plain click as well as the usual

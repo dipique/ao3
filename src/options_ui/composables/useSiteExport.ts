@@ -12,6 +12,7 @@ import { followState, listStored, sharesRefresh } from '#content_script/searchVi
 import { requestCancel, watchRefresh } from '#content_script/searchView/refreshClaim.ts'
 import { importChanges as replayChangeFile } from '#content_script/siteExport/importChanges.js'
 import { cancelJob, discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob, subscribeJob } from '#content_script/siteExport/job.js'
+import { ALL_CACHED, ALL_CACHED_LABEL } from '#content_script/siteExport/payload.js'
 import { cachingBuckets, planOrphanDiscard, summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { discardOrphanedWorkText, purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
 
@@ -457,6 +458,16 @@ export function useSiteExport() {
      */
     downloadCached(row: SiteExportListRow) {
       return startFor(row, ['exporting'])
+    },
+
+    /**
+     * Every work whose text is cached, in one file, whichever list it came
+     * from. Like `downloadCached`, nothing is asked of AO3; there is no list
+     * behind it to refresh.
+     */
+    downloadAllCached() {
+      const descriptor = { sourceId: ALL_CACHED, label: ALL_CACHED_LABEL, listUrl: '' }
+      return run('start the job', () => startJob({ cacheKey: ALL_CACHED, descriptor, steps: ['exporting'] }))
     },
 
     resume() {

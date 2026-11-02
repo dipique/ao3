@@ -3,19 +3,23 @@ import { debounce } from '@antfu/utils'
 import type { Options } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { FacetValueRef } from '#content_script/searchView/engine.js'
+import type { SearchViewPrefs } from '#content_script/searchView/prefs.js'
 import type { SearchView, SearchViewConfig, ViewState } from '#content_script/searchView/view.js'
 import type { SiteData, SiteManifestWork } from '#content_script/siteExport/payload.js'
 
 import { ADDON_CLASS, getArchiveLink, options } from '#common'
 import { setMenusEnabled } from '#content_script/contextTrigger.js'
+import { attachReaderSizing } from '#content_script/readerSizing.ts'
 import { worksFromHtml } from '#content_script/searchView/cache.js'
-import { decorateBlurb, decorateContainer, makeFacetHider } from '#content_script/searchView/decorate.js'
+import { decorateBlurb, decorateContainer, decorateWorkTitle, makeFacetHider } from '#content_script/searchView/decorate.js'
+import { CACHED, NOT_CACHED } from '#content_script/searchView/engine.js'
 import { applyHidden } from '#content_script/searchView/hidden.js'
 import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.js'
 import { applyStatus } from '#content_script/searchView/status.js'
 import { createWorkTextSearcher } from '#content_script/searchView/textSearch.js'
 import { createSearchView } from '#content_script/searchView/view.js'
 import { decompressEntry } from '#content_script/siteExport/compress.js'
+import { ALL_CACHED, workHash } from '#content_script/siteExport/payload.js'
 import { applySurfaceTheme } from '#content_script/theme.js'
 import { seedMarkedForLater } from '#content_script/units/FilterEntityToolbars.js'
 import React from '#dom'
@@ -67,6 +71,15 @@ const UNCACHED_REASON: Record<string, string> = {
   uncached: 'Not saved — no copy was made',
 }
 
+/** The work on screen. */
+interface OpenWork {
+  id: string
+  /** Its text, once unpacked. */
+  body: HTMLElement | null
+  /** Takes away what Reader mode gave the text, while it has something. */
+  detachSizing: (() => void) | null
+}
+
 export interface SiteContext {
   /** The static shell the app replaces; it says the file is inert until it does. */
   shell: HTMLElement
@@ -81,8 +94,9 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   // live sources make (`SearchSource.hidesNothing`), which an export can only
   // make by id: the two lists the reader assembled work by work show every work
   // on them, and an export of one that quietly held some back would be a
-  // shorter list than the page it was taken from.
-  const hidesNothing = sourceId === 'marked-for-later' || sourceId === 'read-works'
+  // shorter list than the page it was taken from. So does the file of every
+  // cached work, which is everything the reader chose to keep.
+  const hidesNothing = sourceId === 'marked-for-later' || sourceId === 'read-works' || sourceId === ALL_CACHED
 
   const blurbsHtml = JSON.parse(await decompressEntry(data.blurbs)) as string[]
   const texts = new Map(data.works.map(work => [work.id, work]))
@@ -141,6 +155,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   shell.className = ROOT
   shell.replaceChildren(status.el, listEl, readerEl)
 
+  let reading: OpenWork | null = null
   let view = mount(await build(opts))
 
   /**
@@ -200,7 +215,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
       hideFacetValue: makeFacetHider(current),
       textSearch,
       initialState,
-      prefs: await loadPrefs(sourceId),
+      prefs: await layout(),
       onPrefsChange: (next) => {
         // A layout that failed to save is not worth interrupting a read for; the
         // status line above already says whether this browser keeps anything.
@@ -217,6 +232,16 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   }
 
   /**
+   * The view's layout as this browser last kept it for the list, or else as the
+   * reader had it on AO3 when the file was made: the file starts where they
+   * left the list, and from their first change on, remembers its own.
+   */
+  async function layout(): Promise<Partial<SearchViewPrefs>> {
+    const kept = await loadPrefs(sourceId)
+    return Object.keys(kept).length ? kept : data.layout ?? {}
+  }
+
+  /**
    * Everything the works need before the view sees them — the two passes the
    * shared host runs on a live listing, plus the one thing only an export has
    * to say: which of these works it does not actually carry.
@@ -226,8 +251,10 @@ export async function startSite(ctx: SiteContext): Promise<void> {
       seedMarkedForLater(works.map(work => work.workId))
     applyStatus(works, current)
     const autoExcludes = applyHidden(works, current, { hidesNothing })
-    for (const work of works)
+    for (const work of works) {
+      work.offline = texts.has(work.workId) ? CACHED : NOT_CACHED
       noteIfAbsent(work, listed.get(work.workId))
+    }
     return autoExcludes
   }
 
@@ -240,29 +267,49 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   function mount(next: SearchView): SearchView {
     listEl.replaceChildren(next.el)
     // A blurb's title still points at AO3 — the work toolbars find their target
-    // by that href, and a reader holding a modifier still wants the archive. A
-    // plain click on a work this file carries is the only one taken here.
+    // by that href. A click on a work this file carries opens the file's copy
+    // instead, however it was clicked.
     next.el.addEventListener('click', onBlurbClick)
+    next.el.addEventListener('auxclick', onBlurbClick)
     return next
   }
 
   function onBlurbClick(event: MouseEvent): void {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+    if (event.defaultPrevented || event.button > 1 || event.altKey)
       return
     const link = (event.target as Element | null)?.closest('a[href]')
-    const id = link && WORK_HREF_RE.exec(link.getAttribute('href') ?? '')?.[1]
-    if (!id || !texts.has(id))
+    const href = link?.getAttribute('href') ?? ''
+    const id = WORK_HREF_RE.exec(href)?.[1]
+    if (!link || !id || !texts.has(id))
       return
-    event.preventDefault()
-    location.hash = `#work/${id}`
+    if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+      event.preventDefault()
+      location.hash = workHash(id)
+      return
+    }
+    // A new tab or window: the browser opens it as it opens any link, so it
+    // lands in the background or in front as the reader's browser decides — at
+    // the work's place in this file. The link is pointed there only until the
+    // browser has followed it, which happens after every listener has run.
+    link.setAttribute('href', workHash(id))
+    setTimeout(() => link.setAttribute('href', href))
   }
 
   function route(): void {
     const id = WORK_HASH_RE.exec(location.hash)?.[1]
     listEl.hidden = id !== undefined
     readerEl.hidden = id === undefined
-    if (id === undefined)
+    if (id === undefined) {
+      closeWork()
       return
+    }
+    // The view was rebuilt under a work that is still open — a mark made from
+    // its title does that. The reader keeps their place in it.
+    if (reading?.id === id) {
+      dressWork()
+      return
+    }
+    closeWork()
     window.scrollTo(0, 0)
     void showWork(id)
   }
@@ -276,6 +323,8 @@ export async function startSite(ctx: SiteContext): Promise<void> {
       </nav>,
       body,
     )
+    const shown: OpenWork = { id, body: null, detachSizing: null }
+    reading = shown
 
     const entry = texts.get(id)
     if (!entry) {
@@ -286,12 +335,40 @@ export async function startSite(ctx: SiteContext): Promise<void> {
       const html = await decompressEntry(entry)
       // A reader who moved on while this was unpacking gets what they asked for
       // second, not what they asked for first.
-      if (WORK_HASH_RE.exec(location.hash)?.[1] === id)
-        body.innerHTML = html
+      if (reading !== shown)
+        return
+      body.innerHTML = html
+      shown.body = body
+      dressWork()
     }
     catch (error) {
       body.textContent = `The copy of this work in the file is damaged — it ${error instanceof Error ? error.message : 'could not be read'}.`
     }
+  }
+
+  /**
+   * What a work page gets on AO3, given to the open work under the settings as
+   * they now stand: Reader mode's zoom and width handles, and the title's work
+   * menu.
+   */
+  function dressWork(): void {
+    const body = reading?.body
+    if (!reading || !body)
+      return
+    reading.detachSizing?.()
+    // Sizing starts from the column's own width, and is then given the whole
+    // window to widen the text into.
+    delete body.dataset.ao3eSized
+    const workskin = body.querySelector<HTMLElement>('#workskin')
+    reading.detachSizing = opts.readerMode && workskin ? attachReaderSizing(workskin).detach : null
+    if (reading.detachSizing)
+      body.dataset.ao3eSized = ''
+    decorateWorkTitle(body, opts)
+  }
+
+  function closeWork(): void {
+    reading?.detachSizing?.()
+    reading = null
   }
 }
 

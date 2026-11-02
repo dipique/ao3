@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ALL_CACHED } from '#content_script/siteExport/payload.js'
+
 import { formatBytes } from '../../model/buckets.ts'
-import { cachedTextOff } from '../../model/jobView.ts'
+import { cachedTextOff, listJob } from '../../model/jobView.ts'
 import { sentence, withReason } from '../../model/phrases.ts'
 
 /**
@@ -25,8 +27,18 @@ import { sentence, withReason } from '../../model/phrases.ts'
  *
  * Both are off while a job runs, since it is writing the text they would
  * delete, and each then says so.
+ *
+ * Beside them, *Download all cached* writes every cached work into one offline
+ * copy, whichever list it came from, asking AO3 for nothing. It is a job like a
+ * list's download, so it waits its turn behind any other and draws its line
+ * under the row.
  */
-const { usage, orphans, view, purge, discardOrphans } = useSiteExport()
+const { usage, orphans, view, purge, discardOrphans, downloadAllCached, resume, discard, cancel } = useSiteExport()
+
+/** The download of every cached work as the job sees it: what the row offers, why it is off, and whether the job's line is the row's. */
+const allJob = computed(() => listJob(view.value, ALL_CACHED))
+const downloadOff = computed(() => (usage.value.cached ? allJob.value.off : null))
+const downloadOffId = useId()
 
 /**
  * What no list holds any more, said only when there is some — and said in terms
@@ -79,6 +91,30 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
   <OptionRow title="Cached work text" :subtitle="subtitle">
     <div flex="~ row wrap items-center justify-end gap-2">
       <button
+        v-if="allJob.actions === 'stop'"
+        type="button"
+        class="outline-btn"
+        data-action="cancel"
+        @click="cancel()"
+      >
+        <span class="i-tabler-x" aria-hidden="true" />
+        Cancel
+      </button>
+      <button
+        v-else
+        type="button"
+        class="outline-btn"
+        :title="downloadOff ? withReason('Download all cached', downloadOff) : undefined"
+        :aria-describedby="downloadOff ? downloadOffId : undefined"
+        :disabled="!usage.cached || !!downloadOff"
+        data-action="download-all-cached"
+        @click="downloadAllCached()"
+      >
+        <span class="i-tabler-download" aria-hidden="true" />
+        Download all cached
+      </button>
+      <span v-if="downloadOff" :id="downloadOffId" hidden>{{ sentence(downloadOff) }}.</span>
+      <button
         type="button"
         :class="confirm.armed(DISCARD) ? 'armed-btn' : 'outline-btn'"
         :title="discardOff ? withReason('Discard orphans', discardOff) : undefined"
@@ -104,5 +140,18 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
       </button>
       <span v-if="jobOff" :id="jobOffId" hidden>{{ sentence(jobOff) }}.</span>
     </div>
+    <template v-if="allJob.here" #extra>
+      <SiteExportProgress>
+        <template v-if="allJob.actions === 'resume'" #foot>
+          <button type="button" class="primary-btn small-btn" data-action="resume" @click="resume()">
+            <span class="i-tabler-player-play" aria-hidden="true" />
+            Continue
+          </button>
+          <button type="button" class="ghost-btn small-btn" data-action="discard" @click="discard()">
+            Discard
+          </button>
+        </template>
+      </SiteExportProgress>
+    </template>
   </OptionRow>
 </template>

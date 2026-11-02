@@ -1,3 +1,4 @@
+import type { SearchViewPrefs } from '../searchView/prefs.ts'
 import type { CompressedEntry, CompressedWork } from './compress.ts'
 
 /**
@@ -40,6 +41,14 @@ import type { CompressedEntry, CompressedWork } from './compress.ts'
  * **2**: one self-contained HTML file. v1 was a folder of pages in a zip.
  */
 export const SITE_SCHEMA_VERSION = 2
+
+/**
+ * The export of every work whose text is cached, whichever list it came from:
+ * the key its job goes by, and the source its file names. No stored list or AO3
+ * listing is behind it.
+ */
+export const ALL_CACHED = 'all-cached'
+export const ALL_CACHED_LABEL = 'All cached works'
 
 /** The element the app reads its whole world out of. */
 export const SITE_DATA_ID = 'ao3e-data'
@@ -131,6 +140,12 @@ export interface SiteData {
   blurbs: CompressedEntry
   /** One entry per cached work, each compressed on its own. */
   works: CompressedWork[]
+  /**
+   * How the reader had this list's search view laid out on AO3 — facet order,
+   * collapsed groups, sort — for a file opened where no layout of its own has
+   * been kept yet. Absent where the list has none.
+   */
+  layout?: Partial<SearchViewPrefs>
 }
 
 /** Where a work lives inside the page. There are no per-work files to navigate to. */

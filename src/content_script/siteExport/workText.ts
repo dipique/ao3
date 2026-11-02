@@ -284,6 +284,14 @@ export function summarizeWorkText(index: WorkTextIndex): WorkTextUsage {
   return usage
 }
 
+/** Every work the index holds text for, whichever list it came from, the newest copy first. */
+export function cachedWorkIds(index: WorkTextIndex): string[] {
+  return Object.entries(index)
+    .filter(([, meta]) => meta.size > 0)
+    .sort(([, a], [, b]) => b.fetchedAt - a.fetchedAt)
+    .map(([id]) => id)
+}
+
 /**
  * How much of one list is cached, as buckets each of its works is in exactly
  * one of, so `cached + failed + unfetched === total`.

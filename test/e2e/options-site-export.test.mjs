@@ -6,15 +6,18 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
+import { CACHED, NOT_CACHED } from '../../src/content_script/searchView/engine.ts'
 import { describeTextSearch } from '../../src/content_script/searchView/textSearch.ts'
-import { SITE_SHELL_ID } from '../../src/content_script/siteExport/payload.ts'
+import { ALL_CACHED, scriptJson, SITE_DATA_ID, SITE_SHELL_ID } from '../../src/content_script/siteExport/payload.ts'
+import { WORK_TEXT_INDEX_KEY, WORK_TEXT_PREFIX, WORK_TEXT_VERSION } from '../../src/content_script/siteExport/workText.ts'
 import { formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { CONFIRM_MS } from '../../src/options_ui/model/confirmInPlace.ts'
 import { jobVerb } from '../../src/options_ui/model/jobView.ts'
 import { PROFILE_LISTS } from '../../src/options_ui/model/profileLists.ts'
 import { blurbsOnRemove, COPY_REMOVAL, NEEDS_VISIT_NOTE, OFFLINE_OFF } from '../../src/options_ui/model/savedListRows.ts'
-import { serveDir, storedListIds, storedLists } from './helpers.mjs'
-import { captureDownloads, figures, mentions, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
+import { launch, serveDir, storedListIds, storedLists } from './helpers.mjs'
+import { captureDownloads, chromePath, figures, mentions, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
+import { openMenu, pickRow } from './trackedPages.mjs'
 
 const ARCHIVE = 'https://archiveofourown.org'
 const CACHE_KEY = 'marked-for-later:tester'
@@ -139,6 +142,15 @@ const SEED = {
       read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
       boring: { icon: 'boring', label: 'Boring', color: '#8a6d3b', triggerAlias: 'read', hideSearchResult: false, items: '' },
       continue: { icon: 'continue', label: 'Ongoing', color: '#0369a1', triggerAlias: 'read', tracksProgress: true, hideSearchResult: false, items: '' },
+    },
+  },
+  // A work read from the file takes over its text's sizing, as on AO3.
+  'option.readerMode': true,
+  // How the reader laid out this list's search view on AO3, for the file to open on.
+  'cache.searchViewPrefs': {
+    'marked-for-later': {
+      collapsed: ['freeforms'],
+      order: ['fandoms', 'status', 'source', 'offline', 'rating', 'warnings', 'categories', 'relationships', 'characters', 'freeforms', 'language', 'completion'],
     },
   },
   // The export bakes the reader's find/replace rules into every work on the way
@@ -700,6 +712,205 @@ describe('options UI — site export', { skip }, () => {
     }
   })
 
+  const RESULTS = '.AO3E--search-view--results > li'
+
+  /**
+   * Open the file on an origin with nothing stored on it: every local file shares
+   * one, so whatever an earlier test left there would otherwise be read here.
+   */
+  async function openFresh(reader, url) {
+    await reader.goto(url, { waitUntil: 'load' })
+    await reader.evaluate(() => new Promise((resolve) => {
+      const del = indexedDB.deleteDatabase('ao3e-site')
+      del.onsuccess = del.onerror = del.onblocked = () => resolve()
+    }))
+    await reader.reload({ waitUntil: 'load' })
+  }
+
+  /** The export's HTML with its data block rewritten by `edit`. */
+  function withData(html, edit) {
+    const open = html.indexOf(`<script type="application/json" id="${SITE_DATA_ID}">`)
+    const start = html.indexOf('>', open) + 1
+    const end = html.indexOf('</script>', start)
+    const data = JSON.parse(html.slice(start, end))
+    edit(data)
+    return html.slice(0, start) + scriptJson(data) + html.slice(end)
+  }
+
+  /** The facet groups in the sidebar, in order, and which of them are open. */
+  const facetGroups = reader => reader.$$eval('.AO3E--search-view--group', els => els.map(el => ({ key: el.dataset.ao3eFacet, open: el.open })))
+
+  /**
+   * A work the file carries opens from the file however the reader opens it:
+   * a new tab or window, with a modifier or the middle button, lands on the
+   * work's place in the file rather than on AO3 — which is what opening several
+   * works at once from a list needs. The link still names AO3 between clicks,
+   * which is how the work menus find their work.
+   */
+  test('a work the file carries opens in the file from a new tab as well', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+    const tabs = await launch(chromePath, { own: true })
+    const reader = await tabs.newPage()
+    const title = '#work_11 h4.heading a'
+    const isWork = target => target.url().startsWith('file:') && new URL(target.url()).hash === '#work/11'
+    try {
+      await reader.goto(fileUrl(dir, 'library.html'), { waitUntil: 'load' })
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+
+      for (const press of [
+        async () => {
+          await reader.keyboard.down('Control')
+          await reader.click(title)
+          await reader.keyboard.up('Control')
+        },
+        () => reader.click(title, { button: 'middle' }),
+      ]) {
+        const opened = tabs.waitForTarget(isWork, { timeout: 10000 })
+        await press()
+        const tab = await (await opened).page()
+        try {
+          // A tab opened behind this one draws no frames, which is what the wait polls on.
+          await tab.bringToFront()
+          await tab.waitForFunction(() => document.querySelector('.AO3E--site--work .userstuff') !== null, { timeout: 15000 })
+        }
+        finally {
+          await tab.close()
+          await reader.bringToFront()
+        }
+
+        assert.equal(await reader.evaluate(() => location.hash), '', 'the list stays where it was')
+        assert.match(await reader.$eval(title, el => el.getAttribute('href')), /^https:\/\/archiveofourown\.org\/works\/11$/)
+      }
+    }
+    finally {
+      await tabs.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /** Which works the file carries text for is a facet of its own, as a filter. */
+  test('whether a work was cached is a facet', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(withData(html, (data) => {
+      data.works = data.works.filter(work => work.id !== '13')
+    }), 'library.html')
+    const reader = await browser.newPage()
+    const VISIBLE = `${RESULTS}:not(.AO3E--search-view--hidden)`
+    try {
+      await openFresh(reader, fileUrl(dir, 'library.html'))
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+
+      const rows = await reader.$$eval('.AO3E--search-view--group[data-ao3e-facet="offline"] .AO3E--search-view--row', els => els.map(el => [
+        el.querySelector('.AO3E--search-view--row-name').textContent,
+        el.querySelector('.AO3E--search-view--row-count').textContent.replace(/\D/g, ''),
+      ]))
+      assert.deepEqual(rows.sort(), [[CACHED, '2'], [NOT_CACHED, '1']])
+
+      await reader.evaluate((value) => {
+        const row = [...document.querySelectorAll('.AO3E--search-view--group[data-ao3e-facet="offline"] .AO3E--search-view--row')]
+          .find(el => el.querySelector('.AO3E--search-view--row-name').textContent === value)
+        row.querySelector('.AO3E--search-view--toggle-include').click()
+      }, NOT_CACHED)
+      await reader.waitForFunction(sel => document.querySelectorAll(sel).length === 1, {}, VISIBLE)
+      assert.deepEqual(await reader.$$eval(VISIBLE, els => els.map(el => el.id)), ['work_13'])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * The search view's layout comes with the list: the file opens on the facet
+   * order and collapsed groups the reader gave this list on AO3, and once
+   * they rearrange it in the file, the file remembers its own.
+   */
+  test('the file opens on the list\'s layout from AO3, and then keeps its own', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+    const reader = await browser.newPage()
+    try {
+      await openFresh(reader, fileUrl(dir, 'library.html'))
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+
+      const onAo3 = SEED['cache.searchViewPrefs']['marked-for-later']
+      const groups = await facetGroups(reader)
+      assert.equal(groups[0].key, onAo3.order[0])
+      assert.equal(groups.find(group => group.key === 'freeforms').open, false)
+
+      await reader.click('.AO3E--search-view--group:first-child .AO3E--search-view--group-move-down')
+      const rearranged = (await facetGroups(reader)).map(group => group.key)
+      assert.notEqual(rearranged[0], onAo3.order[0])
+
+      await reader.reload({ waitUntil: 'load' })
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+      assert.deepEqual((await facetGroups(reader)).map(group => group.key), rearranged)
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * A work read in the file gets what it gets on AO3: its text zooms and
+   * narrows with Reader mode on, and its title opens the work's menu, marks and
+   * all.
+   */
+  test('a work opened in the file can be resized, and marked from its title', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('pageerror', e => errors.push(e.message))
+    const handles = () => reader.$$eval('.AO3E--reader-handle', els => els.length)
+    try {
+      await reader.setViewport({ width: 1280, height: 800 })
+      await openFresh(reader, `${fileUrl(dir, 'library.html')}#work/11`)
+      await reader.waitForFunction(() => document.querySelector('.AO3E--site--work .userstuff') !== null, { timeout: 15000 })
+
+      assert.equal(await handles(), 2)
+      // The text opens at the width the page gives a work, and the handles take
+      // it either way from there: narrower, or out into the rest of the window.
+      const width = () => reader.$eval('#workskin', el => el.getBoundingClientRect().width)
+      const opened = await width()
+      const grip = await reader.$eval('.AO3E--reader-handle-right', (el) => {
+        const r = el.getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      })
+      await reader.mouse.move(grip.x, grip.y)
+      await reader.mouse.down()
+      await reader.mouse.move(grip.x + 120, grip.y, { steps: 4 })
+      await reader.mouse.up()
+      assert.ok(await width() > opened + 100, `the text should widen past the ${opened}px it opened at (now ${await width()}px)`)
+
+      const before = await reader.$eval('#workskin', el => getComputedStyle(el).fontSize)
+      await reader.$eval('#workskin', el => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -200, ctrlKey: true, bubbles: true, cancelable: true })))
+      assert.notEqual(await reader.$eval('#workskin', el => getComputedStyle(el).fontSize), before, 'a zoom over the text resizes it')
+
+      await openMenu(reader, () => reader.$eval('#workskin > .preface h2.title.heading', el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))))
+      assert.ok(await pickRow(reader, 'mark', 'boring'), 'the title\'s menu offers the marks')
+      await until('the mark to be stored', () => reader.evaluate(async () => {
+        const stored = (await browser.storage.local.get('option.workMarks'))['option.workMarks']
+        return stored.marks.boring.items !== ''
+      }))
+      // The page rebuilds itself on every mark; the work stays open under it.
+      assert.equal(await reader.evaluate(() => location.hash), '#work/11')
+      await reader.waitForSelector('.AO3E--site--work .AO3E--indicator--mark-boring', { timeout: 5000 })
+      assert.equal(await handles(), 2, 'one pair of handles, however often the page rebuilds')
+
+      await reader.click('.AO3E--site--nav a')
+      await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)
+      assert.equal(await handles(), 0, 'the handles belong to the work, not the list')
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   /**
    * The reader's marks, filters and layout are kept on the one origin every
    * local file shares — so a re-export, which lands under a new name, still
@@ -975,9 +1186,11 @@ describe('options UI — site export', { skip }, () => {
     reader.on('request', req => /^https?:/.test(req.url()) && !req.url().endsWith('/favicon.ico') && fetched.push(req.url()))
 
     const groups = () => reader.$$eval('.AO3E--search-view--group', els => els.map(el => ({
+      key: el.dataset.ao3eFacet,
       name: el.querySelector('.AO3E--search-view--group-label').textContent.trim(),
       open: el.open,
     })))
+    const collapsedOnAo3 = SEED['cache.searchViewPrefs']['marked-for-later'].collapsed
 
     try {
       await reader.goto(url, { waitUntil: 'networkidle2' })
@@ -1002,7 +1215,8 @@ describe('options UI — site export', { skip }, () => {
 
       // Collapse a facet group, which is the smallest thing the view persists.
       const before = await groups()
-      assert.ok(before.length > 0 && before.every(g => g.open), 'groups open on a first visit')
+      assert.ok(before.length > 0 && before.every(g => g.open === !collapsedOnAo3.includes(g.key)), 'groups open on a first visit as they were on AO3')
+      assert.ok(before[0].open)
       await reader.click('.AO3E--search-view--group-title .AO3E--search-view--group-label')
       await until('the layout to be saved', () => reader.evaluate(async () => {
         const prefs = (await browser.storage.local.get('cache.searchViewPrefs'))['cache.searchViewPrefs']
@@ -1015,7 +1229,7 @@ describe('options UI — site export', { skip }, () => {
       await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
       assert.deepEqual(
         (await groups()).filter(g => !g.open).map(g => g.name),
-        [before[0].name],
+        [before[0].name, ...before.filter(g => !g.open).map(g => g.name)],
       )
 
       // Two loads, one address: everything the app needs was in the document.
@@ -1112,6 +1326,61 @@ describe('options UI — site export', { skip }, () => {
     await importFile()
     await until('the second import to report', async () => (await reported()).join() === '0,1')
     assert.deepEqual(marked.map(entry => entry.workId), ['11'], 'AO3 is not asked twice')
+  })
+
+  /**
+   * One file of every work the cache holds text for, whichever list it came
+   * from — including a work whose list was deleted, which kept its text but not
+   * its blurb, and so is shown by a blurb built from that text. Nothing is asked
+   * of AO3: there is no list to refresh.
+   */
+  test('"Download all cached" puts every cached work in one file, whatever its list', async () => {
+    const ORPHAN = '31'
+    const orphanText = `<div class="ao3e-work" data-ao3e-work-id="${ORPHAN}">
+      <dl class="work meta group">
+        <dt class="rating tags">Rating:</dt><dd class="rating tags"><ul class="commas"><li><a class="tag" href="${ARCHIVE}/tags/General%20Audiences/works">General Audiences</a></li></ul></dd>
+        <dt class="fandom tags">Fandom:</dt><dd class="fandom tags"><ul class="commas"><li><a class="tag" href="${ARCHIVE}/tags/Another%20Fandom/works">Another Fandom</a></li></ul></dd>
+        <dt class="stats">Stats:</dt><dd class="stats"><dl class="stats"><dt class="words">Words:</dt><dd class="words">700</dd><dt class="chapters">Chapters:</dt><dd class="chapters">1/1</dd></dl></dd>
+      </dl>
+      <div id="workskin">
+        <div class="preface group"><h2 class="title heading">An Orphaned Work</h2><h3 class="byline heading"><a rel="author" href="${ARCHIVE}/users/other">other</a></h3></div>
+        <div id="chapters"><div class="userstuff"><p>Kept after its list went.</p></div></div>
+      </div>
+    </div>`
+    await page.evaluate(async (key, indexKey, id, html, version) => {
+      const index = (await browser.storage.local.get(indexKey))[indexKey] ?? {}
+      index[id] = { size: html.length, updatedAt: 0, chapters: 1, words: 700, fetchedAt: Date.now(), v: version }
+      await browser.storage.local.set({ [key]: { html }, [indexKey]: index })
+    }, `${WORK_TEXT_PREFIX}${ORPHAN}`, WORK_TEXT_INDEX_KEY, ORPHAN, orphanText, WORK_TEXT_VERSION)
+
+    try {
+      const before = await page.evaluate(() => window.__downloads.length)
+      const requests = []
+      const watch = req => req.url().startsWith(ARCHIVE) && requests.push(req.url())
+      page.on('request', watch)
+      await options.press(await options.action(page, 'download-all-cached'))
+      await until('the download', () => page.evaluate(n => window.__downloads.length > n, before))
+      page.off('request', watch)
+
+      const { data } = await lastDownload()
+      assert.equal(data.manifest.source.id, ALL_CACHED)
+      assert.deepEqual(data.works.map(work => work.id).sort(), ['11', '12', '13', ORPHAN])
+      assert.equal(data.manifest.counts.cached, 4)
+      const blurbs = JSON.parse(await unpack(data.blurbs))
+      assert.equal(blurbs.length, 4)
+      const built = blurbs.find(html => html.includes(`id="work_${ORPHAN}"`))
+      assert.ok(built?.includes('An Orphaned Work') && built.includes('Another Fandom'), 'the orphan is shown by a blurb built from its text')
+      assert.deepEqual(requests, [], 'nothing should have been asked of AO3')
+      await until('the job to be cleared', async () => await options.stored('siteExportJob') === null)
+    }
+    finally {
+      await page.evaluate(async (key, indexKey, id) => {
+        const index = (await browser.storage.local.get(indexKey))[indexKey] ?? {}
+        delete index[id]
+        await browser.storage.local.remove(key)
+        await browser.storage.local.set({ [indexKey]: index })
+      }, `${WORK_TEXT_PREFIX}${ORPHAN}`, WORK_TEXT_INDEX_KEY, ORPHAN)
+    }
   })
 
   /**
