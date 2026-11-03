@@ -206,7 +206,7 @@ describe('planWorkCache', () => {
 })
 
 describe('summarizeWorkText', () => {
-  test('totals the text, and counts failures separately', () => {
+  test('totals the text, whatever the last attempt to refresh it came to', () => {
     const usage = summarizeWorkText({
       a: meta({ size: 1000 }),
       b: meta({ size: 2000 }),
@@ -215,11 +215,11 @@ describe('summarizeWorkText', () => {
       // One that never had any.
       d: meta({ size: 0, failure: 'notfound', attempts: 3 }),
     })
-    assert.deepEqual(usage, { cached: 3, failed: 2, bytes: 3500 })
+    assert.deepEqual(usage, { cached: 3, bytes: 3500 })
   })
 
   test('an empty index totals nothing', () => {
-    assert.deepEqual(summarizeWorkText({}), { cached: 0, failed: 0, bytes: 0 })
+    assert.deepEqual(summarizeWorkText({}), { cached: 0, bytes: 0 })
   })
 })
 
@@ -238,7 +238,7 @@ describe('planOrphanDiscard', () => {
   test('a work no list holds is an orphan, and is totalled', () => {
     const plan = planOrphanDiscard(index, new Set(['11']))
     assert.deepEqual(plan.workIds, ['12', '13'])
-    assert.deepEqual(plan.usage, { cached: 1, failed: 1, bytes: 2000 })
+    assert.deepEqual(plan.usage, { cached: 1, bytes: 2000 })
   })
 
   test('an entry holding no text is still an orphan worth clearing', () => {
@@ -250,7 +250,7 @@ describe('planOrphanDiscard', () => {
   test('a cache every list accounts for has no orphans', () => {
     const plan = planOrphanDiscard(index, new Set(['11', '12', '13']))
     assert.deepEqual(plan.workIds, [])
-    assert.deepEqual(plan.usage, { cached: 0, failed: 0, bytes: 0 })
+    assert.deepEqual(plan.usage, { cached: 0, bytes: 0 })
   })
 
   test('a work a list holds but the cache never had is not an orphan', () => {

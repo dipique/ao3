@@ -65,7 +65,7 @@ describe('siteExport/workTextCache', { skip }, () => {
 
     const plan = await discard(['11'])
     assert.deepEqual(plan.workIds, ['12'])
-    assert.deepEqual(plan.usage, { cached: 1, failed: 0, bytes: 2000 })
+    assert.deepEqual(plan.usage, { cached: 1, bytes: 2000 })
     assert.deepEqual(await keys(), ['workText.11', 'workTextIndex'])
     assert.deepEqual(Object.keys(await index()), ['11'], 'the work a list still holds stays whole')
   })
@@ -112,7 +112,7 @@ describe('siteExport/workTextCache', { skip }, () => {
     await seed({ 11: meta() }, { 11: '<p>eleven</p>', 99: '<p>nobody</p>' })
 
     const usage = await page.evaluate(() => window.WorkTextCache.purgeWorkText())
-    assert.deepEqual(usage, { cached: 1, failed: 0, bytes: 1000 })
+    assert.deepEqual(usage, { cached: 1, bytes: 1000 })
     assert.deepEqual(await keys(), [])
   })
 })

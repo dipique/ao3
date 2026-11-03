@@ -27,7 +27,7 @@ import React from '#dom'
 import type { Journal } from './journal.ts'
 import type { SiteStorage } from './shim.ts'
 
-import { start as startJournal } from './journal.ts'
+import { restoreUnimported, start as startJournal } from './journal.ts'
 
 /**
  * The exported page's app: the extension's own search view, running with no
@@ -121,8 +121,10 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     },
   })
 
-  const loaded = await options.get()
   const status = statusPanel(storage)
+  if (storage.seeded)
+    await restoreUnimported(data.applied).catch(status.fail)
+  const loaded = await options.get()
 
   /**
    * The record of what the reader does here, and the gate on whether they are

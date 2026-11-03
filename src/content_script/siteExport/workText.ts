@@ -264,22 +264,18 @@ export function planWorkCache(
 export interface WorkTextUsage {
   /** Entries holding text. */
   cached: number
-  /** Entries whose last attempt failed (they may still hold an older copy). */
-  failed: number
   /** Total bytes of sanitized HTML. */
   bytes: number
 }
 
 /** Total an index for the options row's read-out, without decoding any text. */
 export function summarizeWorkText(index: WorkTextIndex): WorkTextUsage {
-  const usage: WorkTextUsage = { cached: 0, failed: 0, bytes: 0 }
+  const usage: WorkTextUsage = { cached: 0, bytes: 0 }
   for (const meta of Object.values(index)) {
     if (meta.size > 0) {
       usage.cached++
       usage.bytes += meta.size
     }
-    if (meta.failure)
-      usage.failed++
   }
   return usage
 }

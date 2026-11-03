@@ -98,6 +98,11 @@ export interface SiteStorage {
   reason: string | null
   meta: SiteStorageMeta
   /**
+   * Whether this open put the export's settings in place of the ones stored
+   * here — see {@link SiteStorageMeta.seededGeneration}.
+   */
+  seeded: boolean
+  /**
    * When this origin was last opened *before* now, or null on a first visit.
    *
    * Derived rather than stored, because {@link SiteStorageMeta.lastOpened} is
@@ -117,6 +122,24 @@ const memory = new Map<string, unknown>()
 const changeListeners = new Set<ChangeListener>()
 const messageListeners = new Set<unknown>()
 
+/** A write, as it is passed to the other pages open on this origin. */
+interface PeerWrite {
+  sets: Items
+  deletes: string[]
+}
+
+/**
+ * The other pages open on this origin — every export open in another tab.
+ *
+ * Each holds the store in memory as it read it on opening, and a caller writes
+ * whole values it read from there (the mark table, every list's layout), so a
+ * page that never heard of a write would put its own older copy back over it
+ * with the next thing it saved. Every write is passed on here, and a page
+ * hearing one takes it in and announces it the way `storage.onChanged` would
+ * announce a write from another of the extension's pages.
+ */
+const peers = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(DB_NAME)
+
 let db: IDBDatabase | null = null
 let writable = false
 
@@ -134,6 +157,7 @@ let writes: Promise<void> = Promise.resolve()
  */
 export async function installBrowserShim(seed: { generatedAt: number, items: Items }): Promise<SiteStorage> {
   defineBrowser()
+  listenToPeers()
 
   let reason: string | null = null
   try {
@@ -147,9 +171,10 @@ export async function installBrowserShim(seed: { generatedAt: number, items: Ite
     db = null
     writable = false
   }
+  catchUpWithPeers()
 
-  const { meta, previousOpen } = await openOrigin(seed)
-  return { writable, reason, meta, previousOpen }
+  const { meta, previousOpen, seeded } = await openOrigin(seed)
+  return { writable, reason, meta, previousOpen, seeded }
 }
 
 /**
@@ -187,7 +212,7 @@ export function siteDatabase(): IDBDatabase | null {
  * Note this open, and seed the reader's settings if this export is the newest
  * one this origin has seen.
  */
-async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<{ meta: SiteStorageMeta, previousOpen: number | null }> {
+async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<{ meta: SiteStorageMeta, previousOpen: number | null, seeded: boolean }> {
   const now = Date.now()
   const stored = memory.get(META_KEY) as Partial<SiteStorageMeta> | undefined
   const meta: SiteStorageMeta = {
@@ -200,14 +225,15 @@ async function openOrigin(seed: { generatedAt: number, items: Items }): Promise<
   }
 
   const items: Items = {}
-  if (!stored || seed.generatedAt > meta.seededGeneration) {
+  const seeded = !stored || seed.generatedAt > meta.seededGeneration
+  if (seeded) {
     Object.assign(items, seed.items)
     meta.seededGeneration = seed.generatedAt
   }
   items[META_KEY] = meta
 
   await setItems(items)
-  return { meta, previousOpen: stored?.lastOpened ?? null }
+  return { meta, previousOpen: stored?.lastOpened ?? null, seeded }
 }
 
 /**
@@ -391,28 +417,64 @@ function getItems(query?: string | string[] | Items | null): Items {
 }
 
 async function setItems(items: Items): Promise<void> {
-  const sets = new Map(Object.entries(items))
-  const changes = collect(sets.keys(), key => ({ oldValue: memory.get(key), newValue: sets.get(key) }))
-  for (const [key, value] of sets)
-    memory.set(key, value)
-  await flush(sets, [])
-  announce(changes)
+  await write({ sets: items, deletes: [] })
 }
 
 async function removeItems(query: string | string[]): Promise<void> {
-  const keys = (Array.isArray(query) ? query : [query]).filter(key => memory.has(key))
-  const changes = collect(keys, key => ({ oldValue: memory.get(key) }))
-  for (const key of keys)
-    memory.delete(key)
-  await flush(new Map(), keys)
+  await write({ sets: {}, deletes: (Array.isArray(query) ? query : [query]).filter(key => memory.has(key)) })
+}
+
+/**
+ * Apply a write here, put it on disk, then pass it to the other pages — after
+ * the disk, so a page that opens in between reads it there instead.
+ */
+async function write(change: PeerWrite): Promise<void> {
+  const changes = take(change)
+  await flush(new Map(Object.entries(change.sets)), change.deletes)
+  peers?.postMessage(change)
   announce(changes)
 }
 
-function collect(keys: Iterable<string>, describe: (key: string) => Changes[string]): Changes {
+/** Apply a write to memory, and say what it changed. */
+function take(change: PeerWrite): Changes {
   const changes: Changes = {}
-  for (const key of keys)
-    changes[key] = describe(key)
+  for (const [key, value] of Object.entries(change.sets)) {
+    changes[key] = { oldValue: memory.get(key), newValue: value }
+    memory.set(key, value)
+  }
+  for (const key of change.deletes) {
+    if (!memory.has(key))
+      continue
+    changes[key] = { oldValue: memory.get(key) }
+    memory.delete(key)
+  }
   return changes
+}
+
+/**
+ * Writes another page made while this one was still reading the store in. Held
+ * until it has, then laid over what it read: each is on disk already, so it is
+ * at least as new as anything the read found.
+ */
+let early: PeerWrite[] | null = []
+
+/** Take in what another page on this origin wrote; it has already gone to disk from there. */
+function listenToPeers(): void {
+  if (!peers)
+    return
+  peers.onmessage = (event: MessageEvent<PeerWrite>) => {
+    if (early)
+      early.push(event.data)
+    else
+      announce(take(event.data))
+  }
+}
+
+/** Lay the writes heard while hydrating over what was read, and take later ones as they come. */
+function catchUpWithPeers(): void {
+  for (const change of early ?? [])
+    take(change)
+  early = null
 }
 
 /**

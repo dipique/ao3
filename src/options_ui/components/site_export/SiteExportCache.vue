@@ -60,15 +60,16 @@ const stranded = computed(() => {
 /** Everything "Discard orphans" would take, counted the way its confirmation says. */
 const orphanCount = computed(() => orphans.value.works + orphans.value.blurbs)
 
+/**
+ * What is on disk. Works a list could not fetch are that list's to report,
+ * beside its own figures and its retry.
+ */
 const subtitle = computed(() => {
   if (!usage.value.cached)
     return `No work text cached yet for offline reading.${stranded.value}`
-  const failed = usage.value.failed
-    ? ` ${usage.value.failed.toLocaleString()} could not be fetched and will be retried.`
-    : ''
-  // The two conditional halves are sentences of their own, after the parenthesis
-  // rather than inside it — nested, the orphan line reads as part of the size.
-  return `${usage.value.cached.toLocaleString()} works (${formatBytes(usage.value.bytes)}) cached.${failed}${stranded.value}`
+  // The orphan line is a sentence of its own, after the parenthesis rather than
+  // inside it — nested, it reads as part of the size.
+  return `${usage.value.cached.toLocaleString()} works (${formatBytes(usage.value.bytes)}) cached.${stranded.value}`
 })
 
 /** Why the job keeps both buttons off, said only on a button that would otherwise be on. */

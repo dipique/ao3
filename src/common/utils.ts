@@ -32,13 +32,24 @@ export async function fetchAndParseDocument(
   return parseDocument(res)
 }
 
+/** A response {@link safeFetch} turned down, with the status it came back with. */
+export class ResponseStatusError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`Status was ${status}, not 200 OK`)
+    this.name = 'ResponseStatusError'
+    this.status = status
+  }
+}
+
 export async function safeFetch(
   ...args: Parameters<typeof globalThis.fetch>
 ): ReturnType<typeof globalThis.fetch> {
   cachedToken = undefined
   const res = await globalThis.fetch(...args)
-  if (!res || res.status !== 200)
-    throw new Error('Status was not 200 OK')
+  if (res.status !== 200)
+    throw new ResponseStatusError(res.status)
 
   return res
 }

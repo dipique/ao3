@@ -306,11 +306,11 @@ describe('site export — the status panel', { skip }, () => {
 
 /**
  * A work's own page: the meta block the sanitizer keeps, with AO3's stats line
- * nested in it. The meta block's labels float in a column of their own, and the
- * stats line inside it is a row — so a rule written for the one quietly lands
- * on the other.
+ * nested in it, and the text under it. The meta block's labels float in a column
+ * of their own, and the stats line inside it is a row — so a rule written for
+ * the one quietly lands on the other.
  */
-function workMetaPage() {
+function workPage() {
   return skinned(`<div class="AO3E--site--work"><div class="ao3e-work" data-ao3e-work-id="11">
   <dl class="work meta group">
     <dt class="rating tags">Rating:</dt><dd class="rating tags"><ul class="commas"><li><a class="tag" href="#">General Audiences</a></li></ul></dd>
@@ -321,6 +321,15 @@ function workMetaPage() {
       <dt class="kudos">Kudos:</dt><dd class="kudos">1</dd>
     </dl></dd>
   </dl>
+  <div id="workskin">
+    <div class="preface group"><h2 class="title heading">A work</h2>
+      <div class="notes module"><h3 class="heading">Notes:</h3><blockquote class="userstuff"><p>A note.</p></blockquote></div>
+    </div>
+    <div id="chapters"><div class="chapter" id="chapter-1">
+      <div class="chapter preface group"><h3 class="title">Chapter 1</h3></div>
+      <div class="userstuff module"><p>The text.</p></div>
+    </div></div>
+  </div>
 </div></div>`)
 }
 
@@ -332,7 +341,7 @@ describe('site export — a work\'s page', { skip }, () => {
     browser = await puppeteer.launch({ executablePath: chromePath, headless: true })
     view = await browser.newPage()
     await view.setViewport({ width: 1000, height: 900 })
-    await view.setContent(workMetaPage(), { waitUntil: 'load' })
+    await view.setContent(workPage(), { waitUntil: 'load' })
   }, { timeout: 120000 })
 
   after(async () => browser?.close())
@@ -363,6 +372,23 @@ describe('site export — a work\'s page', { skip }, () => {
     for (const { label, sameLine, gap } of pairs) {
       assert.ok(sameLine, `${label} should share a line with its value`)
       assert.ok(gap > 0 && gap < 12, `${label} should sit just before its value (${gap}px apart)`)
+    }
+  })
+
+  /** Reader mode zooms a work by the font size it sets on `#workskin`. */
+  test('everything in the text follows a zoom over it', async () => {
+    const PARTS = ['.preface h2.title', '.notes .userstuff p', '.chapter .title', '#chapters .userstuff p']
+    const sizes = () => view.evaluate(parts => parts.map(sel => Number.parseFloat(getComputedStyle(document.querySelector(sel)).fontSize)), PARTS)
+    const before = await sizes()
+    await view.$eval('#workskin', (el) => {
+      el.style.fontSize = '1.5em'
+    })
+    try {
+      const after = await sizes()
+      PARTS.forEach((part, i) => assert.ok(Math.abs(after[i] / before[i] - 1.5) < 0.01, `${part} went from ${before[i]}px to ${after[i]}px`))
+    }
+    finally {
+      await view.$eval('#workskin', el => el.style.removeProperty('font-size'))
     }
   })
 })

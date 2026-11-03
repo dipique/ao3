@@ -146,6 +146,13 @@ export interface SiteData {
    * been kept yet. Absent where the list has none.
    */
   layout?: Partial<SearchViewPrefs>
+  /**
+   * The ids of the change ops whose marks the extension had taken in when this
+   * file was made. The settings above are the mark table as of then, so a page
+   * that seeds them knows from this which marks recorded on its origin the
+   * table still lacks.
+   */
+  applied: string[]
 }
 
 /** Where a work lives inside the page. There are no per-work files to navigate to. */

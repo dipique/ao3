@@ -368,11 +368,14 @@ export function readMarkIds(marks: Record<MarkId, MarkConfig>): MarkId[] {
  * must not import a content-script Unit.
  */
 export function readWorkIds(workMarks: WorkMarks): Set<string> {
+  return workMarks.enabled ? readWorkIdsIn(workMarks.marks) : new Set()
+}
+
+/** {@link readWorkIds} over a mark table alone, whether or not marks are switched on. */
+export function readWorkIdsIn(marks: Record<MarkId, MarkConfig>): Set<string> {
   const ids = new Set<string>()
-  if (!workMarks.enabled)
-    return ids
-  for (const mark of readMarkIds(workMarks.marks)) {
-    for (const workId of markItems(workMarks.marks, mark))
+  for (const mark of readMarkIds(marks)) {
+    for (const workId of markItems(marks, mark))
       ids.add(workId)
   }
   return ids

@@ -18,9 +18,8 @@ import { describeChangeReport } from '../../composables/useSiteExport.ts'
  * read also takes it off the reader's Marked for Later list, which is the
  * archive's own behaviour rather than ours and the one part of an import that
  * reaches off this device — so it is the plain button, and declining it is the
- * menu item. Nothing is lost by declining: an op whose archive half didn't
- * happen isn't written down as done, so importing the same file again later
- * picks up exactly those.
+ * menu item. Nothing is lost by declining: what AO3 wasn't asked is kept as
+ * owed, and the next import asks it.
  */
 const { changeReport, importingChanges, importChanges } = useSiteExport()
 
@@ -93,8 +92,7 @@ const showProblems = ref(false)
             <span text="[12.5px]" leading="[18px]" font-600>Import without telling AO3</span>
             <span text="[11.5px] muted-fg" leading="[16px]">
               Apply the marks here only. Nothing is asked of the Archive, so the works you
-              finished stay on your Marked for Later list &mdash; import the same file again
-              to send them.
+              finished stay on your Marked for Later list until your next import sends them.
             </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -117,7 +115,7 @@ const showProblems = ref(false)
                 Work {{ problem.workId }}
               </ArchiveLink>
               <span text="[11.5px] muted-fg" leading="[16px]">
-                {{ problem.archive ? `AO3 would not take it — ${problem.reason}` : problem.reason }}
+                {{ problem.archive ? `Not sent to AO3: ${problem.reason}` : problem.reason }}
               </span>
             </li>
           </ul>

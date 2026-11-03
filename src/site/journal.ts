@@ -2,8 +2,9 @@ import type { MarkConfig, MarkId, WorkMarks } from '#common'
 import type { ChangeExport, ChangeOp } from '#content_script/siteExport/changeOps.js'
 import type { MarkWrite } from '#content_script/workMarks.js'
 
-import { markRoot, markTracksProgress, READ_MARK, saveAs } from '#common'
+import { markRoot, markTracksProgress, options, READ_MARK, saveAs } from '#common'
 import { CHANGE_SCHEMA_VERSION, changeFileName, changeOpFor, newOpId } from '#content_script/siteExport/changeOps.js'
+import { replayChanges } from '#content_script/siteExport/replay.js'
 import { observeMarkWrites } from '#content_script/workMarks.js'
 
 import { JOURNAL_STORE, recordExport, siteDatabase } from './shim.ts'
@@ -152,6 +153,30 @@ export async function start(ctx: JournalContext): Promise<Journal | null> {
     onChange: fn => void listeners.add(fn),
     save,
   }
+}
+
+/**
+ * Put back the marks recorded here that the export now seeding this origin
+ * does not know about.
+ *
+ * A newer export's settings replace the ones stored here, and its mark table is
+ * the extension's as of the day it was made — without whatever the reader has
+ * marked in an export since and not yet imported. Those are still in the
+ * journal, and `applied` is the extension's ledger as of that same day, so they
+ * are exactly the ops it does not name. Replayed in order onto the seeded
+ * table, they leave it as the extension's will be once they are imported.
+ */
+export async function restoreUnimported(applied: readonly string[]): Promise<void> {
+  const db = siteDatabase()
+  if (!db)
+    return
+  const ops = await readOps(db)
+  if (!ops.length)
+    return
+  const workMarks = await options.get('workMarks')
+  const { marks } = replayChanges(ops, { marks: workMarks.marks, applied: new Set(applied) })
+  if (marks !== workMarks.marks)
+    await options.set({ workMarks: { ...workMarks, marks } })
 }
 
 /** Every op ever recorded here, oldest first — the order an ingest replays in. */

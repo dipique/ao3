@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { markItems } from '../../src/common/workMarks.ts'
 import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
 import { CACHED, NOT_CACHED } from '../../src/content_script/searchView/engine.ts'
 import { describeTextSearch } from '../../src/content_script/searchView/textSearch.ts'
@@ -1380,6 +1381,146 @@ describe('options UI — site export', { skip }, () => {
         await browser.storage.local.remove(key)
         await browser.storage.local.set({ [indexKey]: index })
       }, `${WORK_TEXT_PREFIX}${ORPHAN}`, WORK_TEXT_INDEX_KEY, ORPHAN)
+    }
+  })
+
+  /**
+   * Every local file shares one origin, so the first open of a newer export puts
+   * its settings, mark table and all, in place of the ones there. A mark made in
+   * an older file has not reached the extension, so that table doesn't have it;
+   * the journal does, and the newer file puts back what the extension had not
+   * taken in when it was made. What it had taken in stays as the extension holds
+   * it, even where the reader has changed it there since.
+   */
+  test('a newer export keeps the marks an older one made that the extension has not seen', async () => {
+    const older = await lastDownload()
+    const dir = writeExport(older.html, 'older.html')
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('pageerror', e => errors.push(e.message))
+    const boring = async () => markItems((await reader.evaluate(async () => (await browser.storage.local.get('option.workMarks'))['option.workMarks'])).marks, 'boring')
+    const shown = id => reader.$(`#work_${id} .AO3E--indicator--mark-boring`)
+    const extensionMarks = await options.stored('option.workMarks')
+    try {
+      await reader.goto(fileUrl(dir, 'older.html'), { waitUntil: 'load' })
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+      await openMenu(reader, () => reader.$eval('#work_12 h4.heading a', el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))))
+      assert.ok(await pickRow(reader, 'mark', 'boring'))
+      await until('the mark to be stored', async () => (await boring()).has('12'))
+
+      // The extension took in work 11's mark from the file imported earlier, and
+      // the reader has since taken it off by hand.
+      assert.ok(markItems(extensionMarks.marks, 'boring').has('11'))
+      await page.evaluate(async (marks) => {
+        const stored = (await browser.storage.local.get('option.workMarks'))['option.workMarks']
+        await browser.storage.local.set({ 'option.workMarks': { ...stored, marks } })
+      }, { ...extensionMarks.marks, boring: { ...extensionMarks.marks.boring, items: '' } })
+
+      const before = await page.evaluate(() => window.__downloads.length)
+      await options.press(await options.action(page, 'download-all-cached'))
+      await until('the download', () => page.evaluate(n => window.__downloads.length > n, before))
+      await until('the job to be cleared', async () => await options.stored('siteExportJob') === null)
+      writeFileSync(join(dir, 'newer.html'), (await lastDownload()).html)
+
+      await reader.goto(fileUrl(dir, 'newer.html'), { waitUntil: 'load' })
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+      assert.ok((await boring()).has('12'), 'the mark made in the older file is kept')
+      assert.ok(!(await boring()).has('11'), 'a mark the extension took in is as the extension has it')
+      assert.ok(await shown('12'))
+      assert.equal(await shown('11'), null)
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+      await page.evaluate(async (stored) => {
+        await browser.storage.local.set({ 'option.workMarks': stored })
+      }, extensionMarks)
+    }
+  })
+
+  /**
+   * Each open file holds its own copy of what this browser stores, read in when
+   * it opened. A file open beside it has to hear about what it stores, or the
+   * next thing that file saves writes its older copy back over it — a layout, a
+   * mark.
+   */
+  test('files open side by side keep what each other stores', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'cached.html')
+    writeFileSync(join(dir, 'other.html'), withData(html, (data) => {
+      data.manifest.source.id = 'another-list'
+    }))
+    const cached = await browser.newPage()
+    const other = await browser.newPage()
+    const errors = []
+    for (const tab of [cached, other])
+      tab.on('pageerror', e => errors.push(e.message))
+    const order = async () => (await facetGroups(cached)).map(group => group.key)
+    const reopen = async () => {
+      await cached.reload({ waitUntil: 'load' })
+      await cached.waitForSelector(RESULTS, { timeout: 15000 })
+    }
+    const boring = async tab => markItems((await tab.evaluate(async () => (await browser.storage.local.get('option.workMarks'))['option.workMarks'])).marks, 'boring')
+    const mark = async (tab, id) => {
+      await openMenu(tab, () => tab.$eval(`#work_${id} h4.heading a`, el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))))
+      assert.ok(await pickRow(tab, 'mark', 'boring'))
+    }
+    try {
+      await openFresh(cached, fileUrl(dir, 'cached.html'))
+      await cached.waitForSelector(RESULTS, { timeout: 15000 })
+      await other.goto(fileUrl(dir, 'other.html'), { waitUntil: 'load' })
+      await other.waitForSelector(RESULTS, { timeout: 15000 })
+
+      await cached.bringToFront()
+      await cached.click('.AO3E--search-view--group:first-child .AO3E--search-view--group-move-down')
+      const rearranged = await order()
+      await reopen()
+      assert.deepEqual(await order(), rearranged, 'the file keeps its own layout')
+
+      await other.bringToFront()
+      await other.click('.AO3E--search-view--group-title .AO3E--search-view--group-label')
+      await until('the other file\'s layout to be saved', () => other.evaluate(async () => !!(await browser.storage.local.get('cache.searchViewPrefs'))['cache.searchViewPrefs']['another-list']))
+      await cached.bringToFront()
+      await reopen()
+      assert.deepEqual(await order(), rearranged, 'the other file saving its layout leaves this one\'s alone')
+
+      await mark(cached, '12')
+      await other.bringToFront()
+      await other.waitForSelector('#work_12 .AO3E--indicator--mark-boring', { timeout: 5000 })
+      await mark(other, '13')
+      await until('the other file\'s mark to be stored', async () => (await boring(other)).has('13'))
+      await cached.bringToFront()
+      await reopen()
+      assert.deepEqual([...await boring(cached)].sort(), ['12', '13'], 'a mark made beside it leaves this one\'s alone')
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await cached.close()
+      await other.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * The cached work text row is about what is on disk. A work a list could not
+   * fetch is that list's to report, beside its own figures, so the row says
+   * nothing of it — not even of a cached work whose refetch failed.
+   */
+  test('the cached work text row counts what is cached, not what failed to fetch', async () => {
+    const stored = await page.evaluate(() => browser.storage.local.get(null))
+    const cached = Object.entries(stored[WORK_TEXT_INDEX_KEY]).filter(([, meta]) => meta.size > 0 && !meta.failure)
+    const bytes = cached.reduce((sum, [, meta]) => sum + meta.size, 0)
+    const [first, ...rest] = cached
+    const index = Object.fromEntries([[first[0], { ...first[1], failure: 'error', attempts: 1, attemptedAt: Date.now() }], ...rest])
+    const other = await session.open({ seed: { ...stored, [WORK_TEXT_INDEX_KEY]: index }, hash: '#saved-lists', prepare: stubArchive })
+    try {
+      const text = async () => (await other.lines(await other.row(CACHE_ROW))).join('\n')
+      await until('the row to read the cache', async () => figures(await text()).includes(cached.length))
+      assert.deepEqual(figures(await text()), figures(`${cached.length} ${formatBytes(bytes)}`), await text())
+    }
+    finally {
+      await other.page.close()
     }
   })
 

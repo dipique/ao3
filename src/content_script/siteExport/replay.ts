@@ -5,7 +5,7 @@
 import type { MarkConfig, MarkId } from '../../common/workMarks.ts'
 import type { ChangeOp } from './changeOps.ts'
 
-import { markIsLocal, markTracksProgress, setMark, setMarkGroup, setMarkProgress } from '../../common/workMarks.ts'
+import { markIsLocal, markTracksProgress, readWorkIdsIn, setMark, setMarkGroup, setMarkProgress } from '../../common/workMarks.ts'
 
 /**
  * Replay what a reader did inside an export back onto their mark table.
@@ -32,6 +32,12 @@ import { markIsLocal, markTracksProgress, setMark, setMarkGroup, setMarkProgress
  *   progress, a work AO3 has already taken off the list: each is skipped with a
  *   reason a reader can act on.
  *
+ * What AO3 is asked to do is weighed after the marks, against the table they
+ * leave: one request per work, and only for a work still marked read. The
+ * requests an earlier import could not make come in as
+ * {@link ReplayContext.owed} and are weighed the same way, so a work unmarked
+ * since — in the file or by hand — stays on Marked for Later.
+ *
  * Nothing here writes anything. The next table comes back as a value and the
  * archive-side acts come back as a list; {@link file://./importChanges.ts} is
  * what commits them.
@@ -43,6 +49,13 @@ import { markIsLocal, markTracksProgress, setMark, setMarkGroup, setMarkProgress
  */
 export const OFF_THE_LIST = 'marked here, but it is no longer on your Marked for Later list'
 
+/**
+ * Why a work read in an export isn't asked off Marked for Later after all: by
+ * the time AO3 could be asked, it no longer carries a mark that says it is read
+ * — unmarked later in the same file, or by hand since.
+ */
+export const NO_LONGER_READ = 'no longer marked read here, so it stays on your Marked for Later list'
+
 /** One op that could not be applied, and what to tell the reader about it. */
 export interface ReplaySkip {
   workId: string
@@ -53,13 +66,17 @@ export interface ReplaySkip {
 export interface ArchiveAct {
   workId: string
   opId: string
+  /** When that op was made, for weighing against a scrape of the list. */
+  at: number
 }
 
 export interface ReplayContext {
   /** The reader's mark table as it stands. Never mutated. */
   marks: Record<MarkId, MarkConfig>
-  /** Op ids already honoured — the idempotency ledger. */
+  /** Op ids whose mark is already in the table — the idempotency ledger. */
   applied: ReadonlySet<string>
+  /** Requests to AO3 that earlier imports applied the marks for but could not make. */
+  owed?: readonly ArchiveAct[]
   /**
    * The reader's Marked for Later list as last scraped, when there is one worth
    * reading, along with when it was scraped.
@@ -82,7 +99,7 @@ export interface ReplayResult {
   /** Ops the ledger had seen before. */
   duplicates: number
   skipped: ReplaySkip[]
-  /** The `markAsRead` ops whose second half is still owed to the archive. */
+  /** What the archive still has to be told: one act per work, new or owed. */
   archive: ArchiveAct[]
 }
 
@@ -99,6 +116,13 @@ export function replayChanges(ops: ChangeOp[], ctx: ReplayContext): ReplayResult
   // would quietly reorder what they go on to report.
   const ordered = [...ops].sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
+  const asked = new Map<string, ArchiveAct>()
+  const ask = (act: ArchiveAct): void => {
+    if ((asked.get(act.workId)?.at ?? -Infinity) <= act.at)
+      asked.set(act.workId, act)
+  }
+  ctx.owed?.forEach(ask)
+
   for (const op of ordered) {
     if (ctx.applied.has(op.id)) {
       result.duplicates++
@@ -113,15 +137,20 @@ export function replayChanges(ops: ChangeOp[], ctx: ReplayContext): ReplayResult
 
     result.marks = apply(result.marks, op)
     result.applied.push(op.id)
+    if (op.op === 'markAsRead' && op.payload.on)
+      ask({ workId: op.workId, opId: op.id, at: op.at })
+  }
 
-    // The local half is done either way; only the archive's half can be spent
-    // on nothing, so only it is weighed against what the list last said.
-    if (op.op === 'markAsRead' && op.payload.on) {
-      if (alreadyOffTheList(ctx, op))
-        result.skipped.push({ workId: op.workId, reason: OFF_THE_LIST })
-      else
-        result.archive.push({ workId: op.workId, opId: op.id })
-    }
+  // The local half is done either way; only the archive's half can be spent on
+  // nothing, so only it is weighed against the table and what the list last said.
+  const read = asked.size ? readWorkIdsIn(result.marks) : new Set<string>()
+  for (const act of asked.values()) {
+    if (!read.has(act.workId))
+      result.skipped.push({ workId: act.workId, reason: NO_LONGER_READ })
+    else if (alreadyOffTheList(ctx, act))
+      result.skipped.push({ workId: act.workId, reason: OFF_THE_LIST })
+    else
+      result.archive.push(act)
   }
 
   return result
@@ -168,9 +197,9 @@ function apply(marks: Record<MarkId, MarkConfig>, op: ChangeOp): Record<MarkId, 
 }
 
 /** See {@link ReplayContext.listed} — evidence, not the absence of evidence. */
-function alreadyOffTheList(ctx: ReplayContext, op: ChangeOp): boolean {
+function alreadyOffTheList(ctx: ReplayContext, act: ArchiveAct): boolean {
   const listed = ctx.listed
-  return !!listed && listed.updatedAt > op.at && !listed.ids.has(op.workId)
+  return !!listed && listed.updatedAt > act.at && !listed.ids.has(act.workId)
 }
 
 function label(marks: Record<MarkId, MarkConfig>, markId: MarkId): string {

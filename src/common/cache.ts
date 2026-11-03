@@ -202,12 +202,20 @@ export interface Cache {
   /**
    * Op ids from change files imported out of a site export, oldest first.
    *
-   * The idempotency ledger for that round trip: an op named here has been
-   * honoured, so importing the same file twice does nothing, and a later file
-   * that still carries an old op can't undo a change made by hand since. Ids
-   * only — an op's contents are in the file the reader keeps.
+   * The idempotency ledger for that round trip: an op named here has its mark
+   * in the table, so importing the same file twice does nothing, and a later
+   * file that still carries an old op can't undo a change made by hand since.
+   * Ids only — an op's contents are in the file the reader keeps. An export
+   * carries it too, so the exported page knows which of the marks it recorded
+   * the extension has taken in.
    */
   appliedChangeOps: string[]
+  /**
+   * Works an imported change file marked read that are still to be taken off
+   * Marked for Later on AO3 — the request failed, or the reader held it back.
+   * Every import tries these again, for each work still marked read by then.
+   */
+  owedArchiveActs: { workId: string, opId: string, at: number }[]
   /** The review window the tracked lists were last computed into (see {@link TrackedReviewCache}). */
   trackedReview: TrackedReviewCache
   /** Which page is reading the tracked lists' records, so no other reads them at once (see {@link ReadClaim}). */
@@ -227,6 +235,7 @@ export const cache = createStorage<Cache>({
     searchMisses: {},
     markedForLater: { userId: '', updatedAt: 0, ids: '' },
     appliedChangeOps: [],
+    owedArchiveActs: [],
     // An empty range nothing was computed for: `computedAt: 0` and a start past
     // its end say "no window yet" without a second flag to keep in step.
     trackedReview: { start: 0, end: -1, computedAt: 0, reviewedThrough: 0, listsSig: '', target: 0, sources: {}, days: {}, failed: [], pending: [], retired: '' },

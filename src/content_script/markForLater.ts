@@ -1,4 +1,4 @@
-import { api, fetchToken, getArchiveLink, NO_ARCHIVE_TAB } from '#common'
+import { api, ARCHIVE_UNAVAILABLE, fetchToken, getArchiveLink, NO_ARCHIVE_TAB, ResponseStatusError } from '#common'
 
 /**
  * The one request that changes a work's Marked for Later state on AO3.
@@ -56,7 +56,7 @@ export class MarkRequestError extends Error {
   constructor(status: number) {
     super(status === NOT_SIGNED_IN
       ? 'AO3 answered as though you are signed out — sign in to AO3 and try again'
-      : `Mark request failed (${status})`)
+      : status >= 500 ? ARCHIVE_UNAVAILABLE : `Mark request failed (${status})`)
     this.name = 'MarkRequestError'
     this.status = status
   }
@@ -73,7 +73,10 @@ export class MarkRequestError extends Error {
  */
 export async function submitMark(workId: string, save: boolean): Promise<void> {
   const action = save ? 'mark_for_later' : 'mark_as_read'
-  const token = pageToken() ?? await fetchToken()
+  // A token AO3 would not hand out is AO3's answer to this request too.
+  const token = pageToken() ?? await fetchToken().catch((error: unknown) => {
+    throw error instanceof ResponseStatusError ? new MarkRequestError(error.status) : error
+  })
   const res = await fetch(getArchiveLink(`/works/${workId}/${action}`), {
     method: 'POST',
     credentials: 'same-origin',
@@ -112,6 +115,23 @@ export async function submitMark(workId: string, save: boolean): Promise<void> {
 function isLoginUrl(url: string): boolean {
   try {
     return new URL(url, getArchiveLink('/')).pathname.startsWith('/users/login')
+  }
+  catch {
+    return false
+  }
+}
+
+/**
+ * Whether AO3 answers anything at all.
+ *
+ * Asked when a request got no answer, which is either AO3 out of reach or this
+ * page no longer being let through to it. An opaque request is answered in the
+ * second case and not the first, which is the whole of the question.
+ */
+export async function archiveAnswers(): Promise<boolean> {
+  try {
+    await fetch(getArchiveLink('/'), { method: 'HEAD', mode: 'no-cors', cache: 'no-store', credentials: 'omit' })
+    return true
   }
   catch {
     return false

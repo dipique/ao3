@@ -5,7 +5,7 @@ import { createDefaultMarks, markItems, markProgress, setMark } from '../../src/
 // Node strips the TS types on import; replay.ts reaches only workMarks.ts, which
 // has no imports at all, so the pair loads with no build, no DOM and no
 // extension APIs — which is the whole reason the merge lives in its own module.
-import { OFF_THE_LIST, replayChanges } from '../../src/content_script/siteExport/replay.ts'
+import { NO_LONGER_READ, OFF_THE_LIST, replayChanges } from '../../src/content_script/siteExport/replay.ts'
 
 const AT = Date.UTC(2026, 8, 7, 12)
 
@@ -174,7 +174,7 @@ describe('siteExport/replay', () => {
 
     test('a markAsRead op asks for the work to come off the list', () => {
       const result = replayChanges([readOp], { marks: table(), ...EMPTY })
-      assert.deepEqual(result.archive, [{ workId: '11', opId: 'a' }])
+      assert.deepEqual(result.archive, [{ workId: '11', opId: 'a', at: AT }])
       assert.ok(markItems(result.marks, 'boring').has('11'), 'and the local half happens regardless')
     })
 
@@ -210,7 +210,7 @@ describe('siteExport/replay', () => {
         applied: new Set(),
         listed: { ids: new Set(['12']), updatedAt: AT - 60_000 },
       })
-      assert.deepEqual(result.archive, [{ workId: '11', opId: 'a' }])
+      assert.deepEqual(result.archive, [{ workId: '11', opId: 'a', at: AT }])
       assert.deepEqual(result.skipped, [])
     })
 
@@ -220,7 +220,71 @@ describe('siteExport/replay', () => {
         applied: new Set(),
         listed: { ids: new Set(['11']), updatedAt: AT + 60_000 },
       })
-      assert.deepEqual(result.archive, [{ workId: '11', opId: 'a' }])
+      assert.deepEqual(result.archive, [{ workId: '11', opId: 'a', at: AT }])
+    })
+
+    test('a work marked read and then unmarked in the same file asks nothing of AO3', () => {
+      const result = replayChanges([
+        readOp,
+        op('b', AT + 1000, '11', 'setMark', { markId: 'boring', on: false }),
+      ], { marks: table(), ...EMPTY })
+      assert.deepEqual(result.applied, ['a', 'b'])
+      assert.deepEqual(result.archive, [])
+      assert.deepEqual(result.skipped, [{ workId: '11', reason: NO_LONGER_READ }])
+    })
+
+    test('a work read twice is one request, for the later read', () => {
+      const result = replayChanges([
+        readOp,
+        op('b', AT + 1000, '11', 'markAsRead', { markId: 'read', on: true }),
+      ], { marks: table(), ...EMPTY })
+      assert.deepEqual(result.archive, [{ workId: '11', opId: 'b', at: AT + 1000 }])
+    })
+  })
+
+  /**
+   * What an earlier import could not get AO3 to do. The local half of those ops
+   * is already in the table and in the ledger, so they come back as acts owed
+   * rather than as ops, and are weighed against the table as it stands now.
+   */
+  describe('what earlier imports still owe AO3', () => {
+    const owedAct = { workId: '11', opId: 'a', at: AT }
+
+    test('an owed act is asked for again, with no op in the file', () => {
+      const marks = table({ boring: ['11'] })
+      const result = replayChanges([], { marks, ...EMPTY, owed: [owedAct] })
+      assert.deepEqual(result.archive, [owedAct])
+      assert.equal(result.marks, marks)
+    })
+
+    test('an owed act for a work no longer marked read here is dropped, and said so', () => {
+      const result = replayChanges([], { marks: table(), ...EMPTY, owed: [owedAct] })
+      assert.deepEqual(result.archive, [])
+      assert.deepEqual(result.skipped, [{ workId: '11', reason: NO_LONGER_READ }])
+    })
+
+    test('a work read under another verdict since is still owed', () => {
+      const result = replayChanges([], { marks: table({ read: ['11'] }), ...EMPTY, owed: [owedAct] })
+      assert.deepEqual(result.archive, [owedAct])
+    })
+
+    test('an owed act and a new op for the same work are one request', () => {
+      const result = replayChanges(
+        [op('b', AT + 1000, '11', 'markAsRead', { markId: 'boring', on: true })],
+        { marks: table({ boring: ['11'] }), ...EMPTY, owed: [owedAct] },
+      )
+      assert.deepEqual(result.archive, [{ workId: '11', opId: 'b', at: AT + 1000 }])
+    })
+
+    test('an owed act a later scrape shows off the list is dropped', () => {
+      const result = replayChanges([], {
+        marks: table({ boring: ['11'] }),
+        ...EMPTY,
+        owed: [owedAct],
+        listed: { ids: new Set(['12']), updatedAt: AT + 60_000 },
+      })
+      assert.deepEqual(result.archive, [])
+      assert.deepEqual(result.skipped, [{ workId: '11', reason: OFF_THE_LIST }])
     })
   })
 })

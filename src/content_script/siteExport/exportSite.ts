@@ -1,7 +1,7 @@
 import type { Options, SnapshotDescriptor, ThemeOption } from '#common'
 import type { SearchViewPrefs } from '#content_script/searchView/prefs.js'
 
-import { getArchiveLink, LOCAL_ONLY, options, textReplacementActive } from '#common'
+import { cache, getArchiveLink, LOCAL_ONLY, options, textReplacementActive } from '#common'
 import { readRecords, worksFromRecords } from '#content_script/searchView/blurbStore.js'
 import { readSnapshot } from '#content_script/searchView/cache.js'
 import { loadPrefs } from '#content_script/searchView/prefs.js'
@@ -92,10 +92,11 @@ interface ExportSource {
 }
 
 export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<SiteExportResult> {
-  const [index, textSettings, optionsPayload] = await Promise.all([
+  const [index, textSettings, optionsPayload, applied] = await Promise.all([
     readWorkTextIndex(),
     options.get('textReplacements'),
     siteOptionsPayload(),
+    cache.get('appliedChangeOps'),
   ])
   const { source, works, scrapedAt, listCount, layout } = opts.cacheKey === ALL_CACHED
     ? await allCachedSource(index)
@@ -184,6 +185,8 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
     ',"blurbs":',
     scriptJson(blurbs),
     ...layout ? [',"layout":', scriptJson(layout)] : [],
+    ',"applied":',
+    scriptJson(applied),
     ',"works":[',
     workJson.join(','),
     ']}',

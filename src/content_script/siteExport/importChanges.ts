@@ -1,5 +1,5 @@
-import { cache, options, packIds, unpackIds } from '#common'
-import { MarkRequestError, NOT_SIGNED_IN, submitMark, submitMarkViaTab } from '#content_script/markForLater.js'
+import { ARCHIVE_UNAVAILABLE, cache, options, packIds, unpackIds } from '#common'
+import { archiveAnswers, MarkRequestError, NOT_SIGNED_IN, submitMark, submitMarkViaTab } from '#content_script/markForLater.js'
 
 import type { ArchiveAct, ReplaySkip } from './replay.ts'
 
@@ -13,14 +13,14 @@ import { replayChanges } from './replay.ts'
  * each op means and this commits it, the same split
  * {@link file://./exportSite.ts} and {@link file://./payload.ts} keep on the way
  * out. What it touches: the mark table (one write, not one per op), the ledger
- * of applied op ids, the Marked for Later index, and — for the one op with a
- * half only the archive can do — AO3 itself.
+ * of applied op ids, the requests still owed to AO3, the Marked for Later index,
+ * and — for the one op with a half only the archive can do — AO3 itself.
  *
- * **The file is the queue.** An op is written into the ledger once everything it
- * asked for has happened, so a `markAsRead` whose request to AO3 failed, or that
- * the reader chose not to send, is left out of it: importing the same file again
- * once they are signed back in picks up exactly those and nothing else. The
- * local half re-applies as a no-op, which is what makes that safe.
+ * **The two halves are recorded apart.** An op goes into the ledger as soon as
+ * its mark is in the table, so no later import applies it again over a change
+ * made by hand since. A `markAsRead` whose request to AO3 failed, or that the
+ * reader chose not to send, is kept as an act owed instead, and every import
+ * after it tries again — for each work the table still has marked read by then.
  *
  * **Nothing is merged silently.** Every op lands in one of five buckets —
  * applied, already applied, unreadable, skipped, or refused by the archive — and
@@ -76,7 +76,7 @@ export interface ChangeImportReport {
    * tab open, and so on why the next import might refuse without one.
    */
   viaTab: number
-  /** Works AO3 could not be told about; their ops stay owed. */
+  /** Works AO3 could not be told about; their requests stay owed. */
   archiveFailed: ReplaySkip[]
   /** Works AO3 was deliberately not told about, at the reader's choice. */
   archiveHeld: number
@@ -87,8 +87,8 @@ export interface ImportChangesOptions {
    * Whether to carry out the half of a `markAsRead` that only AO3 can do.
    *
    * Off is offered because it is the one part of an import that reaches outside
-   * this device and changes something on the reader's account. Held ops are not
-   * ledgered, so choosing it defers them rather than dropping them.
+   * this device and changes something on the reader's account. Held requests
+   * are kept as owed, so choosing it defers them rather than dropping them.
    */
   tellArchive: boolean
 }
@@ -99,7 +99,7 @@ export async function importChanges(text: string, opts: ImportChangesOptions): P
   const [workMarks, user, stored] = await Promise.all([
     options.get('workMarks'),
     options.get('user'),
-    cache.get(['appliedChangeOps', 'markedForLater']),
+    cache.get(['appliedChangeOps', 'owedArchiveActs', 'markedForLater']),
   ])
 
   // The index is kept per account — someone else's ids would be nonsense here —
@@ -111,6 +111,7 @@ export async function importChanges(text: string, opts: ImportChangesOptions): P
   const result = replayChanges(file.ops, {
     marks: workMarks.marks,
     applied: new Set(stored.appliedChangeOps),
+    owed: stored.owedArchiveActs,
     listed: listedIds && index.updatedAt ? { ids: listedIds, updatedAt: index.updatedAt } : null,
   })
 
@@ -134,12 +135,11 @@ export async function importChanges(text: string, opts: ImportChangesOptions): P
     await cache.set({ markedForLater: { ...index, ids: packIds(listedIds) } })
   }
 
-  // An op is only written down as done once both its halves are — see the note
-  // on the file being the queue, above.
-  const owed = new Set([...archive.failed.map(entry => entry.act.opId), ...archive.held.map(act => act.opId)])
-  const learned = result.applied.filter(id => !owed.has(id))
-  if (learned.length)
-    await cache.set({ appliedChangeOps: [...stored.appliedChangeOps, ...learned].slice(-LEDGER_LIMIT) })
+  if (result.applied.length)
+    await cache.set({ appliedChangeOps: [...stored.appliedChangeOps, ...result.applied].slice(-LEDGER_LIMIT) })
+  const owed = [...archive.failed.map(entry => entry.act), ...archive.held]
+  if (owed.length || stored.owedArchiveActs.length)
+    await cache.set({ owedArchiveActs: owed })
 
   return {
     sourceId: file.sourceId,
@@ -223,6 +223,8 @@ async function takeOffList(workId: string, delegating: boolean): Promise<boolean
   catch (error) {
     if (!worthDelegating(error))
       throw error
+    if (!(error instanceof MarkRequestError) && !await archiveAnswers())
+      throw new Error(ARCHIVE_UNAVAILABLE)
     await submitMarkViaTab(workId, false)
     return true
   }
@@ -237,7 +239,8 @@ async function takeOffList(workId: string, delegating: boolean): Promise<boolean
  * wait. Everything else is worth one more try from a page that is genuinely on
  * AO3: a refusal it can explain (403, 422) because the POST arrived without an
  * `Origin`, and a request that never got an answer at all, which is what an
- * extension origin losing its privilege would look like from in here.
+ * extension origin losing its privilege would look like from in here — unless
+ * AO3 is answering nobody, which {@link takeOffList} asks before it delegates.
  *
  * The third is {@link NOT_SIGNED_IN}, and it is not worth delegating either:
  * every AO3 tab in this browser shares the session that isn't there, so asking

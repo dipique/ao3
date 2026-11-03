@@ -93,7 +93,7 @@ export interface OrphanSummary {
 }
 
 const rows = ref<SiteExportListRow[]>([])
-const usage = ref<WorkTextUsage>({ cached: 0, failed: 0, bytes: 0 })
+const usage = ref<WorkTextUsage>({ cached: 0, bytes: 0 })
 const orphans = ref<OrphanSummary>({ works: 0, cached: 0, bytes: 0, blurbs: 0, blurbBytes: 0 })
 const loading = ref(true)
 const status = shallowRef<JobStatus>(jobStatus())
@@ -667,7 +667,7 @@ export function describeChangeReport(report: ChangeImportReport): string {
   if (report.archiveHeld)
     parts.push(`${report.archiveHeld.toLocaleString()} not sent to AO3`)
   if (report.archiveFailed.length)
-    parts.push(`${report.archiveFailed.length.toLocaleString()} AO3 would not take`)
+    parts.push(`${report.archiveFailed.length.toLocaleString()} failed to send to AO3`)
   if (report.skipped.length)
     parts.push(`${report.skipped.length.toLocaleString()} skipped`)
   if (report.unreadable)

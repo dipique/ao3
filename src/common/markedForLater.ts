@@ -26,3 +26,10 @@ export const NO_ARCHIVE_TAB = {
   none: 'the request has to come from an AO3 page — open AO3 in a tab and import this file again',
   silent: 'your AO3 tabs did not answer — reload one and import this file again',
 } as const
+
+/**
+ * Why a request to take a work off Marked for Later failed when the fault is
+ * AO3's rather than the request's: it answered with a server error, or nothing
+ * answered at all.
+ */
+export const ARCHIVE_UNAVAILABLE = 'AO3 is down or could not be reached — your next import once it is back will send it'

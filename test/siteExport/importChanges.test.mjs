@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { NO_ARCHIVE_TAB } from '../../src/common/markedForLater.ts'
-import { markItems, packIds } from '../../src/common/workMarks.ts'
+import { ARCHIVE_UNAVAILABLE, NO_ARCHIVE_TAB } from '../../src/common/markedForLater.ts'
+import { createDefaultMarks, markItems, packIds, setMark } from '../../src/common/workMarks.ts'
+import { NO_LONGER_READ } from '../../src/content_script/siteExport/replay.ts'
 import { installMock } from '../e2e/helpers.mjs'
 import { loadModuleInPage, skipWithoutChrome } from './helpers.mjs'
 
@@ -44,6 +45,7 @@ function seed({ listed = [], listedAt = AT - 60_000, owner = 'reader' } = {}) {
     'option.user': { userId: 'reader' },
     'cache.markedForLater': { userId: owner, updatedAt: listedAt, ids: packIds(new Set(listed)) },
     'cache.appliedChangeOps': [],
+    'cache.owedArchiveActs': [],
   }
 }
 
@@ -62,19 +64,31 @@ function file(ops, { sourceId = 'marked-for-later', exportedAt = AT, v = 1 } = {
  * {@link installMock} and before the bundle.
  *
  * `archive` is what AO3 answers a mark request with — `'ok'`, a status, or
- * `'network'` for a request that never gets an answer at all. `tabs` is the
- * reader's open AO3 tabs and what each would say if asked: an answer, or
- * `'silent'` for a tab with no content script under it.
+ * `'network'` for a request that never gets an answer at all — and `token` the
+ * same for the token it hands out first. `reachable` is whether AO3 answers
+ * anything at all, which is what a `HEAD` asks. `tabs` is the reader's open AO3
+ * tabs and what each would say if asked: an answer, or `'silent'` for a tab with
+ * no content script under it.
  */
 function installArchive() {
-  const state = { fetches: [], sent: [], archive: 'ok', tabs: [] }
+  const state = { fetches: [], sent: [], archive: 'ok', token: 'ok', reachable: true, tabs: [] }
   window.__archive = state
 
   window.fetch = async (url, init = {}) => {
     const href = String(url)
     state.fetches.push({ url: href, method: init.method ?? 'GET', body: String(init.body ?? '') })
-    if (href.includes('token_dispenser'))
-      return new Response('{"token":"a-token"}', { status: 200, headers: { 'content-type': 'application/json' } })
+    if (init.method === 'HEAD') {
+      if (!state.reachable)
+        throw new TypeError('Failed to fetch')
+      return new Response(null, { status: 200 })
+    }
+    if (href.includes('token_dispenser')) {
+      if (state.token === 'network')
+        throw new TypeError('Failed to fetch')
+      return state.token === 'ok'
+        ? new Response('{"token":"a-token"}', { status: 200, headers: { 'content-type': 'application/json' } })
+        : new Response('', { status: state.token })
+    }
     if (state.archive === 'network')
       throw new TypeError('Failed to fetch')
     return new Response('', { status: state.archive === 'ok' ? 200 : state.archive })
@@ -123,8 +137,8 @@ describe('siteExport/importChanges', { skip }, () => {
    * Put the page back to a known device. `ledger` is a count rather than a list
    * because the only test that wants a big one wants twenty thousand.
    */
-  const reset = async ({ store = seed(), archive = 'ok', tabs = [], ledger = 0 } = {}) => {
-    await page.evaluate(async (items, outcome, openTabs, ledgerSize) => {
+  const reset = async ({ store = seed(), archive = 'ok', token = 'ok', reachable = true, tabs = [], ledger = 0 } = {}) => {
+    await page.evaluate(async (items, outcome, tokenOutcome, answers, openTabs, ledgerSize) => {
       await window.browser.storage.local.clear()
       await window.browser.storage.local.set({
         ...items,
@@ -134,9 +148,20 @@ describe('siteExport/importChanges', { skip }, () => {
       window.__archive.fetches.length = 0
       window.__archive.sent.length = 0
       window.__archive.archive = outcome
+      window.__archive.token = tokenOutcome
+      window.__archive.reachable = answers
       window.__archive.tabs = openTabs
-    }, store, archive, tabs, ledger)
+    }, store, archive, token, reachable, tabs, ledger)
   }
+
+  /** AO3 answering again, with nothing recorded yet of what this run asks of it. */
+  const archiveBack = () => page.evaluate(() => {
+    window.__archive.archive = 'ok'
+    window.__archive.token = 'ok'
+    window.__archive.reachable = true
+    window.__archive.fetches.length = 0
+    window.__writes.length = 0
+  })
 
   const run = (text, opts = { tellArchive: true }) => page.evaluate(
     (t, o) => window.ImportChanges.importChanges(t, o),
@@ -206,10 +231,11 @@ describe('siteExport/importChanges', { skip }, () => {
   })
 
   /**
-   * The file is the queue: an op whose archive half didn't happen is not written
-   * down as done, so the same file picks it up next time and nothing else.
+   * The two halves of an op are recorded apart: the mark is ledgered as soon as
+   * it is in the table, and what AO3 still has to do is kept as an act owed,
+   * which the next import pays.
    */
-  test('an op AO3 refused stays owed, and a later import pays it', async () => {
+  test('an op AO3 refused is ledgered, its archive half stays owed, and a later import pays it', async () => {
     await reset({ archive: 403 })
     const first = await run(file([op('a', AT, '11', 'markAsRead')]))
 
@@ -219,18 +245,50 @@ describe('siteExport/importChanges', { skip }, () => {
     assert.equal(first.archiveFailed[0].workId, '11')
     assert.ok(first.archiveFailed[0].reason, 'with a reason the reader is given')
     assert.equal((await writes('option.workMarks')).length, 1)
-    assert.deepEqual(await writes('cache.appliedChangeOps'), [], 'nothing is owed and ledgered at once')
+    assert.deepEqual(await writes('cache.appliedChangeOps'), [['a']])
+    assert.deepEqual(await writes('cache.owedArchiveActs'), [[{ workId: '11', opId: 'a', at: AT }]])
 
-    await page.evaluate(() => {
-      window.__archive.archive = 'ok'
-      window.__archive.fetches.length = 0
-      window.__writes.length = 0
-    })
+    await archiveBack()
     const second = await run(file([op('a', AT, '11', 'markAsRead')]))
-    assert.equal(second.duplicates, 0, 'an unpaid op is not a duplicate')
-    assert.equal(second.toldArchive, 1)
-    const [ledger] = await writes('cache.appliedChangeOps')
-    assert.deepEqual(ledger, ['a'])
+    assert.equal(second.duplicates, 1, 'the mark is not applied twice')
+    assert.equal(second.toldArchive, 1, 'but what AO3 was owed is paid')
+    assert.deepEqual(await writes('option.workMarks'), [])
+    assert.deepEqual(await writes('cache.owedArchiveActs'), [[]])
+  })
+
+  test('what is owed is paid by the next import, whichever file it brings', async () => {
+    await reset({ archive: 403 })
+    await run(file([op('a', AT, '11', 'markAsRead')]))
+
+    await archiveBack()
+    const report = await run(file([op('b', AT + 1000, '12', 'setMark')]))
+    assert.equal(report.applied, 1)
+    assert.equal(report.toldArchive, 1)
+    assert.deepEqual((await posted()).map(request => request.url.match(/works\/(\d+)/)[1]), ['11'])
+  })
+
+  /**
+   * Re-importing a file is how the reader retries what AO3 would not take, so
+   * it must not also put back a mark they have changed since by hand — nor take
+   * a work they have since unmarked off Marked for Later.
+   */
+  test('a re-import leaves a mark changed by hand since alone, and asks AO3 nothing for it', async () => {
+    await reset({ archive: 503 })
+    const readOp = op('a', AT, '11', 'markAsRead')
+    await run(file([readOp]))
+
+    await page.evaluate(async (marks) => {
+      const stored = (await window.browser.storage.local.get('option.workMarks'))['option.workMarks']
+      await window.browser.storage.local.set({ 'option.workMarks': { ...stored, marks } })
+    }, setMark(createDefaultMarks(), '11', 'continue', true))
+    await archiveBack()
+
+    const report = await run(file([readOp]))
+    assert.deepEqual(await writes('option.workMarks'), [], 'the table is as the reader left it')
+    assert.deepEqual(await posted(), [])
+    assert.equal(report.toldArchive, 0)
+    assert.deepEqual(report.skipped, [{ workId: '11', reason: NO_LONGER_READ }])
+    assert.deepEqual(await writes('cache.owedArchiveActs'), [[]], 'and nothing is owed for it any more')
   })
 
   test('holding the archive half defers it rather than dropping it', async () => {
@@ -241,7 +299,8 @@ describe('siteExport/importChanges', { skip }, () => {
     assert.equal(report.archiveHeld, 1)
     assert.equal(report.toldArchive, 0)
     assert.deepEqual(await page.evaluate(() => window.__archive.fetches), [], 'nothing was asked of AO3, not even a token')
-    assert.deepEqual(await writes('cache.appliedChangeOps'), [])
+    assert.deepEqual(await writes('cache.appliedChangeOps'), [['a']])
+    assert.deepEqual(await writes('cache.owedArchiveActs'), [[{ workId: '11', opId: 'a', at: AT }]])
     assert.equal((await writes('option.workMarks')).length, 1, 'the local half still happened')
   })
 
@@ -253,7 +312,40 @@ describe('siteExport/importChanges', { skip }, () => {
     assert.equal(report.archiveFailed.length, 3)
     assert.equal(report.archiveHeld, 2)
     assert.equal((await posted()).length, 3, 'the last two were never sent')
-    assert.deepEqual(await writes('cache.appliedChangeOps'), [], 'all five are still owed')
+    const [owed] = await writes('cache.owedArchiveActs')
+    assert.deepEqual(owed.map(act => act.workId), ['11', '12', '13', '14', '15'], 'all five are still owed')
+  })
+
+  /**
+   * AO3 being down is not a refusal another origin could get past, and it is
+   * not something an open AO3 tab would fix: the reader is told to come back
+   * once it is up, and no tab is asked.
+   */
+  describe('when AO3 is down', () => {
+    test('a server error answering the request says AO3 is unavailable', async () => {
+      await reset({ archive: 503, tabs: [{ id: 7, answer: { ok: true } }] })
+      const report = await run(file([op('a', AT, '11', 'markAsRead')]))
+
+      assert.equal(report.archiveFailed[0].reason, ARCHIVE_UNAVAILABLE)
+      assert.deepEqual(await delegated(), [])
+    })
+
+    test('a server error answering the token is the archive\'s answer, not a lost connection', async () => {
+      await reset({ token: 503, tabs: [{ id: 7, answer: { ok: true } }] })
+      const report = await run(file([op('a', AT, '11', 'markAsRead')]))
+
+      assert.equal(report.toldArchive, 0)
+      assert.equal(report.archiveFailed[0].reason, ARCHIVE_UNAVAILABLE)
+      assert.deepEqual(await delegated(), [])
+    })
+
+    test('with nothing answering at all, the reader is not sent to open a tab', async () => {
+      await reset({ token: 'network', archive: 'network', reachable: false })
+      const report = await run(file([op('a', AT, '11', 'markAsRead')]))
+
+      assert.equal(report.archiveFailed[0].reason, ARCHIVE_UNAVAILABLE)
+      assert.deepEqual(await delegated(), [])
+    })
   })
 
   test('an entry that is not an op is counted rather than fatal', async () => {
