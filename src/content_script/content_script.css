@@ -1783,6 +1783,35 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   cursor: default;
 }
 
+/* The handle a group is dragged by, left of its title. The page must not
+   scroll under a finger that is dragging it. */
+.AO3E--search-view--group-grip {
+  display: inline-flex;
+  margin-left: -0.25em;
+  cursor: grab;
+  opacity: 0.35;
+  touch-action: none;
+}
+
+.AO3E--search-view--group-title:hover .AO3E--search-view--group-grip {
+  opacity: 0.8;
+}
+
+.AO3E--search-view--group-dragging {
+  background: var(--ao3e-surface-hover);
+}
+
+.AO3E--dragging-group {
+  cursor: grabbing;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.AO3E--dragging-group .AO3E--search-view--group-title,
+.AO3E--dragging-group .AO3E--search-view--group-grip {
+  cursor: grabbing;
+}
+
 .AO3E--search-view--group-filter {
   width: 100%;
   box-sizing: border-box;

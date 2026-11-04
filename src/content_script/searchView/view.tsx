@@ -2,6 +2,7 @@ import MdiArrowLeft from '~icons/mdi/arrow-left.jsx'
 import MdiCheckCircle from '~icons/mdi/check-circle.jsx'
 import MdiChevronDown from '~icons/mdi/chevron-down.jsx'
 import MdiChevronUp from '~icons/mdi/chevron-up.jsx'
+import MdiDragVertical from '~icons/mdi/drag-vertical.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiRefresh from '~icons/mdi/refresh.jsx'
@@ -38,6 +39,7 @@ import {
 } from './engine.ts'
 import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
 import { groupCountText, layoutFacetRows, leftOutNote, nameRanks } from './facetRows.ts'
+import { dropSlot, moveGroupKey } from './groupOrder.ts'
 import { DEFAULT_STATUS, SIDEBAR_WIDTH } from './prefs.ts'
 import { pristineBlurb } from './pristine.ts'
 import { parseTextQuery, queryKey } from './textQuery.ts'
@@ -46,6 +48,8 @@ import { describeTextSearch } from './textSearch.ts'
 const ROOT = VIEW_ROOT
 /** Body class while the filter column is being dragged — see ReaderMode, same idea. */
 const RESIZING_CLASS = `${ADDON_CLASS}--resizing`
+/** Body class while a facet group is being dragged to a new place. */
+const GROUP_DRAGGING_CLASS = `${ADDON_CLASS}--dragging-group`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
 const HIDDEN_CLASS = VIEW_HIDDEN_CLASS
 const ACTIVE_CLASS = cx('active')
@@ -483,7 +487,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     state.wordsMax = seed.wordsMax
   }
   // The user's custom facet-group order (persisted locally), applied on every
-  // (re)build and mutated by the per-group reorder arrows.
+  // (re)build and mutated by the per-group reorder arrows and grips.
   let facetOrder: FacetKey[] = orderFacetKeys(config.prefs?.order)
   const perPage = Math.max(1, config.perPage ?? DEFAULT_PER_PAGE)
   // Current page (0-based). Sorted full set is cached; filtering never reorders.
@@ -1178,6 +1182,18 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       }
       upBtn.addEventListener('click', onMove(-1))
       downBtn.addEventListener('click', onMove(1))
+      // Pointer-only: the arrows are the way to move a group from the keyboard.
+      const gripEl = (
+        <span class={cx('group-grip')} title={`Drag to move ${FACET_LABELS[key]}`} aria-hidden="true">
+          <MdiDragVertical />
+        </span>
+      ) as HTMLElement
+      gripEl.addEventListener('pointerdown', e => dragGroup(key, e))
+      // A press on the grip is the start of a drag, never a click that folds the group.
+      gripEl.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      })
       const sections = FACET_DIRS.map(dir => selectionSection(key, dir))
       const leftOutEl = (<div class={cx('group-capped')} />) as HTMLElement
       const bodyEl = (
@@ -1188,6 +1204,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       const group = (
         <details class={cx('group')} open={!collapsed} data-ao3e-facet={key}>
           <summary class={cx('group-title')}>
+            {gripEl}
             <span class={cx('group-label')}>
               {FACET_LABELS[key]}
               {' '}
@@ -1238,25 +1255,83 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   }
 
   /**
-   * Move a facet group one slot up (-1) or down (1). Reorders the live group
-   * nodes in place (preserving their open/filter state), updates the saved order,
-   * and persists — no facet rebuild needed.
+   * Put the live group nodes in {@link facetOrder}, moving only those out of
+   * place and keeping their open/filter state — no facet rebuild needed.
    */
+  function arrangeGroups(): void {
+    const byKey = new Map(facetGroups.map(g => [g.key, g]))
+    facetGroups = facetOrder.flatMap(k => byKey.get(k) ?? [])
+    placeChildren(facetsEl, facetGroups.map(g => g.details))
+    syncReorderButtons()
+  }
+
+  /** Put a facet group in slot `to` among the groups shown, without persisting. */
+  function placeGroup(key: FacetKey, to: number): void {
+    facetOrder = moveGroupKey(facetOrder, facetGroups.map(g => g.key), key, to)
+    arrangeGroups()
+  }
+
+  /** Move a facet group one slot up (-1) or down (1), and persist. */
   function moveGroup(key: FacetKey, delta: -1 | 1): void {
     const from = facetGroups.findIndex(g => g.key === key)
     const to = from + delta
     if (from < 0 || to < 0 || to >= facetGroups.length)
       return
-    const [moved] = facetGroups.splice(from, 1)
-    facetGroups.splice(to, 0, moved!)
-    facetsEl.replaceChildren(...facetGroups.map(g => g.details))
-    // Rebuild the saved order: visible groups in their new order, then any facet
-    // keys without a group on this page, kept in their prior relative position.
-    const visibleOrder = facetGroups.map(g => g.key)
-    const visibleSet = new Set(visibleOrder)
-    facetOrder = [...visibleOrder, ...facetOrder.filter(k => !visibleSet.has(k))]
-    syncReorderButtons()
+    placeGroup(key, to)
     persist()
+  }
+
+  /**
+   * Drag a facet group by its grip: as the pointer moves, the group takes the
+   * slot {@link dropSlot} gives its height, and the order is persisted once
+   * it's let go. The facet column holds the pointer, since it stays put while
+   * the groups move inside it, and the group is found by key on every move, so
+   * a rebuild mid-drag (a background refresh) carries on with the new nodes. A
+   * cancelled drag puts the order back as it was.
+   */
+  function dragGroup(key: FacetKey, e: PointerEvent): void {
+    if (e.button !== 0)
+      return
+    e.preventDefault()
+    const startOrder = facetOrder
+    const dragged = (): FacetGroupRef | undefined => facetGroups.find(g => g.key === key)
+    facetsEl.setPointerCapture(e.pointerId)
+    document.body.classList.add(GROUP_DRAGGING_CLASS)
+    dragged()?.details.classList.add(cx('group-dragging'))
+
+    const onMove = (ev: PointerEvent): void => {
+      const from = facetGroups.findIndex(g => g.key === key)
+      if (from === -1)
+        return
+      const mids = facetGroups.map((g) => {
+        const box = g.details.getBoundingClientRect()
+        return box.top + box.height / 2
+      })
+      const to = dropSlot(mids, from, ev.clientY)
+      if (to !== from)
+        placeGroup(key, to)
+    }
+    const onEnd = (ev: PointerEvent): void => {
+      facetsEl.removeEventListener('pointermove', onMove)
+      facetsEl.removeEventListener('pointerup', onEnd)
+      facetsEl.removeEventListener('pointercancel', onEnd)
+      facetsEl.removeEventListener('lostpointercapture', onEnd)
+      if (facetsEl.hasPointerCapture(e.pointerId))
+        facetsEl.releasePointerCapture(e.pointerId)
+      document.body.classList.remove(GROUP_DRAGGING_CLASS)
+      dragged()?.details.classList.remove(cx('group-dragging'))
+      if (ev.type === 'pointercancel') {
+        facetOrder = startOrder
+        arrangeGroups()
+      }
+      else if (facetOrder !== startOrder) {
+        persist()
+      }
+    }
+    facetsEl.addEventListener('pointermove', onMove)
+    facetsEl.addEventListener('pointerup', onEnd)
+    facetsEl.addEventListener('pointercancel', onEnd)
+    facetsEl.addEventListener('lostpointercapture', onEnd)
   }
 
   // --- Render ---------------------------------------------------------------

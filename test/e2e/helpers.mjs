@@ -52,13 +52,11 @@ export function findChrome() {
  * A file whose Chrome has to differ from the shared one gets its own either way:
  * `scrollbars` keeps the scrollbars puppeteer hides, so they take room, for a
  * test of what a scrollbar does to a layout; `args` are switches of the file's
- * own, added to the usual ones; `own` asks for nothing but a Chrome of its own,
- * for a test of a link that opens a new tab, which a click in the shared Chrome,
- * with every other file's window open in it, doesn't reliably do.
+ * own, added to the usual ones.
  */
-export async function launch(chromePath, { scrollbars = false, args = [], own = false } = {}) {
+export async function launch(chromePath, { scrollbars = false, args = [] } = {}) {
   const shared = process.env.AO3E_E2E_BROWSER
-  if (shared && !scrollbars && !args.length && !own) {
+  if (shared && !scrollbars && !args.length) {
     const browser = await puppeteer.connect({ browserWSEndpoint: shared })
     const context = await browser.createBrowserContext()
     const close = context.close.bind(context)
