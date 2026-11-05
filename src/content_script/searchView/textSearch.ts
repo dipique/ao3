@@ -17,7 +17,9 @@
  * should cost nothing but the matching.
  */
 
-import { foldText, parseTextQuery, queryMatches, queryTerms } from './textQuery.ts'
+import type { Term } from './textQuery.ts'
+
+import { foldText, parseTextQuery, queryKey, queryMatches, queryTerms, termIndex } from './textQuery.ts'
 
 /** Where a searcher gets the stored markup of each work. */
 export interface WorkTextSource {
@@ -144,7 +146,7 @@ export function workTextOf(html: string): string {
  * The text around the earliest place any term matches, roughly `radius`
  * characters either side and cut back to whole words. Null when no term matches.
  */
-export function textSnippet(plain: string, terms: readonly string[], radius: number = SNIPPET_RADIUS): TextSnippet | null {
+export function textSnippet(plain: string, terms: readonly Term[], radius: number = SNIPPET_RADIUS): TextSnippet | null {
   const folded = foldText(plain)
   // Read back out of the original unless folding moved things, in which case the
   // folded text is the only one the positions are true of.
@@ -152,10 +154,10 @@ export function textSnippet(plain: string, terms: readonly string[], radius: num
   let at = -1
   let length = 0
   for (const term of terms) {
-    const found = folded.indexOf(term)
+    const found = termIndex(term, folded)
     if (found !== -1 && (at === -1 || found < at)) {
       at = found
-      length = term.length
+      length = term.text.length
     }
   }
   if (at === -1)
@@ -247,7 +249,7 @@ export function createWorkTextSearcher(source: WorkTextSource): WorkTextSearcher
     const terms = queryTerms(parseTextQuery(query))
     if (!terms.length || !source.has(workId))
       return Promise.resolve(null)
-    const key = terms.join('\u0000')
+    const key = terms.map(term => queryKey(term)).join('\u0000')
     if (key !== snippetTerms) {
       snippetTerms = key
       snippets = new Map()

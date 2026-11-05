@@ -22,7 +22,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 
 ### Browsing and searching
 
-- Instant search views load a whole listing into one page, with a text search that reads words, "quoted phrases", OR (or ||), NOT and parentheses as AO3's search does, sorting (by date, length, kudos, kudos %, hits, comments, bookmarks and more), and include/exclude filters for your marks, rating, warnings, category, fandom, relationship, character, additional tags, language, completion and word count. They're offered on:
+- Instant search views load a whole listing into one page, with a text search that reads words, "quoted phrases", OR (or ||), NOT and parentheses as AO3's search does (a single word in quotes matches only as a whole word), sorting (by date, length, kudos, kudos %, hits, comments, bookmarks and more), and include/exclude filters for your marks, rating, warnings, category, fandom, relationship, character, additional tags, language, completion and word count. They're offered on:
   - your Marked for Later page, which **Search your Marked for Later list** replaces with one;
   - your History and Marked for Later pages, as a "Search read items" button (**Search the works you've read**; needs work marks);
   - uncommon tags, which AO3 lists but won't sort or filter (**Search an uncommon tag's works**);

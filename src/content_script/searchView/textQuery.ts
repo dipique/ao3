@@ -7,7 +7,9 @@
  * `fluff harry OR draco` asks for fluff and either name; `NOT` tighter still,
  * taking the one word, phrase or group after it. The operators count only in
  * capitals: in lower case they are words, and AO3's own warnings hold a "not".
- * Every word and phrase matches anywhere in the text, inside words too.
+ * Every word and phrase matches anywhere in the text, inside words too, except
+ * a single word in quotes, which matches only as a whole word: `"school"` finds
+ * "school" and "after-school", never "preschool".
  *
  * Both boxes search as the reader types, so every string is a query: an
  * unclosed quote or parenthesis runs to the end, and an operator with nothing
@@ -16,10 +18,12 @@
  * Pure — no imports at all — so it loads under a plain `node --test`.
  */
 
-interface Term {
+export interface Term {
   kind: 'term'
   /** Folded, with any run of spaces in a phrase made one. */
   text: string
+  /** Matches only where no letter, digit or mark touches it on either side. */
+  wholeWord?: true
 }
 
 /** A query, read. Null stands for a query with nothing to look for, which every text answers. */
@@ -38,6 +42,15 @@ const DOUBLE_QUOTES = /[“”„‟″]/g
  * parenthesis, or a word: a run up to the next space, quote, parenthesis or `||`.
  */
 const QUERY_TOKEN = /"([^"]*)"?|(\|\|)|([()])|((?:[^\s"()|]|\|(?!\|))+)/g
+
+/**
+ * A character that carries a word on past a match. Scripts written without spaces
+ * are left out, since there every letter touches the next and a word in them
+ * would otherwise never stand whole.
+ */
+const WORD_CHAR = String.raw`(?![\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Thai}\p{sc=Lao}\p{sc=Khmer}\p{sc=Myanmar}])[\p{L}\p{N}\p{M}]`
+const ENDS_IN_WORD = new RegExp(`${WORD_CHAR}$`, 'u')
+const STARTS_IN_WORD = new RegExp(`^${WORD_CHAR}`, 'u')
 
 /**
  * Text as it is matched: lowercased, with curly quotes straightened, so a query
@@ -65,7 +78,7 @@ function tokenize(query: string): Token[] {
     else {
       const text = foldText(phrase ?? word ?? '').replace(/\s+/g, ' ').trim()
       if (text)
-        tokens.push({ kind: 'term', text })
+        tokens.push(phrase !== undefined && !text.includes(' ') ? { kind: 'term', text, wholeWord: true } : { kind: 'term', text })
     }
   }
   return tokens
@@ -155,12 +168,27 @@ export function parseTextQuery(query: string): TextQuery | null {
   return join('and', operands)
 }
 
+/** Whether a match from `start` to `end` has no word running on past either end. Two code units hold any one character. */
+function standsWhole(folded: string, start: number, end: number): boolean {
+  return !ENDS_IN_WORD.test(folded.slice(Math.max(0, start - 2), start)) && !STARTS_IN_WORD.test(folded.slice(end, end + 2))
+}
+
+/** Where a word or phrase first matches in folded text, or -1. */
+export function termIndex(term: Term, folded: string): number {
+  let at = folded.indexOf(term.text)
+  if (term.wholeWord) {
+    while (at !== -1 && !standsWhole(folded, at, at + term.text.length))
+      at = folded.indexOf(term.text, at + 1)
+  }
+  return at
+}
+
 /** Whether folded text answers the query. */
 export function queryMatches(query: TextQuery | null, folded: string): boolean {
   if (!query)
     return true
   switch (query.kind) {
-    case 'term': return folded.includes(query.text)
+    case 'term': return termIndex(query, folded) !== -1
     case 'not': return !queryMatches(query.operand, folded)
     case 'and': return query.operands.every(operand => queryMatches(operand, folded))
     case 'or': return query.operands.some(operand => queryMatches(operand, folded))
@@ -168,12 +196,13 @@ export function queryMatches(query: TextQuery | null, folded: string): boolean {
 }
 
 /** The words and phrases a query looks for, as opposed to those it excludes: every one outside a `NOT`, once each, in order. */
-export function queryTerms(query: TextQuery | null): string[] {
+export function queryTerms(query: TextQuery | null): Term[] {
   if (!query || query.kind === 'not')
     return []
   if (query.kind === 'term')
-    return [query.text]
-  return [...new Set(query.operands.flatMap(operand => queryTerms(operand)))]
+    return [query]
+  const terms = new Map(query.operands.flatMap(operand => queryTerms(operand)).map(term => [queryKey(term), term]))
+  return [...terms.values()]
 }
 
 /** A query written out one way only, so two that ask the same thing in different spacing, case or spelling compare equal. */
@@ -181,7 +210,7 @@ export function queryKey(query: TextQuery | null): string {
   if (!query)
     return ''
   switch (query.kind) {
-    case 'term': return `"${query.text}"`
+    case 'term': return `${query.wholeWord ? 'WHOLE ' : ''}"${query.text}"`
     case 'not': return `NOT ${queryKey(query.operand)}`
     case 'and': return `(${query.operands.map(operand => queryKey(operand)).join(' ')})`
     case 'or': return `(${query.operands.map(operand => queryKey(operand)).join(' OR ')})`

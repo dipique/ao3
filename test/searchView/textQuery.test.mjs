@@ -59,6 +59,62 @@ describe('words and phrases', () => {
   })
 })
 
+describe('a quoted single word', () => {
+  test('matches only as a whole word', () => {
+    assert.equal(finds('high "school"', 'I went to school at central high'), true)
+    assert.equal(finds('high "school"', 'I want to preschool at central high'), false)
+    assert.equal(finds('"school"', 'schools'), false)
+    assert.equal(finds('"school"', 'schoolhouse'), false)
+  })
+
+  test('finds a later whole word past an earlier word that only holds it', () => {
+    assert.equal(finds('"school"', 'preschool, then school'), true)
+  })
+
+  test('stands at the start and end of the text, and beside punctuation', () => {
+    for (const text of ['school', 'School.', '(school)', '"school"', 'school’s', 'after-school'])
+      assert.equal(finds('"school"', text), true, text)
+  })
+
+  test('counts digits, accented letters and combining marks as part of a word', () => {
+    assert.equal(finds('"tea"', 'tea2'), false)
+    assert.equal(finds('"caf"', 'café'), false)
+    assert.equal(finds('"cafe"', 'café'), false)
+    assert.equal(finds('"café"', 'Le Café.'), true)
+  })
+
+  test('still finds a word in a script written without spaces', () => {
+    assert.equal(finds('"学校"', '我的学校很大'), true)
+    assert.equal(finds('"school"', '我的school很大'), true)
+  })
+
+  test('reads the same in curly quotes, unclosed, or with spaces inside the quotes', () => {
+    for (const query of ['“school”', '"school', '" school "']) {
+      assert.equal(finds(query, 'a school'), true, query)
+      assert.equal(finds(query, 'a preschool'), false, query)
+    }
+  })
+
+  test('works under NOT and OR', () => {
+    assert.equal(finds('NOT "ron"', 'Aaron'), true)
+    assert.equal(finds('NOT "ron"', 'Ron'), false)
+    assert.equal(finds('"ron" OR "harry"', 'Aaron and Harry'), true)
+    assert.equal(finds('"ron" OR "harry"', 'Aaron and Harrys'), false)
+  })
+
+  test('takes its punctuation literally', () => {
+    assert.equal(finds('"(tv)"', 'Sherlock (TV)'), true)
+    assert.equal(finds('"c++"', 'c++ code'), true)
+    assert.equal(finds('"c++"', 'cc code'), false)
+  })
+
+  test('leaves unquoted words and quoted phrases matching inside words', () => {
+    assert.equal(finds('school', 'preschool'), true)
+    assert.equal(finds('"old hou"', 'the old house'), true)
+    assert.equal(finds('"reschool at"', 'preschool at home'), true)
+  })
+})
+
 describe('OR', () => {
   test('either side will do, spelled OR or ||', () => {
     for (const query of ['harry OR draco', 'harry || draco', 'harry||draco']) {
@@ -190,13 +246,20 @@ describe('a query typed part-way', () => {
 })
 
 describe('queryTerms', () => {
+  const texts = query => queryTerms(parseTextQuery(query)).map(term => term.text)
+
   test('lists the words and phrases outside a NOT, each once, in order', () => {
-    assert.deepEqual(queryTerms(parseTextQuery('Harry OR "the  old house" NOT draco harry')), ['harry', 'the old house'])
-    assert.deepEqual(queryTerms(parseTextQuery('tea NOT (dragon OR house)')), ['tea'])
+    assert.deepEqual(texts('Harry OR "the  old house" NOT draco harry'), ['harry', 'the old house'])
+    assert.deepEqual(texts('tea NOT (dragon OR house)'), ['tea'])
   })
 
   test('counts a word under two NOTs as outside', () => {
-    assert.deepEqual(queryTerms(parseTextQuery('NOT NOT tea')), ['tea'])
+    assert.deepEqual(texts('NOT NOT tea'), ['tea'])
+  })
+
+  test('keeps a word and the same word quoted apart, since they ask different things', () => {
+    const terms = queryTerms(parseTextQuery('tea "tea"'))
+    assert.deepEqual(terms.map(term => Boolean(term.wholeWord)), [false, true])
   })
 
   test('nothing for a query of exclusions only, or no query', () => {
@@ -216,12 +279,14 @@ describe('queryKey', () => {
   })
 
   test('is the same when a word is repeated', () => {
-    assert.ok(same('tea Tea "tea"', 'tea'))
+    assert.ok(same('tea Tea', 'tea'))
+    assert.ok(same('"tea" “Tea”', '"tea"'))
   })
 
   test('differs for queries that ask different things', () => {
     assert.ok(!same('harry draco', 'harry OR draco'))
     assert.ok(!same('"harry draco"', 'harry draco'))
+    assert.ok(!same('"tea"', 'tea'))
     assert.ok(!same('fluff harry OR draco', '(fluff harry) OR draco'))
     assert.ok(!same('NOT tea', 'tea'))
     assert.ok(!same('"tea or"', 'tea OR'))

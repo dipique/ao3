@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 // Node strips the TS types on import; textSearch.ts is pure (no `#common`, no
 // `browser`, no DOM, nothing but the pure textQuery.ts), so it loads with a
 // plain `node --test`.
-import { foldText } from '../../src/content_script/searchView/textQuery.ts'
+import { foldText, parseTextQuery, queryTerms } from '../../src/content_script/searchView/textQuery.ts'
 import {
   createWorkTextSearcher,
   describeTextSearch,
@@ -51,9 +51,10 @@ describe('workTextOf', () => {
 
 describe('textSnippet', () => {
   const plain = 'One two three four five six seven eight nine ten. The Dragon drank tea. Eleven twelve thirteen fourteen fifteen.'
+  const terms = query => queryTerms(parseTextQuery(query))
 
   test('centres on the earliest match, in the text\'s own case, clipped at word boundaries', () => {
-    const snippet = textSnippet(plain, ['tea', 'dragon'], 20)
+    const snippet = textSnippet(plain, terms('tea dragon'), 20)
     assert.equal(snippet.match, 'Dragon')
     assert.equal(snippet.before, 'eight nine ten. The ')
     assert.equal(snippet.after, ' drank tea. Eleven')
@@ -62,23 +63,30 @@ describe('textSnippet', () => {
   })
 
   test('a match near the start is not clipped there', () => {
-    const snippet = textSnippet(plain, ['two'], 20)
+    const snippet = textSnippet(plain, terms('two'), 20)
     assert.equal(snippet.before, 'One ')
     assert.equal(snippet.clippedStart, false)
   })
 
   test('a whole short text comes back unclipped', () => {
-    const snippet = textSnippet('Tea time.', ['time'], 40)
+    const snippet = textSnippet('Tea time.', terms('time'), 40)
     assert.deepEqual(snippet, { before: 'Tea ', match: 'time', after: '.', clippedStart: false, clippedEnd: false })
   })
 
   test('a curly apostrophe in the text answers a straight one in the query', () => {
-    const snippet = textSnippet('I don’t know.', ['don\'t'], 40)
+    const snippet = textSnippet('I don’t know.', terms('don\'t'), 40)
     assert.equal(snippet.match, 'don’t')
   })
 
+  test('a quoted word centres on where it stands whole, past a word that only holds it', () => {
+    const snippet = textSnippet('Preschool first, then school.', terms('"school"'), 40)
+    assert.equal(snippet.match, 'school')
+    assert.equal(snippet.before, 'Preschool first, then ')
+  })
+
   test('null when nothing matches', () => {
-    assert.equal(textSnippet(plain, ['coffee']), null)
+    assert.equal(textSnippet(plain, terms('coffee')), null)
+    assert.equal(textSnippet('A preschool.', terms('"school"')), null)
   })
 })
 
@@ -125,6 +133,22 @@ describe('createWorkTextSearcher', () => {
     assert.deepEqual(await hits('tea NOT again'), ['1'])
     assert.deepEqual(await hits('NOT dragon'), ['2'])
     assert.deepEqual(await hits('(sea OR again) tea'), ['3'])
+  })
+
+  test('a quoted word finds only the works that hold it whole', async () => {
+    const searcher = createWorkTextSearcher(library({
+      1: storedWork('<p>I went to school at central high.</p>'),
+      2: storedWork('<p>I want to preschool at central high.</p>'),
+    }))
+    const hits = async query => [...(await searcher.search(['1', '2'], query)).hits].sort()
+    assert.deepEqual(await hits('high "school"'), ['1'])
+    assert.deepEqual(await hits('high school'), ['1', '2'])
+  })
+
+  test('quoting a word asks for a new snippet of the same work', async () => {
+    const searcher = createWorkTextSearcher(library({ 1: storedWork('<p>Preschool first, then school.</p>') }))
+    assert.match((await searcher.snippet('1', 'school')).before, /Pre$/)
+    assert.match((await searcher.snippet('1', '"school"')).before, /then $/)
   })
 
   test('a work with no saved text is counted, not loaded', async () => {

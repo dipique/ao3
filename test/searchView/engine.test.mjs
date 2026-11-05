@@ -158,6 +158,12 @@ describe('searchView in-memory engine', () => {
     assert.equal(computeView([work({ summaryText: 'It is a slow burn.' })], phrase).visible.size, 1)
   })
 
+  test('a quoted word has to stand whole in a field', () => {
+    const word = { ...emptyFilterState(), text: '"ron"' }
+    assert.equal(matches(work({ title: 'Ron' }), word), true)
+    assert.equal(matches(work({ title: 'Aaron' }), word), false)
+  })
+
   test('a phrase reads across a line break, but never from one field into the next', () => {
     const phrase = { ...emptyFilterState(), text: '"slow burn"' }
     assert.equal(matches(work({ summaryText: 'A slow\n\nburn.' }), phrase), true)
