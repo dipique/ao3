@@ -1,4 +1,12 @@
 /**
+ * The individual work page's own title heading — a bare `<h2>`, not a link, so a
+ * blurb-link selector misses it. Null on any other page.
+ */
+export function workPageTitle(root: ParentNode): HTMLElement | null {
+  return root.querySelector<HTMLElement>('#workskin > .preface.group > h2.title.heading')
+}
+
+/**
  * The work id for the page we are on, or null when this isn't a work page.
  *
  * Usually the URL says it. But AO3 also serves a chapter at its own permalink —

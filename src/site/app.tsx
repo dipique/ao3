@@ -101,6 +101,8 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   const blurbsHtml = JSON.parse(await decompressEntry(data.blurbs)) as string[]
   const texts = new Map(data.works.map(work => [work.id, work]))
   const listed = new Map(data.manifest.works.map(work => [work.id, work]))
+  const titles = new Map<string, string>()
+  const listTitle = document.title
 
   /**
    * The search inside the works, over the copies this file carries. Made once
@@ -254,6 +256,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     applyStatus(works, current)
     const autoExcludes = applyHidden(works, current, { hidesNothing })
     for (const work of works) {
+      titles.set(work.workId, work.title)
       work.offline = texts.has(work.workId) ? CACHED : NOT_CACHED
       noteIfAbsent(work, listed.get(work.workId))
     }
@@ -299,6 +302,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
 
   function route(): void {
     const id = WORK_HASH_RE.exec(location.hash)?.[1]
+    document.title = (id && titles.get(id)) || listTitle
     listEl.hidden = id !== undefined
     readerEl.hidden = id === undefined
     if (id === undefined) {

@@ -190,6 +190,26 @@ export function attachPopoverTrigger(el: HTMLElement, getContent: () => Node | s
   })
 }
 
+const menuLenders = new WeakMap<Element, () => HTMLElement | null>()
+
+/**
+ * Have right-click / long-press on `el` open the menu of the trigger `lender`
+ * finds. A left click stays `el`'s own, whatever the lender does with one.
+ *
+ * The lender is looked up at each gesture, so it makes no difference which is set
+ * up first, and while it has no trigger (its feature is off, or menus were
+ * cleared) `el` isn't a trigger either and the browser's own menu opens.
+ */
+export function borrowMenuTrigger(el: HTMLElement, lender: () => HTMLElement | null): void {
+  menuLenders.set(el, lender)
+}
+
+function borrowedTrigger(el: Element): Trigger | null {
+  const lender = menuLenders.get(el)?.()
+  const trigger = lender && triggers.get(lender)
+  return trigger ? { ...trigger, indicator: false, clickToOpen: false } : null
+}
+
 /** Walk up from an event target to the nearest registered trigger element. */
 function findTrigger(target: EventTarget | null): { el: HTMLElement, trigger: Trigger } | null {
   // Start from the deepest Element — clicks/taps often land on an icon's <svg> or
@@ -197,7 +217,7 @@ function findTrigger(target: EventTarget | null): { el: HTMLElement, trigger: Tr
   // walking up reaches the registered HTML trigger (the indicator span / link).
   let el: Element | null = target instanceof Element ? target : null
   while (el) {
-    const trigger = triggers.get(el as HTMLElement)
+    const trigger = triggers.get(el as HTMLElement) ?? borrowedTrigger(el)
     if (trigger)
       return { el: el as HTMLElement, trigger }
     if (el === document.body)

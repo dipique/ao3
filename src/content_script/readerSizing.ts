@@ -1,4 +1,6 @@
 import { ADDON_CLASS } from '#common'
+import { borrowMenuTrigger } from '#content_script/contextTrigger.js'
+import { workPageTitle } from '#content_script/workPage.ts'
 
 /**
  * Make a work's text (`#workskin`) comfortable to resize.
@@ -9,7 +11,8 @@ import { ADDON_CLASS } from '#common'
  *   page. Anywhere outside the work text, normal browser zoom is untouched.
  * - **Drag to width.** Two thin handles hug the left/right edges of the reading
  *   column; dragging either one narrows or widens the (centred) column, down to a
- *   {@link MIN_WIDTH_REM} floor.
+ *   {@link MIN_WIDTH_REM} floor. They ride the viewport while the title scrolls
+ *   away, so right-clicking one opens the title's work menu.
  *
  * Both values persist in the page's own `localStorage` (see {@link LS_SCALE} /
  * {@link LS_WIDTH}), so they're per-device and never travel through the synced
@@ -70,6 +73,7 @@ function makeHandle(sideClass: string): HTMLElement {
   handle.className = `${ADDON_CLASS} ${HANDLE_CLASS} ${sideClass}`
   handle.title = 'Drag to adjust reading width'
   handle.setAttribute('aria-hidden', 'true')
+  borrowMenuTrigger(handle, () => workPageTitle(document))
   return handle
 }
 
@@ -155,6 +159,8 @@ export function attachReaderSizing(workskin: HTMLElement): ReaderSizing {
   window.addEventListener('resize', onViewportChange)
 
   const beginDrag = (side: 'left' | 'right') => (e: PointerEvent): void => {
+    if (e.button !== 0)
+      return
     e.preventDefault()
     const handle = e.currentTarget as HTMLElement
     handle.setPointerCapture(e.pointerId)

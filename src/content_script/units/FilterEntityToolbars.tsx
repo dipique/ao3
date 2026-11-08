@@ -29,7 +29,7 @@ import { openProgressEditor } from '#content_script/progressEditor.js'
 import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
 import { applyMark, applyMarkGroup, applyMarkProgress } from '#content_script/workMarks.js'
-import { workPageId } from '#content_script/workPage.ts'
+import { workPageId, workPageTitle } from '#content_script/workPage.ts'
 import React from '#dom'
 
 /**
@@ -939,14 +939,6 @@ const seriesEntries: EntityEntry[] = []
 
 /** This run's subscription to the saved-work index, taken down by the next clean. */
 let stopHearing: (() => void) | null = null
-
-/**
- * The individual work page's own title heading — a bare `<h2>`, not a link, so the
- * blurb-link selector misses it. Null on any other page.
- */
-function workPageTitle(root: ParentNode): HTMLElement | null {
-  return root.querySelector<HTMLElement>('#workskin > .preface.group > h2.title.heading')
-}
 
 export class FilterWorkToolbar extends FilterEntityToolbar {
   static override get name() { return 'FilterWorkToolbar' }

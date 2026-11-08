@@ -176,6 +176,49 @@ describe('NOT', () => {
   })
 })
 
+describe('a minus at the start of a term', () => {
+  test('excludes it, as NOT does', () => {
+    assert.equal(finds('fluff -angst', 'fluff'), true)
+    assert.equal(finds('fluff -angst', 'fluff and angst'), false)
+    assert.equal(queryKey(parseTextQuery('fluff -angst')), queryKey(parseTextQuery('fluff NOT angst')))
+  })
+
+  test('takes a phrase, a quoted word or a group', () => {
+    assert.equal(finds('-"major character death"', 'a major death of a character'), true)
+    assert.equal(finds('-"major character death"', 'major character death'), false)
+    assert.equal(finds('-"ron"', 'Aaron'), true)
+    assert.equal(finds('-"ron"', 'Ron'), false)
+    assert.equal(finds('-(harry OR draco)', 'ron'), true)
+    assert.equal(finds('-(harry OR draco)', 'draco'), false)
+  })
+
+  test('binds tighter than OR', () => {
+    assert.equal(finds('-harry OR draco', 'harry and draco'), true)
+    assert.equal(finds('-harry OR draco', 'harry'), false)
+  })
+
+  test('stays part of a word when it comes later in the word', () => {
+    assert.equal(finds('slow-burn', 'a slow-burn romance'), true)
+    assert.equal(finds('slow-burn', 'a slow burn romance'), false)
+    assert.equal(finds('well-', 'well-known'), true)
+  })
+
+  test('on its own excludes nothing and is not looked for', () => {
+    assert.equal(finds('fluff - angst', 'fluff and angst'), true)
+    assert.equal(finds('fluff - angst', 'fluff - comfort'), false)
+    assert.equal(finds('fluff -', 'fluff'), true)
+    for (const query of ['-', ' - ', '--', '-()'])
+      assert.equal(parseTextQuery(query), null, query)
+  })
+
+  test('in quotes is looked for as written', () => {
+    assert.equal(finds('-chan', 'Sakura-chan'), false)
+    assert.equal(finds('"-chan"', 'Sakura-chan'), true)
+    assert.equal(finds('"-chan"', 'Sakura chan'), false)
+    assert.equal(finds('"-chan"', 'Sakura-chans'), false)
+  })
+})
+
 describe('parentheses', () => {
   test('group what they hold', () => {
     const query = '(fluff OR crack) (harry OR draco)'

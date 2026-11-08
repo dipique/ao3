@@ -18,7 +18,7 @@ import { PROFILE_LISTS } from '../../src/options_ui/model/profileLists.ts'
 import { blurbsOnRemove, COPY_REMOVAL, NEEDS_VISIT_NOTE, OFFLINE_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { serveDir, storedListIds, storedLists } from './helpers.mjs'
 import { captureDownloads, figures, mentions, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
-import { openMenu, pickRow } from './trackedPages.mjs'
+import { menuRows, openMenu, pickRow } from './trackedPages.mjs'
 
 const ARCHIVE = 'https://archiveofourown.org'
 const CACHE_KEY = 'marked-for-later:tester'
@@ -602,6 +602,8 @@ describe('options UI — site export', { skip }, () => {
         'the filter sidebar should be there',
       )
 
+      const listTitle = await reader.title()
+
       // A blurb's own link still names the archive — the view's work toolbars
       // find their target by that href — and a plain click routes in the page.
       assert.match(
@@ -614,10 +616,12 @@ describe('options UI — site export', { skip }, () => {
       const text = await reader.$eval('.AO3E--site--work', el => el.textContent)
       assert.match(text, /The rewritten text of work 11\./)
       assert.equal(await reader.$eval('.AO3E--site--list', el => el.hidden), true)
+      assert.equal(await reader.title(), 'Work number 11')
 
       // Back to the list, and the view's own search box narrows it.
       await reader.click('.AO3E--site--nav a')
       await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)
+      assert.equal(await reader.title(), listTitle)
       await reader.type('.AO3E--search-view--input', 'Work number 12')
       await reader.waitForFunction(
         () => document.querySelectorAll('.AO3E--search-view--results > li:not(.AO3E--search-view--hidden)').length === 1,
@@ -909,6 +913,7 @@ describe('options UI — site export', { skip }, () => {
       await reader.setViewport({ width: 1280, height: 800 })
       await openFresh(reader, `${fileUrl(dir, 'library.html')}#work/11`)
       await reader.waitForFunction(() => document.querySelector('.AO3E--site--work .userstuff') !== null, { timeout: 15000 })
+      assert.equal(await reader.title(), 'Work number 11', 'a file opened at a work names that work')
 
       assert.equal(await handles(), 2)
       // The text opens at the width the page gives a work, and the handles take
@@ -939,6 +944,11 @@ describe('options UI — site export', { skip }, () => {
       assert.equal(await reader.evaluate(() => location.hash), '#work/11')
       await reader.waitForSelector('.AO3E--site--work .AO3E--indicator--mark-boring', { timeout: 5000 })
       assert.equal(await handles(), 2, 'one pair of handles, however often the page rebuilds')
+
+      // Halfway down the work, the handles are what is still on screen.
+      await openMenu(reader, () => reader.$eval('.AO3E--reader-handle-right', el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))))
+      assert.ok((await menuRows(reader)).some(row => row.action === 'unmark' && row.value === 'boring'), 'a handle opens the title\'s menu')
+      await reader.keyboard.press('Escape')
 
       await reader.click('.AO3E--site--nav a')
       await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)

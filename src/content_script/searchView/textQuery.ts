@@ -7,6 +7,8 @@
  * `fluff harry OR draco` asks for fluff and either name; `NOT` tighter still,
  * taking the one word, phrase or group after it. The operators count only in
  * capitals: in lower case they are words, and AO3's own warnings hold a "not".
+ * A `-` directly before a term is the same as `NOT`; later in a word, on its own
+ * or inside quotes it is just text.
  * Every word and phrase matches anywhere in the text, inside words too, except
  * a single word in quotes, which matches only as a whole word: `"school"` finds
  * "school" and "after-school", never "preschool".
@@ -22,7 +24,7 @@ export interface Term {
   kind: 'term'
   /** Folded, with any run of spaces in a phrase made one. */
   text: string
-  /** Matches only where no letter, digit or mark touches it on either side. */
+  /** Matches only where no word runs on past either end of it. */
   wholeWord?: true
 }
 
@@ -39,9 +41,10 @@ const DOUBLE_QUOTES = /[“”„‟″]/g
 
 /**
  * A quoted phrase (to the end, if the quote is never closed), `||`, a
- * parenthesis, or a word: a run up to the next space, quote, parenthesis or `||`.
+ * parenthesis, a `-` with a term straight after it, or a word: a run up to the
+ * next space, quote, parenthesis or `||`.
  */
-const QUERY_TOKEN = /"([^"]*)"?|(\|\|)|([()])|((?:[^\s"()|]|\|(?!\|))+)/g
+const QUERY_TOKEN = /"([^"]*)"?|(\|\|)|([()])|(-(?=\S))|((?:[^\s"()|]|\|(?!\|))+)/g
 
 /**
  * A character that carries a word on past a match. Scripts written without spaces
@@ -65,17 +68,17 @@ export function foldText(text: string): string {
 /** Curly quotes delimit a phrase too, since a phone keyboard turns every typed quote into one. */
 function tokenize(query: string): Token[] {
   const tokens: Token[] = []
-  for (const [, phrase, or, paren, word] of query.replace(DOUBLE_QUOTES, '"').matchAll(QUERY_TOKEN)) {
+  for (const [, phrase, or, paren, minus, word] of query.replace(DOUBLE_QUOTES, '"').matchAll(QUERY_TOKEN)) {
     if (or || word === 'OR') {
       tokens.push({ kind: 'or' })
     }
-    else if (word === 'NOT') {
+    else if (minus || word === 'NOT') {
       tokens.push({ kind: 'not' })
     }
     else if (paren) {
       tokens.push({ kind: paren === '(' ? 'open' : 'close' })
     }
-    else {
+    else if (word !== '-') {
       const text = foldText(phrase ?? word ?? '').replace(/\s+/g, ' ').trim()
       if (text)
         tokens.push(phrase !== undefined && !text.includes(' ') ? { kind: 'term', text, wholeWord: true } : { kind: 'term', text })
@@ -168,16 +171,16 @@ export function parseTextQuery(query: string): TextQuery | null {
   return join('and', operands)
 }
 
-/** Whether a match from `start` to `end` has no word running on past either end. Two code units hold any one character. */
-function standsWhole(folded: string, start: number, end: number): boolean {
-  return !ENDS_IN_WORD.test(folded.slice(Math.max(0, start - 2), start)) && !STARTS_IN_WORD.test(folded.slice(end, end + 2))
+/** Whether one word runs on across a position in folded text. Two code units hold any one character. */
+function wordRunsAcross(folded: string, at: number): boolean {
+  return ENDS_IN_WORD.test(folded.slice(Math.max(0, at - 2), at)) && STARTS_IN_WORD.test(folded.slice(at, at + 2))
 }
 
 /** Where a word or phrase first matches in folded text, or -1. */
 export function termIndex(term: Term, folded: string): number {
   let at = folded.indexOf(term.text)
   if (term.wholeWord) {
-    while (at !== -1 && !standsWhole(folded, at, at + term.text.length))
+    while (at !== -1 && (wordRunsAcross(folded, at) || wordRunsAcross(folded, at + term.text.length)))
       at = folded.indexOf(term.text, at + 1)
   }
   return at
