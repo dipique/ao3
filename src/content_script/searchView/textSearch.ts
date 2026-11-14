@@ -19,6 +19,7 @@
 
 import type { Term } from './textQuery.ts'
 
+import { COMMENTS_CLASS } from '../siteExport/workText.ts'
 import { foldText, parseTextQuery, queryKey, queryMatches, queryTerms, termIndex } from './textQuery.ts'
 
 /** Where a searcher gets the stored markup of each work. */
@@ -105,6 +106,9 @@ const COMMENT = /<!--[\s\S]*?-->/g
  */
 const WORKSKIN = /<div(?:\s[^>]*?)?\sid="workskin"/
 
+/** Where it ends, in a copy saved with its comments: they are other readers' words, not the work's. */
+const COMMENTS = new RegExp(`<div(?:\\s[^>]*?)?\\sclass="${COMMENTS_CLASS}"`)
+
 const ENTITY = /&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi
 
 /**
@@ -131,13 +135,14 @@ function decodeEntities(text: string): string {
 }
 
 /**
- * A stored work's text as a reader sees it: the work from its title down, with
- * the markup gone, the entities decoded and every run of whitespace one space.
- * Case is kept — this is also what a {@link TextSnippet} is cut from.
+ * A stored work's text as a reader sees it: the work from its title to its end,
+ * with the markup gone, the entities decoded and every run of whitespace one
+ * space. Case is kept — this is also what a {@link TextSnippet} is cut from.
  */
 export function workTextOf(html: string): string {
   const start = html.search(WORKSKIN)
-  const work = start === -1 ? html : html.slice(start)
+  const end = html.search(COMMENTS)
+  const work = html.slice(Math.max(start, 0), end === -1 ? undefined : end)
   const text = work.replace(COMMENT, ' ').replace(BLOCK_TAG, ' ').replace(TAG, '')
   return decodeEntities(text).replace(/\s+/g, ' ').trim()
 }

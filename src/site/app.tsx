@@ -1,14 +1,20 @@
 import { debounce } from '@antfu/utils'
 
+import MdiArrowCollapseUp from '~icons/mdi/arrow-collapse-up.jsx'
+import MdiBookmarkCheckOutline from '~icons/mdi/bookmark-check-outline.jsx'
+import MdiCommentMultipleOutline from '~icons/mdi/comment-multiple-outline.jsx'
+
 import type { Options } from '#common'
 import type { Work } from '#content_script/blurb.js'
+import type { FloatingToolbar } from '#content_script/floatingToolbar.tsx'
 import type { FacetValueRef } from '#content_script/searchView/engine.js'
 import type { SearchViewPrefs } from '#content_script/searchView/prefs.js'
 import type { SearchView, SearchViewConfig, ViewState } from '#content_script/searchView/view.js'
 import type { SiteData, SiteManifestWork } from '#content_script/siteExport/payload.js'
 
 import { ADDON_CLASS, getArchiveLink, options } from '#common'
-import { setMenusEnabled } from '#content_script/contextTrigger.js'
+import { openMenuOf, setMenusEnabled } from '#content_script/contextTrigger.js'
+import { createFloatingToolbar, toolbarButton } from '#content_script/floatingToolbar.tsx'
 import { attachReaderSizing } from '#content_script/readerSizing.ts'
 import { worksFromHtml } from '#content_script/searchView/cache.js'
 import { decorateBlurb, decorateContainer, decorateWorkTitle, makeFacetHider } from '#content_script/searchView/decorate.js'
@@ -20,14 +26,18 @@ import { createWorkTextSearcher } from '#content_script/searchView/textSearch.js
 import { createSearchView } from '#content_script/searchView/view.js'
 import { decompressEntry } from '#content_script/siteExport/compress.js'
 import { ALL_CACHED, workHash } from '#content_script/siteExport/payload.js'
+import { COMMENTS_CLASS } from '#content_script/siteExport/workText.ts'
 import { applySurfaceTheme } from '#content_script/theme.js'
 import { seedMarkedForLater } from '#content_script/units/FilterEntityToolbars.js'
+import { workPageTitle } from '#content_script/workPage.ts'
 import React from '#dom'
 
 import type { Journal } from './journal.ts'
 import type { SiteStorage } from './shim.ts'
+import type { ChapterEntry } from './workNav.ts'
 
 import { restoreUnimported, start as startJournal } from './journal.ts'
+import { chaptersOf, fragmentTarget, workRoute } from './workNav.ts'
 
 /**
  * The exported page's app: the extension's own search view, running with no
@@ -54,14 +64,14 @@ import { restoreUnimported, start as startJournal } from './journal.ts'
  * doesn't offer marks at all.
  */
 
-/** The reader's route: the list, or one work by id. */
-const WORK_HASH_RE = /^#work\/(\d+)$/
-
 /** A work id inside an href, however the link was written. */
 const WORK_HREF_RE = /\/works\/(\d+)(?:[/?#]|$)/
 
 const ROOT = `${ADDON_CLASS}--site`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
+
+/** The action both ways down to the comments carry: the count in the stats and the toolbar's pill. */
+const JUMP_COMMENTS = 'jump-comments'
 
 /** Why a work in the list can't be opened from the file, in the reader's words. */
 const UNCACHED_REASON: Record<string, string> = {
@@ -160,7 +170,11 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   shell.replaceChildren(status.el, listEl, readerEl)
 
   let reading: OpenWork | null = null
+  /** The open work's floating controls, rebuilt with it and gone with it. */
+  let toolbar: FloatingToolbar | null = null
   let view = mount(await build(opts))
+  readerEl.addEventListener('click', onReaderClick)
+  document.addEventListener('pointerdown', closeChapterMenus, true)
 
   /**
    * A mark, a rule, a highlight — anything the reader changes from inside the
@@ -301,8 +315,11 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   }
 
   function route(): void {
-    const id = WORK_HASH_RE.exec(location.hash)?.[1]
+    const id = workRoute(location.hash)
     document.title = (id && titles.get(id)) || listTitle
+    // What this browser keeps, and the way to export it, is about the list as a
+    // whole; over a work it is only in the way of the text.
+    status.el.hidden = id !== undefined
     listEl.hidden = id !== undefined
     readerEl.hidden = id === undefined
     if (id === undefined) {
@@ -322,13 +339,13 @@ export async function startSite(ctx: SiteContext): Promise<void> {
 
   async function showWork(id: string): Promise<void> {
     const body = (<div class={cx('work')}>Unpacking…</div>) as HTMLElement
-    readerEl.replaceChildren(
+    const nav = (
       <nav class={cx('nav')}>
         <a href="#">← Back to the list</a>
         <a href={getArchiveLink(`/works/${id}`)} rel="noreferrer">Open on AO3</a>
-      </nav>,
-      body,
-    )
+      </nav>
+    ) as HTMLElement
+    readerEl.replaceChildren(nav, body)
     const shown: OpenWork = { id, body: null, detachSizing: null }
     reading = shown
 
@@ -345,6 +362,9 @@ export async function startSite(ctx: SiteContext): Promise<void> {
         return
       body.innerHTML = html
       shown.body = body
+      const chapters = chaptersOf(body)
+      if (chapters.length > 1)
+        nav.append(chapterMenu(chapters))
       dressWork()
     }
     catch (error) {
@@ -355,7 +375,8 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   /**
    * What a work page gets on AO3, given to the open work under the settings as
    * they now stand: Reader mode's zoom and width handles, and the title's work
-   * menu.
+   * menu — and what only a page this long needs: a comment count that leads to
+   * the comments saved under the work, and the floating controls.
    */
   function dressWork(): void {
     const body = reading?.body
@@ -370,11 +391,150 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     if (reading.detachSizing)
       body.dataset.ao3eSized = ''
     decorateWorkTitle(body, opts)
+    const comments = body.querySelector<HTMLElement>(`.${COMMENTS_CLASS}`)
+    if (comments)
+      linkCommentCount(body)
+    mountToolbar(body, comments)
+  }
+
+  /**
+   * The open work's floating controls, in the corner AO3's pages keep theirs:
+   * back to the top, down to the comments when the copy has any, and the menu of
+   * marks the title opens, for a reader who never thought to right-click it.
+   */
+  function mountToolbar(body: HTMLElement, comments: HTMLElement | null): void {
+    removeToolbar()
+    const next = createFloatingToolbar()
+    const pill = (button: HTMLButtonElement, run: () => void): void => {
+      button.addEventListener('click', () => {
+        run()
+        next.setOpen(false)
+      })
+      next.panel.append(button)
+    }
+    pill(toolbarButton(<MdiArrowCollapseUp />, 'Jump to top', 'Go back to the top of the work', 'jump-top'), () => window.scrollTo(0, 0))
+    if (comments)
+      pill(toolbarButton(<MdiCommentMultipleOutline />, 'Jump to Comments', 'Go to the comments saved under the work', JUMP_COMMENTS), () => jumpTo(comments))
+    if (opts.workMarks.enabled) {
+      const marks = toolbarButton(<MdiBookmarkCheckOutline />, 'Update marks', 'Open the work\'s menu of marks, as right-clicking its title does', 'update-marks')
+      pill(marks, () => {
+        const title = workPageTitle(body)
+        const at = marks.getBoundingClientRect()
+        if (title)
+          openMenuOf(title, at.left, at.top)
+      })
+    }
+    document.body.append(next.el)
+    toolbar = next
+  }
+
+  function removeToolbar(): void {
+    toolbar?.detach()
+    toolbar?.el.remove()
+    toolbar = null
+  }
+
+  /**
+   * Where the work's own links lead, and its comment count: to a place in the
+   * work, scrolled to rather than followed, since the hash is the page's route.
+   */
+  function onReaderClick(event: MouseEvent): void {
+    const body = reading?.body
+    if (!body || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+      return
+    const target = event.target as Element | null
+    if (target?.closest(`[data-ao3e-action="${JUMP_COMMENTS}"]`)) {
+      const comments = body.querySelector<HTMLElement>(`.${COMMENTS_CLASS}`)
+      if (comments)
+        jumpTo(comments)
+      return
+    }
+    const id = fragmentTarget(target?.closest('a[href]')?.getAttribute('href') ?? null)
+    const place = id === null ? null : body.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"], a[name="${CSS.escape(id)}"]`)
+    if (!place)
+      return
+    event.preventDefault()
+    jumpTo(place)
   }
 
   function closeWork(): void {
     reading?.detachSizing?.()
     reading = null
+    removeToolbar()
+  }
+}
+
+function jumpTo(el: HTMLElement): void {
+  el.scrollIntoView({ block: 'start' })
+}
+
+/**
+ * The comment count in the work's stats, made a way down to the comments.
+ * Whatever link AO3 put on it pointed at its own comment pages, so the count
+ * becomes a button showing the same number.
+ */
+function linkCommentCount(body: HTMLElement): void {
+  const count = body.querySelector<HTMLElement>('dl.work.meta.group dd.comments')
+  if (!count || count.querySelector(`[data-ao3e-action="${JUMP_COMMENTS}"]`))
+    return
+  const text = count.textContent?.trim() ?? ''
+  count.replaceChildren(
+    <button type="button" class={cx('comments-link')} data-ao3e-action={JUMP_COMMENTS} title="Go to the comments">{text}</button>,
+  )
+}
+
+/**
+ * "Jump to chapter", beside the way back to the list: a list of every chapter
+ * by its heading, which closes once one is picked, on Escape, or on a click
+ * anywhere else ({@link closeChapterMenus}).
+ */
+function chapterMenu(chapters: readonly ChapterEntry[]): HTMLElement {
+  const menu = (
+    <details class={cx('chapters')}>
+      <summary data-ao3e-action="jump-chapter">Jump to chapter</summary>
+      <ol class={cx('chapter-list')}>
+        {chapters.map((chapter, i) => (
+          <li><button type="button" data-ao3e-chapter={String(i)}>{chapter.label}</button></li>
+        ))}
+      </ol>
+    </details>
+  ) as HTMLElement as HTMLDetailsElement
+  menu.addEventListener('click', (event) => {
+    const picked = (event.target as Element | null)?.closest<HTMLElement>('[data-ao3e-chapter]')
+    const chapter = picked && chapters[Number(picked.dataset.ao3eChapter)]
+    if (!chapter)
+      return
+    menu.open = false
+    jumpTo(chapter.el)
+  })
+  menu.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !menu.open)
+      return
+    menu.open = false
+    menu.querySelector('summary')?.focus()
+  })
+  menu.addEventListener('toggle', () => {
+    if (menu.open)
+      keepOnScreen(menu.querySelector<HTMLElement>(`.${cx('chapter-list')}`)!)
+  })
+  return menu
+}
+
+/** The window's edge a dropped-down list keeps clear of, as the page's own gutter does. */
+const SCREEN_MARGIN_PX = 16
+
+/** Shift a list that opened under its toggle left, by as much as it would run past the window. */
+function keepOnScreen(list: HTMLElement): void {
+  list.style.removeProperty('left')
+  const over = list.getBoundingClientRect().right - (document.documentElement.clientWidth - SCREEN_MARGIN_PX)
+  if (over > 0)
+    list.style.left = `${-over}px`
+}
+
+function closeChapterMenus(event: Event): void {
+  for (const menu of document.querySelectorAll<HTMLDetailsElement>(`details.${cx('chapters')}[open]`)) {
+    if (!menu.contains(event.target as Node))
+      menu.open = false
   }
 }
 

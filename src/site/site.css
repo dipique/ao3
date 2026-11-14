@@ -147,6 +147,11 @@ body.ao3e-site {
   margin: 0 0 1rem;
 }
 
+/* Over a work, where the panel is only in the way; the grid above outranks a bare [hidden]. */
+.AO3E--site--status[hidden] {
+  display: none;
+}
+
 .AO3E--site--status p {
   margin: 0;
 }
@@ -212,11 +217,88 @@ body.ao3e-site {
 
 .AO3E--site--nav {
   display: flex;
-  gap: 1.5rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 1.5rem;
   border-bottom: 1px solid var(--ao3e-site-line);
   padding-bottom: 0.6rem;
   margin-bottom: 1.5rem;
   font-size: 0.9rem;
+}
+
+/* "Jump to chapter": a link-like toggle, with the list dropping out of it. */
+.AO3E--site--chapters {
+  position: relative;
+}
+
+.AO3E--site--chapters > summary {
+  color: var(--ao3e-site-link);
+  cursor: pointer;
+  list-style: none;
+}
+
+.AO3E--site--chapters > summary::-webkit-details-marker {
+  display: none;
+}
+
+.AO3E--site--chapters > summary::after {
+  content: ' \25BE';
+}
+
+.AO3E--site--chapters[open] > summary::after {
+  content: ' \25B4';
+}
+
+/* Under its toggle, shifted left by the app when it would run off the window;
+   above the reader-mode grips, below the floating toolbar and the menus. */
+.AO3E--site--chapter-list {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 40;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 16rem;
+  max-width: min(36rem, calc(100vw - 2rem));
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.3rem 0;
+  list-style: none;
+  background: var(--ao3e-site-bg);
+  border: 1px solid var(--ao3e-site-line);
+  border-radius: 0.3rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.AO3E--site--chapter-list button {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.4rem 0.8rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.AO3E--site--chapter-list button:hover,
+.AO3E--site--chapter-list button:focus-visible {
+  background: var(--ao3e-site-panel);
+}
+
+/* The comment count in the stats, once it leads down to the comments. */
+.AO3E--site--comments-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ao3e-site-link);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .AO3E--site--work {
@@ -226,16 +308,29 @@ body.ao3e-site {
 
 /*
    With Reader mode on, the work's text sizes itself, so the column makes room
-   for it to be dragged wider; the meta block keeps the column's width.
+   for it to be dragged wider; the meta block and the comments take nearly the
+   whole of it.
 */
 .AO3E--site--work[data-ao3e-sized] {
   max-width: none;
 }
 
-.AO3E--site--work[data-ao3e-sized] .work.meta.group {
-  max-width: 46rem;
+.AO3E--site--work[data-ao3e-sized] .work.meta.group,
+.AO3E--site--work[data-ao3e-sized] .ao3e-comments {
+  box-sizing: border-box;
+  max-width: 95%;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* A little air between the text and the grips beside it: AO3's skin pads the
+   column the grips hug, and an export's doesn't. */
+body.ao3e-site .AO3E--reader-handle-right {
+  transform: translate(4px, -50%);
+}
+
+body.ao3e-site .AO3E--reader-handle-left {
+  transform: translate(calc(-100% - 4px), -50%);
 }
 
 /* Why a work in the list can't be opened from the file. */
@@ -599,9 +694,16 @@ body.ao3e-site {
    The stats line nested in the meta block is a row of label/value pairs, not
    another column: the two rules above would float each of its labels onto a
    line of its own and butt every value against the next label.
+
+   It sits on the line of its own "Stats:" label, as every other value does:
+   as wide as what the floated label leaves (the shared stylesheet's full width
+   would push it under the label), and in the box's own size, so its first line
+   shares the label's baseline.
 */
 .ao3e-work .work.meta.group dl.stats {
+  width: auto;
   margin: 0;
+  font-size: inherit;
 }
 
 .ao3e-work .work.meta.group dl.stats dt {
@@ -666,4 +768,63 @@ body.ao3e-site {
 
 .ao3e-work .chapter .title {
   font-size: 1.2em;
+}
+
+/* --- The comments saved under a work ------------------------------------- */
+
+.ao3e-work .ao3e-comments {
+  border-top: 1px solid var(--ao3e-site-line);
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+}
+
+.ao3e-work .ao3e-comments > h3.heading {
+  font-size: 1.1rem;
+  margin: 0 0 1rem;
+}
+
+.ao3e-work .ao3e-comments ol.thread {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* A reply sits under what it answers, a step in. */
+.ao3e-work .ao3e-comments ol.thread ol.thread {
+  margin-left: 1.5rem;
+}
+
+.ao3e-work .ao3e-comments li.comment {
+  border: 1px solid var(--ao3e-site-line);
+  border-radius: 0.3rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.ao3e-work .ao3e-comments li.comment h4.byline {
+  margin: 0 0 0.3rem;
+  color: var(--ao3e-site-muted);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.ao3e-work .ao3e-comments li.comment h4.byline > a {
+  font-weight: 700;
+}
+
+.ao3e-work .ao3e-comments li.comment .posted {
+  margin-left: 0.4em;
+}
+
+.ao3e-work .ao3e-comments li.comment blockquote.userstuff {
+  margin: 0;
+}
+
+.ao3e-work .ao3e-comments li.comment blockquote.userstuff > p:first-child {
+  margin-top: 0;
+}
+
+.ao3e-work .ao3e-comments li.comment blockquote.userstuff > p:last-child {
+  margin-bottom: 0;
 }

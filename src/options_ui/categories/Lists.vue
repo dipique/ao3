@@ -37,6 +37,12 @@
       <SiteExportChanges />
       <SiteExportCache />
       <OptionRow
+        title="Save comments with cached works"
+        subtitle="Cache each work's comments along with its text, and show them under the work in an offline copy. Every page of comments is one more request to AO3. Works already cached are fetched again, with their comments, the next time their list is cached."
+      >
+        <OptionSwitch option-id="cacheComments" />
+      </OptionRow>
+      <OptionRow
         title="Discard unneeded blurbs automatically"
         subtitle="When a refresh drops a work from a stored list, or a list is deleted, forget that work's blurb straight away if no other list holds it — instead of waiting for Discard orphans. Cached work text is never touched."
       >

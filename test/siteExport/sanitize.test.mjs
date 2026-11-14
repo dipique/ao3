@@ -4,15 +4,17 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { COMMENTS_CLASS } from '../../src/content_script/siteExport/workText.ts'
 import { REPO_ROOT } from '../e2e/helpers.mjs'
 import { loadModuleInPage, skipWithoutChrome } from './helpers.mjs'
+import { comment, PAGE, THREAD, withComments } from './workPages.mjs'
 
 /**
  * The work-text sanitizer, run in a real DOM.
  *
  * Unlike the rest of `test/e2e/`, this builds nothing but the one module under
- * test — `sanitize.ts` imports nothing — so it costs a Chrome launch and no
- * extension build. Everything it asserts is a promise the exported site depends
+ * test and the constant it shares, so it costs a Chrome launch and no extension
+ * build. Everything it asserts is a promise the exported site depends
  * on: the reading experience survives, AO3's chrome does not, and no link is
  * left pointing at a path that only exists on archiveofourown.org.
  */
@@ -20,75 +22,26 @@ import { loadModuleInPage, skipWithoutChrome } from './helpers.mjs'
 /** The real page the sanitizer was written against; absent in a standalone clone. */
 const SAMPLE = join(REPO_ROOT, '..', 'html', 'work-sample', 'works', '79362971.html')
 
-/**
- * A work page in miniature: the meta block and `#workskin` we keep, wrapped in
- * the chrome we don't (navigation with a "Mark for Later" form, the kudos and
- * comment furniture, AO3's scripts), plus the things a work's own author HTML
- * can carry — an inline handler and a `javascript:` link.
- */
-const PAGE = `<!DOCTYPE html><html><head>
-<title>Work</title>
-<script src="/javascripts/application.js"></script>
-<style>.user-1 { display: none }</style>
-</head><body class="works-show logged-in">
-<div id="header"><ul class="menu"><li><a href="/works/search">Search</a></li></ul></div>
-<div id="main" class="works-show region">
-  <ul class="work navigation actions">
-    <li class="mark"><form class="button_to" method="post" action="/works/42/mark_for_later">
-      <button type="submit">Mark for Later</button>
-      <input type="hidden" name="authenticity_token" value="SECRET">
-    </form></li>
-  </ul>
-  <div class="wrapper"><dl class="work meta group">
-    <dt class="fandom tags">Fandom:</dt>
-    <dd class="fandom tags"><ul class="commas"><li><a class="tag" href="/tags/Some%20Fandom/works">Some Fandom</a></li></ul></dd>
-    <dt class="stats">Stats:</dt>
-    <dd class="stats"><dl class="stats"><dt class="words">Words:</dt><dd class="words">666</dd><dt class="chapters">Chapters:</dt><dd class="chapters">2/2</dd></dl></dd>
-  </dl></div>
-  <div id="work-skin" class="wrapper"><div id="workskin">
-    <div class="preface group">
-      <h2 class="title heading">A Title</h2>
-      <h3 class="byline heading"><a rel="author" href="/users/someone/pseuds/someone">someone</a></h3>
-      <div class="summary module"><blockquote class="userstuff"><p>A summary.</p></blockquote></div>
-    </div>
-    <div id="chapters" role="article">
-      <div class="chapter" id="chapter-1">
-        <div class="chapter preface group"><h3 class="title"><a href="/works/42/chapters/1">Chapter 1</a></h3></div>
-        <div class="userstuff module">
-          <p>First chapter. <a href="#chapter-2">Skip ahead</a>, or see <a href="/works/99">that other work</a>.</p>
-          <p onclick="alert(1)">Clicky.</p>
-          <p><a href="javascript:alert(2)">Do not</a></p>
-          <p><a href="java&#10;script:alert(3)">Nor this</a></p>
-          <p><a href="&#9;VBScript:alert(4)">Nor this either</a></p>
-          <img src="/images/skins/thing.png" alt="a thing">
-        </div>
-      </div>
-      <div class="chapter" id="chapter-2">
-        <div class="userstuff module"><p>Second chapter.</p></div>
-      </div>
-    </div>
-    <div class="afterword preface group"><div class="notes module"><blockquote class="userstuff"><p>End notes.</p></blockquote></div></div>
-  </div></div>
-  <div id="feedback" class="feedback">
-    <form id="new_kudo" action="/kudos" method="post"><button type="submit">Kudos</button></form>
-    <div id="kudos">someone left kudos</div>
-    <form class="new_comment" action="/works/42/comments" method="post"><textarea name="comment[comment_content]"></textarea></form>
-  </div>
-</div>
-<div id="footer"><p>AO3 footer</p></div>
-</body></html>`
-
 describe('sanitizeWorkPage', { skip: skipWithoutChrome }, () => {
   let close
-  /** Sanitize `source` as if it were the fetched page for `workId`. */
+  /** Sanitize `source` as if it were the fetched page for `workId`, with `commentPages` as the comment pages fetched. */
   let sanitize
+  /** How many pages of comments `source` says the work has. */
+  let pageCount
 
   before(async () => {
     const loaded = await loadModuleInPage('src/content_script/siteExport/sanitize.ts', 'SAN')
     close = loaded.close
-    sanitize = (source, workId = '42') => loaded.page.evaluate(
-      ([html, id]) => window.SAN.sanitizeWorkPage(new DOMParser().parseFromString(html, 'text/html'), id),
-      [source, workId],
+    sanitize = (source, workId = '42', commentPages) => loaded.page.evaluate(
+      ([html, id, pages]) => {
+        const parse = text => new DOMParser().parseFromString(text, 'text/html')
+        return window.SAN.sanitizeWorkPage(parse(html), id, pages?.map(parse))
+      },
+      [source, workId, commentPages],
+    )
+    pageCount = source => loaded.page.evaluate(
+      html => window.SAN.commentPageCount(new DOMParser().parseFromString(html, 'text/html')),
+      source,
     )
   })
 
@@ -151,6 +104,60 @@ describe('sanitizeWorkPage', { skip: skipWithoutChrome }, () => {
   test('returns null when the page holds no work text', async () => {
     const login = '<html><body><div id="main"><h2 class="heading">Sign in</h2></div></body></html>'
     assert.equal(await sanitize(login), null)
+  })
+
+  describe('comments', () => {
+    const section = html => html.match(new RegExp(`<div class="${COMMENTS_CLASS}">[\\s\\S]*$`))?.[0] ?? ''
+
+    test('are left out unless they were asked for', async () => {
+      const html = await sanitize(withComments(THREAD))
+      assert.ok(!html.includes(COMMENTS_CLASS))
+      assert.ok(!html.includes('Loved it.'))
+    })
+
+    test('follow the work, threads and replies kept as AO3 nests them', async () => {
+      const page = withComments(THREAD)
+      const html = await sanitize(page, '42', [page])
+      const kept = section(html)
+      assert.ok(html.indexOf('End notes.') < html.indexOf(COMMENTS_CLASS), 'the comments come after the work')
+      assert.match(kept, /Loved it\.[\s\S]*<ol class="thread">[\s\S]*Me too\./)
+      assert.match(kept, /reader1<\/a>/)
+      assert.match(kept, /on Chapter 1/)
+    })
+
+    test('keep what a reader reads and drop what only works on AO3', async () => {
+      const page = withComments(THREAD)
+      const kept = section(await sanitize(page, '42', [page]))
+      for (const gone of ['Comment Actions', '>Reply<', '>Thread<', 'add_comment_reply_placeholder', 'icon_user.png', 'pagination'])
+        assert.ok(!kept.includes(gone), `expected ${JSON.stringify(gone)} to be stripped from the comments`)
+      assert.match(kept, /href="https:\/\/archiveofourown\.org\/users\/reader1\/pseuds\/reader1"/)
+    })
+
+    test('run on from page to page in order, as one list', async () => {
+      const first = withComments(comment(1, 'First page.'), { current: 1, pages: 2 })
+      const second = withComments(comment(3, 'Second page.'), { current: 2, pages: 2 })
+      const kept = section(await sanitize(first, '42', [first, second]))
+      assert.equal(kept.match(/<ol class="thread">/g)?.length, 1, 'the pages are one list')
+      assert.ok(kept.indexOf('First page.') < kept.indexOf('Second page.'))
+    })
+
+    test('a work with no comments has no section, though they were asked for', async () => {
+      assert.ok(!(await sanitize(PAGE, '42', [PAGE])).includes(COMMENTS_CLASS))
+    })
+
+    test('are scrubbed like the work: no handlers, no scripts, no javascript: links', async () => {
+      const page = withComments(comment(5, '<a href="javascript:alert(1)" onclick="alert(2)">Hi</a><script>alert(3)</script>'))
+      const kept = section(await sanitize(page, '42', [page]))
+      assert.ok(!/javascript:|onclick|<script/i.test(kept))
+      assert.match(kept, /Hi<\/a>/)
+    })
+
+    test('count their pages from AO3\'s page list', async () => {
+      assert.equal(await pageCount(withComments(THREAD)), 1)
+      assert.equal(await pageCount(withComments(THREAD, { current: 1, pages: 4 })), 4)
+      assert.equal(await pageCount(withComments(THREAD, { current: 3, pages: 3 })), 3)
+      assert.equal(await pageCount(PAGE), 0, 'a page with no comments listed has none to fetch')
+    })
   })
 
   test('handles the real AO3 work page it was written against', { skip: existsSync(SAMPLE) ? false : 'the saved AO3 work page is not available here' }, async () => {

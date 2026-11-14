@@ -11,10 +11,13 @@
  *
  * What survives: the whole reading experience — the meta block, title, byline,
  * summary and notes, every chapter of a `view_full_work=true` fetch, and the
- * afterword. What doesn't: AO3's scripts and styles, every form and control
- * (kudos, comments, bookmarks, subscribe, "Mark for Later"), and the site
- * chrome around all of it.
+ * afterword — and, when they were fetched, the comments, after it all. What
+ * doesn't: AO3's scripts and styles, every form and control (kudos, comment
+ * and reply boxes, bookmarks, subscribe, "Mark for Later"), and the site chrome
+ * around all of it.
  */
+
+import { COMMENTS_CLASS } from './workText.ts'
 
 /**
  * Base for resolving AO3's relative links.
@@ -55,6 +58,20 @@ const DROP_SELECTORS = [
   'meta',
 ].join(', ')
 
+/**
+ * The parts of each comment that only do something on AO3: its actions (reply,
+ * thread, edit), the box a reply opens into, the commenter's icon, and the
+ * screen-reader caption over the actions. Pinned to the comment's own children
+ * inside the comments section, so neither the work's markup nor a comment's
+ * text can match.
+ */
+const COMMENT_CHROME = ['ul.actions', 'div.icon', 'h5.landmark', '[id^="add_comment_reply_placeholder"]']
+  .map(selector => `.${COMMENTS_CLASS} li.comment > ${selector}`)
+  .join(', ')
+
+/** The top-level list of comments on a page fetched with `show_comments=true`. */
+const COMMENT_THREAD = '#comments_placeholder > ol.thread'
+
 /** Attributes carrying a URL, and whether a `data:` URL is acceptable in them. */
 const URL_ATTRIBUTES: [attribute: string, allowData: boolean][] = [
   ['href', false],
@@ -69,8 +86,13 @@ const URL_ATTRIBUTES: [attribute: string, allowData: boolean][] = [
  * text at all — a login redirect, an adult-content interstitial, a deleted work
  * — which is the caller's cue to classify the failure
  * ({@link file://./fetchWorkText.ts}).
+ *
+ * `commentPages` are the pages of the work's comments, fetched with
+ * `show_comments=true`, in page order (the first is usually `doc` itself).
+ * Their threads follow the work as one list, in a section of their own
+ * ({@link COMMENTS_CLASS}). A work with no comments gets no section.
  */
-export function sanitizeWorkPage(doc: Document, workId: string): string | null {
+export function sanitizeWorkPage(doc: Document, workId: string, commentPages?: readonly Document[]): string | null {
   const skin = doc.querySelector('#workskin')
   if (!skin)
     return null
@@ -85,12 +107,51 @@ export function sanitizeWorkPage(doc: Document, workId: string): string | null {
       container.append(found.cloneNode(true))
   }
 
-  for (const el of Array.from(container.querySelectorAll(DROP_SELECTORS)))
+  const comments = commentPages && commentsSection(doc, commentPages)
+  if (comments)
+    container.append(comments)
+
+  for (const el of Array.from(container.querySelectorAll(`${DROP_SELECTORS}, ${COMMENT_CHROME}`)))
     el.remove()
 
   scrubAttributes(container)
 
   return container.outerHTML
+}
+
+/**
+ * How many pages of comments a page fetched with `show_comments=true` says the
+ * work has: the highest page AO3's page list names, 1 when the comments fit on
+ * one page, and 0 when the page lists none.
+ */
+export function commentPageCount(doc: Document): number {
+  if (!doc.querySelector(`${COMMENT_THREAD} > li`))
+    return 0
+  let pages = 1
+  for (const el of Array.from(doc.querySelectorAll('#comments_placeholder ol.pagination a[href], #comments_placeholder ol.pagination .current'))) {
+    const href = el.getAttribute('href')
+    const page = href === null ? Number(el.textContent) : Number(new URL(href, ARCHIVE_BASE).searchParams.get('page'))
+    if (Number.isInteger(page) && page > pages)
+      pages = page
+  }
+  return pages
+}
+
+/** Every page's comments as one list under a heading, or null when there are none. */
+function commentsSection(doc: Document, pages: readonly Document[]): HTMLElement | null {
+  const threads = pages.flatMap(page => Array.from(page.querySelectorAll(`${COMMENT_THREAD} > li`)))
+  if (!threads.length)
+    return null
+  const section = doc.createElement('div')
+  section.className = COMMENTS_CLASS
+  const heading = doc.createElement('h3')
+  heading.className = 'heading'
+  heading.textContent = 'Comments'
+  const list = doc.createElement('ol')
+  list.className = 'thread'
+  list.append(...threads.map(thread => doc.importNode(thread, true)))
+  section.append(heading, list)
+  return section
 }
 
 /**

@@ -2,7 +2,7 @@ import { fetchWithRetry, PATIENCE } from '#content_script/archiveFetch.js'
 
 import type { WorkFreshness, WorkTextFailure, WorkTextMeta } from './workText.ts'
 
-import { sanitizeWorkPage } from './sanitize.ts'
+import { commentPageCount, sanitizeWorkPage } from './sanitize.ts'
 import { recordWorkTextFailure, writeWorkText } from './workTextCache.ts'
 
 /**
@@ -25,6 +25,12 @@ import { recordWorkTextFailure, writeWorkText } from './workTextCache.ts'
  * would have got the same 429. Both leave the entry exactly as it was — no
  * failure, no backoff earned, nothing for the run to list as unfetchable — and
  * the work simply has not been tried yet.
+ *
+ * **Comments, when wanted, ride on the same request.** `show_comments=true`
+ * puts the first page of them under the work, and each further page is the work
+ * page again with `page=N`: AO3 serves comment pages no other way that a plain
+ * request can read. A page that fails leaves the copy stored with the comments
+ * before it, unmarked as holding them all, so the next run fetches it again.
  */
 
 /** Everything and every chapter, in one response, adult gate pre-cleared. */
@@ -55,8 +61,21 @@ export interface CacheWorkTextResult {
   rateLimited?: boolean
 }
 
-export function workPageUrl(workId: string): string {
-  return `${ARCHIVE_BASE}/works/${workId}?${WORK_PAGE_QUERY}`
+/** Which work page to ask for: with or without its comments, and which page of them. */
+export interface WorkPageQuery {
+  comments?: boolean
+  /** The page of comments; the first is asked for without a number, as AO3's own links do. */
+  page?: number
+}
+
+export function workPageUrl(workId: string, { comments = false, page = 1 }: WorkPageQuery = {}): string {
+  const extra = `${comments ? '&show_comments=true' : ''}${comments && page > 1 ? `&page=${page}` : ''}`
+  return `${ARCHIVE_BASE}/works/${workId}?${WORK_PAGE_QUERY}${extra}`
+}
+
+export interface CacheWorkTextOptions {
+  /** Save every page of the work's comments with it. */
+  comments?: boolean
 }
 
 /**
@@ -67,15 +86,15 @@ export function workPageUrl(workId: string): string {
  * compares a future blurb to ({@link file://./workText.ts}), so they must come
  * from the blurb, not from the work page.
  */
-export async function cacheWorkText(work: WorkFreshness, signal?: AbortSignal): Promise<CacheWorkTextResult> {
+export async function cacheWorkText(work: WorkFreshness, signal?: AbortSignal, opts: CacheWorkTextOptions = {}): Promise<CacheWorkTextResult> {
   const { workId } = work
-  const facts = { updatedAt: work.dateUpdated, chapters: work.chapters, words: work.words }
+  const comments = opts.comments === true
 
   let res: Response
   try {
     // Nobody is watching a caching run, so it waits out a rate limit rather
     // than coming back to ask the reader for permission to carry on.
-    res = await fetchWithRetry(workPageUrl(workId), signal, PATIENCE.bulk)
+    res = await fetchWithRetry(workPageUrl(workId, { comments }), signal, PATIENCE.bulk)
   }
   catch (err) {
     // An aborted run leaves the entry exactly as it was: the reader stopped us,
@@ -104,18 +123,67 @@ export async function cacheWorkText(work: WorkFreshness, signal?: AbortSignal): 
   if (/\/users\/login/.test(res.url))
     return fail(workId, 'restricted', 'AO3 asked us to sign in — you are signed out, or the work is locked')
 
-  const doc = new DOMParser().parseFromString(await res.text(), 'text/html')
-  const html = sanitizeWorkPage(doc, workId)
-  if (html === null) {
-    // No `#workskin`. The adult-content gate should be impossible (we ask for
-    // `view_adult=true`), but if AO3 shows it anyway, say so plainly rather than
-    // storing an interstitial as if it were a story.
+  const doc = parsePage(await res.text())
+  if (!doc.querySelector('#workskin')) {
+    // The adult-content gate should be impossible (we ask for `view_adult=true`),
+    // but if AO3 shows it anyway, say so plainly rather than storing an
+    // interstitial as if it were a story.
     const gated = !!doc.querySelector('a[href*="view_adult=true"], .caution')
     return fail(workId, gated ? 'restricted' : 'error', noticeText(doc) ?? 'The page held no work text')
   }
 
-  const meta = await writeWorkText(workId, html, facts)
+  const gathered = comments ? await fetchCommentPages(workId, doc, signal) : null
+  if (gathered?.rateLimited)
+    return { workId, failure: null, rateLimited: true }
+
+  const html = sanitizeWorkPage(doc, workId, gathered?.pages)!
+  const meta = await writeWorkText(workId, html, {
+    updatedAt: work.dateUpdated,
+    chapters: work.chapters,
+    words: work.words,
+    comments: gathered?.complete === true,
+  })
   return { workId, meta, failure: null }
+}
+
+function parsePage(text: string): Document {
+  return new DOMParser().parseFromString(text, 'text/html')
+}
+
+/** The pages of a work's comments, starting with the one already fetched with the work. */
+interface CommentPages {
+  pages: Document[]
+  /** Every page the first one lists was fetched. */
+  complete: boolean
+  /** AO3 was still asking us to wait at the end of a page's patience. */
+  rateLimited?: boolean
+}
+
+/**
+ * Fetch the pages of comments after `first`, in order, stopping at the first
+ * that can't be had. A page refused for rate limiting is reported as such, so
+ * the work goes back in the queue as it would had its first page been refused.
+ */
+async function fetchCommentPages(workId: string, first: Document, signal?: AbortSignal): Promise<CommentPages> {
+  const pages = [first]
+  const count = commentPageCount(first)
+  for (let page = 2; page <= count; page++) {
+    let res: Response
+    try {
+      res = await fetchWithRetry(workPageUrl(workId, { comments: true, page }), signal, PATIENCE.bulk)
+    }
+    catch (err) {
+      if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError'))
+        throw err
+      return { pages, complete: false }
+    }
+    if (res.status === 429)
+      return { pages, complete: false, rateLimited: true }
+    if (res.status !== 200 || /\/users\/login/.test(res.url))
+      return { pages, complete: false }
+    pages.push(parsePage(await res.text()))
+  }
+  return { pages, complete: true }
 }
 
 async function fail(workId: string, failure: WorkTextFailure, message: string): Promise<CacheWorkTextResult> {

@@ -108,6 +108,8 @@ export interface WorkTextFacts {
   chapters: number
   /** Word count, per the blurb. */
   words: number
+  /** The text holds every page of the work's comments. */
+  comments?: boolean
 }
 
 /**
@@ -125,6 +127,7 @@ export async function writeWorkText(workId: string, html: string, facts: WorkTex
     fetchedAt: now,
     attemptedAt: now,
     v: WORK_TEXT_VERSION,
+    ...facts.comments ? { comments: true } : {},
   }
   await serialized(async () => {
     const index = await readWorkTextIndex()
@@ -156,6 +159,7 @@ export async function recordWorkTextFailure(workId: string, failure: WorkTextFai
       words: previous?.words ?? 0,
       fetchedAt: previous?.fetchedAt ?? 0,
       v: previous?.v ?? WORK_TEXT_VERSION,
+      ...previous?.comments ? { comments: true } : {},
       failure,
       attempts: (previous?.attempts ?? 0) + 1,
       attemptedAt: Date.now(),

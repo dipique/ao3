@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import puppeteer from 'puppeteer-core'
 
+import { COMMENTS_CLASS } from '../../src/content_script/siteExport/workText.ts'
 import { REPO_ROOT } from '../e2e/helpers.mjs'
 import { chromePath, skipWithoutChrome } from './helpers.mjs'
 
@@ -296,6 +297,14 @@ describe('site export — the status panel', { skip }, () => {
     assert.ok(pending.bottom <= Math.min(button.y, line.y), 'the count should lead, above both')
   })
 
+  test('hidden over a work, it takes no room at all', async () => {
+    await view.setContent(statusPage(), { waitUntil: 'load' })
+    await view.$eval('.AO3E--site--status', (el) => {
+      el.hidden = true
+    })
+    assert.equal(await view.$eval('.AO3E--site--status', el => getComputedStyle(el).display), 'none')
+  })
+
   test('what the button says afterwards goes underneath both', async () => {
     await view.setContent(statusPage({ said: 'Saved 3 changes as ao3e-changes-1.json.' }), { waitUntil: 'load' })
     const { button, line } = await assertBeside()
@@ -330,6 +339,10 @@ function workPage() {
       <div class="userstuff module"><p>The text.</p></div>
     </div></div>
   </div>
+  <div class="${COMMENTS_CLASS}"><h3 class="heading">Comments</h3><ol class="thread">
+    <li class="comment group" id="comment_1"><h4 class="heading byline"><a href="#">reader</a> <span class="posted datetime">12 Mar 2026</span></h4><blockquote class="userstuff"><p>Loved it.</p></blockquote></li>
+    <li><ol class="thread"><li class="comment group" id="comment_2"><h4 class="heading byline"><a href="#">author</a></h4><blockquote class="userstuff"><p>Thank you!</p></blockquote></li></ol></li>
+  </ol></div>
 </div></div>`)
 }
 
@@ -373,6 +386,53 @@ describe('site export — a work\'s page', { skip }, () => {
       assert.ok(sameLine, `${label} should share a line with its value`)
       assert.ok(gap > 0 && gap < 12, `${label} should sit just before its value (${gap}px apart)`)
     }
+  })
+
+  test('the stats sit on the line of their own label, level with it', async () => {
+    const [label, first] = await Promise.all([box(view, 'dt.stats'), box(view, 'dd.stats dl.stats > dt')])
+    assert.ok(first.x > label.right, `the stats (x ${first.x}) should follow their label (right ${label.right})`)
+    assert.ok(Math.abs(first.y - label.y) < 1 && Math.abs(first.bottom - label.bottom) < 1, `the stats (y ${first.y}–${first.bottom}) should be level with their label (y ${label.y}–${label.bottom})`)
+  })
+
+  test('with Reader mode on, the meta block and the comments take nearly the whole column', async () => {
+    await view.$eval('.AO3E--site--work', (el) => {
+      el.dataset.ao3eSized = ''
+    })
+    try {
+      const column = await box(view, '.AO3E--site--work')
+      for (const part of ['.work.meta.group', `.${COMMENTS_CLASS}`]) {
+        const { w, x } = await box(view, part)
+        assert.ok(Math.abs(w / column.w - 0.95) < 0.01, `${part} is ${w}px of a ${column.w}px column`)
+        assert.ok(Math.abs((x - column.x) - (column.right - x - w)) < 1, `${part} should be centred`)
+      }
+    }
+    finally {
+      await view.$eval('.AO3E--site--work', el => delete el.dataset.ao3eSized)
+    }
+  })
+
+  test('a reply sits a step in from what it answers', async () => {
+    const [comment, reply] = await Promise.all([box(view, '#comment_1'), box(view, '#comment_2')])
+    assert.ok(reply.x > comment.x + 8, `the reply (x ${reply.x}) should be indented from the comment (x ${comment.x})`)
+  })
+
+  /** Placed as `readerSizing.ts` places them: on the column's edges. */
+  test('the reader-mode grips stand a little off the text', async () => {
+    const text = await box(view, '#workskin')
+    const [left, right] = await view.evaluate((edge) => {
+      const grip = (side, x) => {
+        const el = document.createElement('div')
+        el.className = `AO3E AO3E--reader-handle AO3E--reader-handle-${side}`
+        el.style.left = `${x}px`
+        document.body.append(el)
+        const r = el.getBoundingClientRect()
+        el.remove()
+        return { x: r.x, right: r.right }
+      }
+      return [grip('left', edge.x), grip('right', edge.right)]
+    }, text)
+    assert.ok(Math.abs(text.x - left.right - 4) < 0.5, `the left grip ends ${text.x - left.right}px before the text`)
+    assert.ok(Math.abs(right.x - text.right - 4) < 0.5, `the right grip starts ${right.x - text.right}px after the text`)
   })
 
   /** Reader mode zooms a work by the font size it sets on `#workskin`. */

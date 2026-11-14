@@ -40,6 +40,14 @@ export const WORK_TEXT_TTL_MS = 90 * 24 * 60 * 60 * 1000
 export const WORK_TEXT_PREFIX = 'workText.'
 export const WORK_TEXT_INDEX_KEY = 'workTextIndex'
 
+/**
+ * The class of the section a cached copy keeps its comments in, after
+ * `#workskin`. Named here because three things find it: the sanitizer that
+ * writes it, the search inside works that stops short of it, and the exported
+ * page that jumps to it.
+ */
+export const COMMENTS_CLASS = 'ao3e-comments'
+
 /** First retry of a failed fetch, doubling per consecutive failure. */
 export const FAILURE_BACKOFF_BASE_MS = 60 * 60 * 1000
 
@@ -74,6 +82,11 @@ export interface WorkTextMeta {
   fetchedAt: number
   /** {@link WORK_TEXT_VERSION} at the time of writing. */
   v: number
+  /**
+   * Set when the text was fetched with every page of the work's comments, which
+   * then follow `#workskin` in it ({@link file://./sanitize.ts}).
+   */
+  comments?: boolean
   /** Set when the last attempt failed; the text (if any) is the previous good copy. */
   failure?: WorkTextFailure
   /** Consecutive failures, for {@link failureBackoffMs}. */
@@ -112,7 +125,7 @@ export interface WorkFreshness {
 }
 
 /** Why a work is being fetched. `null` from {@link needsFetch} means "leave it alone". */
-export type FetchReason = 'absent' | 'version' | 'retry' | 'updated' | 'chapters' | 'words' | 'ttl'
+export type FetchReason = 'absent' | 'version' | 'retry' | 'updated' | 'chapters' | 'words' | 'comments' | 'ttl'
 
 export interface FreshnessOptions {
   /** Override the TTL floor (tests, and a future "refetch everything older than…"). */
@@ -127,6 +140,8 @@ export interface FreshnessOptions {
    * shouldn't have to wait out an hour they can see no reason for.
    */
   retryFailures?: boolean | 'now'
+  /** Whether the reader wants comments saved with each work, so a copy saved without them is behind. */
+  comments?: boolean
 }
 
 /** How long to wait after `attempts` consecutive failures before trying again. */
@@ -155,7 +170,7 @@ export function needsFetch(
   now: number,
   opts: FreshnessOptions = {},
 ): FetchReason | null {
-  const { ttlMs = WORK_TEXT_TTL_MS, version = WORK_TEXT_VERSION, retryFailures = true } = opts
+  const { ttlMs = WORK_TEXT_TTL_MS, version = WORK_TEXT_VERSION, retryFailures = true, comments = false } = opts
 
   if (!entry)
     return 'absent'
@@ -185,6 +200,9 @@ export function needsFetch(
 
   if (blurb.words > 0 && blurb.words !== entry.words)
     return 'words'
+
+  if (comments && !entry.comments)
+    return 'comments'
 
   if (now - entry.fetchedAt >= ttlMs)
     return 'ttl'

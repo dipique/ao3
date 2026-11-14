@@ -12,6 +12,7 @@ import {
   textSnippet,
   workTextOf,
 } from '../../src/content_script/searchView/textSearch.ts'
+import { COMMENTS_CLASS } from '../../src/content_script/siteExport/workText.ts'
 import { figures, mentions } from '../facts.mjs'
 
 /** A stored work as the sanitizer writes one: the meta block, then the work's own text. */
@@ -23,6 +24,12 @@ describe('workTextOf', () => {
   test('keeps the work and leaves the meta block behind', () => {
     const text = workTextOf(storedWork('<p>Once upon a time.</p>'))
     assert.equal(text, 'A Title Once upon a time.')
+  })
+
+  test('ends where the work does, leaving the comments saved after it behind', () => {
+    const work = storedWork('<p>Once upon a time.</p>')
+    const withComments = work.replace(/<\/div>$/, `<div id="comments" class="${COMMENTS_CLASS}"><ol class="thread"><li class="comment"><blockquote class="userstuff"><p>Loved it.</p></blockquote></li></ol></div></div>`)
+    assert.equal(workTextOf(withComments), 'A Title Once upon a time.')
   })
 
   test('falls back to the whole markup when there is no #workskin', () => {

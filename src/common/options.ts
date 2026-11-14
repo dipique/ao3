@@ -82,6 +82,12 @@ export interface Options {
    * reader asks for.
    */
   pruneOrphanedBlurbs: boolean
+  /**
+   * Save every page of a work's comments with its cached text, for an offline
+   * copy to show under the work. Each further page of comments is one more
+   * request for the work page. Off by default.
+   */
+  cacheComments: boolean
 
   compressSearchUrls: boolean
   tagToolbar: boolean

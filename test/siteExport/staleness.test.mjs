@@ -116,6 +116,34 @@ describe('needsFetch', () => {
     })
   })
 
+  describe('comments', () => {
+    test('a copy saved without its comments is fetched again once comments are wanted', () => {
+      assert.equal(needsFetch(meta(), blurb(), NOW, { comments: true }), 'comments')
+    })
+
+    test('a copy saved with them is left alone', () => {
+      assert.equal(needsFetch(meta({ comments: true }), blurb(), NOW, { comments: true }), null)
+    })
+
+    test('a copy saved with them stands when comments are no longer wanted', () => {
+      assert.equal(needsFetch(meta({ comments: true }), blurb(), NOW), null)
+    })
+
+    test('without the setting, a copy without comments is current', () => {
+      assert.equal(needsFetch(meta(), blurb(), NOW, { comments: false }), null)
+    })
+
+    test('the blurb proxies are reported ahead of it, and the TTL floor after it', () => {
+      assert.equal(needsFetch(meta(), blurb({ words: 9000 }), NOW, { comments: true }), 'words')
+      assert.equal(needsFetch(meta({ fetchedAt: NOW - WORK_TEXT_TTL_MS - DAY }), blurb(), NOW, { comments: true }), 'comments')
+    })
+
+    test('a failed entry still waits out its backoff', () => {
+      const waiting = meta({ failure: 'error', attempts: 1, attemptedAt: NOW - 60_000 })
+      assert.equal(needsFetch(waiting, blurb(), NOW, { comments: true }), null)
+    })
+  })
+
   describe('failures', () => {
     const failed = (over = {}) => meta({ failure: 'error', attempts: 1, attemptedAt: NOW - DAY, ...over })
 
@@ -202,6 +230,12 @@ describe('planWorkCache', () => {
 
   test('an empty list plans nothing', () => {
     assert.deepEqual(planWorkCache([], {}, NOW), { queue: [], reasons: {}, fresh: [], waiting: [] })
+  })
+
+  test('queues the copies saved without comments when comments are wanted', () => {
+    const plan = planWorkCache(works, { ...index, a: meta({ comments: true }) }, NOW, { comments: true })
+    assert.deepEqual(plan.queue, ['b'])
+    assert.deepEqual(planWorkCache(works, index, NOW, { comments: true }).reasons, { a: 'comments', b: 'chapters' })
   })
 })
 

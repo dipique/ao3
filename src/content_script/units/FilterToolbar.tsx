@@ -1,4 +1,3 @@
-import Icon from '~icons/ao3e/icon.jsx'
 import MdiBookOpenVariant from '~icons/mdi/book-open-variant.jsx'
 import MdiCog from '~icons/mdi/cog.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
@@ -11,12 +10,14 @@ import MdiPlaylistPlay from '~icons/mdi/playlist-play.jsx'
 import MdiPlaylistPlus from '~icons/mdi/playlist-plus.jsx'
 
 import type { ListState, SaveBackDone, SaveBackPage, SaveBackPlan, SaveBackUndoPlan, SavedList, TrackedFilter, TrackedList, TrackedMeta } from '#common'
+import type { FloatingToolbar } from '#content_script/floatingToolbar.tsx'
 import type { DetachedSnapshot } from '#content_script/searchView/cache.ts'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
 import { ADDON_CLASS, aliasOf, api, cache, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
+import { BUTTON_CLASS, createFloatingToolbar, ICON_CLASS, toolbarButton } from '#content_script/floatingToolbar.tsx'
 import { holdSearchPrompt } from '#content_script/pendingSearch.ts'
 import { detachSnapshot, pruneDetached, restoreSnapshot } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
@@ -27,12 +28,6 @@ import { endRefining, openRefining, refiningList, startRefining, takeRefiningLin
 import { trackedFilterOf } from '#content_script/tracked/viewFilter.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
-
-const TOOLBAR_CLASS = `${ADDON_CLASS}--filter-toolbar`
-const PANEL_CLASS = `${ADDON_CLASS}--filter-toolbar--panel`
-const FAB_CLASS = `${ADDON_CLASS}--filter-toolbar--fab`
-const OPEN_CLASS = `${ADDON_CLASS}--filter-toolbar--open`
-const BUTTON_CLASS = `${ADDON_CLASS}--filter-toolbar--button`
 
 /** The tracking pill and the box it grows — see {@link FilterToolbar.buildTrackButton}. */
 const TRACK_CLASS = `${ADDON_CLASS}--filter-toolbar--track`
@@ -127,51 +122,15 @@ export function refreshFilterToolbar(): void {
 }
 
 /**
- * How much of the bottom-right corner this toolbar is occupying, published on
- * `<html>` for anything else that parks itself there. The toast stack is the
- * one thing that does (see {@link file://../../common/toast/toast.css}) and it
- * offsets itself by this, so a toast raised by one of the pills below sits
- * above the toolbar instead of over it — until this existed, saving anything
- * from a pill made the whole toolbar unreachable for as long as the toast was
- * up, the launcher included.
- *
- * Deliberately survives `clean()`: a pill's write re-runs every unit, and the
- * toast it raised is *not* ours to remove (it has no `ADDON_CLASS`, so it rides
- * out the rebuild). Dropping the property in between would drop that toast onto
- * the corner and lift it again a moment later. `ready()` always mounts a
- * toolbar — the unit is always enabled — so it is always rewritten.
+ * The toolbar's shell as mounted, so each run's `clean()` can stop it following
+ * outside clicks and its box before `ready()` mounts a fresh one — otherwise
+ * re-runs would leak listeners.
  */
-const RESERVE_PROP = '--ao3e-corner-reserve'
+let mounted: FloatingToolbar | null = null
 
 /**
- * Watches the mounted toolbar's box, so the reserve follows a pill appearing or
- * the tracking box growing out of one. Module scope for the same reason as the
- * outside-click handler below: one per mounted toolbar, detached by `clean()`.
- */
-let reserveObserver: ResizeObserver | null = null
-
-/**
- * Document listener that collapses the panel on an outside click. Kept at module
- * scope (not per-instance) so each run's `clean()` can detach the previous one
- * before `ready()` mounts a fresh toolbar — otherwise re-runs would leak listeners.
- */
-let outsideHandler: ((e: Event) => void) | null = null
-function detachOutsideHandler(): void {
-  if (outsideHandler) {
-    document.removeEventListener('pointerdown', outsideHandler, true)
-    outsideHandler = null
-  }
-}
-
-function detachReserveObserver(): void {
-  reserveObserver?.disconnect()
-  reserveObserver = null
-}
-
-/**
- * A floating control in the bottom-right corner of listing pages. A round,
- * touch-sized button (the extension's AO3 logo) expands a stack of pill toggles
- * — and collapses them again — so the stack can grow without crowding the page:
+ * The floating control in the bottom-right corner of AO3's pages
+ * ({@link file://../floatingToolbar.tsx}), with these pills:
  *
  * - **Peek** — on any listing where the extension hid one or more works, toggles
  *   a body class that reveals them (and hides them again) without touching the
@@ -238,8 +197,8 @@ export class FilterToolbar extends Unit {
   override get enabled() { return true }
 
   static override async clean(): Promise<void> {
-    detachOutsideHandler()
-    detachReserveObserver()
+    mounted?.detach()
+    mounted = null
     syncPeek = null
     syncTrack = null
     trackWritten = null
@@ -274,7 +233,10 @@ export class FilterToolbar extends Unit {
   }
 
   buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean, showReplace: boolean, trackable: TrackablePage | null): HTMLElement {
-    const panel = <div class={PANEL_CLASS} role="group" />
+    mounted?.detach()
+    const toolbar = createFloatingToolbar({ onOpenChange: holdSearchPrompt })
+    mounted = toolbar
+    const { el: container, panel } = toolbar
     panel.append(this.buildOptionsButton())
     if (trackable) {
       const track = this.buildTrackButton(trackable)
@@ -298,41 +260,6 @@ export class FilterToolbar extends Unit {
     if (menusButton)
       panel.append(menusButton)
 
-    const fab: HTMLButtonElement = (
-      <button type="button" class={FAB_CLASS} aria-haspopup="true" aria-expanded="false">
-        <Icon />
-      </button>
-    ) as HTMLElement as HTMLButtonElement
-
-    // The panel renders above the fab (column layout) so the pills stack upward.
-    const container = (
-      <div class={`${ADDON_CLASS}  ${TOOLBAR_CLASS}`}>
-        {panel}
-        {fab}
-      </div>
-    )
-
-    let open = false
-
-    // Say how much of the corner this is taking, for whatever else is in it —
-    // see RESERVE_PROP. Measured from the live box rather than worked out from
-    // the stylesheet, so the reader's font size, however many pills this page
-    // has and the tracking box growing out of one are all in it. Collapsed, only
-    // the circle counts: the panel keeps its layout box while it is hidden, and
-    // reserving that would hold every toast a couple of hundred pixels off the
-    // bottom of the page for nothing.
-    const syncReserve = (): void => {
-      // Nothing is published until the toolbar has a box — `ready()` appends it
-      // after this runs. Leaving the property as it was until then is the point:
-      // a toast raised by a pill outlives the rebuild that pill's write sets
-      // off, and must not drop onto the corner and rise again in between.
-      if (!container.isConnected)
-        return
-      const measured = container.hidden ? null : (open ? container : fab).getBoundingClientRect()
-      const reserved = measured ? Math.max(0, Math.round(window.innerHeight - measured.top)) : 0
-      document.documentElement.style.setProperty(RESERVE_PROP, `${reserved}px`)
-    }
-
     // The peek pill comes and goes with the count, and with nothing left in the
     // panel there is nothing for the fab to open — so the whole toolbar steps
     // out of the corner rather than leaving a button that opens an empty box.
@@ -350,51 +277,18 @@ export class FilterToolbar extends Unit {
         }
       }
       container.hidden = panel.children.length === 0
-      syncReserve()
+      toolbar.syncReserve()
     }
     if (peek)
       syncPeek = syncVisible
     syncVisible()
-
-    // Everything that changes the box: the toolbar being appended (the first
-    // real measurement), a pill arriving or leaving, the tracking box opening.
-    detachReserveObserver()
-    reserveObserver = new ResizeObserver(() => syncReserve())
-    reserveObserver.observe(container)
-
-    const setOpen = (next: boolean): void => {
-      open = next
-      container.classList.toggle(OPEN_CLASS, open)
-      fab.setAttribute('aria-expanded', String(open))
-      const label = open ? 'Hide extension controls' : 'Show extension controls'
-      fab.title = label
-      fab.setAttribute('aria-label', label)
-      holdSearchPrompt(open)
-      // Opening changes what counts as taken without changing the box the
-      // observer above is watching, so it has nothing to say about this one.
-      syncReserve()
-    }
-    setOpen(false)
-
-    fab.addEventListener('click', (e) => {
-      e.preventDefault()
-      setOpen(!open)
-    })
-
-    // Collapse when the user clicks anywhere outside the toolbar.
-    detachOutsideHandler()
-    outsideHandler = (e: Event) => {
-      if (open && !container.contains(e.target as Node))
-        setOpen(false)
-    }
-    document.addEventListener('pointerdown', outsideHandler, true)
 
     return container
   }
 
   /** The peek pill, plus the sync that relabels it and reports the current count. */
   buildPeekButton(): { button: HTMLButtonElement, sync: () => number } {
-    const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`} />
+    const icon: HTMLElement = <span class={ICON_CLASS} />
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
       <button type="button" class={BUTTON_CLASS} aria-pressed="false" data-ao3e-action="peek">
@@ -429,7 +323,7 @@ export class FilterToolbar extends Unit {
   }
 
   buildMenusButton(): HTMLElement {
-    const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiGestureTapHold /></span>
+    const icon: HTMLElement = <span class={ICON_CLASS}><MdiGestureTapHold /></span>
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
       <button type="button" class={`${BUTTON_CLASS}  ${ADDON_CLASS}--filter-toolbar--menus`} aria-pressed="false">
@@ -471,7 +365,7 @@ export class FilterToolbar extends Unit {
     // Optimistic local state so the pill flips instantly; the options change also
     // triggers a re-run that rebuilds the toolbar (and (de)activates ReaderMode).
     let on = this.options.readerMode
-    const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiBookOpenVariant /></span>
+    const icon: HTMLElement = <span class={ICON_CLASS}><MdiBookOpenVariant /></span>
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
       <button type="button" class={BUTTON_CLASS} aria-pressed="false">
@@ -507,7 +401,7 @@ export class FilterToolbar extends Unit {
     // Optimistic local state, as with the reader pill: the options write also
     // re-runs every unit, which rebuilds this toolbar from the saved value.
     let on = this.options.textReplacements.tools
-    const icon: HTMLElement = <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiFindReplace /></span>
+    const icon: HTMLElement = <span class={ICON_CLASS}><MdiFindReplace /></span>
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
       <button type="button" class={BUTTON_CLASS} aria-pressed="false" data-ao3e-action="replace-tools">
@@ -1167,14 +1061,7 @@ export class FilterToolbar extends Unit {
   }
 
   buildOptionsButton(): HTMLElement {
-    const label = 'Open the AO3 Enhancements options page'
-    const button: HTMLButtonElement = (
-      <button type="button" class={BUTTON_CLASS} title={label} aria-label={label} data-ao3e-action="options">
-        <span class={`${ADDON_CLASS}--filter-toolbar--icon`}><MdiCog /></span>
-        <span>Open extension options…</span>
-      </button>
-    ) as HTMLElement as HTMLButtonElement
-
+    const button = toolbarButton(<MdiCog />, 'Open extension options…', 'Open the AO3 Enhancements options page', 'options')
     button.addEventListener('click', () => {
       if (!extensionAlive())
         return
@@ -1325,7 +1212,7 @@ function trackPill(icon: JSX.Element, text: string, title: string, pressed = fal
   const group: HTMLElement = <div class={TRACK_CLASS} />
   const button: HTMLButtonElement = (
     <button type="button" class={BUTTON_CLASS} title={title} aria-label={title}>
-      <span class={`${ADDON_CLASS}--filter-toolbar--icon`}>{icon}</span>
+      <span class={ICON_CLASS}>{icon}</span>
       <span class={`${TRACK_CLASS}--text`}>{text}</span>
     </button>
   ) as HTMLElement as HTMLButtonElement

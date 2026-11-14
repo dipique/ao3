@@ -36,6 +36,7 @@ export const OPTION_DEFAULTS: Options = {
   },
 
   pruneOrphanedBlurbs: false,
+  cacheComments: false,
 
   compressSearchUrls: false,
   tagToolbar: false,

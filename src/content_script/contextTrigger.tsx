@@ -204,6 +204,17 @@ export function borrowMenuTrigger(el: HTMLElement, lender: () => HTMLElement | n
   menuLenders.set(el, lender)
 }
 
+/**
+ * Open `el`'s menu at a viewport point, as right-clicking it would, for a
+ * control somewhere else that offers the same menu. Does nothing while `el` has
+ * none.
+ */
+export function openMenuOf(el: HTMLElement, x: number, y: number): void {
+  const trigger = triggers.get(el) ?? borrowedTrigger(el)
+  if (trigger)
+    fire(trigger, x, y)
+}
+
 function borrowedTrigger(el: Element): Trigger | null {
   const lender = menuLenders.get(el)?.()
   const trigger = lender && triggers.get(lender)

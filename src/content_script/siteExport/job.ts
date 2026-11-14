@@ -617,6 +617,7 @@ async function runCaching(job: ExportJob, signal: AbortSignal): Promise<void> {
   const context = await loadContext(job.cacheKey)
   if (!context)
     throw new Error(`There is no stored list for "${job.descriptor.label}" any more. Refresh the list and try again.`)
+  const comments = await options.get('cacheComments')
 
   // Planned once, when the step begins with nothing to do yet; a resumed job
   // arrives with a queue half consumed and must not have it rebuilt underneath.
@@ -626,7 +627,7 @@ async function runCaching(job: ExportJob, signal: AbortSignal): Promise<void> {
       [...context.values()].map(entry => entry.freshness),
       index,
       Date.now(),
-      { retryFailures: job.retryNow ? 'now' : true },
+      { retryFailures: job.retryNow ? 'now' : true, comments },
     )
     job.queue = plan.queue
     job.total = plan.queue.length
@@ -656,7 +657,7 @@ async function runCaching(job: ExportJob, signal: AbortSignal): Promise<void> {
 
       let result
       try {
-        result = await cacheWorkText(entry.freshness, signal)
+        result = await cacheWorkText(entry.freshness, signal, { comments })
       }
       catch (err) {
         // A stopped run learned nothing about this work, so it goes back to the
