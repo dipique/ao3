@@ -4,7 +4,7 @@ import { inflateSync } from 'node:zlib'
 
 import { OPTIONS_SAVE_DELAY_MS } from '../../src/common/constants.ts'
 import { SUGGEST_DELAY_MS } from '../../src/options_ui/model/tagSuggestions.ts'
-import { ensureBuilt, findChrome, hurryTimers, installMock, launch, openWindow, outlast, serveDist, sleep } from './helpers.mjs'
+import { ensureBuilt, findChrome, hurryTimers, installMock, launch, openWindow, outlast, serveDist, until } from './helpers.mjs'
 
 /**
  * The options page, opened the one way every e2e test opens it, and read
@@ -125,22 +125,8 @@ export async function openOptions(browser, server, { seed = {}, hash = '', viewp
   return new OptionsPage(page, messages)
 }
 
-/**
- * Wait until `check` (which may be async) holds, asking again every 50 ms, or
- * fail naming `what` once `ms` have gone by: for a test to wait on what it is
- * waiting for, such as a write landing, rather than on a guess at how long that
- * takes.
- */
-export async function until(what, check, ms = 20000) {
-  const deadline = Date.now() + ms
-  while (!(await check())) {
-    if (Date.now() > deadline)
-      assert.fail(`timed out waiting for ${what}`)
-    await sleep(50)
-  }
-}
-
 export { figures, mentions } from '../facts.mjs'
+export { until }
 
 /** Where every request the options page makes of AO3 goes. */
 export const ARCHIVE = 'https://archiveofourown.org'

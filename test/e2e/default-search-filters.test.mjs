@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { COMPLETION_LABELS, CROSSOVER_LABELS } from '../../src/common/data.ts'
+import { mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { mentions } from './optionsPage.mjs'
 import { settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()

@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -332,6 +333,21 @@ export function installMock(seed) {
 }
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+/**
+ * Wait until `check` (which may be async) holds, asking again every 50 ms, or
+ * fail naming `what` once `ms` have gone by: for a test to wait on what it is
+ * waiting for, such as a write landing, rather than on a guess at how long that
+ * takes.
+ */
+export async function until(what, check, ms = 20000) {
+  const deadline = Date.now() + ms
+  while (!(await check())) {
+    if (Date.now() > deadline)
+      assert.fail(`timed out waiting for ${what}`)
+    await sleep(50)
+  }
+}
 
 /**
  * A page script for `evaluateOnNewDocument`: a timer the page sets for exactly

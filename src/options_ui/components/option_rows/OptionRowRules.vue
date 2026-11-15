@@ -34,7 +34,7 @@ OptionRowRulesContext.provide({
       <div flex="~ items-center gap-3 wrap">
         <OptionRowRuleColors />
         <label flex="~ items-center gap-2" data-setting="always-show-priority">
-          <span text="[12.5px] muted-fg">Always show priority</span>
+          <span text="[12.5px] muted-fg">'Always show' default priority</span>
           <Input
             v-model.number="alwaysShow"
             type="number"

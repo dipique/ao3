@@ -5,8 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { createDefaultMarks, moveMark, packIds, packProgress } from '../../src/common/workMarks.ts'
 import { addMonths, fromEpochDays, todayEpochDays } from '../../src/common/workProgress.ts'
-import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch, until } from './helpers.mjs'
 import { menuRows, openMenu, pickRow, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()

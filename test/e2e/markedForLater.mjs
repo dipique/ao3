@@ -1,6 +1,6 @@
 import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
+import { mentions } from '../facts.mjs'
 import { installMock, openWindow, storedLists } from './helpers.mjs'
-import { mentions } from './optionsPage.mjs'
 import { ARCHIVE, inject, relayWrites } from './trackedPages.mjs'
 
 /**

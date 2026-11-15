@@ -3,8 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { utcToday } from '../../src/common/trackedLists.ts'
 import { mentions } from '../facts.mjs'
-import { ensureBuilt, findChrome } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { ensureBuilt, findChrome, until } from './helpers.mjs'
 import {
   ARCHIVE,
   blurb,

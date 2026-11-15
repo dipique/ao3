@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { figures } from '../facts.mjs'
-import { ensureBuilt, findChrome, installMock, storedListIds } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { ensureBuilt, findChrome, installMock, storedListIds, until } from './helpers.mjs'
 import { ARCHIVE, blurb, inject, launch, listingPage, openTab, rerun, stored, visit } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, resetWorkIds, listing as reviewListing, TODAY, trackedOption, works } from './trackedReview.mjs'
 

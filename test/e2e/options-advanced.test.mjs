@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { captureDownloads, skip, startOptions, until } from './optionsPage.mjs'
-import { toastTypes } from './trackedPages.mjs'
+import { toastTypes } from './toasts.mjs'
 
 const WIDE = { width: 1280, height: 800 }
 const IMPORT_EXPORT = 'your-data-import-export-your-settings'

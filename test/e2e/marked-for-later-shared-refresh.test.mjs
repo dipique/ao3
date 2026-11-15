@@ -2,9 +2,8 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { claimRefresh, REFRESH_CLAIM_TTL_MS } from '../../src/content_script/searchView/listRefresh.ts'
-import { ensureBuilt, findChrome } from './helpers.mjs'
+import { ensureBuilt, findChrome, until } from './helpers.mjs'
 import { archiveTab, KEY, liveTitles, loadToRead, openToRead, RETRY_AFTER, runToRead, shownTitles, showsProgress, storedClaim, storedSeed, toReadPage, updatingNote, updatingStop, waitsOutRefusal } from './markedForLater.mjs'
-import { until } from './optionsPage.mjs'
 import { launch, linkWrites, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()

@@ -27,6 +27,8 @@
     "tests:e2e:visual": "node --test --test-concurrency=3 --test-global-setup=test/e2e/globalSetup.mjs \"test/e2e/visual/*.test.mjs\"",
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run tests:all",
     "verify:full": "pnpm run verify && pnpm run tests:e2e:visual",
+    "verify:changed": "node scripts/verify-changed.mjs",
+    "verify:full:changed": "node scripts/verify-changed.mjs --visual",
     "build": "pnpm run build:prod:firefox && pnpm run build:prod:chrome",
     "dist": "node scripts/dist.ts",
     "dist:lint": "pnpm run dist:firefox:lint",

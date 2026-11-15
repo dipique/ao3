@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, beforeEach, describe, test } from 'node:test'
 
-import { ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { ensureBuilt, findChrome, installMock, launch, until } from './helpers.mjs'
 import { inject, menuGuardOver, openMenu } from './trackedPages.mjs'
 
 const chromePath = findChrome()

@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
+    // With nothing emitted, the build info is all `vue-tsc -b` has to tell an
+    // unchanged project from a changed one; without it every project is checked
+    // again on every run.
+    "incremental": true,
     "target": "ESNext",
     "moduleDetection": "force",
     "useDefineForClassFields": true,

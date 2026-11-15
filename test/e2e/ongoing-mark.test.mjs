@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { describeProgress, hiddenLabel, todayEpochDays } from '../../src/common/workProgress.ts'
-import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { mentions, until } from './optionsPage.mjs'
+import { mentions } from '../facts.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch, until } from './helpers.mjs'
 import { menuClosed, menuRows, openMenu, pickRow, rerun, runs, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()

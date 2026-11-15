@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
+    // With nothing emitted, the build info is all `vue-tsc -b` has to tell an
+    // unchanged project from a changed one; without it every project is checked
+    // again on every run.
+    "incremental": true,
     "target": "ESNext",
     // The options UI is all .vue SFCs with template blocks — it has no .tsx of
     // its own — so the only JSX this project ever sees is in the src/common

@@ -5,8 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { READINESS_LABELS } from '../../src/common/workProgress.ts'
 import { UNREAD } from '../../src/content_script/searchView/engine.ts'
-import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch, until } from './helpers.mjs'
 import { pressFacet, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()

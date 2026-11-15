@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { ensureBuilt, findChrome, storedListIds } from './helpers.mjs'
+import { ensureBuilt, findChrome, storedListIds, until } from './helpers.mjs'
 import { archiveTab, KEY, liveTitles, openToRead, shownTitles, storedClaim, storedSeed, toReadPage } from './markedForLater.mjs'
-import { until } from './optionsPage.mjs'
 import { launch, rerun } from './trackedPages.mjs'
 
 const chromePath = findChrome()

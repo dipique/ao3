@@ -3,8 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { createDefaultMarks, packIds } from '../../src/common/workMarks.ts'
 import { isFresh, refreshIntervalMs } from '../../src/content_script/searchView/freshness.ts'
-import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { ensureBuilt, findChrome, storedListIds, storedLists, until } from './helpers.mjs'
 import { ARCHIVE, blurb, keptStore, launch, openMenu, openTab, pickRow, rerun, stored, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()

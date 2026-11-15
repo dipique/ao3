@@ -4,8 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { createDefaultMarks, markItems } from '../../src/common/workMarks.ts'
-import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch, until } from './helpers.mjs'
 import { menuRows, openMenu, pickRow, rerun, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()

@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { ensureBuilt, findChrome, installMock, storedLists } from './helpers.mjs'
+import { ensureBuilt, findChrome, installMock, storedLists, until } from './helpers.mjs'
 import { RETRY_AFTER, waitsOutRefusal } from './markedForLater.mjs'
-import { until } from './optionsPage.mjs'
 import { inject, launch } from './trackedPages.mjs'
 
 const chromePath = findChrome()

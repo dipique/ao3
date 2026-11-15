@@ -4,9 +4,8 @@ import { after, before, describe, test } from 'node:test'
 import { unpackIds } from '../../src/common/workMarks.ts'
 import { WAIT_BUDGET } from '../../src/content_script/archiveFetch.ts'
 import { figures } from '../facts.mjs'
-import { ensureBuilt, findChrome, installMock, storedListIds, storedLists } from './helpers.mjs'
+import { ensureBuilt, findChrome, installMock, storedListIds, storedLists, until } from './helpers.mjs'
 import { archiveTab, blurb, DESCRIPTOR, HOUR, KEY, liveTitles, loadToRead, shownTitles, storedClaim, TO_READ, toReadPage, updatingNote } from './markedForLater.mjs'
-import { until } from './optionsPage.mjs'
 import { ARCHIVE, inject, launch, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()

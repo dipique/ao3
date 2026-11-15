@@ -3,8 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { DIST, ensureBuilt, findChrome, installMock, launch, storedLists } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch, storedLists, until } from './helpers.mjs'
 import { openMenu, pickRow, rerun, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()

@@ -4,7 +4,7 @@ import { after, before, describe, test } from 'node:test'
 import { backupList, NEXT_BACKUP } from '../../src/options_ui/model/backups.ts'
 import { numbers } from '../facts.mjs'
 import { mentions, scriptBackground, skip, startOptions, until } from './optionsPage.mjs'
-import { toastTypes } from './trackedPages.mjs'
+import { toastTypes } from './toasts.mjs'
 
 const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 390, height: 844 }

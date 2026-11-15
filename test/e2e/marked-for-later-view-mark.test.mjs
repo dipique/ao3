@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { createDefaultMarks } from '../../src/common/workMarks.ts'
-import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
-import { until } from './optionsPage.mjs'
+import { ensureBuilt, findChrome, storedListIds, storedLists, until } from './helpers.mjs'
 import { ARCHIVE, blurb, launch, openMenu, openTab, pickRow, stored, toastTypes, viewDrawn, visit } from './trackedPages.mjs'
 
 const chromePath = findChrome()

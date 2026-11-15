@@ -5,8 +5,8 @@ import { after, before, describe, test } from 'node:test'
 
 import { COMPLETION_LABELS } from '../../src/common/data.ts'
 import { COMPLETE_VALUE, WIP_VALUE } from '../../src/content_script/searchView/engine.ts'
+import { mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { mentions } from './optionsPage.mjs'
 import { menuClosed, menuGuardOver, menuRows, openMenu, pickRow, settled, viewDrawn } from './trackedPages.mjs'
 
 const chromePath = findChrome()

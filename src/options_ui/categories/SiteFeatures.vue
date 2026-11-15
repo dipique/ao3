@@ -4,7 +4,7 @@
 <template>
   <OptionCategory
     title="Site features &amp; appearance"
-    subtitle="What the extension adds to every AO3 page, and how it looks."
+    subtitle="Themes/skins, site-wide features, and tweaks to AO3 behavior that don't fit anywhere else."
     icon="i-mdi-tune-variant"
     rail-label="Site features"
   >
@@ -16,7 +16,7 @@
     -->
     <OptionSubsection
       title="Link menus"
-      subtitle="Right-click — or long-press — a tag, fandom, author or work to act on it without leaving the page."
+      subtitle="Right-click/long-press tags/fandoms/etc. for quick access to filtering and rule-creation features."
     >
       <OptionMasterGroup
         option-id="contextMenusEnabled"
@@ -25,26 +25,26 @@
       >
         <OptionRow
           title="Open menus with a left-click"
-          subtitle="A plain click or tap on a tag, fandom or author opens its menu instead of following the link; the menu's “Open” item still follows it. Shift+click follows the link, so Ctrl+Shift+click still opens it in a new tab."
+          subtitle="Replaces click behavior with context menu. Shift+click follows the link; Ctrl+Shift+click opens in a new tab."
           :badges="['every-click']"
         >
           <OptionSwitch option-id="openMenuOnClick" />
         </OptionRow>
         <OptionRow
           title="Menu on tags"
-          subtitle="Include or exclude a tag in the Sort &amp; Filter sidebar, or hide, always-show or highlight it everywhere. Tags that already have a rule get a small indicator."
+          subtitle="Tag context menus add an option to include/exclude from the filter sidebar or add a rule."
         >
           <OptionSwitch option-id="tagToolbar" />
         </OptionRow>
         <OptionRow
           title="Menu on fandoms"
-          subtitle="The same actions on fandoms. Fandoms are filtered by id from a bundled list, so any fandom works — not just the ten the sidebar offers."
+          subtitle="Same as the tag menus, but for fandoms."
         >
           <OptionSwitch option-id="fandomToolbar" />
         </OptionRow>
         <OptionRow
           title="Hide or highlight an author"
-          subtitle="Adds hide, collapse, always-show and highlight to an author's menu, so you can manage author rules from any byline. An indicator shows next to the name when one is active."
+          subtitle="Adds hide, collapse, always-show and highlight to an author menu."
         >
           <OptionSwitch option-id="hideAuthorToolbar" />
         </OptionRow>
@@ -57,7 +57,7 @@
         </OptionRow>
         <OptionRow
           title="Mute an author"
-          subtitle="Adds mute / unmute to an author's menu. Muting hides that author's works, series, bookmarks and comments from you across AO3."
+          subtitle="Adds mute / unmute to an author's menu (hides author's works, series, bookmarks and comments across AO3)."
           :badges="['needs-login']"
         >
           <OptionSwitch option-id="muteAuthorToolbar" />
@@ -82,7 +82,7 @@
     >
       <OptionRow
         title="Reveal filtered works"
-        subtitle="Adds “Show N filtered works” to the floating toolbar in the bottom-right corner, which reveals what your filters hid without changing them. It appears only where something is hidden; the toolbar itself is always there for its other quick actions."
+        subtitle="Adds “Show filtered works” toggle to the floating toolbar."
       >
         <OptionSwitch option-id="filterToolbar" />
       </OptionRow>
@@ -97,7 +97,7 @@
 
     <OptionSubsection
       title="Appearance"
-      subtitle="How the extension's own pages, menus and additions to AO3 look, and AO3 itself if you want it dark."
+      subtitle="Themes, skins, and misc. features."
     >
       <OptionRow
         title="Extension theme"
