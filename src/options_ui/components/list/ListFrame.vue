@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import type { ListCap } from '../../model/listView.ts'
+import type { RowWindow } from '../../model/rowWindow.ts'
 
 import { capFor } from '../../model/listView.ts'
+import { estimatedHeights, rowWindow, sameWindow } from '../../model/rowWindow.ts'
+
+type RowKey = string | number
 
 /**
  * The frame an editable list is drawn in: a header for what acts on the list
@@ -16,7 +20,8 @@ import { capFor } from '../../model/listView.ts'
  * scroll, and a shadow shows at an edge only while there is more past it.
  *
  * The rows are the default slot's direct children, since the cap measures
- * them. `bands` goes between the header and the rows: notes about the whole
+ * them. A list too long to draw whole passes `virtualRows`, and draws only
+ * the rows the slot is given. `bands` goes between the header and the rows: notes about the whole
  * list, and column heads. `foot` goes under the rows, outside the cap and its
  * shadows: a line about the list as a whole, such as what it takes to store.
  *
@@ -42,22 +47,83 @@ const props = withDefaults(defineProps<{
   addLabel?: string
   /** Offer to lift the frame over the page, as tall as the window. */
   expandable?: boolean
+  /**
+   * Every row's key, in order, for a list too long to draw whole: the frame
+   * then draws only the rows near the view ({@link rowWindow}), handing their
+   * places in this list to the default slot as `rows`, and keeps the room the
+   * others would take.
+   */
+  virtualRows?: readonly RowKey[]
 }>(), { cap: 'setting' })
 
 /** Add was pressed: the click, whose `currentTarget` is the button, for a dialog to give focus back to. */
 const emit = defineEmits<{ add: [event: MouseEvent] }>()
 
+defineSlots<{
+  default?: (props: { rows?: readonly number[] }) => unknown
+  filter?: () => unknown
+  controls?: () => unknown
+  bands?: () => unknown
+  empty?: () => unknown
+  foot?: () => unknown
+}>()
+
 const titleId = useId()
 
 const rows = useTemplateRef<HTMLElement>('rows')
+const body = useTemplateRef<HTMLElement>('body')
 const held = ref<number | null>(null)
+
+/**
+ * A virtual frame's rows: what the slot is given to draw, the heights
+ * measured of the rows drawn so far, by key, and every row's height, measured
+ * or estimated, in order.
+ */
+const measured = shallowRef(new Map<RowKey, number>())
+const heights = computed(() => props.virtualRows ? estimatedHeights(props.virtualRows, measured.value) : [])
+const shown = shallowRef<RowWindow | null>(null)
+const drawn = computed(() => shown.value ? Array.from({ length: shown.value.end - shown.value.start }, (_, i) => shown.value!.start + i) : undefined)
+
+/** Work out the rows to draw for where the body is scrolled, drawing again only if they changed. */
+function place() {
+  if (!props.virtualRows) {
+    shown.value = null
+    return
+  }
+  const view = body.value
+  const next = rowWindow(heights.value, view?.scrollTop ?? 0, view?.clientHeight || window.innerHeight)
+  if (!sameWindow(shown.value, next))
+    shown.value = next
+}
+watch(heights, place, { immediate: true })
+
+/** Record the heights of the rows drawn, which are the window's rows in order. */
+function measureRows(list: HTMLElement) {
+  const keys = props.virtualRows
+  const from = shown.value?.start
+  if (!keys || from === undefined)
+    return
+  let next: Map<RowKey, number> | null = null
+  for (const [i, row] of [...list.children].entries()) {
+    const key = keys[from + i]
+    const height = row.getBoundingClientRect().height
+    if (key === undefined || measured.value.get(key) === height)
+      continue
+    next ??= new Map(measured.value)
+    next.set(key, height)
+  }
+  if (next)
+    measured.value = next
+}
 
 function measure() {
   const list = rows.value
   // Not laid out, so every height would read 0.
   if (!list?.offsetHeight)
     return
+  measureRows(list)
   held.value = capFor(props.cap, [...list.children].map(row => row.getBoundingClientRect().height))
+  edges()
 }
 
 // The observer catches a row changing height and the frame being shown or
@@ -66,7 +132,34 @@ function measure() {
 // before then, so a row just added past the cap is scrolled to where the
 // capped body shows it.
 useResizeObserver(rows, measure)
+useResizeObserver(body, () => {
+  place()
+  edges()
+})
 onUpdated(measure)
+
+/**
+ * Whether there is more past the body's top and bottom edges, which each show
+ * a shade while there is; and the width of its scrollbar, which the shades
+ * leave clear. The shades lie over the body rather than in its background,
+ * which scrolling would have to paint again at every step.
+ */
+const moreAbove = ref(false)
+const moreBelow = ref(false)
+const gutter = ref(0)
+function edges() {
+  const view = body.value
+  if (!view)
+    return
+  moreAbove.value = view.scrollTop > 0
+  moreBelow.value = view.scrollTop + view.clientHeight < view.scrollHeight - 1
+  gutter.value = view.offsetWidth - view.clientWidth
+}
+
+function scrolled() {
+  place()
+  edges()
+}
 
 /**
  * Bring the row with this `data-list-row` into sight, scrolling the body and
@@ -179,15 +272,24 @@ defineExpose({ reveal })
       <div v-if="empty" data-list-empty class="list-frame__empty">
         <slot name="empty" />
       </div>
-      <div
-        v-else
-        data-list-body
-        class="list-frame__body"
-        :style="{ maxHeight: held === null || expanded ? undefined : `${held}px` }"
-      >
-        <div ref="rows" role="list">
-          <slot />
+      <div v-else class="list-frame__view">
+        <div
+          ref="body"
+          data-list-body
+          class="list-frame__body"
+          :style="{ maxHeight: held === null || expanded ? undefined : `${held}px` }"
+          @scroll.passive="scrolled"
+        >
+          <div
+            ref="rows"
+            role="list"
+            :style="shown ? { paddingTop: `${shown.before}px`, paddingBottom: `${shown.after}px` } : undefined"
+          >
+            <slot :rows="drawn" />
+          </div>
         </div>
+        <div v-show="moreAbove" data-list-shade="top" class="list-frame__shade list-frame__shade--top" :style="{ right: `${gutter}px` }" aria-hidden="true" />
+        <div v-show="moreBelow" data-list-shade="bottom" class="list-frame__shade list-frame__shade--bottom" :style="{ right: `${gutter}px` }" aria-hidden="true" />
       </div>
       <div v-if="$slots.foot" data-list-foot class="list-frame__foot">
         <slot name="foot" />
@@ -219,6 +321,12 @@ defineExpose({ reveal })
   bottom: 16px;
   flex-direction: column;
   box-shadow: var(--dlg-shadow);
+}
+.list-frame--expanded .list-frame__view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 .list-frame--expanded .list-frame__body {
   flex: 1;
@@ -292,26 +400,36 @@ defineExpose({ reveal })
   font-weight: 600;
 }
 
-/*
-  The shadows: two shades fixed to the body's edges (`scroll`), under two
-  covers in the ground colour that travel with the rows (`local`). At the top
-  of the rows the top cover hides the top shade, and at their end the bottom
-  cover hides the bottom one; anywhere between, both shades show.
-*/
+/* The body over a plain ground, which the browser can slide as it scrolls
+   rather than paint again. */
+.list-frame__view {
+  position: relative;
+}
 .list-frame__body {
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
-  background:
-    linear-gradient(rgb(var(--color-default)) 30%, rgb(var(--color-default) / 0)) top / 100% 26px no-repeat local,
-    linear-gradient(rgb(var(--color-default) / 0), rgb(var(--color-default)) 70%) bottom / 100% 26px no-repeat local,
-    radial-gradient(farthest-side at 50% 0, var(--scroll-shade), transparent) top / 100% 11px no-repeat scroll,
-    radial-gradient(farthest-side at 50% 100%, var(--scroll-shade), transparent) bottom / 100% 11px no-repeat scroll;
   background-color: rgb(var(--color-default));
 }
 .list-frame__body:hover {
   scrollbar-color: var(--scroll-thumb-hover) transparent;
+}
+/* The shadows: a shade at each edge, over the rows and clear of the
+   scrollbar, shown while there is more past that edge. */
+.list-frame__shade {
+  position: absolute;
+  left: 0;
+  height: 11px;
+  pointer-events: none;
+}
+.list-frame__shade--top {
+  top: 0;
+  background: radial-gradient(farthest-side at 50% 0, var(--scroll-shade), transparent);
+}
+.list-frame__shade--bottom {
+  bottom: 0;
+  background: radial-gradient(farthest-side at 50% 100%, var(--scroll-shade), transparent);
 }
 
 .list-frame__foot {

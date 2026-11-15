@@ -34,6 +34,16 @@ const shown = computed(() => shownRules(filters.value, query.value, sort.value, 
 }))
 const stale = computed(() => heldOrderStale(filters.value, query.value, sort.value, defaults.value, hold.value))
 
+/**
+ * A list of hundreds of rules is drawn a window at a time: the frame says
+ * which of the shown rules to draw, by their places among them, and each
+ * drawn row says where it stands in the whole list.
+ */
+const keys = computed(() => shown.value.map(row => row.at))
+function drawn(places: readonly number[] = []) {
+  return places.map(place => ({ ...shown.value[place]!, place: place + 1 }))
+}
+
 function edit(rule: Rule) {
   hold.value ??= shown.value.map(row => row.at)
   context.edit?.(rule)
@@ -88,6 +98,7 @@ function add(event: MouseEvent) {
     :empty="shown.length === 0"
     add-label="Add a rule"
     expandable
+    :virtual-rows="keys"
     @add="add"
   >
     <template #filter>
@@ -117,87 +128,91 @@ function add(event: MouseEvent) {
       </template>
     </template>
 
-    <ListRow
-      v-for="{ at, rule, priority } in shown"
-      :key="at"
-      :row-id="at"
-      :template="ROW"
-      :narrow-template="NARROW_ROW"
-      :off="rule.behavior === 'none'"
-      @dblclick="edit(rule)"
-    >
-      <template #icon>
-        <Tooltip>
-          <span class="grid place-items-center text-[15px]">
-            <Icon v-if="rule.behavior === 'highlight'" i-mdi-star :style="{ color: starColor(rule) }" label="Highlight" />
-            <Icon v-else-if="rule.behavior === 'collapse'" i-mdi-arrow-collapse-vertical label="Collapse" />
-            <Icon v-else-if="rule.behavior === 'invert'" i-tabler-eye-exclamation class="text-brand-fg" label="Always show" />
-            <Icon v-else-if="rule.behavior === 'hideFilter'" i-mdi-tag-off label="Hide tag" />
-            <Icon v-else-if="rule.behavior === 'none'" i-mdi-cancel label="Disabled rule" />
-            <Icon v-else i-tabler-eye-off label="Hide work" />
-          </span>
-          <template #content>
-            <span v-if="rule.behavior === 'highlight'">Highlight the match on results (does not hide).</span>
-            <span v-else-if="rule.behavior === 'collapse'">Collapse matching works to a line saying why, with a button to show them.</span>
-            <span v-else-if="rule.behavior === 'invert'">Always show matching works - unless a hide rule outranks this one.</span>
-            <span v-else-if="rule.behavior === 'hideFilter'">Hide the matching tags themselves, on works and in the filter sidebar (does not hide works).</span>
-            <span v-else-if="rule.behavior === 'none'">Disabled - the rule is kept, but does nothing at all.</span>
-            <span v-else>Hide matching works completely - they leave the listing.</span>
-          </template>
-        </Tooltip>
-      </template>
-      <template #numbers>
-        <Tooltip :content="priority.title">
-          <span :class="priority.custom ? 'font-700 text-default-fg' : ''">
-            <span aria-hidden="true">{{ priority.text }}</span>
-            <span class="sr-only">{{ priority.title }}</span>
-          </span>
-        </Tooltip>
-      </template>
-      <span class="min-w-0 flex items-center gap-[7px]">
-        <span class="overflow-hidden text-ellipsis whitespace-pre" :title="rule.value">{{ rule.value }}<span v-if="rule.pseud" class="text-muted-fg"> ({{ rule.pseud }})</span></span>
-        <Tooltip>
-          <span class="list-row__glyph grid shrink-0 place-items-center text-[13px] text-muted-fg">
-            <Icon v-if="matchesId(rule)" i-codicon-symbol-numeric label="Id" />
-            <Icon v-else-if="rule.matcher === 'contains'" i-codicon-whole-word label="Contains" />
-            <Icon v-else-if="rule.matcher === 'regex'" i-codicon-regex label="Regex" />
-            <Icon v-else i-codicon-symbol-string label="Exact" />
-          </span>
-          <template #content>
-            <span v-if="matchesId(rule)">A numeric value matches the id exactly.</span>
-            <span v-else-if="rule.matcher === 'contains'">Matches if the value contains the rule. Often used for matching one person in a Relationship tag.</span>
-            <span v-else-if="rule.matcher === 'regex'">Uses regular expressions to match the rule to the value.</span>
-            <span v-else>Matches if the value exactly equals the rule. (default)</span>
-          </template>
-        </Tooltip>
-      </span>
-      <template #meta>
-        {{ ruleTargetLabel(rule.target) }}
-      </template>
-      <template #actions>
-        <DialogDetachedTrigger
-          v-if="context.editDialog.value"
-          :dialog="context.editDialog.value"
-          class="icon-btn"
-          :aria-label="`Edit rule “${rule.value}”`"
-          title="Edit rule"
-          data-action="edit"
-          @click="edit(rule)"
-        >
-          <span class="i-tabler-pencil" text="[14px]" aria-hidden="true" />
-        </DialogDetachedTrigger>
-        <button
-          type="button"
-          class="icon-btn"
-          :aria-label="`Remove rule “${rule.value}”`"
-          title="Remove rule"
-          data-action="remove"
-          @click="remove(at, rule)"
-        >
-          <span class="i-tabler-trash" text="[14px]" aria-hidden="true" />
-        </button>
-      </template>
-    </ListRow>
+    <template #default="{ rows }">
+      <ListRow
+        v-for="{ at, rule, priority, place } in drawn(rows)"
+        :key="at"
+        :row-id="at"
+        :aria-posinset="place"
+        :aria-setsize="shown.length"
+        :template="ROW"
+        :narrow-template="NARROW_ROW"
+        :off="rule.behavior === 'none'"
+        @dblclick="edit(rule)"
+      >
+        <template #icon>
+          <Tooltip>
+            <span class="grid place-items-center text-[15px]">
+              <Icon v-if="rule.behavior === 'highlight'" i-mdi-star :style="{ color: starColor(rule) }" label="Highlight" />
+              <Icon v-else-if="rule.behavior === 'collapse'" i-mdi-arrow-collapse-vertical label="Collapse" />
+              <Icon v-else-if="rule.behavior === 'invert'" i-tabler-eye-exclamation class="text-brand-fg" label="Always show" />
+              <Icon v-else-if="rule.behavior === 'hideFilter'" i-mdi-tag-off label="Hide tag" />
+              <Icon v-else-if="rule.behavior === 'none'" i-mdi-cancel label="Disabled rule" />
+              <Icon v-else i-tabler-eye-off label="Hide work" />
+            </span>
+            <template #content>
+              <span v-if="rule.behavior === 'highlight'">Highlight the match on results (does not hide).</span>
+              <span v-else-if="rule.behavior === 'collapse'">Collapse matching works to a line saying why, with a button to show them.</span>
+              <span v-else-if="rule.behavior === 'invert'">Always show matching works - unless a hide rule outranks this one.</span>
+              <span v-else-if="rule.behavior === 'hideFilter'">Hide the matching tags themselves, on works and in the filter sidebar (does not hide works).</span>
+              <span v-else-if="rule.behavior === 'none'">Disabled - the rule is kept, but does nothing at all.</span>
+              <span v-else>Hide matching works completely - they leave the listing.</span>
+            </template>
+          </Tooltip>
+        </template>
+        <template #numbers>
+          <Tooltip :content="priority.title">
+            <span :class="priority.custom ? 'font-700 text-default-fg' : ''">
+              <span aria-hidden="true">{{ priority.text }}</span>
+              <span class="sr-only">{{ priority.title }}</span>
+            </span>
+          </Tooltip>
+        </template>
+        <span class="min-w-0 flex items-center gap-[7px]">
+          <span class="overflow-hidden text-ellipsis whitespace-pre" :title="rule.value">{{ rule.value }}<span v-if="rule.pseud" class="text-muted-fg"> ({{ rule.pseud }})</span></span>
+          <Tooltip>
+            <span class="list-row__glyph grid shrink-0 place-items-center text-[13px] text-muted-fg">
+              <Icon v-if="matchesId(rule)" i-codicon-symbol-numeric label="Id" />
+              <Icon v-else-if="rule.matcher === 'contains'" i-codicon-whole-word label="Contains" />
+              <Icon v-else-if="rule.matcher === 'regex'" i-codicon-regex label="Regex" />
+              <Icon v-else i-codicon-symbol-string label="Exact" />
+            </span>
+            <template #content>
+              <span v-if="matchesId(rule)">A numeric value matches the id exactly.</span>
+              <span v-else-if="rule.matcher === 'contains'">Matches if the value contains the rule. Often used for matching one person in a Relationship tag.</span>
+              <span v-else-if="rule.matcher === 'regex'">Uses regular expressions to match the rule to the value.</span>
+              <span v-else>Matches if the value exactly equals the rule. (default)</span>
+            </template>
+          </Tooltip>
+        </span>
+        <template #meta>
+          {{ ruleTargetLabel(rule.target) }}
+        </template>
+        <template #actions>
+          <DialogDetachedTrigger
+            v-if="context.editDialog.value"
+            :dialog="context.editDialog.value"
+            class="icon-btn"
+            :aria-label="`Edit rule “${rule.value}”`"
+            title="Edit rule"
+            data-action="edit"
+            @click="edit(rule)"
+          >
+            <span class="i-tabler-pencil" text="[14px]" aria-hidden="true" />
+          </DialogDetachedTrigger>
+          <button
+            type="button"
+            class="icon-btn"
+            :aria-label="`Remove rule “${rule.value}”`"
+            title="Remove rule"
+            data-action="remove"
+            @click="remove(at, rule)"
+          >
+            <span class="i-tabler-trash" text="[14px]" aria-hidden="true" />
+          </button>
+        </template>
+      </ListRow>
+    </template>
   </ListFrame>
 </template>
 

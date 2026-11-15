@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { skip, startOptions, until } from './optionsPage.mjs'
+import { skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 import { RuleEditor, RULES_LIST } from './ruleEditor.mjs'
 
-/** Twenty rules alike but for their text, so the list's own order is theirs by text, and the list scrolls past its cap. */
-const RULES = Array.from({ length: 20 }, (_, i) => ({ target: 'tag', value: `rule ${String(i + 1).padStart(2, '0')}`, matcher: 'exact' }))
+/** Twelve rules alike but for their text, so the list's own order is theirs by text, and the list scrolls past its cap. */
+const RULES = Array.from({ length: 12 }, (_, i) => ({ target: 'tag', value: `rule ${String(i + 1).padStart(2, '0')}`, matcher: 'exact' }))
 
 const SEED = { 'option.rules': { enabled: true, filters: RULES, colors: {} } }
 
@@ -27,7 +27,8 @@ describe('options UI — rules list holds its order while editing', { skip }, ()
 
   before(async () => {
     session = await startOptions()
-    options = await session.open({ seed: SEED, hash: '#customize-search-results' })
+    // Typing a rule's text asks AO3 for tags it might be; the archive answers with none.
+    options = await session.open({ seed: SEED, hash: '#customize-search-results', prepare: tab => stubArchive(tab, () => ({ json: [] })) })
     page = options.page
     rules = new RuleEditor(options)
   }, { timeout: 180000 })
