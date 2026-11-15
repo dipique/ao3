@@ -19,6 +19,12 @@ import { capFor } from '../../model/listView.ts'
  * them. `bands` goes between the header and the rows: notes about the whole
  * list, and column heads. `foot` goes under the rows, outside the cap and its
  * shadows: a line about the list as a whole, such as what it takes to store.
+ *
+ * An `expandable` frame has a button in its header that lifts it over the
+ * page, as tall as the window, in its own column's width: the page behind is
+ * dimmed, can't be scrolled or reached, and Escape, the button again or a
+ * press on the dimmed page puts the frame back. A space as tall as the frame
+ * holds its place meanwhile, so nothing under it moves.
  */
 const props = withDefaults(defineProps<{
   /** The list's `data-list`. */
@@ -34,6 +40,8 @@ const props = withDefaults(defineProps<{
   cap?: ListCap
   /** The header's Add button's name; without one there is no Add button. */
   addLabel?: string
+  /** Offer to lift the frame over the page, as tall as the window. */
+  expandable?: boolean
 }>(), { cap: 'setting' })
 
 /** Add was pressed: the click, whose `currentTarget` is the button, for a dialog to give focus back to. */
@@ -72,49 +80,120 @@ function reveal(rowId: string | number) {
   row?.querySelector('input')?.focus({ preventScroll: true })
 }
 
+const spot = useTemplateRef<HTMLElement>('spot')
+const frame = useTemplateRef<HTMLElement>('frame')
+const toggle = useTemplateRef<HTMLButtonElement>('toggle')
+const expanded = ref(false)
+const spotHeight = ref(0)
+const { left, width } = useElementBounding(spot)
+const scrollLocked = useScrollLock(document.body)
+
+/** The page's own content, which the lifted frame holds the reader out of: the body's child the frame's place is in. */
+let page: HTMLElement | null = null
+
+/**
+ * Lift the frame over the page or put it back. Moving it between the page and
+ * the body takes the focus off its button, so the focus is put back on it.
+ */
+async function setExpanded(next: boolean) {
+  if (next === expanded.value)
+    return
+  if (next) {
+    spotHeight.value = frame.value?.offsetHeight ?? 0
+    page = frame.value?.closest<HTMLElement>('body > *') ?? null
+  }
+  expanded.value = next
+  scrollLocked.value = next
+  page?.toggleAttribute('inert', next)
+  if (!next)
+    page = null
+  await nextTick()
+  toggle.value?.focus({ preventScroll: true })
+}
+
+function escape(event: KeyboardEvent) {
+  if (!expanded.value || event.defaultPrevented)
+    return
+  event.preventDefault()
+  void setExpanded(false)
+}
+
+onBeforeUnmount(() => {
+  page?.removeAttribute('inert')
+  scrollLocked.value = false
+})
+
 defineExpose({ reveal })
 </script>
 
 <template>
-  <div role="group" :aria-labelledby="titleId" :data-list="listId" class="list-frame">
-    <div class="list-frame__head">
-      <span :id="titleId" class="list-frame__title" :class="{ 'sr-only': $slots.filter }">{{ title }}</span>
-      <slot name="filter" />
-      <span data-list-count class="list-frame__count">
-        <span :class="{ 'list-frame__count--wide': shortCount !== undefined }">{{ count }}</span>
-        <span v-if="shortCount !== undefined" class="list-frame__count--narrow">{{ shortCount }}</span>
-      </span>
-      <slot name="controls" />
-      <button
-        v-if="addLabel"
-        type="button"
-        class="icon-btn"
-        :aria-label="addLabel"
-        :title="addLabel"
-        data-action="add"
-        @click="emit('add', $event)"
-      >
-        <span class="i-tabler-plus" text="[15px]" aria-hidden="true" />
-      </button>
-    </div>
-    <slot name="bands" />
-    <div v-if="empty" data-list-empty class="list-frame__empty">
-      <slot name="empty" />
-    </div>
+  <div v-if="expanded" ref="spot" data-list-spot :style="{ height: `${spotHeight}px` }" />
+  <Teleport to="body" :disabled="!expanded">
+    <div v-if="expanded" data-list-scrim class="list-frame__scrim animate-overlay" @click="setExpanded(false)" />
     <div
-      v-else
-      data-list-body
-      class="list-frame__body"
-      :style="{ maxHeight: held === null ? undefined : `${held}px` }"
+      ref="frame"
+      :role="expanded ? 'dialog' : 'group'"
+      :aria-modal="expanded ? 'true' : undefined"
+      :aria-labelledby="titleId"
+      :data-list="listId"
+      :data-expanded="expanded ? '' : undefined"
+      class="list-frame"
+      :class="{ 'list-frame--expanded': expanded }"
+      :style="expanded ? { left: `${left}px`, width: `${width}px` } : undefined"
+      @keydown.esc="escape"
     >
-      <div ref="rows" role="list">
-        <slot />
+      <div class="list-frame__head">
+        <span :id="titleId" class="list-frame__title" :class="{ 'sr-only': $slots.filter }">{{ title }}</span>
+        <slot name="filter" />
+        <span data-list-count class="list-frame__count">
+          <span :class="{ 'list-frame__count--wide': shortCount !== undefined }">{{ count }}</span>
+          <span v-if="shortCount !== undefined" class="list-frame__count--narrow">{{ shortCount }}</span>
+        </span>
+        <slot name="controls" />
+        <button
+          v-if="addLabel"
+          type="button"
+          class="icon-btn"
+          :aria-label="addLabel"
+          :title="addLabel"
+          data-action="add"
+          @click="emit('add', $event)"
+        >
+          <span class="i-tabler-plus" text="[15px]" aria-hidden="true" />
+        </button>
+        <button
+          v-if="expandable"
+          ref="toggle"
+          type="button"
+          class="icon-btn"
+          :aria-label="expanded ? 'Restore list' : 'Expand list'"
+          :title="expanded ? 'Restore list' : 'Expand list'"
+          :aria-pressed="expanded"
+          data-action="expand"
+          @click="setExpanded(!expanded)"
+        >
+          <span :class="expanded ? 'i-tabler-arrows-minimize' : 'i-tabler-arrows-maximize'" text="[15px]" aria-hidden="true" />
+        </button>
+      </div>
+      <slot name="bands" />
+      <div v-if="empty" data-list-empty class="list-frame__empty">
+        <slot name="empty" />
+      </div>
+      <div
+        v-else
+        data-list-body
+        class="list-frame__body"
+        :style="{ maxHeight: held === null || expanded ? undefined : `${held}px` }"
+      >
+        <div ref="rows" role="list">
+          <slot />
+        </div>
+      </div>
+      <div v-if="$slots.foot" data-list-foot class="list-frame__foot">
+        <slot name="foot" />
       </div>
     </div>
-    <div v-if="$slots.foot" data-list-foot class="list-frame__foot">
-      <slot name="foot" />
-    </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -126,6 +205,31 @@ defineExpose({ reveal })
   border: 1px solid rgb(var(--color-border));
   border-radius: 9px;
   background-color: rgb(var(--color-default));
+}
+
+/* Lifted over the page: its column's width (set where it is drawn), as tall
+   as the window less a margin, its rows taking whatever the header and foot
+   leave. At the page's top bar's layer and the dialogs', after the page in the
+   document, so over the bar and under any dialog opened from it. */
+.list-frame--expanded {
+  display: flex;
+  position: fixed;
+  z-index: 50;
+  top: 16px;
+  bottom: 16px;
+  flex-direction: column;
+  box-shadow: var(--dlg-shadow);
+}
+.list-frame--expanded .list-frame__body {
+  flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.list-frame__scrim {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  background-color: var(--scrim);
 }
 
 .list-frame__head {

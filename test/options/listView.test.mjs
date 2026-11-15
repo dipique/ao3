@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 
 import { MIN_PRIORITY } from '../../src/common/data.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
-import { capFor, cycleSort, filterRows, filterSavedLists, focusSuccessor, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, SAVED_LIST_SORTS, savedListsHead, shownRules, shownSavedLists, SORT_HINTS, sortHint, sortMarks, sortRows, sortSavedLists, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
+import { capFor, cycleSort, filterRows, filterSavedLists, focusSuccessor, heldOrderStale, holdWithout, keepOrder, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, SAVED_LIST_SORTS, savedListsHead, shownRules, shownSavedLists, SORT_HINTS, sortHint, sortMarks, sortRows, sortSavedLists, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
 import { figures } from '../facts.mjs'
 
 /** The rules settings a fresh install starts with. */
@@ -343,6 +343,112 @@ describe('shownRules: the sort', () => {
   test('the sort runs over what the filter leaves', () => {
     assert.deepEqual(order('value', 'asc', 'an'), ['banana', 'Mango'])
     assert.deepEqual(order('value', 'desc', 'an'), ['Mango', 'banana'])
+  })
+})
+
+describe('keepOrder', () => {
+  const kept = (fresh, held, present = () => true) => keepOrder(fresh, held, present).join('')
+
+  test('the held order wins over the fresh one', () => {
+    assert.equal(kept(['a', 'b', 'c'], ['c', 'a', 'b']), 'cab')
+  })
+
+  test('a row the hold doesn\'t know goes after the row the fresh order puts before it, wherever the hold has that one', () => {
+    assert.equal(kept(['a', 'n', 'b', 'c'], ['c', 'a', 'b']), 'canb')
+    assert.equal(kept(['a', 'b', 'c', 'n'], ['c', 'a', 'b']), 'cnab')
+  })
+
+  test('one with nothing before it in the fresh order goes first', () => {
+    assert.equal(kept(['n', 'a', 'b'], ['b', 'a']), 'nba')
+  })
+
+  test('rows new to the hold that are next to each other stay together, in the fresh order', () => {
+    assert.equal(kept(['a', 'm', 'n', 'b'], ['b', 'a']), 'bamn')
+  })
+
+  test('drops the held rows that are no longer there, and places a new row past them', () => {
+    assert.equal(kept(['a', 'n', 'b'], ['b', 'x', 'a'], row => row !== 'x'), 'ban')
+  })
+
+  test('keeps a held row the fresh order leaves out', () => {
+    assert.equal(kept(['a'], ['b', 'a']), 'ba')
+  })
+})
+
+describe('shownRules: a held order', () => {
+  const RULES = [
+    { target: 'tag', value: 'cherry', matcher: 'exact' },
+    { target: 'tag', value: 'apple', matcher: 'exact' },
+    { target: 'tag', value: 'banana', matcher: 'exact' },
+  ]
+  const BY_TEXT = { key: 'value', direction: 'asc' }
+  const values = (rules, shown) => shown.map(at => rules[at].value)
+
+  test('without one, the rules show as the filter and the sort say', () => {
+    assert.deepEqual(shownRules(RULES, '', BY_TEXT, SETTINGS, null), shownRules(RULES, '', BY_TEXT, SETTINGS))
+  })
+
+  test('a rule edited while held stays in its row, whatever it sorts as now', () => {
+    const hold = shownRules(RULES, '', BY_TEXT, SETTINGS)
+    const edited = RULES.with(1, { ...RULES[1], value: 'zucchini' })
+    assert.deepEqual(values(edited, shownRules(edited, '', BY_TEXT, SETTINGS, hold)), ['zucchini', 'banana', 'cherry'])
+  })
+
+  test('a rule added while held shows where the sort puts it among the held rows', () => {
+    const hold = shownRules(RULES, '', BY_TEXT, SETTINGS)
+    const added = [...RULES, { target: 'tag', value: 'blueberry', matcher: 'exact' }]
+    assert.deepEqual(values(added, shownRules(added, '', BY_TEXT, SETTINGS, hold)), ['apple', 'banana', 'blueberry', 'cherry'])
+  })
+
+  test('a held rule stays shown though the filter would now leave it out; a new rule shows only if the filter keeps it', () => {
+    const hold = shownRules(RULES, 'an', BY_TEXT, SETTINGS)
+    const edited = [...RULES.with(2, { ...RULES[2], value: 'kiwi' }), { target: 'tag', value: 'mango', matcher: 'exact' }, { target: 'tag', value: 'fig', matcher: 'exact' }]
+    assert.deepEqual(values(edited, shownRules(edited, 'an', BY_TEXT, SETTINGS, hold)), ['mango', 'kiwi'], 'mango has no held rule before it in the sort, so goes first')
+  })
+
+  test('a held place past the end of the list is dropped', () => {
+    const hold = shownRules(RULES, '', BY_TEXT, SETTINGS)
+    assert.deepEqual(values(RULES.slice(0, 2), shownRules(RULES.slice(0, 2), '', BY_TEXT, SETTINGS, hold)), ['apple', 'cherry'])
+  })
+})
+
+describe('heldOrderStale', () => {
+  const RULES = [
+    { target: 'tag', value: 'apple', matcher: 'exact' },
+    { target: 'tag', value: 'banana', matcher: 'exact' },
+  ]
+  const BY_TEXT = { key: 'value', direction: 'asc' }
+
+  test('nothing is stale without a hold', () => {
+    assert.equal(heldOrderStale(RULES, '', BY_TEXT, SETTINGS, null), false)
+  })
+
+  test('a hold the sort would give anyway is not stale', () => {
+    assert.equal(heldOrderStale(RULES, '', BY_TEXT, SETTINGS, [0, 1]), false)
+  })
+
+  test('a hold that shows the rules otherwise than the sort would is stale', () => {
+    assert.equal(heldOrderStale(RULES.with(0, { ...RULES[0], value: 'cherry' }), '', BY_TEXT, SETTINGS, [0, 1]), true)
+  })
+
+  test('so is one holding a rule the filter would leave out', () => {
+    assert.equal(heldOrderStale(RULES, 'ban', BY_TEXT, SETTINGS, [0, 1]), true)
+  })
+})
+
+describe('holdWithout', () => {
+  test('drops the removed place, and moves each place after it up one, as the stored list does', () => {
+    assert.deepEqual(holdWithout([3, 0, 2, 1], 1), [2, 0, 1])
+  })
+
+  test('no hold stays no hold', () => {
+    assert.equal(holdWithout(null, 1), null)
+  })
+
+  test('leaves the hold it was given alone', () => {
+    const hold = [1, 0]
+    holdWithout(hold, 0)
+    assert.deepEqual(hold, [1, 0])
   })
 })
 

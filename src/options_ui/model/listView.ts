@@ -133,8 +133,53 @@ function ruleCompare(key: RuleSortKey, defaults: RulePriorityDefaults): Compare<
  * way the key points. By priority, the rules that show none come after the
  * numbered ones whichever way the sort points, in the unsorted order: a
  * number they store but don't show would put them in an order nobody can see.
+ *
+ * With a `hold`, the places shown when it was taken, the rules keep that
+ * order, so a rule edited while working down the list stays in its row rather
+ * than moving to where it sorts now ({@link keepOrder}). Each held rule stays
+ * shown, whatever the filter says of it now; a rule added since shows where
+ * the filter and the sort put it among them.
  */
-export function shownRules(rules: readonly Rule[], query: string, sort: KeySort<RuleSortKey>, defaults: RulePriorityDefaults): number[] {
+export function shownRules(rules: readonly Rule[], query: string, sort: KeySort<RuleSortKey>, defaults: RulePriorityDefaults, hold: readonly number[] | null = null): number[] {
+  const fresh = sortedRules(rules, query, sort, defaults)
+  return hold ? keepOrder(fresh, hold, at => at < rules.length) : fresh
+}
+
+/** Whether a held order shows the rules otherwise than the filter and the sort would now. */
+export function heldOrderStale(rules: readonly Rule[], query: string, sort: KeySort<RuleSortKey>, defaults: RulePriorityDefaults, hold: readonly number[] | null): boolean {
+  if (!hold)
+    return false
+  const held = shownRules(rules, query, sort, defaults, hold)
+  const fresh = sortedRules(rules, query, sort, defaults)
+  return held.length !== fresh.length || held.some((at, i) => at !== fresh[i])
+}
+
+/** A held order once the rule at `at` is removed: its place goes, and each later place moves up one, as the stored list's do. */
+export function holdWithout(hold: readonly number[] | null, at: number): number[] | null {
+  return hold && hold.filter(place => place !== at).map(place => place > at ? place - 1 : place)
+}
+
+/**
+ * The rows in `held`'s order, those `present` turns down left out, with each
+ * row of `fresh` the hold doesn't have placed after the nearest held row that
+ * comes before it in `fresh`, or first if none does. Rows new to the hold keep
+ * `fresh`'s order among themselves.
+ */
+export function keepOrder<T>(fresh: readonly T[], held: readonly T[], present: (row: T) => boolean): T[] {
+  const kept = held.filter(present)
+  const known = new Set(kept)
+  const after = new Map<T | undefined, T[]>()
+  let anchor: T | undefined
+  for (const row of fresh) {
+    if (known.has(row))
+      anchor = row
+    else
+      after.set(anchor, [...after.get(anchor) ?? [], row])
+  }
+  return [...after.get(undefined) ?? [], ...kept.flatMap(row => [row, ...after.get(row) ?? []])]
+}
+
+function sortedRules(rules: readonly Rule[], query: string, sort: KeySort<RuleSortKey>, defaults: RulePriorityDefaults): number[] {
   const needle = query.trim().toLowerCase()
   const kept = [...rules.keys()].filter(at => rules[at]!.value.toLowerCase().includes(needle))
   const rule = (compare: Compare<Rule>): Compare<number> => (a, b) => compare(rules[a]!, rules[b]!)

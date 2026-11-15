@@ -5,7 +5,7 @@ import { ruleTargetColor, ruleTargetLabel } from '#common'
 
 import type { KeySort, RuleSortKey } from '../../model/listView.ts'
 
-import { RULE_SORTS, rulePriorityCell, shownRules, UNSORTED } from '../../model/listView.ts'
+import { heldOrderStale, holdWithout, RULE_SORTS, rulePriorityCell, shownRules, UNSORTED } from '../../model/listView.ts'
 
 const { filters, colors } = useOption('rules')
 const defaults = useRulePriorityDefaults()
@@ -15,14 +15,34 @@ const context = OptionRowRulesContext.inject()
 /**
  * The filter and the sort only change what the list shows, and last for the
  * visit: neither writes the rules.
+ *
+ * Opening a rule to edit it holds the order the rows are in, so working down
+ * the list, each rule edited stays in its row rather than moving to where it
+ * sorts now. Re-sort lets go of it, and so does changing the filter or the
+ * sort.
  */
 const query = ref('')
 const sort = ref<KeySort<RuleSortKey>>(UNSORTED)
+const hold = ref<number[] | null>(null)
+watch([query, sort], () => {
+  hold.value = null
+})
 
-const shown = computed(() => shownRules(filters.value, query.value, sort.value, defaults.value).map((at) => {
+const shown = computed(() => shownRules(filters.value, query.value, sort.value, defaults.value, hold.value).map((at) => {
   const rule = filters.value[at]!
   return { at, rule, priority: rulePriorityCell(rule, defaults.value) }
 }))
+const stale = computed(() => heldOrderStale(filters.value, query.value, sort.value, defaults.value, hold.value))
+
+function edit(rule: Rule) {
+  hold.value ??= shown.value.map(row => row.at)
+  context.edit?.(rule)
+}
+
+function remove(at: number, rule: Rule) {
+  context.remove?.(rule)
+  hold.value = holdWithout(hold.value, at)
+}
 
 const count = computed(() => {
   if (query.value.trim())
@@ -67,12 +87,24 @@ function add(event: MouseEvent) {
     :count="count"
     :empty="shown.length === 0"
     add-label="Add a rule"
+    expandable
     @add="add"
   >
     <template #filter>
       <ListFilter v-model="query" label="Search rules by text" placeholder="Search rules" clear-label="Clear rule search" />
     </template>
     <template #controls>
+      <button
+        v-if="stale"
+        type="button"
+        class="rules-resort input-ring"
+        title="Put the rows in sorted order again"
+        data-action="resort"
+        @click="hold = null"
+      >
+        <span class="i-tabler-arrows-sort text-[13px]" aria-hidden="true" />
+        Re-sort
+      </button>
       <ListKeySort v-model="sort" :choices="RULE_SORTS" />
     </template>
     <template #empty>
@@ -92,7 +124,7 @@ function add(event: MouseEvent) {
       :template="ROW"
       :narrow-template="NARROW_ROW"
       :off="rule.behavior === 'none'"
-      @dblclick="context.edit?.(rule)"
+      @dblclick="edit(rule)"
     >
       <template #icon>
         <Tooltip>
@@ -150,7 +182,7 @@ function add(event: MouseEvent) {
           :aria-label="`Edit rule “${rule.value}”`"
           title="Edit rule"
           data-action="edit"
-          @click="context.edit?.(rule)"
+          @click="edit(rule)"
         >
           <span class="i-tabler-pencil" text="[14px]" aria-hidden="true" />
         </DialogDetachedTrigger>
@@ -160,7 +192,7 @@ function add(event: MouseEvent) {
           :aria-label="`Remove rule “${rule.value}”`"
           title="Remove rule"
           data-action="remove"
-          @click="context.remove?.(rule)"
+          @click="remove(at, rule)"
         >
           <span class="i-tabler-trash" text="[14px]" aria-hidden="true" />
         </button>
@@ -168,3 +200,26 @@ function add(event: MouseEvent) {
     </ListRow>
   </ListFrame>
 </template>
+
+<style scoped>
+/* The header's words' colour, in a pill as tall as its glyph buttons, since it
+   shows only while the order is out of date and should be seen. */
+.rules-resort {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 999px;
+  background-color: rgb(var(--color-default));
+  color: rgb(var(--color-default-fg));
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rules-resort:hover {
+  background-color: var(--row-hover);
+}
+</style>
