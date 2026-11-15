@@ -45,7 +45,7 @@ const VARIANTS = [
  * Advanced in the settings row: *Your data*'s buttons are the row's 28 px
  * controls, Export opens its three variants (and says what none of them
  * carries), each saving the keys it names, and *Learned fandom ids* exports and
- * clears what was learned. *Under the hood* is two switch rows.
+ * clears what was learned. *Under the hood* is three switch rows.
  */
 describe('options UI — Advanced', { skip }, () => {
   let session
@@ -142,14 +142,14 @@ describe('options UI — Advanced', { skip }, () => {
     }
   })
 
-  test('Under the hood is two switch rows, each storing its option', async () => {
+  test('Under the hood is three switch rows, each storing its option', async () => {
     const options = await session.open({ hash: '#under-the-hood', viewport: WIDE })
     try {
       const rows = await options.page.$$eval('[data-category="advanced"] [data-row-part="title"]', els => els
         .map(el => el.closest('[id]').id)
         .filter(id => id.startsWith('under-the-hood-')))
-      assert.deepEqual(rows, ['under-the-hood-compress-filter-urls', 'under-the-hood-debug-mode'])
-      for (const [id, key] of [['under-the-hood-compress-filter-urls', 'option.compressSearchUrls'], ['under-the-hood-debug-mode', 'option.verbose']]) {
+      assert.deepEqual(rows, ['under-the-hood-compress-filter-urls', 'under-the-hood-debug-mode', 'under-the-hood-impersonate-user-requests'])
+      for (const [id, key] of [['under-the-hood-compress-filter-urls', 'option.compressSearchUrls'], ['under-the-hood-debug-mode', 'option.verbose'], ['under-the-hood-impersonate-user-requests', 'option.impersonateUserRequests']]) {
         await options.press(await options.control(await options.row(id), 'switch'))
         await until(`${key} to be written`, async () => await options.lastWrite(key) !== null)
         assert.equal(await options.stored(key), true, id)

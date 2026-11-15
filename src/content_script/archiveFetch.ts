@@ -1,3 +1,5 @@
+import { archiveFetch } from '../common/archiveRequest.ts'
+
 /**
  * How this extension asks AO3 for a page when it's asking for a great many of
  * them: one request, retried on 429 with `Retry-After` honoured, and nothing
@@ -457,7 +459,7 @@ export function fetchWithRetry(
   patience: number = PATIENCE.interactive,
 ): Promise<Response> {
   return askWithRetry(
-    () => fetch(url, { credentials: 'same-origin', signal }),
+    () => archiveFetch(url, { credentials: 'same-origin', signal }),
     res => (res.status === 429 ? { retryAfter: res.headers.get('Retry-After') } : null),
     signal,
     patience,

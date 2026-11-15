@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-// Node strips the TS types on import; archiveFetch.ts imports nothing at all, so
+// Node strips the TS types on import; archiveFetch.ts imports only a module that imports nothing, so
 // it loads under a plain `node --test`. `fetch` is stubbed per test and the
 // clock is mocked, which is the only way an hours-long budget is testable.
 import { archivePause, archiveWaitRemaining, askWithRetry, BLIND_WAIT_STEP_MS, countdown, fetchWithRetry, MAX_WAIT_MS, onArchiveWait, PACE_EVERY, PACE_IDLE_RESET_MS, PACE_PAUSE_MS, PATIENCE, retryAfterMs, WAIT_WORDS, waitLine, watchWaitLine } from '../../src/content_script/archiveFetch.ts'

@@ -3,6 +3,8 @@ import { isProxy, isReactive, isRef, toRaw } from 'vue'
 
 import type { User } from './data.ts'
 
+import { archiveFetch } from './archiveRequest.ts'
+
 const DEFAULT_BASE_URL = 'https://archiveofourown.org'
 
 export function getArchiveLink(path: string): string {
@@ -50,7 +52,7 @@ export async function safeFetch(
   ...args: Parameters<typeof globalThis.fetch>
 ): ReturnType<typeof globalThis.fetch> {
   cachedToken = undefined
-  const res = await globalThis.fetch(...args)
+  const res = await archiveFetch(...args)
   if (res.status !== 200)
     throw new ResponseStatusError(res.status, res.headers.get('Retry-After'))
 

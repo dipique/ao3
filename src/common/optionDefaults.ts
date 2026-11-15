@@ -81,4 +81,5 @@ export const OPTION_DEFAULTS: Options = {
   user: { },
 
   verbose: false,
+  impersonateUserRequests: false,
 }

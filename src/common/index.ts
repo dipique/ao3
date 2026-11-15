@@ -1,6 +1,10 @@
 export { api } from './api.ts'
 export type { BackupKind, BackupSummary, HeldAnswer, MarkDelegation, SetSyncResult, SyncStatus, SyncUsage } from './api.ts'
 
+export { archiveFetch } from './archiveRequest.ts'
+
+export { followImpersonateUserRequests } from './archiveRequestOption.ts'
+
 export * from './backupIndex.ts'
 
 export { createBackupStore } from './backupStore.ts'

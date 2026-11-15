@@ -4,7 +4,7 @@ import './reset.css'
 
 import { type Component, createApp } from 'vue'
 
-import { cache, logBanner, options } from '#common'
+import { cache, followImpersonateUserRequests, logBanner, options } from '#common'
 
 import Icon from './components/basic/Icon.ts'
 import OptionsUI from './OptionsUI.vue'
@@ -12,6 +12,8 @@ import OptionsUI from './OptionsUI.vue'
 import 'uno.css'
 
 logBanner()
+
+void followImpersonateUserRequests()
 
 /** A per-device key this page has no reader for, deleted so the browser doesn't keep it. */
 const UNREAD_LOCAL_KEY = 'ao3e:options:descriptions'

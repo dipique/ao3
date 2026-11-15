@@ -37,6 +37,13 @@
       >
         <OptionSwitch option-id="verbose" />
       </OptionRow>
+      <OptionRow
+        title="Impersonate user requests"
+        subtitle="This option bypasses AO3's intentional traffic control mechanisms. Using it may cause problems for AO3, and may get your account temporarily or permanently banned. Use with extreme caution."
+        :badges="['this-device']"
+      >
+        <OptionSwitch option-id="impersonateUserRequests" />
+      </OptionRow>
     </OptionSubsection>
   </OptionCategory>
 </template>

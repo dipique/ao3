@@ -1,4 +1,4 @@
-import { fetchAndParseDocument, getArchiveLink } from '#common'
+import { archiveFetch, fetchAndParseDocument, getArchiveLink } from '#common'
 
 /**
  * Network helpers for the author context menu's subscribe and mute rows.
@@ -82,7 +82,7 @@ export async function submitSubscription(sub: Subscription): Promise<Subscriptio
   if (!creating)
     body.set('_method', 'delete')
 
-  const res = await fetch(getArchiveLink(path), {
+  const res = await archiveFetch(getArchiveLink(path), {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
@@ -149,7 +149,7 @@ export async function submitMuteForm(confirmUrl: string): Promise<void> {
   for (const input of form.querySelectorAll('input[name]'))
     body.append(input.name, input.value)
 
-  const res = await fetch(getArchiveLink(action), {
+  const res = await archiveFetch(getArchiveLink(action), {
     method: 'POST',
     credentials: 'same-origin',
     headers: {

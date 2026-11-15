@@ -100,6 +100,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 - A link anchor on every setting, and on every category and section.
 - Settings that **Right-click menus** switches off hang beneath it, and are greyed out, with the reason, while it is off.
 - **Debug mode** logs what the extension is doing to the browser's developer console, which helps when reporting a problem.
+- **Impersonate user requests** gets the extension's requests to AO3 past traffic control AO3 applies on purpose. It may cause problems for AO3 and may get your account banned, so it stays off unless you turn it on, and only on the browser where you do.
 
 The aim is for the extension to be at least as accessible as AO3 itself. If it falls short somewhere, please [open an issue](https://github.com/dipique/ao3/issues); bug reports and feature requests go there too.
 

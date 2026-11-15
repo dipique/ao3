@@ -156,6 +156,10 @@ export const ARCHIVE = 'https://archiveofourown.org'
  *   cached, so a request the page makes again reaches the stub again;
  * - `'fail'`: the network failing.
  *
+ * A CORS preflight is approved for whatever headers it names, without asking
+ * `answer` or counting it in `asked`: the extension's own page is spared one
+ * for a host in `host_permissions`, and plain localhost is not.
+ *
  * @returns `asked`, the URLs the page asked for, in order, and `abandoned`,
  *   those it gave up on before an answer came; `heard()`, which waits until
  *   every request the page has made of the archive so far has reached the
@@ -187,6 +191,16 @@ export async function stubArchive(page, answer) {
     const url = request.url()
     if (!url.startsWith(ARCHIVE))
       return void request.continue()
+    if (request.method() === 'OPTIONS') {
+      return void request.respond({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': request.headers()['access-control-request-method'] ?? 'GET',
+          'access-control-allow-headers': request.headers()['access-control-request-headers'] ?? '',
+        },
+      }).catch(() => {})
+    }
     asked.push(url)
     answering++
     try {

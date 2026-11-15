@@ -1,4 +1,4 @@
-import { api, ARCHIVE_UNAVAILABLE, fetchToken, getArchiveLink, NO_ARCHIVE_TAB, ResponseStatusError } from '#common'
+import { api, ARCHIVE_UNAVAILABLE, archiveFetch, fetchToken, getArchiveLink, NO_ARCHIVE_TAB, ResponseStatusError } from '#common'
 
 /**
  * The one request that changes a work's Marked for Later state on AO3.
@@ -80,7 +80,7 @@ export async function submitMark(workId: string, save: boolean): Promise<void> {
   const token = pageToken() ?? await fetchToken().catch((error: unknown) => {
     throw error instanceof ResponseStatusError ? new MarkRequestError(error.status, error.retryAfter) : error
   })
-  const res = await fetch(getArchiveLink(`/works/${workId}/${action}`), {
+  const res = await archiveFetch(getArchiveLink(`/works/${workId}/${action}`), {
     method: 'POST',
     credentials: 'same-origin',
     // The action finishes by redirecting, and where it redirects *to* is the only

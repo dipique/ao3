@@ -25,6 +25,7 @@ const defaults = {
   theme: { chosen: 'inherit', current: 'light' },
   user: {},
   verbose: false,
+  impersonateUserRequests: false,
   savedLists: { lists: {} },
   big: [],
 }
@@ -36,6 +37,7 @@ const options = {
   theme: { chosen: 'dark', current: 'dark' },
   user: { userId: 'me' },
   verbose: true,
+  impersonateUserRequests: true,
   savedLists: { v: 1, lists: { a1: { id: 'a1', kind: 'series-works', url: '/series/1', title: 'Mine' } } },
 }
 
@@ -88,6 +90,7 @@ describe('buildLocalUpdate', () => {
     assert.deepEqual(rebuilt.theme, { chosen: 'inherit', current: 'dark' }, 'chosen reset, current kept')
     assert.deepEqual(rebuilt.user, { userId: 'me' }, 'user preserved from existing')
     assert.equal(rebuilt.verbose, true, 'verbose preserved from existing')
+    assert.equal(rebuilt.impersonateUserRequests, true, 'impersonating preserved from existing')
     assert.deepEqual(rebuilt.savedLists, options.savedLists, 'saved-list records preserved from existing')
   })
 

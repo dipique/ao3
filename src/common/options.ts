@@ -315,6 +315,13 @@ export interface Options {
 
   // Special case - see ./logger.ts
   verbose: boolean
+  /**
+   * Send every request to AO3 with what the browser sends when the reader loads
+   * a page themselves ({@link file://./archiveRequest.ts}). It gets the
+   * extension past traffic control AO3 applies on purpose, so it is off unless
+   * the reader turns it on, and stays on the browser that turned it on.
+   */
+  impersonateUserRequests: boolean
 }
 
 export const options = createStorage<Options>({

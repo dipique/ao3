@@ -4,7 +4,7 @@ import type { MenuItem } from '#content_script/contextMenu.js'
 import type { CheckboxGroup } from '#content_script/filterSidebar.js'
 import type { FacetKey } from '#content_script/searchView/engine.ts'
 
-import { ADDON_CLASS, getArchiveLink, toast } from '#common'
+import { ADDON_CLASS, archiveFetch, getArchiveLink, toast } from '#common'
 import { openPopover } from '#content_script/contextMenu.js'
 import { attachMenuTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import { resetFilterSidebarCaches } from '#content_script/filterSidebar.js'
@@ -71,7 +71,7 @@ let symbolsKeyCache: HTMLElement | null = null
 
 async function fetchSymbolsKey(): Promise<Node> {
   if (!symbolsKeyCache) {
-    const res = await fetch(getArchiveLink('/help/symbols_key'), { credentials: 'same-origin' })
+    const res = await archiveFetch(getArchiveLink('/help/symbols_key'), { credentials: 'same-origin' })
     if (!res.ok)
       throw new Error(`Failed to load symbols key (${res.status})`)
     const doc = new DOMParser().parseFromString(await res.text(), 'text/html')

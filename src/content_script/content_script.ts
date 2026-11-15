@@ -1,6 +1,6 @@
 import { debounce } from '@antfu/utils'
 
-import { ADDON_CLASS, api, isExtensionContextValid, logBanner, logger, options, toast } from '#common'
+import { ADDON_CLASS, api, followImpersonateUserRequests, isExtensionContextValid, logBanner, logger, options, toast } from '#common'
 
 import type { RunProgress } from './runProgress.ts'
 
@@ -16,6 +16,8 @@ import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
 
 logBanner()
+
+const impersonationFollowed = followImpersonateUserRequests()
 
 /**
  * Clears any old DOM elements added by the extension.
@@ -75,6 +77,8 @@ async function run() {
   }
 
   const opts = await options.get()
+  // Before any unit can ask AO3 for anything.
+  await impersonationFollowed
   // Before waiting on the page, so a skin switched on since the last page still
   // lands ahead of the first paint if it can. Every re-run passes through here,
   // which is what makes the switch work without a reload.
