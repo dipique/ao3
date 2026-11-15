@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { options } from '#common'
+
+import { rowSyncs } from '../../model/rowSync.ts'
+
 /** A fact about a setting, shown as a badge beside its title. */
 export type RowBadge = 'needs-login' | 'this-device' | 'every-click'
 
@@ -12,6 +16,11 @@ export interface OptionRowProps {
    * rather than being gated, and its title carries the weight.
    */
   master?: boolean
+  /**
+   * Options the row edits that are read by a component around the row rather
+   * than a control inside it, which names its own (`useRowOption`).
+   */
+  options?: readonly options.Id[]
 }
 
 const props = defineProps<OptionRowProps>()
@@ -22,9 +31,21 @@ const BADGES = {
   'every-click': { label: 'Changes every click', tip: 'Overrides what happens when a link is clicked', warn: true },
 } as const satisfies Record<RowBadge, { label: string, tip: string, warn: boolean }>
 
-const { id, controlId, visible, titleHtml, subtitleHtml } = useSearchableRow(
+const { id, anchor, controlId, visible, titleHtml, subtitleHtml } = useSearchableRow(
   () => ({ title: props.title, subtitle: props.subtitle }),
 )
+
+const { isBookmarked, toggle } = useSettingBookmarks()
+const bookmarked = computed({
+  get: () => isBookmarked(anchor.value),
+  set: () => toggle(anchor.value),
+})
+
+const edited = shallowReactive(new Set<options.Id>())
+OptionRowEdits.provide(option => edited.add(option))
+const { state: sync } = useSync()
+/** Marked only while sync is on, since until then nothing syncs. */
+const synced = computed(() => sync.enabled && rowSyncs([...(props.options ?? []), ...edited], props.badges))
 
 OptionLabelId.provide(controlId)
 
@@ -44,23 +65,39 @@ OptionRowOff.provide({ reason, id: reasonId })
     :class="{ 'option-row--master': master, 'option-row--inert': inert }"
     style="scroll-margin-top: var(--shell-top);"
   >
-    <label :for="controlId" class="option-row__main">
+    <!-- The sync mark and bookmark stand outside the labels, so the title and description label the control without them. -->
+    <div class="option-row__main">
       <span class="option-row__text">
         <span data-row-part="title" class="option-row__title">
-          <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
-          <!-- eslint-disable-next-line vue/no-v-html -->
-          <span v-html="titleHtml" />
-          <template v-for="badge in badges" :key="badge">
-            {{ ' ' }}<Badge :data-badge="badge" :warn="BADGES[badge].warn" :title="BADGES[badge].tip" ml="[3px]">{{ BADGES[badge].label }}</Badge>
-          </template>
+          <label :for="controlId">
+            <!-- v-html is safe here: `highlight` escapes the text and only ever adds <mark>. -->
+            <!-- eslint-disable-next-line vue/no-v-html -->
+            <span v-html="titleHtml" />
+            <template v-for="badge in badges" :key="badge">
+              {{ ' ' }}<Badge :data-badge="badge" :warn="BADGES[badge].warn" :title="BADGES[badge].tip" ml="[3px]">{{ BADGES[badge].label }}</Badge>
+            </template>
+          </label>
+          {{ ' ' }}<span class="option-row__marks">
+            <Tooltip v-if="synced" content="Setting automatically syncs; settings without this icon apply to this browser only">
+              <span data-synced class="option-row__synced i-tabler-refresh input-ring" role="img" aria-label="Syncs" tabindex="0" />
+            </Tooltip>
+            <IconToggle
+              v-model="bookmarked"
+              data-bookmark
+              class="option-row__bookmark"
+              label="Bookmark"
+              :tip="bookmarked ? 'Remove from the sidebar' : 'Add to the sidebar'"
+              :icon="bookmarked ? 'i-tabler-bookmark-filled' : 'i-tabler-bookmark'"
+            />
+          </span>
         </span>
         <!-- eslint-disable-next-line vue/no-v-html -->
-        <span v-show="!folded" data-row-part="description" class="option-row__description" v-html="subtitleHtml" />
+        <label v-show="!folded" :for="controlId" data-row-part="description" class="option-row__description" v-html="subtitleHtml" />
       </span>
       <div data-row-part="control" class="option-row__control" :title="reason ?? undefined">
         <slot :id="controlId" />
       </div>
-    </label>
+    </div>
     <span v-if="reason" :id="reasonId" hidden>{{ reason }}</span>
     <div v-if="$slots.extra" class="option-row__extra">
       <slot :id="controlId" name="extra" />
@@ -133,6 +170,46 @@ OptionRowOff.provide({ reason, id: reasonId })
 }
 .option-row--master .option-row__title {
   font-weight: 600;
+}
+
+/* The sync mark and bookmark follow the title as one unit, centred on each other. */
+.option-row__marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: -2px;
+}
+
+.option-row__synced {
+  border-radius: 3px;
+  color: rgb(var(--color-muted-fg));
+  font-size: 13px;
+}
+
+/* The bookmark is faint until the row is hovered, and lit while set. The rail
+   lists bookmarks only from 768 px, so it shows there only. */
+.option-row__title :deep(.option-row__bookmark) {
+  display: none;
+  width: 16px;
+  height: 18px;
+  border-width: 0;
+  font-size: 14px;
+}
+@media (min-width: 768px) {
+  .option-row__title :deep(.option-row__bookmark) {
+    display: inline-grid;
+  }
+}
+.option-row__title :deep(.option-row__bookmark:not(:hover)) {
+  opacity: 0.35;
+}
+.option-row:hover .option-row__title :deep(.option-row__bookmark:not(:hover)) {
+  opacity: 0.7;
+}
+.option-row__title :deep(.option-row__bookmark[aria-pressed='true']) {
+  background-color: transparent;
+  color: rgb(var(--color-brand-fg));
+  opacity: 1;
 }
 .option-row__description {
   color: rgb(var(--color-muted-fg));

@@ -5,7 +5,7 @@ import type { Language } from '#common'
 
 import { fetchAndParseDocument, getArchiveLink } from '#common'
 
-const { language } = useOption('searchLanguage')
+const { language } = useRowOption('searchLanguage')
 const options = shallowRef<Language[]>([])
 const open = ref(false)
 

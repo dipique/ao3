@@ -10,6 +10,7 @@ declare global {
   const OptionCategoryName: typeof import('../options_ui/composables/context').OptionCategoryName
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionMasterState: typeof import('../options_ui/composables/context').OptionMasterState
+  const OptionRowEdits: typeof import('../options_ui/composables/context').OptionRowEdits
   const OptionRowOff: typeof import('../options_ui/composables/context').OptionRowOff
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
   const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
@@ -265,6 +266,7 @@ declare global {
   const useRegexCheck: typeof import('../options_ui/composables/useRegexCheck').useRegexCheck
   const useRegexRunner: typeof import('../options_ui/composables/useRegexRunner').useRegexRunner
   const useResizeObserver: typeof import('@vueuse/core').useResizeObserver
+  const useRowOption: typeof import('../options_ui/composables/useRowOption').useRowOption
   const useRulePriorityDefaults: typeof import('../options_ui/composables/useOptions').useRulePriorityDefaults
   const useRuleTimings: typeof import('../options_ui/composables/useRuleTimings').useRuleTimings
   const useSSRWidth: typeof import('@vueuse/core').useSSRWidth
@@ -276,6 +278,7 @@ declare global {
   const useScrollLock: typeof import('@vueuse/core').useScrollLock
   const useSearchableRow: typeof import('../options_ui/composables/useOptionSearch').useSearchableRow
   const useSessionStorage: typeof import('@vueuse/core').useSessionStorage
+  const useSettingBookmarks: typeof import('../options_ui/composables/useSettingBookmarks').useSettingBookmarks
   const useShare: typeof import('@vueuse/core').useShare
   const useSiteExport: typeof import('../options_ui/composables/useSiteExport').useSiteExport
   const useSlots: typeof import('vue').useSlots

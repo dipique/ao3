@@ -76,6 +76,7 @@ declare module 'vue' {
     RadioBox: typeof import('./../options_ui/components/basic/RadioBox/RadioBox.vue')['default']
     RadioBoxItem: typeof import('./../options_ui/components/basic/RadioBox/RadioBoxItem.vue')['default']
     Rail: typeof import('./../options_ui/components/shell/Rail.vue')['default']
+    RailBookmark: typeof import('./../options_ui/components/shell/RailBookmark.vue')['default']
     RekaCollapsibleContent: typeof import('reka-ui')['CollapsibleContent']
     RekaCollapsibleRoot: typeof import('reka-ui')['CollapsibleRoot']
     RekaCollapsibleTrigger: typeof import('reka-ui')['CollapsibleTrigger']

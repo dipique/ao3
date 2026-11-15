@@ -70,11 +70,12 @@ export const CHUNK_PREFIX = 'o'
  * `theme.chosen` syncs, never the device-derived `theme.current`); `user` is the
  * per-device logged-in AO3 account, `verbose` is a local debug toggle,
  * `savedLists` holds this browser's saved lists, which reach another browser
- * only while they are tracked, as `trackedLists` entries, and
+ * only while they are tracked, as `trackedLists` entries,
  * `impersonateUserRequests` risks the reader's AO3 account, so it is turned on
- * one browser at a time, knowingly.
+ * one browser at a time, knowingly, and `bookmarkedSettings` are shortcuts on
+ * this browser's options page.
  */
-export const LOCAL_ONLY = new Set<keyof Options>(['user', 'verbose', 'savedLists', 'impersonateUserRequests'])
+export const LOCAL_ONLY = new Set<keyof Options>(['user', 'verbose', 'savedLists', 'impersonateUserRequests', 'bookmarkedSettings'])
 
 export interface Manifest {
   /** schema version */
@@ -204,8 +205,6 @@ export function buildLocalUpdate(
       write[key] = defaults[key]
   }
   out.theme = { ...defaults.theme, ...(pruned.theme ?? {}), current: existing.theme.current }
-  for (const key of LOCAL_ONLY)
-    write[key] = existing[key]
   return out
 }
 

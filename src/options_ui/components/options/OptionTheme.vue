@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { chosen } = useOption('theme')
+const { chosen } = useRowOption('theme')
 
 const id = OptionLabelId.inject()
 </script>

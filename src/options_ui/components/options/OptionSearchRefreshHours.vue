@@ -3,7 +3,7 @@ const props = defineProps<{
   optionId: 'searchProfileListsRefreshHours' | 'searchListingsRefreshHours'
 }>()
 
-const optionValue = useOption(props.optionId)
+const optionValue = useRowOption(props.optionId)
 const id = OptionLabelId.inject()
 const choices: { hours: number, label: string }[] = [
   { hours: 0, label: 'Every time' },

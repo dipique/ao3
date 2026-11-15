@@ -311,6 +311,13 @@ export interface Options {
    * `content_script/darkSkin.ts`).
    */
   darkSkin: boolean
+  /**
+   * The options page's bookmarked settings, by the anchor id of each one's row,
+   * in the order they were bookmarked. The page's rail lists each under its
+   * category and sub-section, as a link to the row. A shortcut on this device's
+   * options page, so it never syncs.
+   */
+  bookmarkedSettings: { ids: string[] }
   user: { userId?: string }
 
   // Special case - see ./logger.ts
@@ -330,8 +337,8 @@ export const options = createStorage<Options>({
   prefix: 'option.',
   // `savedLists` is written by the background as stored lists come and go, and
   // re-running every unit for it would tear down an open search view the moment
-  // its list was first stored.
-  ignoredEvents: ['theme', 'user', 'savedLists'],
+  // its list was first stored. `bookmarkedSettings` concerns the options page alone.
+  ignoredEvents: ['theme', 'user', 'savedLists', 'bookmarkedSettings'],
   defaults: OPTION_DEFAULTS,
 })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const optionValue = useOption('hideShowReason')
+const optionValue = useRowOption('hideShowReason')
 const id = OptionLabelId.inject()
 
 const value = computed({

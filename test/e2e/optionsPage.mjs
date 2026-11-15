@@ -492,7 +492,7 @@ export class OptionsPage {
 
   /**
    * The rail's links as they are drawn, in order, each as `{ kind, id, name,
-   * count, current, inView }`: `kind` is `'category'` or `'subsection'`, `id`
+   * count, current, inView }`: `kind` is `'category'`, `'subsection'` or `'bookmark'`, `id`
    * is the anchor it links to, `name` is its label, `count` is the number
    * beside it (or null), `current` says whether it is the current category,
    * and `inView` whether it is the sub-section marked as the one being read.

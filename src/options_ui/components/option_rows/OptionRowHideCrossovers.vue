@@ -5,6 +5,7 @@ const { enabled, maxFandoms } = useOption('hideCrossovers')
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    :options="['hideCrossovers']"
     title="Crossovers"
     subtitle="Hide works listing more than a set number of fandoms — usually crossovers, anthologies or gift collections."
   >

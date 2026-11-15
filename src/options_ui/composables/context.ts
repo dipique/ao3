@@ -1,6 +1,6 @@
 import type { ComponentInstance, ComputedRef, GlobalComponents, Ref } from 'vue'
 
-import type { Rule } from '#common'
+import type { options, Rule } from '#common'
 
 import type { DependentState } from '../model/masterGroup.ts'
 
@@ -14,6 +14,9 @@ export const OptionMasterState = createContext<ComputedRef<DependentState>>('Opt
  * the id of the element saying so, for the control's `aria-describedby`.
  */
 export const OptionRowOff = createContext<{ reason: ComputedRef<string | null>, id: string }>('OptionRowOff')
+
+/** From a settings row to the controls in it, which tell it the options they edit. */
+export const OptionRowEdits = createContext<(option: options.Id) => void>('OptionRowEdits')
 
 /** Title of the enclosing category / sub-section, for the row search index. */
 export const OptionCategoryName = createContext<string>('OptionCategoryName')

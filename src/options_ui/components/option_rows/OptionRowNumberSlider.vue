@@ -76,14 +76,10 @@ const slider = computed(() => ({
   <OptionRow
     :title="title"
     :subtitle="subtitle"
+    :options="optionEnabledId ? [optionId, optionEnabledId] : [optionId]"
   >
     <template #default="{ id }">
-      <!--
-        The control cell is inside the row's label, and a click on a label
-        that lands on no control of its own focuses the one it labels: here
-        the number, after every drag.
-      -->
-      <div v-if="inControl" w-30 shrink-0 @click.prevent>
+      <div v-if="inControl" w-30 shrink-0>
         <Slider v-bind="slider" />
       </div>
       <NumberInput

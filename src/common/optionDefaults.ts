@@ -79,6 +79,7 @@ export const OPTION_DEFAULTS: Options = {
 
   theme: { chosen: 'inherit', current: 'light' },
   darkSkin: false,
+  bookmarkedSettings: { ids: [] },
   user: { },
 
   verbose: false,

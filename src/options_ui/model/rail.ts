@@ -8,8 +8,17 @@ import { entryMatches, searchTerms } from './settingsSearch.ts'
  * settings each holds and how many of those a query keeps. Categories and
  * sub-sections are named by their titles, as the rows record them, and carry
  * the anchor id a link to them uses. As the page scrolls, the rail marks the
- * current category's sub-section being read ({@link markedSubsection}).
+ * current category's sub-section being read ({@link markedSubsection}). The
+ * rows the reader bookmarked are listed under the category and sub-section
+ * holding them.
  */
+
+/** A bookmarked row: its anchor id, its title, and the title of its sub-section. */
+export interface RailBookmark {
+  id: string
+  name: string
+  subsection: string | null
+}
 
 export interface RailSubsection {
   id: string
@@ -19,6 +28,8 @@ export interface RailSubsection {
   hits: number
   /** Whether the rail lists it: always with no query, and with a hit while there is one. */
   visible: boolean
+  /** Its bookmarked rows that the query keeps, in the order the rows come. */
+  bookmarks: RailBookmark[]
 }
 
 export interface RailCategory extends RailSubsection {
@@ -42,15 +53,20 @@ export interface DrawnSubsection {
  * with nothing in it yet draws its empty state, and in that order, which a
  * sub-section whose rows are all drawn late (a list's, once it has been read)
  * would otherwise lose. A sub-section with rows that it leaves out comes after
- * the rest of its category's, in the order its rows come.
+ * the rest of its category's, in the order its rows come. `bookmarks` is the
+ * anchor ids of the bookmarked rows; one naming no row is left out.
  */
-export function buildRail(rows: readonly SettingsRow[], order: readonly string[], query: string, current: string, subsections: readonly DrawnSubsection[] = []): RailCategory[] {
+export function buildRail(rows: readonly SettingsRow[], order: readonly string[], query: string, current: string, subsections: readonly DrawnSubsection[] = [], bookmarks: readonly string[] = []): RailCategory[] {
   const terms = searchTerms(query)
   const titles = new Set(order)
   for (const row of rows) {
     if (row.category !== null)
       titles.add(row.category)
   }
+  const bookmarked = new Set(bookmarks)
+  const bookmarksOf = (inside: readonly SettingsRow[]): RailBookmark[] => inside
+    .filter(row => bookmarked.has(row.id) && entryMatches(row, terms))
+    .map(row => ({ id: row.id, name: row.title, subsection: row.subsection }))
 
   return [...titles].map((title) => {
     const own = rows.filter(row => row.category === title)
@@ -67,6 +83,7 @@ export function buildRail(rows: readonly SettingsRow[], order: readonly string[]
           count: inside.length,
           hits: subsectionHits,
           visible: !terms.length || subsectionHits > 0,
+          bookmarks: bookmarksOf(inside),
         }
       })
     const id = categoryId(title)
@@ -79,8 +96,14 @@ export function buildRail(rows: readonly SettingsRow[], order: readonly string[]
       current: id === current,
       inPane: terms.length ? hits > 0 : id === current,
       subsections: ownSubsections,
+      bookmarks: bookmarksOf(own),
     }
   })
+}
+
+/** `bookmarks` with `id` taken out if it is in them, or added after them if not. */
+export function toggleBookmark(bookmarks: readonly string[], id: string): string[] {
+  return bookmarks.includes(id) ? bookmarks.filter(bookmark => bookmark !== id) : [...bookmarks, id]
 }
 
 /**

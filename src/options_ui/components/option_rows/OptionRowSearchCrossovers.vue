@@ -7,6 +7,7 @@ const { enabled, crossovers } = useOption('searchCrossovers')
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    :options="['searchCrossovers']"
     title="Default crossovers"
     subtitle="Pre-selects AO3’s Crossovers filter, so listings start without crossovers, or with nothing else. AO3 decides what counts as one; hiding works by how many fandoms they list is under Customize search results."
   >

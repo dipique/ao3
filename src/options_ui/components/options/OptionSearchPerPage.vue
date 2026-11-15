@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const optionValue = useOption('searchPerPage')
+const optionValue = useRowOption('searchPerPage')
 const id = OptionLabelId.inject()
 const choices = [25, 50, 100, 250, 1000]
 </script>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const optionValue = useOption('forceAlignment')
+const optionValue = useRowOption('forceAlignment')
 const id = OptionLabelId.inject()
 </script>
 

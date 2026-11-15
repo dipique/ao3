@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { buildRail, landingCategory, markedSubsection, nextHold, subsectionInView } from '../../src/options_ui/model/rail.ts'
+import { anchorSlug } from '../../src/options_ui/model/anchors.ts'
+import { buildRail, landingCategory, markedSubsection, nextHold, subsectionInView, toggleBookmark } from '../../src/options_ui/model/rail.ts'
 
 const SITE = 'Site features & appearance'
 
@@ -204,6 +205,72 @@ describe('buildRail', () => {
       assert.deepEqual(inPane(buildRail(ROWS, ORDER, 'menu', 'reading')), ['site-features-appearance'])
       assert.deepEqual(inPane(buildRail(ROWS, ORDER, '', 'reading')), ['reading'])
     })
+  })
+
+  describe('bookmarks', () => {
+    const ROWS_WITH_IDS = [
+      ...ROWS.map(row => ({ ...row, id: anchorSlug(`${row.subsection} ${row.title}`) })),
+      { id: 'loose-row', category: 'Reading', subsection: null, title: 'A row outside any sub-section', subtitle: '' },
+    ]
+    const marks = rail => rail.map(({ id, bookmarks, subsections }) => ({
+      id,
+      bookmarks: bookmarks.map(b => [b.id, b.name, b.subsection]),
+      subsections: subsections.filter(s => s.bookmarks.length).map(s => [s.id, s.bookmarks.map(b => b.id)]),
+    }))
+
+    test('with none, no category or sub-section holds any', () => {
+      const rail = buildRail(ROWS_WITH_IDS, ORDER, '', 'reading')
+      assert.ok(rail.every(c => !c.bookmarks.length && c.subsections.every(s => !s.bookmarks.length)))
+    })
+
+    test('each bookmarked row is under its category and its sub-section, named by its title', () => {
+      const rail = buildRail(ROWS_WITH_IDS, ORDER, '', 'reading', [], ['work-text-narrow-text', 'appearance-extension-theme'])
+      assert.deepEqual(marks(rail), [
+        { id: 'site-features-appearance', bookmarks: [['appearance-extension-theme', 'Extension theme', 'Appearance']], subsections: [['appearance', ['appearance-extension-theme']]] },
+        { id: 'search', bookmarks: [], subsections: [] },
+        { id: 'reading', bookmarks: [['work-text-narrow-text', 'Narrow text', 'Work text']], subsections: [['work-text', ['work-text-narrow-text']]] },
+      ])
+    })
+
+    test('come in the order the rows do, whatever order they were bookmarked in', () => {
+      const reading = byId(buildRail(ROWS_WITH_IDS, ORDER, '', 'reading', [], ['work-text-narrow-text', 'marks-status-work-marks', 'work-text-reader-mode'])).reading
+      assert.deepEqual(reading.bookmarks.map(b => b.id), ['marks-status-work-marks', 'work-text-reader-mode', 'work-text-narrow-text'])
+      assert.deepEqual(reading.subsections.find(s => s.id === 'work-text').bookmarks.map(b => b.id), ['work-text-reader-mode', 'work-text-narrow-text'])
+    })
+
+    test('a bookmarked row outside any sub-section is under its category alone', () => {
+      const reading = byId(buildRail(ROWS_WITH_IDS, ORDER, '', 'reading', [], ['loose-row'])).reading
+      assert.deepEqual(reading.bookmarks.map(b => [b.id, b.subsection]), [['loose-row', null]])
+      assert.ok(reading.subsections.every(s => !s.bookmarks.length))
+    })
+
+    test('a bookmark naming no row on the page is left out', () => {
+      const rail = buildRail(ROWS_WITH_IDS, ORDER, '', 'reading', [], ['saved-lists-search-tea'])
+      assert.ok(rail.every(c => !c.bookmarks.length))
+    })
+
+    test('with a query, only the bookmarked rows it keeps are listed', () => {
+      const reading = byId(buildRail(ROWS_WITH_IDS, ORDER, 'narrower', 'reading', [], ['work-text-narrow-text', 'work-text-reader-mode'])).reading
+      assert.deepEqual(reading.bookmarks.map(b => b.id), ['work-text-narrow-text'])
+      assert.deepEqual(reading.subsections.find(s => s.id === 'work-text').bookmarks.map(b => b.id), ['work-text-narrow-text'])
+    })
+  })
+})
+
+describe('toggleBookmark', () => {
+  test('adds a setting not bookmarked yet, after the others', () => {
+    assert.deepEqual(toggleBookmark(['a'], 'b'), ['a', 'b'])
+  })
+
+  test('removes a bookmarked setting, keeping the others in order', () => {
+    assert.deepEqual(toggleBookmark(['a', 'b', 'c'], 'b'), ['a', 'c'])
+  })
+
+  test('leaves the list it was given alone', () => {
+    const bookmarks = Object.freeze(['a'])
+    toggleBookmark(bookmarks, 'b')
+    toggleBookmark(bookmarks, 'a')
+    assert.deepEqual(bookmarks, ['a'])
   })
 })
 

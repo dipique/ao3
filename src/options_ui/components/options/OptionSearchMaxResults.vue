@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const optionValue = useOption('searchMaxResults')
+const optionValue = useRowOption('searchMaxResults')
 const id = OptionLabelId.inject()
 const choices = [200, 500, 1000, 2500, 5000, 10000]
 </script>

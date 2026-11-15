@@ -106,12 +106,14 @@ export function useSearchableRow(source: () => { title: string, subtitle: string
       unindex()
     indexed = key
     owners.set(key, owner)
-    rows.value.set(key, { category, subsection, ...source() })
+    rows.value.set(key, { id: key, category, subsection, ...source() })
   })
   onUnmounted(unindex)
 
   return {
     id,
+    /** The anchor it is indexed under now. */
+    anchor: current,
     /** Id of the row's control, kept distinct from the row's own anchor id. */
     controlId: `${id}-input`,
     visible: computed(() => rowKept(rows.value.get(current.value))),

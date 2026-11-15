@@ -5,7 +5,7 @@ const props = defineProps<{
   optionId: options.BooleanId
 }>()
 
-const optionValue = useOption(props.optionId)
+const optionValue = useRowOption(props.optionId)
 const id = OptionLabelId.inject()
 const off = OptionRowOff.inject(null)
 </script>

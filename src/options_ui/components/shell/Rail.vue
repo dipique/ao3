@@ -23,6 +23,11 @@ const items = computed(() => rail.value
       icon: nav?.icon ?? '',
       jobs: !!nav?.jobs,
       subsections: category.current ? category.subsections.filter(subsection => subsection.visible) : [],
+      /**
+       * The bookmarks listed under the category itself: in the current
+       * category, those its sub-sections don't list; in another, all of them.
+       */
+      bookmarks: category.current ? category.bookmarks.filter(bookmark => bookmark.subsection === null) : category.bookmarks,
     }
   }))
 
@@ -91,10 +96,11 @@ watch([currentId, wide, nav], () => {
           <span v-if="searching" data-rail-count ml-auto text="[10.5px]" font-400 tabular-nums>{{ item.hits }}</span>
         </a>
         <ul
-          v-if="item.subsections.length"
+          v-if="item.subsections.length || item.bookmarks.length"
           class="hidden md:flex"
           border="l-1" ml="[21px]" mb-1.5 mt-0.5 flex-col gap-px pl="[11px]"
         >
+          <RailBookmark v-for="bookmark in item.bookmarks" :key="bookmark.id" :bookmark="bookmark" />
           <li v-for="subsection in item.subsections" :key="subsection.id">
             <a
               data-rail-item="subsection"
@@ -107,6 +113,9 @@ watch([currentId, wide, nav], () => {
               <span data-rail-label truncate>{{ subsection.name }}</span>
               <span data-rail-count text="[10.5px]" tabular-nums>{{ subsection.hits }}</span>
             </a>
+            <ul v-if="subsection.bookmarks.length" flex="~ col" gap-px pl-3>
+              <RailBookmark v-for="bookmark in subsection.bookmarks" :key="bookmark.id" :bookmark="bookmark" />
+            </ul>
           </li>
         </ul>
       </li>

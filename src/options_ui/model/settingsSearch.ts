@@ -6,6 +6,8 @@
 
 /** One settings row as the search sees it: where it sits, and what it says. */
 export interface SettingsRow {
+  /** Its anchor id. */
+  id: string
   /** The titles of the category and sub-section holding it. */
   category: string | null
   subsection: string | null
