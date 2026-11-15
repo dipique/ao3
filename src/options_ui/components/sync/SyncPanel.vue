@@ -66,6 +66,7 @@ function choose(answer: SyncAnswer): void {
   <section data-sync-panel aria-label="Sync settings across devices" class="sync-panel">
     <div class="sync-panel__head">
       <OptionRow
+        anchor="sync-settings"
         title="Sync settings across devices"
         subtitle="Store your options in the browser's synced storage so they follow you to other browsers signed in to the same account. Cache is never synced."
       >

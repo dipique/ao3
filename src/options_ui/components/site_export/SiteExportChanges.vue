@@ -67,6 +67,7 @@ const showProblems = ref(false)
 
 <template>
   <OptionRow
+    anchor="export-changes"
     title="Changes made in an export"
     subtitle="Load an ao3e-changes-….json file saved from an exported site to replay the marks you made while reading it. Importing the same file twice changes nothing."
   >

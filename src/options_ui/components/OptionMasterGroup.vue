@@ -14,6 +14,8 @@ import { dependentState } from '../model/masterGroup.ts'
  */
 const props = defineProps<{
   optionId: options.BooleanId
+  /** The master switch's row's key ({@link file://./option_rows/OptionRow.vue}). */
+  anchor: string
   title: string
   subtitle: string
 }>()
@@ -26,7 +28,7 @@ const state = OptionMasterState.provide(computed(() => dependentState({ title: p
 
 <template>
   <div data-master-group>
-    <OptionRow :title="title" :subtitle="subtitle" master>
+    <OptionRow :anchor="anchor" :title="title" :subtitle="subtitle" master>
       <OptionSwitch :option-id="optionId" />
     </OptionRow>
     <OptionDependents :off="state.inert">

@@ -114,7 +114,7 @@ const jobState = scope => scope.evaluate(el => el.querySelector('[data-job-state
 /** Switch Work marks, under Reading, and come back to the tiles. */
 async function switchWorkMarks(options, enabled) {
   await options.goTo('#marks-status')
-  await options.press(await options.control(await options.row('marks-status-work-marks'), 'switch'))
+  await options.press(await options.control(await options.row('work-marks'), 'switch'))
   await until(`Work marks to be written ${enabled ? 'on' : 'off'}`, async () => (await options.lastWrite('option.workMarks'))?.enabled === enabled)
   await options.goTo('#user-profile-lists')
 }
@@ -178,7 +178,7 @@ describe('options UI — User profile lists', { skip }, () => {
     assert.deepEqual(await page.$$eval('[data-tile]', els => els.map(el => el.dataset.tile)), ['marked-for-later', 'read-works'])
 
     const marked = await tile('marked-for-later')
-    assert.equal(await marked.evaluate(el => el.id), 'user-profile-lists-marked-for-later')
+    assert.equal(await marked.evaluate(el => el.id), 'marked-for-later')
     assert.equal(await marked.evaluate(el => el.getAttribute('aria-label')), list('marked-for-later').name)
     const text = await options.text(marked)
     assert.ok(mentions(text, list('marked-for-later').name) && mentions(text, list('marked-for-later').note), text)
@@ -186,7 +186,7 @@ describe('options UI — User profile lists', { skip }, () => {
     assert.ok(await marked.$('[data-badge="needs-login"]'), 'it is fetched only while the reader is signed in')
 
     const read = await tile('read-works')
-    assert.equal(await read.evaluate(el => el.id), 'user-profile-lists-read-works')
+    assert.equal(await read.evaluate(el => el.id), 'read-works')
     const readText = await options.text(read)
     assert.ok(mentions(readText, list('read-works').name) && mentions(readText, list('read-works').note), readText)
     assert.ok(await read.$('[data-badge="needs-login"]'))

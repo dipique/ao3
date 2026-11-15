@@ -5,7 +5,7 @@ import { shownTheme } from './model/theme.ts'
 const ready = useOptionsReady()
 const themeOption = useOption('theme')
 
-// `options_ui.html#search`, `#work-text`, `#work-text-reader-mode` — see
+// `options_ui.html#search`, `#work-text`, `#reader-mode` — see
 // {@link file://./composables/useHashNav.ts}.
 useHashNav(ready)
 

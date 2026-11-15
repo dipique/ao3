@@ -11,7 +11,7 @@ const SEED = {
 
 /** The Word count menu's ranges, and the Default word count row. */
 const RANGES = 'word-count-ranges'
-const DEFAULT_ROW = 'filter-defaults-default-word-count'
+const DEFAULT_ROW = 'search-word-count'
 
 /**
  * The two word-count rows in the options UI. Both edit their bounds as text and

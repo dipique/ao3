@@ -297,8 +297,8 @@ describe('Reload listings, on the options page', { skip }, () => {
   test('sits under Reload your own lists, reads Every time until a time is picked, and stores the hours picked', async () => {
     const options = await session.open({ hash: '#instant-search-views', viewport: { width: 1280, height: 800 } })
     try {
-      const row = await options.row('instant-search-views-reload-listings')
-      const own = await options.row('instant-search-views-reload-your-own-lists')
+      const row = await options.row('search-listings-refresh-hours')
+      const own = await options.row('search-profile-lists-refresh-hours')
       assert.equal(await own.evaluate((el, next) => el.nextElementSibling === next, row), true, 'the row straight after Reload your own lists')
 
       const select = await options.control(row, 'combobox')

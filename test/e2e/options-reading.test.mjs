@@ -5,10 +5,10 @@ import { skip, startOptions, until } from './optionsPage.mjs'
 
 /** The rows with a slider beside their number, the option each edits, and the slider's far end. */
 const SLIDER_ROWS = {
-  'work-statistics-reading-speed': { key: 'option.wordsPerMinute', max: 1000 },
-  'work-text-narrow-the-work-text': { key: 'option.styleWidth', max: 100 },
+  'words-per-minute': { key: 'option.wordsPerMinute', max: 1000 },
+  'style-width': { key: 'option.styleWidth', max: 100 },
 }
-const ALIGNMENT = 'work-text-force-text-alignment'
+const ALIGNMENT = 'force-alignment'
 
 /** Where a slider row's parts are drawn, as rounded boxes, and which part holds the slider. */
 function sliderRow(id) {

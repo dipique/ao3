@@ -1,27 +1,23 @@
 <script setup lang="ts">
-import { anchorSlug } from '../model/anchors.ts'
-
 const props = defineProps<{
+  /** Its key: its anchor id, and what its rows, the rail and links know it by ({@link file://../model/anchors.ts}). */
+  anchor: string
   title: string
   subtitle?: string
   /** Phrases of the subtitle to draw bold, each found after the last. */
   strong?: readonly string[]
 }>()
 
-OptionSubsectionName.provide(props.title)
+const id = useAnchorKey(props.anchor)
+OptionSubsectionKey.provide(id)
 
-const category = OptionCategoryName.inject(null)
-useAddSubsection(props.title, category)
+const category = OptionCategoryKey.inject(null)
+useAddSubsection({ category, id, title: props.title })
 const { subsectionMatches, highlight, highlightStrong } = useOptionSearch()
 
-const visible = computed(() => subsectionMatches(category, props.title))
+const visible = computed(() => subsectionMatches(category, id))
 
-/**
- * Anchor for a `#hash` jump. Sub-section headings are unique across the page, so
- * the slug of the title alone is enough — and short enough to write by hand.
- */
-const id = anchorSlug(props.title)
-registerAnchor({ id, kind: 'subsection', name: props.title, category, subsection: props.title })
+registerAnchor({ id, kind: 'subsection', name: props.title, category, subsection: id })
 </script>
 
 <template>

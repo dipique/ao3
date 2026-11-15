@@ -6,6 +6,7 @@ import type { options } from '#common'
 import type { OptionRowProps } from './OptionRow.vue'
 
 const {
+  anchor,
   title,
   subtitle,
   optionEnabledId,
@@ -74,6 +75,7 @@ const slider = computed(() => ({
 
 <template>
   <OptionRow
+    :anchor="anchor"
     :title="title"
     :subtitle="subtitle"
     :options="optionEnabledId ? [optionId, optionEnabledId] : [optionId]"

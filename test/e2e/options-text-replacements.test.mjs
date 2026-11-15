@@ -74,7 +74,7 @@ describe('options UI — text replacements', { skip }, () => {
       for (const [index, rule] of RULES.entries())
         assert.deepEqual(await shown(options, index), rule, `row ${index}`)
 
-      const tools = await (await options.row('work-text-text-replacement')).$('#ao3e-text-replacement-tools')
+      const tools = await (await options.row('text-replacements')).$('#ao3e-text-replacement-tools')
       assert.ok(
         await tools.evaluate((el, frame) => !!(el.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING), list),
         'the switch comes before the list',

@@ -6,7 +6,7 @@ import { numbers } from '../facts.mjs'
 import { mentions, skip, startOptions } from './optionsPage.mjs'
 
 const LIST = 'work-marks'
-const ROW = 'marks-status-work-marks'
+const ROW = 'work-marks'
 const KEY = 'option.workMarks'
 const HASH = '#marks-status'
 

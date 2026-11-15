@@ -1,4 +1,4 @@
-import { anchorSlug, categoryId } from '../model/anchors.ts'
+import { anchorKey, anchorSlug, isAnchorKey } from '../model/anchors.ts'
 
 /**
  * The page's anchor registry: every category, sub-section and option row, by the
@@ -16,12 +16,12 @@ import { anchorSlug, categoryId } from '../model/anchors.ts'
 export type AnchorKind = 'category' | 'subsection' | 'row'
 
 export interface Anchor {
-  /** The element's DOM id — what a `#hash` normally names. */
+  /** Its key, which is the element's DOM id: what a `#hash` normally names. */
   id: string
   kind: AnchorKind
   /** What the page calls it, so a hash can name that instead of the id. */
   name: string
-  /** Titles of the owning category and sub-section, so a jump can find the way in. */
+  /** Keys of the owning category and sub-section, so a jump can find the way in. */
   category: string | null
   subsection: string | null
 }
@@ -36,9 +36,10 @@ export function registerAnchor(anchor: Anchor): void {
 }
 
 /**
- * What `hash` names: its id, or failing that the *name* of a category,
- * sub-section or row — so `#Search` and `#Work text` work as well as their
- * slugs, and a link can be written the way the page reads.
+ * What `hash` names: a key, or one of a row's aliases ({@link anchorKey}), or
+ * failing that the *name* of a category, sub-section or row as the page shows
+ * it now — so `#Search` and `#Work text` work as well as their keys, and a
+ * link can be written the way the page reads.
  */
 export function resolveAnchor(hash: string): Anchor | null {
   const raw = hash.replace(/^#/, '')
@@ -53,7 +54,7 @@ export function resolveAnchor(hash: string): Anchor | null {
   if (!key)
     return null
 
-  const byId = anchors.get(key)
+  const byId = anchors.get(anchorKey(key))
   if (byId)
     return byId
 
@@ -69,5 +70,16 @@ export function resolveAnchor(hash: string): Anchor | null {
 /** The id of the category `hash` lands in: the one it names, or the one holding what it names. */
 export function anchorCategory(hash: string): string | null {
   const category = resolveAnchor(hash)?.category
-  return category ? categoryId(category) : null
+  return category ?? null
+}
+
+/**
+ * The key a category, sub-section or row is given, as its anchor id. One a
+ * hash couldn't name, as written, is said in development, since a link or
+ * bookmark to it would never land.
+ */
+export function useAnchorKey(key: string): string {
+  if (process.env.NODE_ENV === 'development' && !isAnchorKey(key))
+    console.warn(`[options] anchor key "${key}" is not written as a hash is read; use "${anchorSlug(key)}"`)
+  return key
 }

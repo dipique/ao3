@@ -27,7 +27,7 @@ const props = defineProps<{
 
 const { refreshList, cacheWorks, downloadSite, stop, cancel, cancelForeign, foreign, resume, discard } = useSiteExport()
 
-const { id, visible, titleHtml, subtitleHtml } = useSearchableRow(() => ({ title: props.tile.name, subtitle: props.tile.note }))
+const { id, visible, titleHtml, subtitleHtml } = useSearchableRow(() => ({ title: props.tile.name, subtitle: props.tile.note }), () => props.tile.id)
 
 const ICONS: Record<ProfileListId, string> = {
   'marked-for-later': 'i-tabler-bookmark',

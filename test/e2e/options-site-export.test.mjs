@@ -29,9 +29,9 @@ const copyRow = key => `copy:${key}`
 /** The reader's own Marked for Later, a tile of its own under User profile lists. */
 const TILE = 'marked-for-later'
 /** The one row that isn't about a list: the way changes made in a file get back. */
-const CHANGES_ROW = 'offline-reading-changes-made-in-an-export'
-const CACHE_ROW = 'offline-reading-cached-work-text'
-const PRUNE_ROW = 'offline-reading-discard-unneeded-blurbs-automatically'
+const CHANGES_ROW = 'export-changes'
+const CACHE_ROW = 'cached-work-text'
+const PRUNE_ROW = 'prune-orphaned-blurbs'
 /** What a caching job is said to be doing. */
 const CACHING = jobVerb({ phase: 'caching' })
 

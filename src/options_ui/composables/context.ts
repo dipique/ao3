@@ -18,9 +18,9 @@ export const OptionRowOff = createContext<{ reason: ComputedRef<string | null>, 
 /** From a settings row to the controls in it, which tell it the options they edit. */
 export const OptionRowEdits = createContext<(option: options.Id) => void>('OptionRowEdits')
 
-/** Title of the enclosing category / sub-section, for the row search index. */
-export const OptionCategoryName = createContext<string>('OptionCategoryName')
-export const OptionSubsectionName = createContext<string>('OptionSubsectionName')
+/** Key of the enclosing category / sub-section, for the row search index, the rail and the page's anchors. */
+export const OptionCategoryKey = createContext<string>('OptionCategoryKey')
+export const OptionSubsectionKey = createContext<string>('OptionSubsectionKey')
 
 export const OptionRowRulesContext = createContext<{
   editDialog: Ref<ComponentInstance<GlobalComponents['Dialog']> | null>

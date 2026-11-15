@@ -1,8 +1,7 @@
 import type { SettingsRow } from '../model/settingsSearch.ts'
 
-import { anchorSlug } from '../model/anchors.ts'
 import { entryMatches, highlight as highlightTerms, highlightWithStrong, searchTerms } from '../model/settingsSearch.ts'
-import { registerAnchor } from './useAnchors.ts'
+import { registerAnchor, useAnchorKey } from './useAnchors.ts'
 
 /**
  * Page-wide search over the option rows. What a query keeps, and how its hits
@@ -64,25 +63,22 @@ export function useOptionSearch() {
 
 /**
  * Registers one row and returns everything `OptionRow` needs to render itself:
- * a stable id to anchor and label by, whether the current search keeps it, and
+ * its key to anchor and label by, whether the current search keeps it, and
  * its title/description with search hits marked.
  *
- * The id is a slug of the sub-section plus the title, so the two rows called
- * "Reading time" (work stats and chapter stats) get distinct, readable anchors.
- * A row whose title is the reader's, which two rows can share, passes an
- * `anchor` of its own, which follows the title as the reader changes it: the
- * row is indexed and found under the anchor it has now. `id` is the one it
- * started with.
+ * `anchor` gives the row's key ({@link file://../model/anchors.ts}). A row
+ * whose name is the reader's, such as a saved list's, has a key that follows
+ * the name as the reader changes it: the row is indexed and found under the
+ * key it has now. `id` is the one it started with.
  */
-export function useSearchableRow(source: () => { title: string, subtitle: string }, anchor?: () => string) {
-  const category = OptionCategoryName.inject(null)
-  const subsection = OptionSubsectionName.inject(null)
-  const fixed = anchorSlug(subsection ? `${subsection} ${source().title}` : source().title)
-  const current = computed(() => anchor?.() ?? fixed)
+export function useSearchableRow(source: () => { title: string, subtitle: string }, anchor: () => string) {
+  const category = OptionCategoryKey.inject(null)
+  const subsection = OptionSubsectionKey.inject(null)
+  const current = computed(() => useAnchorKey(anchor()))
   const id = current.value
 
   if (process.env.NODE_ENV === 'development' && rows.value.has(id))
-    console.warn(`[options] duplicate option row id "${id}" — give one of them a distinct title or sub-section`)
+    console.warn(`[options] duplicate option row key "${id}" — give one of them a key of its own`)
 
   // Unlike the search index above, the anchor registry keeps the row after it
   // unmounts, and under an anchor it has left; see {@link registerAnchor}.

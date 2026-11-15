@@ -3,11 +3,13 @@
 
 <template>
   <OptionCategory
+    anchor="search"
     title="Search"
     subtitle="Better search pages, filter defaults, and what to keep out of your results."
     icon="i-mdi-magnify"
   >
     <OptionSubsection
+      anchor="filter-defaults"
       title="Filter defaults"
       subtitle="Values AO3's own Sort &amp; Filter sidebar and search forms should start with. Applied only when you haven't already chosen one, so anything in the URL wins."
     >
@@ -17,6 +19,7 @@
       <OptionRowSearchCrossovers />
       <OptionRowWordCountRanges />
       <OptionRow
+        anchor="completion-toolbar"
         title="Completion menu"
         subtitle="Click a work’s chapter total in a listing — the 5 of 1/5, or the ? of 1/? — or its “Chapters:” label, for a menu offering completed or incomplete works only. On a normal listing your pick fills AO3's own Completion Status filter; inside an instant search view it filters the loaded list instead."
       >
@@ -25,11 +28,13 @@
     </OptionSubsection>
 
     <OptionSubsection
+      anchor="customize-search-results"
       title="Customize search results"
       subtitle="Choose what shows up in your listings and how it looks — hide or collapse works, make others stand out, or remove individual tags from work blurbs. Applies anywhere works are listed."
     >
       <OptionRowRules />
       <OptionRow
+        anchor="auto-exclude-hidden"
         title="Exclude hidden works from the search"
         subtitle="When a rule hides a work outright, add what hid it to the search itself — ticked in AO3's own Sort &amp; Filter exclusions, or typed in when it isn't listed — so a page of twenty stops arriving with one work left on it. Nothing is submitted for you; press Sort and Filter when you're ready. Anything still carried by a work you always-show is left alone."
       >
@@ -37,12 +42,14 @@
       </OptionRow>
       <OptionRowHideCrossovers />
       <OptionRow
+        anchor="hide-reason"
         title="Collapse or hide"
         subtitle="What to do with a work hidden by the crossover filter, or by a mark set to hide it. Collapsing leaves a line saying why, with a button to show the work anyway. Rules choose this for themselves, per rule."
       >
         <OptionHideReason />
       </OptionRow>
       <OptionRow
+        anchor="hide-show-matched-values"
         title="Show what matched"
         subtitle="On a collapsed work, name the tag, fandom or author that matched rather than the rule that hid it. Hover a value — or tap it on a touchscreen — to see its rule, and use its exclude (−) button to add it straight to the filter sidebar."
       >
@@ -51,64 +58,75 @@
     </OptionSubsection>
 
     <OptionSubsection
+      anchor="instant-search-views"
       title="Instant search views"
       subtitle="Load a whole listing into one page you can sort and filter instantly — by tag, fandom, rating, length, kudos and more — instead of paging through twenty works at a time."
     >
       <OptionRow
+        anchor="search-marked-for-later"
         title="Search your Marked for Later list"
         subtitle="Replaces your own Marked for Later page with the instant search view of the whole to-read list."
       >
         <OptionSwitch option-id="searchMarkedForLater" />
       </OptionRow>
       <OptionRow
+        anchor="search-profile-lists-refresh-hours"
         title="Reload your own lists"
         subtitle="How long the Marked for Later and read-works views reuse what they already have. Both can run to thousands of works — dozens of requests to AO3 — so raise this if yours are long; the view's own Refresh button reloads regardless."
       >
         <OptionSearchRefreshHours option-id="searchProfileListsRefreshHours" />
       </OptionRow>
       <OptionRow
+        anchor="search-listings-refresh-hours"
         title="Reload listings"
         subtitle="How long the views of an uncommon tag, a series, a works search and a filtered listing reuse the copy they kept before reading the listing again. Every time reads it again on each open, up to the works ceiling; the view's own Refresh button reloads regardless."
       >
         <OptionSearchRefreshHours option-id="searchListingsRefreshHours" />
       </OptionRow>
       <OptionRow
+        anchor="search-read-works"
         title="Search the works you've read"
         subtitle="Adds a “Search read items” button to your History and Marked for Later pages, collecting everything you have marked read — or with any finer verdict — into one view, with a Status filter to narrow it to one of them. Needs work marks on; each work's details come from your AO3 history."
       >
         <OptionSwitch option-id="searchReadWorks" />
       </OptionRow>
       <OptionRow
+        anchor="search-tag-works"
         title="Search an uncommon tag's works"
         subtitle="AO3 only sorts and filters a tag's works once the tag has been made canonical; every other tag gets a plain paged list. Adds a “Search these works” link to those pages."
       >
         <OptionSwitch option-id="searchTagWorks" />
       </OptionRow>
       <OptionRow
+        anchor="search-series-works"
         title="Search a series' works"
         subtitle="AO3 gives a series page no way to sort or filter it, however long the series runs. Adds a “Search these works” button next to Bookmark Series."
       >
         <OptionSwitch option-id="searchSeriesWorks" />
       </OptionRow>
       <OptionRow
+        anchor="search-text-results"
         title="Search text-search results"
         subtitle="Adds a “Search these results” button to the results of a works search, so you can narrow them by things AO3's own results page can't filter on."
       >
         <OptionSwitch option-id="searchTextResults" />
       </OptionRow>
       <OptionRow
+        anchor="search-filtered-listing"
         title="Search a filtered listing's works"
         subtitle="AO3 already sorts and filters a tag's, an author's or a collection's works with its Sort & Filter sidebar. Adds a “Search these works” button to those listings too, which loads them into the same view, to narrow by things the sidebar can't, such as your marks."
       >
         <OptionSwitch option-id="searchFilteredListing" />
       </OptionRow>
       <OptionRow
+        anchor="search-max-results"
         title="Maximum works to load"
         subtitle="A ceiling on how many works the views above will load. Works come twenty to a page from AO3's donated servers, and a text search for a common word can match hundreds of thousands — so a bigger list loads only up to this ceiling, in the Archive's own order, and only after you confirm."
       >
         <OptionSearchMaxResults />
       </OptionRow>
       <OptionRow
+        anchor="search-per-page"
         title="Results per page"
         subtitle="How many works to show at a time in the views above. Lower values stay fast even on very large lists."
       >

@@ -153,10 +153,10 @@ describe('options UI — text contrast', { skip }, () => {
           }
           if (category === 'search') {
             // A bound that can't be saved, so the row says why.
-            const [lowest] = await options.controls(await options.row('filter-defaults-default-word-count'), 'textbox')
+            const [lowest] = await options.controls(await options.row('search-word-count'), 'textbox')
             await lowest.click({ clickCount: 3 })
             await lowest.type('-5')
-            await until('the default word count to say why', async () => !!(await (await options.row('filter-defaults-default-word-count')).$('[data-error]')))
+            await until('the default word count to say why', async () => !!(await (await options.row('search-word-count')).$('[data-error]')))
           }
           if (category === 'sync-backups')
             await until('the backups to be listed', async () => (await options.listRows('backups')).length === REPLIES.listBackups.length)
@@ -249,7 +249,7 @@ describe('options UI — text contrast', { skip }, () => {
         await arm('Remove offline copy', await options.action(tag, 'remove-copy'))
         await arm('Remove list', await options.action(tag, 'remove-list'))
 
-        const cache = await options.row('offline-reading-cached-work-text')
+        const cache = await options.row('cached-work-text')
         const discard = await options.action(cache, 'discard-orphans')
         await until('Discard orphans to have something to discard', () => discard.evaluate(el => !el.disabled))
         await arm('Discard orphans', discard)

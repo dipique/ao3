@@ -8,7 +8,7 @@ const SEARCH = '[data-settings-search]'
 const WIDE = { width: 1280, height: 800 }
 const NARROW = { width: 390, height: 844 }
 
-const THEME_ROW = 'appearance-extension-theme'
+const THEME_ROW = 'theme'
 
 /** A query no setting answers to, whatever the settings say: the pane holds nothing while it stands. */
 const NO_SUCH_SETTING = 'qqzxqqzx'

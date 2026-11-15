@@ -1,43 +1,42 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { entryMatches, searchTerms } from '../../src/options_ui/model/settingsSearch.ts'
 import { storedLists } from './helpers.mjs'
 import { skip, startOptions, until } from './optionsPage.mjs'
 
 const SEARCH = '[data-settings-search]'
 
 /**
- * A word of the settings row `id`'s own text that nothing else the pane holds
- * has in it, in any category, shown or not: a query only that row answers to,
- * whatever the settings say. Runs in the page.
+ * Every settings row on the page, in page order: its key, the keys of the
+ * category and sub-section holding it, and what the search reads of it, its
+ * title (without its badges) and its description. Runs in the page.
  */
-function wordOnlyIn(id) {
-  /** The text under `root`, a piece per text node, less what `skip` picks. */
-  const textOf = (root, skip) => {
-    const pieces = []
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (!skip || !node.parentElement.closest(skip))
-        pieces.push(node.textContent)
-    }
-    return pieces.join(' ').toLowerCase()
-  }
-  const row = document.getElementById(id)
-  const everything = textOf(document.querySelector('main'))
-  // What the search reads of a row: its title, less its badges, and its description.
-  const own = ['title', 'description'].map(part => textOf(row.querySelector(`[data-row-part="${part}"]`), '[data-badge]')).join(' ')
-  const count = (text, word) => text.split(word).length - 1
-  return own.split(/[^a-z]+/)
-    .filter(word => word.length >= 5)
-    .sort((a, b) => b.length - a.length)
-    .find(word => count(everything, word) === count(own, word)) ?? null
+function settingsRows() {
+  return [...document.querySelectorAll('.option-row')].map(row => ({
+    id: row.id,
+    category: row.closest('[data-category]')?.dataset.category ?? null,
+    subsection: row.closest('section[id]:not([data-category])')?.id ?? null,
+    title: row.querySelector('[data-row-part="title"] label > span')?.textContent ?? '',
+    subtitle: row.querySelector('[data-row-part="description"]')?.textContent ?? '',
+  }))
 }
 
-/** The query `wordOnlyIn` finds for the row `id`, which it must find. */
-async function queryOnlyFor(page, id) {
-  const word = await page.evaluate(wordOnlyIn, id)
-  assert.ok(word, `#${id} has a word of its own`)
-  return word
+/**
+ * A query the row `id` answers to whatever it says: its whole title and
+ * description. Which other rows answer to it is worked out by the search's own
+ * rule ({@link entryMatches}), so no test here depends on the settings' words.
+ */
+async function queryFor(page, id) {
+  const row = (await page.evaluate(settingsRows)).find(one => one.id === id)
+  assert.ok(row, `no settings row #${id}`)
+  return `${row.title} ${row.subtitle}`.trim()
+}
+
+/** The settings rows `query` keeps, by the search's own rule, in page order. */
+async function rowsKept(page, query) {
+  const terms = searchTerms(query)
+  return (await page.evaluate(settingsRows)).filter(row => entryMatches(row, terms))
 }
 
 /** A stored works search, for the saved lists to have a row. */
@@ -51,6 +50,9 @@ const TEA_COPY = storedLists({
 })
 
 const CATEGORIES = ['site-features-appearance', 'search', 'lists', 'reading', 'sync-backups', 'advanced']
+
+/** The categories holding `rows`, in rail order. */
+const categoriesOf = rows => CATEGORIES.filter(id => rows.some(row => row.category === id))
 
 /**
  * Getting around the options page: the pane shows one category at a time, the
@@ -66,7 +68,7 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
 
   before(async () => {
     session = await startOptions()
-    options = await session.open({ hash: '#work-text-reader-mode', viewport: { width: 1280, height: 800 } })
+    options = await session.open({ hash: '#reader-mode', viewport: { width: 1280, height: 800 } })
     page = options.page
   }, { timeout: 180000 })
 
@@ -115,14 +117,14 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
 
   test('the hash the page opened with shows its category alone, scrolled to the setting', async () => {
     assert.deepEqual(await options.shownCategories(), ['reading'])
-    const row = await positionOf('work-text-reader-mode')
+    const row = await positionOf('reader-mode')
     assert.ok(row, 'the reader mode row should be shown, under its own anchor id')
     assert.ok(row.onScreen, `reader mode row was at ${row.top}px`)
     assert.ok(row.clear, `reader mode row was at ${row.top}px, under the top bar`)
   })
 
   test('every category stays on the page while another is shown', async () => {
-    const hidden = await options.row('filter-defaults-default-crossovers')
+    const hidden = await options.row('search-crossovers')
     assert.equal(await hidden.evaluate(el => el.checkVisibility()), false)
   })
 
@@ -168,7 +170,7 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
       assert.ok(subsections.every(s => s.name), 'each sub-section is named')
       assert.equal(subsections.find(s => s.id === 'user-profile-lists').count, 2, 'Marked for Later and Read works')
       assert.equal(subsections.find(s => s.id === 'saved-lists').count, 1, 'one per saved list')
-      for (const id of ['review-tracked-lists', 'user-profile-lists-marked-for-later', 'user-profile-lists-read-works', 'offline-reading-changes-made-in-an-export', 'offline-reading-cached-work-text', 'offline-reading-discard-unneeded-blurbs-automatically'])
+      for (const id of ['tracked-lists', 'marked-for-later', 'read-works', 'export-changes', 'cached-work-text', 'prune-orphaned-blurbs'])
         assert.equal(await (await lists.row(id)).evaluate(el => el.checkVisibility()), true, id)
       const stored = await lists.savedList(`copy:${TEA_KEY}`)
       assert.equal(await stored.evaluate(el => el.id), 'saved-lists-search-tea', 'a saved list\'s row is anchored under Saved lists, by its name')
@@ -216,34 +218,43 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
     // own name, without it, falls back to the name.
     await goTo('#Reader mode')
     assert.deepEqual(await options.shownCategories(), ['reading'])
-    const row = await positionOf('work-text-reader-mode')
+    const row = await positionOf('reader-mode')
     assert.ok(row?.onScreen && row.clear, `reader mode row was at ${row?.top}px`)
   })
 
   /** The row a query below answers to, alone, and the category that holds it. */
-  const HIT = 'link-menus-hide-or-highlight-an-author'
+  /** The row whose whole text is searched for below. */
+  const HIT = 'hide-author-toolbar'
 
   test('a query shows every category with a hit under its heading, and only the rows that match', async () => {
     await goTo('#reading')
-    await search(await queryOnlyFor(page, HIT))
+    const query = await queryFor(page, HIT)
+    await search(query)
+    const kept = await rowsKept(page, query)
+    assert.ok(kept.some(row => row.id === HIT), 'a row answers to its own text')
 
-    assert.deepEqual(await options.shownCategories(), ['site-features-appearance'])
-    const heading = await (await options.row('site-features-appearance')).$eval('h1', el => el.checkVisibility() && el.textContent.trim() !== '')
-    assert.equal(heading, true, 'under its heading')
+    assert.deepEqual(await options.shownCategories(), categoriesOf(kept))
+    for (const category of categoriesOf(kept)) {
+      const heading = await (await options.row(category)).$eval('h1', el => el.checkVisibility() && el.textContent.trim() !== '')
+      assert.equal(heading, true, `#${category} is under its heading`)
+    }
 
-    const shown = async id => (await options.row(id)).evaluate(el => el.checkVisibility())
-    assert.equal(await shown(HIT), true, 'the row the query names is shown')
-    assert.equal(await shown('link-menus-right-click-menus'), false, 'a row without the term is hidden')
+    const shown = await page.evaluate(() => [...document.querySelectorAll('.option-row')].filter(row => row.checkVisibility()).map(row => row.id))
+    assert.deepEqual(shown, kept.map(row => row.id), 'the rows shown are the rows the query keeps')
   })
 
   test('while a query runs, the rail lists only the categories with hits, each with its count', async () => {
+    const kept = await rowsKept(page, await searchText())
     const categories = await categoriesOnRail()
-    assert.deepEqual(categories.map(c => c.id), ['site-features-appearance'])
-    assert.ok(categories.every(c => c.count > 0), JSON.stringify(categories))
+    assert.deepEqual(categories.map(c => c.id), categoriesOf(kept))
+    for (const category of categories)
+      assert.equal(category.count, kept.filter(row => row.category === category.id).length, `#${category.id}'s count`)
     const line = await matchLine()
     assert.ok(line, 'the pane says how many settings match')
-    assert.equal(categories.reduce((sum, c) => sum + c.count, 0), line.hits, 'the counts add up to the settings that match')
-    assert.deepEqual(await subsectionsOnRail(), [], 'the current category has no hit, so it is not open on the rail')
+    assert.equal(line.hits, kept.length, 'the pane counts the settings that match')
+    const current = (await categoriesOnRail()).find(c => c.current)?.id ?? 'reading'
+    const open = kept.filter(row => row.category === current && row.subsection).map(row => row.subsection)
+    assert.deepEqual((await subsectionsOnRail()).map(s => s.id), [...new Set(open)], 'the current category is open on its sub-sections with a hit, if any')
   })
 
   test('Escape clears the query and returns to the category the search started from', async () => {
@@ -258,19 +269,24 @@ describe('options UI — the rail, #hash jumps and the settings search', { skip 
   })
 
   test('a jump the search would hide clears it, and one it keeps leaves it running', async () => {
-    await search(await queryOnlyFor(page, HIT))
-    await goTo('#work-text-reader-mode')
+    const query = await queryFor(page, HIT)
+    const kept = new Set((await rowsKept(page, query)).map(row => row.id))
+    const hidden = (await page.evaluate(settingsRows)).find(row => !kept.has(row.id) && row.category !== 'site-features-appearance')
+    assert.ok(hidden, 'some row the query hides, in another category')
+
+    await search(query)
+    await goTo(`#${hidden.id}`)
     assert.equal(await searchText(), '')
-    assert.deepEqual(await options.shownCategories(), ['reading'])
-    assert.ok((await positionOf('work-text-reader-mode'))?.onScreen)
+    assert.deepEqual(await options.shownCategories(), [hidden.category])
+    assert.ok((await positionOf(hidden.id))?.onScreen)
 
     // A query the target survives is the reader's place in the page, and is left
     // where it is.
-    const survives = await queryOnlyFor(page, 'work-text-reader-mode')
+    const survives = await queryFor(page, hidden.id)
     await search(survives)
-    await goTo('#work-text-reader-mode')
+    await goTo(`#${hidden.id}`)
     assert.equal(await searchText(), survives)
-    assert.ok((await positionOf('work-text-reader-mode'))?.onScreen)
+    assert.ok((await positionOf(hidden.id))?.onScreen)
   })
 
   test('Back to the address the page opened with, which has no hash, returns to the first category', async () => {
@@ -418,7 +434,7 @@ describe('options UI — the rail marks the sub-section being read', { skip }, (
   })
 
   test('a hash naming a setting marks the sub-section it is in', async () => {
-    const options = await session.open({ hash: '#work-text-reader-mode', viewport: VIEWPORT })
+    const options = await session.open({ hash: '#reader-mode', viewport: VIEWPORT })
     try {
       await until('Work text to be marked', () => markedIs(options, 'work-text'))
     }
@@ -431,12 +447,26 @@ describe('options UI — the rail marks the sub-section being read', { skip }, (
     const options = await session.open({ hash: '#customize-search-results', viewport: VIEWPORT })
     try {
       await until('Customize search results to be marked', () => markedIs(options, 'customize-search-results'))
-      await (await options.page.$(SEARCH)).type(await queryOnlyFor(options.page, 'filter-defaults-default-crossovers'))
-      await until('the rail to list Filter defaults alone', async () => {
-        const listed = (await options.railItems()).filter(item => item.kind === 'subsection').map(item => item.id)
-        return JSON.stringify(listed) === JSON.stringify(['filter-defaults'])
+      // A Search row whose text Customize search results has none of, so the
+      // query takes that sub-section off the rail.
+      let query = null
+      let listed = []
+      for (const row of (await options.page.evaluate(settingsRows)).filter(one => one.category === 'search' && one.subsection !== 'customize-search-results')) {
+        const text = await queryFor(options.page, row.id)
+        const kept = (await rowsKept(options.page, text)).filter(one => one.category === 'search')
+        if (!kept.some(one => one.subsection === 'customize-search-results')) {
+          query = text
+          listed = [...new Set(kept.map(one => one.subsection).filter(Boolean))]
+          break
+        }
+      }
+      assert.ok(query, 'some Search row has text Customize search results doesn\'t')
+      await (await options.page.$(SEARCH)).type(query)
+      await until('the rail to list the sub-sections with a hit', async () => {
+        const shown = (await options.railItems()).filter(item => item.kind === 'subsection').map(item => item.id)
+        return JSON.stringify(shown) === JSON.stringify(listed)
       })
-      await until('Filter defaults to be marked', () => markedIs(options, 'filter-defaults'))
+      await until('a listed sub-section to be marked', async () => (await Promise.all(listed.map(id => markedIs(options, id)))).some(Boolean))
     }
     finally {
       await options.close()

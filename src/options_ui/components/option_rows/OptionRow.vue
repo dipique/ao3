@@ -7,6 +7,12 @@ import { rowSyncs } from '../../model/rowSync.ts'
 export type RowBadge = 'needs-login' | 'this-device' | 'every-click'
 
 export interface OptionRowProps {
+  /**
+   * Its key: its anchor id, and what a link, a bookmark or a test names it by
+   * ({@link file://../../model/anchors.ts}). The option it sets, where it sets
+   * one, written as a hash is read: `hide-author-toolbar`.
+   */
+  anchor: string
   title: string
   subtitle: string
   /** Facts that would otherwise be a phrase in the description. */
@@ -33,6 +39,7 @@ const BADGES = {
 
 const { id, anchor, controlId, visible, titleHtml, subtitleHtml } = useSearchableRow(
   () => ({ title: props.title, subtitle: props.subtitle }),
+  () => props.anchor,
 )
 
 const { isBookmarked, toggle } = useSettingBookmarks()

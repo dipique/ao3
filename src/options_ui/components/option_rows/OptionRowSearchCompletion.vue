@@ -7,6 +7,7 @@ const { enabled, completion } = useOption('searchCompletion')
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    anchor="search-completion"
     :options="['searchCompletion']"
     title="Default completion status"
     subtitle="Pre-selects AO3’s Completion Status filter, so listings start with only complete works, or only works in progress."

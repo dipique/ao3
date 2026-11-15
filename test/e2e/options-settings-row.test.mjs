@@ -6,19 +6,19 @@ import { mentions, skip, startOptions, until } from './optionsPage.mjs'
 const WIDE = { width: 1280, height: 800 }
 const SEARCH = '[data-settings-search]'
 
-const MASTER = 'link-menus-right-click-menus'
+const MASTER = 'context-menus'
 const MASTER_KEY = 'option.contextMenusEnabled'
 /** The rows the master switch gates, by anchor id, and the option each one edits. */
 const DEPENDENTS = {
-  'link-menus-open-menus-with-a-left-click': 'option.openMenuOnClick',
-  'link-menus-menu-on-tags': 'option.tagToolbar',
-  'link-menus-menu-on-fandoms': 'option.fandomToolbar',
-  'link-menus-hide-or-highlight-an-author': 'option.hideAuthorToolbar',
-  'link-menus-subscribe-to-an-author': 'option.subscribeAuthorToolbar',
-  'link-menus-mute-an-author': 'option.muteAuthorToolbar',
+  'open-menu-on-click': 'option.openMenuOnClick',
+  'tag-toolbar': 'option.tagToolbar',
+  'fandom-toolbar': 'option.fandomToolbar',
+  'hide-author-toolbar': 'option.hideAuthorToolbar',
+  'subscribe-author-toolbar': 'option.subscribeAuthorToolbar',
+  'mute-author-toolbar': 'option.muteAuthorToolbar',
 }
 /** Not gated: with menus off it still drives the capture buttons and the entity toolbars. */
-const MARK_FOR_LATER = 'link-menus-mark-a-work-for-later'
+const MARK_FOR_LATER = 'mark-for-later-toolbar'
 
 /** A mix of on and off, so a value lost or flipped on the way through shows. */
 const SEEDED = {
@@ -108,9 +108,9 @@ describe('options UI — the settings row', { skip }, () => {
         assert.equal(await descriptionShown(options, MARK_FOR_LATER), true)
 
         // An inert switch takes no press.
-        await options.press(await switchOf(options, 'link-menus-menu-on-tags'))
+        await options.press(await switchOf(options, 'tag-toolbar'))
         await options.saved()
-        assert.equal(await checked(options, 'link-menus-menu-on-tags'), true)
+        assert.equal(await checked(options, 'tag-toolbar'), true)
         await noDependentWrites(options)
 
         await options.press(await switchOf(options, MASTER))
@@ -138,7 +138,7 @@ describe('options UI — the settings row', { skip }, () => {
     test('a settings search shows an inert row\'s description, where its hit is', async () => {
       const options = await session.open({ hash: '#link-menus', viewport: WIDE, seed: { ...SEEDED, [MASTER_KEY]: false } })
       try {
-        const id = 'link-menus-hide-or-highlight-an-author'
+        const id = 'hide-author-toolbar'
         // A word of the row's description that its title doesn't have, so the hit is there.
         const title = (await partOf(options, id, 'title')).toLowerCase()
         const word = (await partOf(options, id, 'description')).split(/[^a-z]+/i).filter(w => w.length >= 4 && !title.includes(w.toLowerCase())).sort((a, b) => b.length - a.length)[0]
@@ -149,7 +149,7 @@ describe('options UI — the settings row', { skip }, () => {
         assert.equal(await row.evaluate(el => el.checkVisibility()), true)
         assert.equal(await descriptionShown(options, id), true)
         assert.equal((await row.$eval('[data-row-part="description"] mark', el => el.textContent)).toLowerCase(), word.toLowerCase())
-        assert.equal(await disabled(options, 'link-menus-hide-or-highlight-an-author'), true)
+        assert.equal(await disabled(options, 'hide-author-toolbar'), true)
       }
       finally {
         await options.close()
@@ -159,13 +159,13 @@ describe('options UI — the settings row', { skip }, () => {
 
   describe('badges', () => {
     const BADGES = {
-      'link-menus-open-menus-with-a-left-click': ['every-click'],
-      'link-menus-subscribe-to-an-author': ['needs-login'],
-      'link-menus-mute-an-author': ['needs-login'],
-      'link-menus-mark-a-work-for-later': ['needs-login'],
-      'page-controls-collapsible-dashboard-sidebar': ['this-device'],
-      'work-text-reader-mode': ['this-device'],
-      'link-menus-menu-on-tags': [],
+      'open-menu-on-click': ['every-click'],
+      'subscribe-author-toolbar': ['needs-login'],
+      'mute-author-toolbar': ['needs-login'],
+      'mark-for-later-toolbar': ['needs-login'],
+      'collapsible-dashboard': ['this-device'],
+      'reader-mode': ['this-device'],
+      'tag-toolbar': [],
     }
 
     test('sit beside the title, each with a tooltip', async () => {

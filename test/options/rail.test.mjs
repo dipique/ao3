@@ -1,40 +1,44 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { anchorSlug } from '../../src/options_ui/model/anchors.ts'
 import { buildRail, landingCategory, markedSubsection, nextHold, subsectionInView, toggleBookmark } from '../../src/options_ui/model/rail.ts'
 
-const SITE = 'Site features & appearance'
+/** The categories, by key and the name the rail gives them. */
+const SITE = { id: 'site-features-appearance', name: 'Site features & appearance' }
+const SEARCH = { id: 'search', name: 'Search' }
+const READING = { id: 'reading', name: 'Reading' }
+const LISTS = { id: 'lists', name: 'Lists' }
 
+/** Rows record the keys of the category and sub-section holding them. */
 const ROWS = [
-  { category: SITE, subsection: 'Link menus', title: 'Right-click menus', subtitle: 'Menus on tags, fandoms and authors.' },
-  { category: SITE, subsection: 'Link menus', title: 'Menu on tags', subtitle: 'Open a menu on any tag.' },
-  { category: SITE, subsection: 'Appearance', title: 'Extension theme', subtitle: 'Light, dark, or as AO3 shows.' },
-  { category: 'Reading', subsection: 'Marks & status', title: 'Work marks', subtitle: 'Your own marks on works.' },
-  { category: 'Reading', subsection: 'Work text', title: 'Reader mode', subtitle: 'Strips the page down to the work text.' },
-  { category: 'Reading', subsection: 'Work text', title: 'Narrow text', subtitle: 'A narrower reading column.' },
-  { category: 'Search', subsection: 'Filter defaults', title: 'Default language', subtitle: 'Pre-fills the sidebar.' },
+  { category: 'site-features-appearance', subsection: 'link-menus', title: 'Right-click menus', subtitle: 'Menus on tags, fandoms and authors.' },
+  { category: 'site-features-appearance', subsection: 'link-menus', title: 'Menu on tags', subtitle: 'Open a menu on any tag.' },
+  { category: 'site-features-appearance', subsection: 'appearance', title: 'Extension theme', subtitle: 'Light, dark, or as AO3 shows.' },
+  { category: 'reading', subsection: 'marks-status', title: 'Work marks', subtitle: 'Your own marks on works.' },
+  { category: 'reading', subsection: 'work-text', title: 'Reader mode', subtitle: 'Strips the page down to the work text.' },
+  { category: 'reading', subsection: 'work-text', title: 'Narrow text', subtitle: 'A narrower reading column.' },
+  { category: 'search', subsection: 'filter-defaults', title: 'Default language', subtitle: 'Pre-fills the sidebar.' },
 ]
 
-const ORDER = [SITE, 'Search', 'Reading']
+const ORDER = [SITE, SEARCH, READING]
 
 const byId = rail => Object.fromEntries(rail.map(category => [category.id, category]))
-/** The sub-sections a category draws, by title, in the order it draws them. */
-const drawn = (category, ...titles) => titles.map(title => ({ category, title }))
+/** The sub-sections a category draws, as `[key, title]`, in the order it draws them. */
+const drawn = (category, ...subsections) => subsections.map(([id, title]) => ({ category, id, title }))
 
 /** The drawn Lists, whose Saved lists has no rows: no list has been saved. */
 const LISTS_ROWS = [
-  { category: 'Lists', subsection: 'Review', title: 'Tracked lists', subtitle: 'What is new across the lists you track.' },
-  { category: 'Lists', subsection: 'Offline reading', title: 'Cached work text', subtitle: 'The text of the works you cached.' },
+  { category: 'lists', subsection: 'review', title: 'Tracked lists', subtitle: 'What is new across the lists you track.' },
+  { category: 'lists', subsection: 'offline-reading', title: 'Cached work text', subtitle: 'The text of the works you cached.' },
 ]
-const LISTS_DRAWN = drawn('Lists', 'Review', 'Saved lists', 'Offline reading')
+const LISTS_DRAWN = drawn('lists', ['review', 'Review'], ['saved-lists', 'Saved lists'], ['offline-reading', 'Offline reading'])
 const shape = rail => rail.map(({ id, count, subsections }) => ({ id, count, subsections: subsections.map(s => [s.id, s.count]) }))
 
 describe('buildRail', () => {
   test('lists the categories in the given order, by id and name', () => {
     const rail = buildRail(ROWS, ORDER, '', 'search')
     assert.deepEqual(rail.map(c => [c.id, c.name]), [
-      ['site-features-appearance', SITE],
+      ['site-features-appearance', 'Site features & appearance'],
       ['search', 'Search'],
       ['reading', 'Reading'],
     ])
@@ -50,34 +54,43 @@ describe('buildRail', () => {
 
   test('puts sub-sections in the order given, whatever order their rows come in', () => {
     const rows = [
-      { category: 'Lists', subsection: 'Review', title: 'Tracked lists', subtitle: '' },
-      { category: 'Lists', subsection: 'Offline reading', title: 'Cached work text', subtitle: '' },
+      { category: 'lists', subsection: 'review', title: 'Tracked lists', subtitle: '' },
+      { category: 'lists', subsection: 'offline-reading', title: 'Cached work text', subtitle: '' },
       // A saved list's row, drawn once the stored lists have been read.
-      { category: 'Lists', subsection: 'Saved lists', title: 'Search: tea', subtitle: '' },
+      { category: 'lists', subsection: 'saved-lists', title: 'Search: tea', subtitle: '' },
     ]
-    const lists = byId(buildRail(rows, ['Lists'], '', 'lists', drawn('Lists', 'Review', 'Saved lists', 'Offline reading'))).lists
+    const lists = byId(buildRail(rows, [LISTS], '', 'lists', LISTS_DRAWN)).lists
     assert.deepEqual(lists.subsections.map(s => [s.id, s.count]), [['review', 1], ['saved-lists', 1], ['offline-reading', 1]])
   })
 
   test('a sub-section the order leaves out comes after the others, in the order its rows come', () => {
-    const reading = byId(buildRail(ROWS, ORDER, '', 'reading', drawn('Reading', 'Work text'))).reading
+    const reading = byId(buildRail(ROWS, ORDER, '', 'reading', drawn('reading', ['work-text', 'Work text']))).reading
     assert.deepEqual(reading.subsections.map(s => s.id), ['work-text', 'marks-status'])
   })
 
   test('a sub-section drawn with no rows is listed under its own category, at 0', () => {
-    const rail = byId(buildRail(LISTS_ROWS, ['Lists', 'Reading'], '', 'lists', [...LISTS_DRAWN, ...drawn('Reading', 'Work text')]))
+    const rail = byId(buildRail(LISTS_ROWS, [LISTS, READING], '', 'lists', [...LISTS_DRAWN, ...drawn('reading', ['work-text', 'Work text'])]))
     assert.deepEqual(rail.lists.subsections.map(s => [s.id, s.count, s.hits]), [['review', 1, 1], ['saved-lists', 0, 0], ['offline-reading', 1, 1]])
     assert.equal(rail.lists.count, 2, 'a sub-section adds no rows to its category')
     assert.deepEqual(rail.reading.subsections.map(s => [s.id, s.count]), [['work-text', 0]], 'nor to another category')
   })
 
-  test('names each sub-section by its title', () => {
-    const reading = byId(buildRail(ROWS, ORDER, '', 'reading')).reading
-    assert.deepEqual(reading.subsections.map(s => s.name), ['Marks & status', 'Work text'])
+  test('names each sub-section by the title it is drawn with, and one not drawn by its key', () => {
+    const reading = byId(buildRail(ROWS, ORDER, '', 'reading', drawn('reading', ['work-text', 'Work text']))).reading
+    assert.deepEqual(reading.subsections.map(s => s.name), ['Work text', 'marks-status'])
+  })
+
+  test('a title the page renames changes what the rail calls it, and nothing else', () => {
+    const before = buildRail(ROWS, ORDER, '', 'reading', drawn('reading', ['marks-status', 'Marks & status'], ['work-text', 'Work text']))
+    const after = buildRail(ROWS, [SITE, SEARCH, { ...READING, name: 'Reading & marks' }], '', 'reading', drawn('reading', ['marks-status', 'Your marks'], ['work-text', 'Work text']))
+    const without = rail => rail.map(({ name: _, subsections, ...rest }) => ({ ...rest, subsections: subsections.map(({ name: __, ...sub }) => sub) }))
+    assert.deepEqual(without(after), without(before))
+    assert.equal(byId(after).reading.name, 'Reading & marks')
+    assert.equal(byId(after).reading.subsections[0].name, 'Your marks')
   })
 
   test('a row outside any sub-section counts toward its category only', () => {
-    const rows = [...ROWS, { category: 'Search', subsection: null, title: 'Loose row', subtitle: '' }]
+    const rows = [...ROWS, { category: 'search', subsection: null, title: 'Loose row', subtitle: '' }]
     const search = byId(buildRail(rows, ORDER, '', 'search')).search
     assert.equal(search.count, 2)
     assert.deepEqual(search.subsections.map(s => [s.id, s.count]), [['filter-defaults', 1]])
@@ -88,15 +101,16 @@ describe('buildRail', () => {
     assert.deepEqual(shape(buildRail(rows, ORDER, '', 'search')), shape(buildRail(ROWS, ORDER, '', 'search')))
   })
 
-  test('a category the order leaves out still gets listed, after the others', () => {
-    const rows = [{ category: 'Advanced', subsection: 'Under the hood', title: 'Verbose logging', subtitle: '' }, ...ROWS]
+  test('a category the order leaves out still gets listed, after the others, named by its key', () => {
+    const rows = [{ category: 'advanced', subsection: 'under-the-hood', title: 'Verbose logging', subtitle: '' }, ...ROWS]
     const rail = buildRail(rows, ORDER, '', 'search')
     assert.deepEqual(rail.map(c => c.id), ['site-features-appearance', 'search', 'reading', 'advanced'])
     assert.equal(rail.at(-1).count, 1)
+    assert.equal(rail.at(-1).name, 'advanced')
   })
 
   test('a category in the order with no rows is listed, empty', () => {
-    const rail = buildRail(ROWS, [...ORDER, 'Lists'], '', 'search')
+    const rail = buildRail(ROWS, [...ORDER, LISTS], '', 'search')
     const lists = byId(rail).lists
     assert.deepEqual({ count: lists.count, hits: lists.hits, visible: lists.visible, subsections: lists.subsections }, {
       count: 0,
@@ -120,7 +134,7 @@ describe('buildRail', () => {
 
     test('every sub-section is visible, one with no rows too', () => {
       for (const query of ['', '   ']) {
-        const lists = byId(buildRail(LISTS_ROWS, ['Lists'], query, 'lists', LISTS_DRAWN)).lists
+        const lists = byId(buildRail(LISTS_ROWS, [LISTS], query, 'lists', LISTS_DRAWN)).lists
         assert.deepEqual(lists.subsections.map(s => [s.id, s.visible]), [['review', true], ['saved-lists', true], ['offline-reading', true]], JSON.stringify(query))
       }
     })
@@ -144,11 +158,11 @@ describe('buildRail', () => {
     })
 
     test('a category with no rows is hidden', () => {
-      assert.equal(byId(buildRail(ROWS, [...ORDER, 'Lists'], 'text', 'search')).lists.visible, false)
+      assert.equal(byId(buildRail(ROWS, [...ORDER, LISTS], 'text', 'search')).lists.visible, false)
     })
 
     test('only the sub-sections with hits are visible, so one with no rows is hidden', () => {
-      const lists = byId(buildRail(LISTS_ROWS, ['Lists'], 'cached', 'lists', LISTS_DRAWN)).lists
+      const lists = byId(buildRail(LISTS_ROWS, [LISTS], 'cached', 'lists', LISTS_DRAWN)).lists
       assert.deepEqual(lists.subsections.map(s => [s.id, s.hits, s.visible]), [['review', 0, false], ['saved-lists', 0, false], ['offline-reading', 1, true]])
     })
 
@@ -171,7 +185,7 @@ describe('buildRail', () => {
 
     test('is none when the id names no category', () => {
       assert.ok(buildRail(ROWS, ORDER, '', 'nowhere').every(c => !c.current))
-      assert.ok(buildRail(ROWS, ORDER, '', SITE).every(c => !c.current), 'a title is not an id')
+      assert.ok(buildRail(ROWS, ORDER, '', SITE.name).every(c => !c.current), 'a name is not an id')
     })
 
     test('stays current while a query hides it', () => {
@@ -209,8 +223,8 @@ describe('buildRail', () => {
 
   describe('bookmarks', () => {
     const ROWS_WITH_IDS = [
-      ...ROWS.map(row => ({ ...row, id: anchorSlug(`${row.subsection} ${row.title}`) })),
-      { id: 'loose-row', category: 'Reading', subsection: null, title: 'A row outside any sub-section', subtitle: '' },
+      ...ROWS.map((row, i) => ({ ...row, id: ['link-menus-right-click-menus', 'link-menus-menu-on-tags', 'appearance-extension-theme', 'marks-status-work-marks', 'work-text-reader-mode', 'work-text-narrow-text', 'filter-defaults-default-language'][i] })),
+      { id: 'loose-row', category: 'reading', subsection: null, title: 'A row outside any sub-section', subtitle: '' },
     ]
     const marks = rail => rail.map(({ id, bookmarks, subsections }) => ({
       id,
@@ -226,9 +240,9 @@ describe('buildRail', () => {
     test('each bookmarked row is under its category and its sub-section, named by its title', () => {
       const rail = buildRail(ROWS_WITH_IDS, ORDER, '', 'reading', [], ['work-text-narrow-text', 'appearance-extension-theme'])
       assert.deepEqual(marks(rail), [
-        { id: 'site-features-appearance', bookmarks: [['appearance-extension-theme', 'Extension theme', 'Appearance']], subsections: [['appearance', ['appearance-extension-theme']]] },
+        { id: 'site-features-appearance', bookmarks: [['appearance-extension-theme', 'Extension theme', 'appearance']], subsections: [['appearance', ['appearance-extension-theme']]] },
         { id: 'search', bookmarks: [], subsections: [] },
-        { id: 'reading', bookmarks: [['work-text-narrow-text', 'Narrow text', 'Work text']], subsections: [['work-text', ['work-text-narrow-text']]] },
+        { id: 'reading', bookmarks: [['work-text-narrow-text', 'Narrow text', 'work-text']], subsections: [['work-text', ['work-text-narrow-text']]] },
       ])
     })
 
@@ -353,7 +367,7 @@ describe('subsectionInView', () => {
 
 describe('nextHold', () => {
   const jump = to => ({ kind: 'jump', to })
-  const PAGE_CONTROLS = { kind: 'subsection', id: 'page-controls', subsection: 'Page controls' }
+  const PAGE_CONTROLS = { kind: 'subsection', id: 'page-controls', subsection: 'page-controls' }
   const held = (target, landedAt = null) => ({ target, landedAt })
 
   test('a jump to a sub-section holds the sub-section', () => {
@@ -361,7 +375,7 @@ describe('nextHold', () => {
   })
 
   test('a jump to a setting holds the sub-section it is in, by the sub-section\'s id', () => {
-    assert.deepEqual(nextHold(null, jump({ kind: 'row', id: 'marks-status-work-marks', subsection: 'Marks & status' })), held('marks-status'))
+    assert.deepEqual(nextHold(null, jump({ kind: 'row', id: 'work-marks', subsection: 'marks-status' })), held('marks-status'))
   })
 
   test('a jump to a category holds its first sub-section, whichever is first when it lands', () => {
@@ -369,7 +383,7 @@ describe('nextHold', () => {
   })
 
   test('a later jump takes the place of an earlier one\'s hold, landed or not', () => {
-    const next = jump({ kind: 'subsection', id: 'appearance', subsection: 'Appearance' })
+    const next = jump({ kind: 'subsection', id: 'appearance', subsection: 'appearance' })
     assert.deepEqual(nextHold(held('page-controls'), next), held('appearance'))
     assert.deepEqual(nextHold(held('page-controls', 860), next), held('appearance'))
   })

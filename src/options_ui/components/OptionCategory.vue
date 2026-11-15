@@ -1,5 +1,7 @@
 <script setup lang="ts">
 const props = defineProps<{
+  /** Its key: its anchor id, and what the rail, rows and links know it by ({@link file://../model/anchors.ts}). */
+  anchor: string
   title: string
   subtitle: string
   /** Its icon on the rail, as an icon class such as `i-mdi-magnify`. */
@@ -12,13 +14,14 @@ const props = defineProps<{
   jobs?: boolean
 }>()
 
-OptionCategoryName.provide(props.title)
+const id = useAnchorKey(props.anchor)
+OptionCategoryKey.provide(id)
 
 const railLabel = props.railLabel ?? props.title
-const { id } = useAddNav({ title: props.title, icon: props.icon, railLabel, chipLabel: props.chipLabel ?? railLabel, jobs: props.jobs })
+useAddNav({ id, title: props.title, icon: props.icon, railLabel, chipLabel: props.chipLabel ?? railLabel, jobs: props.jobs })
 
-// Also findable by a `#hash`, by that id or by the category's own name.
-registerAnchor({ id, kind: 'category', name: props.title, category: props.title, subsection: null })
+// Also findable by a `#hash`, by its key or by the category's own name.
+registerAnchor({ id, kind: 'category', name: props.title, category: id, subsection: null })
 
 const { highlight } = useOptionSearch()
 const { inPane } = useCurrentCategory()

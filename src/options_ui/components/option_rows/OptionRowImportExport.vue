@@ -140,6 +140,7 @@ async function startExport({ keyPrefixes, fileSuffix }: typeof EXPORT_VARIANTS[n
 
 <template>
   <OptionRow
+    anchor="import-export"
     title="Import &amp; export your settings"
     :subtitle="`Save every setting, rule and mark to a file, or load one back in. ~${sizeUsed}kB in use.`"
   >

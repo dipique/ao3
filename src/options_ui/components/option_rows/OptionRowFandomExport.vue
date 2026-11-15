@@ -46,6 +46,7 @@ async function clearCache(): Promise<void> {
 
 <template>
   <OptionRow
+    anchor="learned-fandom-ids"
     title="Learned fandom ids"
     :subtitle="`${total} ids collected while browsing (${counts.fandoms} fandoms, ${counts.characters} characters, ${counts.relationships} relationships).`"
   >

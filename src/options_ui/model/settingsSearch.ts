@@ -8,7 +8,7 @@
 export interface SettingsRow {
   /** Its anchor id. */
   id: string
-  /** The titles of the category and sub-section holding it. */
+  /** The keys of the category and sub-section holding it. */
   category: string | null
   subsection: string | null
   title: string

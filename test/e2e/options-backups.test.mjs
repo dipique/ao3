@@ -180,10 +180,10 @@ describe('options UI — backups', { skip }, () => {
   test('the count to keep shows while daily backups are on', async () => {
     const options = await open({ listBackups: [] })
     try {
-      const count = '[id="backups-number-of-daily-backups-to-keep"]'
+      const count = '[id="backup-count"]'
       assert.ok(await options.page.$(count), 'shown while on')
 
-      await options.press(await options.control(await options.row('backups-keep-daily-backups'), 'switch'))
+      await options.press(await options.control(await options.row('backups-enabled'), 'switch'))
       await until('daily backups to be turned off', async () => await options.stored('sync.backupsEnabled') === false)
       assert.equal(await options.page.$(count), null, 'gone while off')
       const empty = await options.text(await options.page.$('[data-list="backups"] [data-list-empty]'))
@@ -197,7 +197,7 @@ describe('options UI — backups', { skip }, () => {
   test('the count to keep is a stepper, and each press writes it', async () => {
     const options = await open({ listBackups: [] })
     try {
-      const row = await options.row('backups-number-of-daily-backups-to-keep')
+      const row = await options.row('backup-count')
       assert.equal(await (await options.control(row, 'spinbutton')).evaluate(el => el.value), '7')
       // The stepper steps as the pointer goes down, so it is pressed with the pointer.
       await (await options.action(row, 'increment')).click()

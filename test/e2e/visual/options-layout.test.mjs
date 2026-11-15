@@ -16,11 +16,11 @@ const THEME = 'light'
 const OTHER_THEME = 'dark'
 
 /** A plain switch row, outside any group. */
-const PLAIN_ROW = 'page-controls-reveal-filtered-works'
+const PLAIN_ROW = 'filter-toolbar'
 /** A row inside the master group's bracket. */
-const GROUPED_ROW = 'link-menus-menu-on-tags'
+const GROUPED_ROW = 'tag-toolbar'
 /** A switch that reveals more, seeded on so its inset shows. */
-const INSET_ROW = 'filter-defaults-default-language'
+const INSET_ROW = 'search-language'
 /** A tracked list with a long title and a filter, and a stored list no visit has described, under its long raw key. */
 const LONG = {
   id: 'l0ng',
@@ -87,7 +87,7 @@ function footBoxes(id) {
 }
 
 /** A row whose control is two buttons, too wide to sit beside the text in a phone's width. */
-const WIDE_CONTROL_ROW = 'your-data-import-export-your-settings'
+const WIDE_CONTROL_ROW = 'import-export'
 
 /** {@link SEED} with Work marks on. */
 const WITH_MARKS = { ...SEED, 'option.workMarks': MARKS }
@@ -610,7 +610,7 @@ describe('options UI — the rule editor on a phone', { skip }, () => {
   test('suggestions open under the value, above the matcher', async () => {
     const options = await session.open({
       viewport: { width: 390, height: 844 },
-      hash: '#customize-search-results-rules',
+      hash: '#rules',
       seed: { 'option.rules': { enabled: true, filters: [], colors: {} } },
       prepare: page => stubArchive(page, () => ({ json: ['Harry Potter', 'Harry Potter (Character)'].map(name => ({ id: name, name })) })),
     })

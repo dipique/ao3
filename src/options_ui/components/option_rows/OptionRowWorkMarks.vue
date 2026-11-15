@@ -310,6 +310,7 @@ function save() {
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    anchor="work-marks"
     :options="['workMarks']"
     title="Work marks"
     subtitle="Mark a work read — or with a finer verdict, anything from Favorite to Abandoned — from its right-click menu. Pressing AO3's own “Mark as Read” marks it here too, so the list fills itself in as you browse."

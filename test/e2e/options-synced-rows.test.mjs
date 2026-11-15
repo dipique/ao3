@@ -4,9 +4,9 @@ import { after, before, describe, test } from 'node:test'
 import { skip, startOptions, until } from './optionsPage.mjs'
 
 /** Rows editing options that sync: a switch inside the row, a slider row, and a row whose option is read around it. */
-const SYNCED = ['under-the-hood-compress-filter-urls', 'work-statistics-reading-speed', 'customize-search-results-rules']
+const SYNCED = ['compress-search-urls', 'words-per-minute', 'rules']
 /** Rows that don't: one editing an option kept on this device, one badged as this device's, and one editing no option. */
-const UNSYNCED = ['under-the-hood-debug-mode', 'work-text-reader-mode', 'your-data-import-export-your-settings']
+const UNSYNCED = ['verbose', 'reader-mode', 'import-export']
 
 /**
  * While sync is on, a row whose setting syncs carries a sync mark beside its
@@ -52,7 +52,7 @@ describe('options UI — which settings sync', { skip }, () => {
     })
 
     test('the mark comes before the bookmark, and explains itself in a tooltip', async () => {
-      const row = await options.row('under-the-hood-compress-filter-urls')
+      const row = await options.row('compress-search-urls')
       const before = await row.evaluate(el => !!(el.querySelector('[data-synced]').compareDocumentPosition(el.querySelector('[data-bookmark]')) & Node.DOCUMENT_POSITION_FOLLOWING))
       assert.ok(before)
       assert.ok(await options.tooltip(await row.$('[data-synced]')))

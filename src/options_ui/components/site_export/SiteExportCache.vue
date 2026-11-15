@@ -89,7 +89,7 @@ async function press(id: typeof DISCARD | typeof DELETE): Promise<void> {
 </script>
 
 <template>
-  <OptionRow title="Cached work text" :subtitle="subtitle">
+  <OptionRow anchor="cached-work-text" title="Cached work text" :subtitle="subtitle">
     <div flex="~ row wrap items-center justify-end gap-2">
       <button
         v-if="allJob.actions === 'stop'"

@@ -1,19 +1,24 @@
 import type { SettingsRow } from './settingsSearch.ts'
 
-import { anchorSlug, categoryId } from './anchors.ts'
 import { entryMatches, searchTerms } from './settingsSearch.ts'
 
 /**
  * The rail: the page's categories, each with its sub-sections, and how many
  * settings each holds and how many of those a query keeps. Categories and
- * sub-sections are named by their titles, as the rows record them, and carry
- * the anchor id a link to them uses. As the page scrolls, the rail marks the
- * current category's sub-section being read ({@link markedSubsection}). The
- * rows the reader bookmarked are listed under the category and sub-section
- * holding them.
+ * sub-sections are known by their keys, as the rows record them, which are
+ * also the anchor ids a link to them uses; their titles are only what the
+ * rail calls them. As the page scrolls, the rail marks the current category's
+ * sub-section being read ({@link markedSubsection}). The rows the reader
+ * bookmarked are listed under the category and sub-section holding them.
  */
 
-/** A bookmarked row: its anchor id, its title, and the title of its sub-section. */
+/** A category in the rail's order: its key, and what the rail calls it. */
+export interface NamedCategory {
+  id: string
+  name: string
+}
+
+/** A bookmarked row: its anchor id, its title, and the key of its sub-section. */
 export interface RailBookmark {
   id: string
   name: string
@@ -39,15 +44,17 @@ export interface RailCategory extends RailSubsection {
   subsections: RailSubsection[]
 }
 
-/** A sub-section the page draws: its title, under the title of the category it is drawn in. */
+/** A sub-section the page draws: its key and title, under the key of the category it is drawn in. */
 export interface DrawnSubsection {
   category: string | null
+  id: string
   title: string
 }
 
 /**
- * `order` is the category titles in rail order; a category with rows that it
- * leaves out comes after them, so no setting is left unreachable. `current` is
+ * `order` is the categories in rail order; a category with rows that it
+ * leaves out comes after them, named by its key, so no setting is left
+ * unreachable. A sub-section is named by the title it is drawn with. `current` is
  * the current category's id. `subsections` is the sub-sections the page draws,
  * in the order it draws them. They are listed even with no rows, as a list
  * with nothing in it yet draws its empty state, and in that order, which a
@@ -56,40 +63,42 @@ export interface DrawnSubsection {
  * the rest of its category's, in the order its rows come. `bookmarks` is the
  * anchor ids of the bookmarked rows; one naming no row is left out.
  */
-export function buildRail(rows: readonly SettingsRow[], order: readonly string[], query: string, current: string, subsections: readonly DrawnSubsection[] = [], bookmarks: readonly string[] = []): RailCategory[] {
+export function buildRail(rows: readonly SettingsRow[], order: readonly NamedCategory[], query: string, current: string, subsections: readonly DrawnSubsection[] = [], bookmarks: readonly string[] = []): RailCategory[] {
   const terms = searchTerms(query)
-  const titles = new Set(order)
+  const names = new Map(order.map(category => [category.id, category.name]))
   for (const row of rows) {
-    if (row.category !== null)
-      titles.add(row.category)
+    if (row.category !== null && !names.has(row.category))
+      names.set(row.category, row.category)
   }
   const bookmarked = new Set(bookmarks)
   const bookmarksOf = (inside: readonly SettingsRow[]): RailBookmark[] => inside
     .filter(row => bookmarked.has(row.id) && entryMatches(row, terms))
     .map(row => ({ id: row.id, name: row.title, subsection: row.subsection }))
 
-  return [...titles].map((title) => {
-    const own = rows.filter(row => row.category === title)
+  return [...names].map(([id, name]) => {
+    const own = rows.filter(row => row.category === id)
     const hits = own.filter(row => entryMatches(row, terms)).length
-    const placed = subsections.filter(subsection => subsection.category === title).map(subsection => subsection.title)
-    const unplaced = own.map(row => row.subsection).filter(subsection => subsection !== null).filter(subsection => !placed.includes(subsection))
-    const ownSubsections = [...new Set([...placed, ...unplaced])]
-      .map((subsection) => {
+    const titles = new Map(subsections.filter(subsection => subsection.category === id).map(subsection => [subsection.id, subsection.title]))
+    for (const row of own) {
+      if (row.subsection !== null && !titles.has(row.subsection))
+        titles.set(row.subsection, row.subsection)
+    }
+    const ownSubsections = [...titles]
+      .map(([subsection, title]) => {
         const inside = own.filter(row => row.subsection === subsection)
         const subsectionHits = inside.filter(row => entryMatches(row, terms)).length
         return {
-          id: anchorSlug(subsection),
-          name: subsection,
+          id: subsection,
+          name: title,
           count: inside.length,
           hits: subsectionHits,
           visible: !terms.length || subsectionHits > 0,
           bookmarks: bookmarksOf(inside),
         }
       })
-    const id = categoryId(title)
     return {
       id,
-      name: title,
+      name,
       count: own.length,
       hits,
       visible: !terms.length || hits > 0,
@@ -158,7 +167,7 @@ export function subsectionInView(sections: readonly SectionTop[], view: ReadingV
 export interface JumpTo {
   kind: 'category' | 'subsection' | 'row'
   id: string
-  /** The title of the sub-section it is in, or is. */
+  /** The key of the sub-section it is in, or is. */
   subsection: string | null
 }
 
@@ -194,7 +203,7 @@ export function nextHold(hold: JumpHold | null, event: HoldEvent): JumpHold | nu
       return {
         target: event.to.kind === 'subsection'
           ? event.to.id
-          : event.to.kind === 'row' && event.to.subsection !== null ? anchorSlug(event.to.subsection) : null,
+          : event.to.kind === 'row' ? event.to.subsection : null,
         landedAt: null,
       }
     case 'landed':

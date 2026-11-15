@@ -48,6 +48,7 @@ watch([from, to], ([nextFrom, nextTo]) => {
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    anchor="search-word-count"
     :options="['searchWordCount']"
     title="Default word count"
     subtitle="Pre-fills AO3’s Word Count filter with a range. Leave either end blank for a one-sided range, such as “at least 50,000 words”."

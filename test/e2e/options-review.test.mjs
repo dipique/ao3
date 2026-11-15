@@ -13,7 +13,7 @@ import { ARCHIVE, captureDownloads, mentions, skip, startOptions, stubArchive, u
 import { archiveAnswers, archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, trackedOption } from './trackedReview.mjs'
 
 const TODAY = utcToday()
-const ROW = 'review-tracked-lists'
+const ROW = 'tracked-lists'
 /** The row under Saved lists of a stored list no saved list is at. */
 const copyRow = key => `copy:${key}`
 /** The review's stored window, under the key the review keeps it by. */

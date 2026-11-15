@@ -36,6 +36,7 @@ function remove(index: number) {
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    anchor="text-replacements"
     :options="['textReplacements']"
     title="Text replacement"
     subtitle="Find and replace text in a work’s summary, notes and chapters as you read — for renaming a character or fixing a tic. Only what is displayed changes; the work itself is untouched."

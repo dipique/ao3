@@ -7,13 +7,13 @@
 export {}
 declare global {
   const EffectScope: typeof import('vue').EffectScope
-  const OptionCategoryName: typeof import('../options_ui/composables/context').OptionCategoryName
+  const OptionCategoryKey: typeof import('../options_ui/composables/context').OptionCategoryKey
   const OptionLabelId: typeof import('../options_ui/composables/context').OptionLabelId
   const OptionMasterState: typeof import('../options_ui/composables/context').OptionMasterState
   const OptionRowEdits: typeof import('../options_ui/composables/context').OptionRowEdits
   const OptionRowOff: typeof import('../options_ui/composables/context').OptionRowOff
   const OptionRowRulesContext: typeof import('../options_ui/composables/context').OptionRowRulesContext
-  const OptionSubsectionName: typeof import('../options_ui/composables/context').OptionSubsectionName
+  const OptionSubsectionKey: typeof import('../options_ui/composables/context').OptionSubsectionKey
   const anchorCategory: typeof import('../options_ui/composables/useAnchors').anchorCategory
   const askAutocomplete: typeof import('../options_ui/composables/useTagSuggestions').askAutocomplete
   const asyncComputed: typeof import('@vueuse/core').asyncComputed
@@ -133,6 +133,7 @@ declare global {
   const useActiveElement: typeof import('@vueuse/core').useActiveElement
   const useAddNav: typeof import('../options_ui/composables/useNav').useAddNav
   const useAddSubsection: typeof import('../options_ui/composables/useNav').useAddSubsection
+  const useAnchorKey: typeof import('../options_ui/composables/useAnchors').useAnchorKey
   const useAnimate: typeof import('@vueuse/core').useAnimate
   const useArrayDifference: typeof import('@vueuse/core').useArrayDifference
   const useArrayEvery: typeof import('@vueuse/core').useArrayEvery

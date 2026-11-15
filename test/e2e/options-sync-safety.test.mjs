@@ -951,7 +951,7 @@ describe('options UI — the sync panel', { skip }, () => {
     const options = await open({ 'sync.enabled': true }, {}, NARROW)
     try {
       const boxes = await options.page.evaluate(() => {
-        const head = document.querySelector('[data-sync-panel] [id="sync-sync-settings-across-devices"]')
+        const head = document.querySelector('[data-sync-panel] [id="sync-settings"]')
         const box = (selector) => {
           const { top, bottom, left, right } = head.querySelector(selector).getBoundingClientRect()
           return { top: Math.round(top), bottom: Math.round(bottom), left: Math.round(left), right: Math.round(right) }

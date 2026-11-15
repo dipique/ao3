@@ -9,7 +9,7 @@ import { holdForJump, jumpLanded } from './useSubsectionInView.ts'
 
 /**
  * Deep links into the options page: `options_ui.html#search` opens on the Search
- * category, `#work-text` on that sub-section, `#work-text-reader-mode` on the
+ * category, `#work-text` on that sub-section, `#reader-mode` on the
  * setting itself. A hash may equally name the thing the way the page spells it —
  * `#Search`, `#Work text` — see {@link file://./useAnchors.ts}. The rail's links
  * are hashes too, so picking a category there is a jump like any other.
@@ -80,9 +80,9 @@ export async function jumpToHash(hash: string): Promise<boolean> {
 
   const { searching, rowMatches, categoryMatches, subsectionMatches, clear } = useOptionSearch()
   const survivesSearch = anchor.kind === 'category'
-    ? categoryMatches(anchor.name)
+    ? categoryMatches(anchor.id)
     : anchor.kind === 'subsection'
-      ? subsectionMatches(anchor.category, anchor.name)
+      ? subsectionMatches(anchor.category, anchor.id)
       : rowMatches(anchor.id)
   if (searching.value && !survivesSearch)
     clear()

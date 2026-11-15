@@ -5,8 +5,8 @@ import { captureDownloads, skip, startOptions, until } from './optionsPage.mjs'
 import { toastTypes } from './toasts.mjs'
 
 const WIDE = { width: 1280, height: 800 }
-const IMPORT_EXPORT = 'your-data-import-export-your-settings'
-const FANDOM_IDS = 'your-data-learned-fandom-ids'
+const IMPORT_EXPORT = 'import-export'
+const FANDOM_IDS = 'learned-fandom-ids'
 
 const learned = names => Object.fromEntries(names.map((name, i) => [name.toLowerCase(), { id: i + 1, name }]))
 
@@ -145,11 +145,9 @@ describe('options UI — Advanced', { skip }, () => {
   test('Under the hood is three switch rows, each storing its option', async () => {
     const options = await session.open({ hash: '#under-the-hood', viewport: WIDE })
     try {
-      const rows = await options.page.$$eval('[data-category="advanced"] [data-row-part="title"]', els => els
-        .map(el => el.closest('[id]').id)
-        .filter(id => id.startsWith('under-the-hood-')))
-      assert.deepEqual(rows, ['under-the-hood-compress-filter-urls', 'under-the-hood-debug-mode', 'under-the-hood-impersonate-user-requests'])
-      for (const [id, key] of [['under-the-hood-compress-filter-urls', 'option.compressSearchUrls'], ['under-the-hood-debug-mode', 'option.verbose'], ['under-the-hood-impersonate-user-requests', 'option.impersonateUserRequests']]) {
+      const rows = await options.page.$$eval('[data-category="advanced"] #under-the-hood .option-row', els => els.map(el => el.id))
+      assert.deepEqual(rows, ['compress-search-urls', 'verbose', 'impersonate-user-requests'])
+      for (const [id, key] of [['compress-search-urls', 'option.compressSearchUrls'], ['verbose', 'option.verbose'], ['impersonate-user-requests', 'option.impersonateUserRequests']]) {
         await options.press(await options.control(await options.row(id), 'switch'))
         await until(`${key} to be written`, async () => await options.lastWrite(key) !== null)
         assert.equal(await options.stored(key), true, id)

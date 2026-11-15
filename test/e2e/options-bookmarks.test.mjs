@@ -3,8 +3,8 @@ import { after, before, describe, test } from 'node:test'
 
 import { skip, startOptions, until } from './optionsPage.mjs'
 
-const RULES = 'customize-search-results-rules'
-const READER_MODE = 'work-text-reader-mode'
+const RULES = 'rules'
+const READER_MODE = 'reader-mode'
 
 /**
  * Bookmarking a setting: the bookmark beside a row's title lists the row on

@@ -5,6 +5,7 @@ const { enabled } = useOption('searchLanguage')
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    anchor="search-language"
     :options="['searchLanguage']"
     title="Default language"
     subtitle="Sets a default language in the Filter sidebar on search pages."

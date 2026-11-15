@@ -397,7 +397,7 @@ describe('the option that offers it', { skip }, () => {
   test('is a switch under Instant search views, off until it is switched on', async () => {
     const options = await session.open({ hash: '#instant-search-views', viewport: { width: 1280, height: 800 } })
     try {
-      const toggle = await options.control(await options.row('instant-search-views-search-a-filtered-listings-works'), 'switch')
+      const toggle = await options.control(await options.row('search-filtered-listing'), 'switch')
       assert.equal(await toggle.evaluate(el => el.getAttribute('aria-checked')), 'false')
       await options.press(toggle)
       await until('the option to be stored', async () => await options.stored('option.searchFilteredListing') === true)

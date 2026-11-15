@@ -98,6 +98,7 @@ function remove(index: number) {
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    anchor="word-count-toolbar"
     :options="['wordCountToolbar']"
     title="Word count menu"
     subtitle="Click a work’s word count in a listing for a menu of lengths to filter by. Edit the ranges it offers below; they may overlap."

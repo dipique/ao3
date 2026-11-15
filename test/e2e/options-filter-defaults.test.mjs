@@ -4,8 +4,8 @@ import { after, before, describe, test } from 'node:test'
 import { COMPLETION_LABELS, CROSSOVER_LABELS } from '../../src/common/data.ts'
 import { skip, startOptions } from './optionsPage.mjs'
 
-const COMPLETION = 'filter-defaults-default-completion-status'
-const CROSSOVERS = 'filter-defaults-default-crossovers'
+const COMPLETION = 'search-completion'
+const CROSSOVERS = 'search-crossovers'
 
 /**
  * The completion and crossover rows under Filter defaults. Switching one on

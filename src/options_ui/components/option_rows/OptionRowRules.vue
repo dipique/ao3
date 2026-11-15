@@ -24,6 +24,7 @@ OptionRowRulesContext.provide({
 <template>
   <OptionRowCollapsable
     v-model:open="enabled"
+    anchor="rules"
     :options="['rules']"
     title="Rules"
     subtitle="Tag-based rules to hide, collapse, or show works; and rules that hide or highlight specific tags. A 'tag' can be be a tag, fandom, author, warning, character, relationship, or work/series title. Rules have priorities to resolve conflicts. That means you can hide a fandom by default, but have works display if a certain tag is present."

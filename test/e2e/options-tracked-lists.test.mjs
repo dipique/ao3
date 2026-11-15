@@ -140,7 +140,7 @@ describe('options UI — saved lists', { skip }, () => {
    * test expects not to have been written by now would have been.
    */
   async function flush() {
-    const prune = await options.control(await options.row('offline-reading-discard-unneeded-blurbs-automatically'), 'switch')
+    const prune = await options.control(await options.row('prune-orphaned-blurbs'), 'switch')
     const was = await options.lastWrite('option.pruneOrphanedBlurbs')
     await options.press(prune)
     await until('the other setting to be written', async () => await options.lastWrite('option.pruneOrphanedBlurbs') !== was)
@@ -846,7 +846,7 @@ describe('options UI — the saved lists\' frame', { skip }, () => {
   })
 
   test('with Tracked lists off, the frame says so, and every switch is off with the reason; titles stay live', async () => {
-    await options.press(await options.control(await options.row('review-tracked-lists'), 'switch'))
+    await options.press(await options.control(await options.row('tracked-lists'), 'switch'))
     await until('the switch to be written', async () => (await options.lastWrite('option.trackedLists'))?.enabled === false)
     await until('the frame to say so', async () => !!await (await options.list(LIST)).$('[data-saved-lists-band="review-off"]'))
 
@@ -859,7 +859,7 @@ describe('options UI — the saved lists\' frame', { skip }, () => {
     assert.equal(await (await options.control(await options.savedList('ser1es'), 'textbox')).evaluate(el => el.disabled), false)
     assert.ok(await options.action(await options.savedList('th3irs'), 'view-edit'))
 
-    await options.press(await options.control(await options.row('review-tracked-lists'), 'switch'))
+    await options.press(await options.control(await options.row('tracked-lists'), 'switch'))
     await until('the switch to be written', async () => (await options.lastWrite('option.trackedLists'))?.enabled === true)
     await until('the switch to come back', async () => !(await (await options.control(await options.savedList('th3irs'), 'switch')).evaluate(el => el.disabled)))
   })

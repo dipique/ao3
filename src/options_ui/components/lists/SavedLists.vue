@@ -33,11 +33,13 @@ const busy = computed(() => busyNotice(view.value))
 const now = useNow({ interval: 60_000 })
 
 /**
- * Each row's anchor: its name under Saved lists, as a settings row's is; a
+ * Each row's anchor: its name, after the key of the sub-section it is in; a
  * name two rows share gets the row's id as well, so each has one of its own.
+ * A list is named by the reader, so its anchor follows its name.
  */
+const SUBSECTION = OptionSubsectionKey.inject(null) ?? 'saved-lists'
 const anchors = computed(() => {
-  const slugs = new Map(savedRows.value.map(row => [row.id, anchorSlug(`Saved lists ${row.title || row.placeholder}`)]))
+  const slugs = new Map(savedRows.value.map(row => [row.id, anchorSlug(`${SUBSECTION} ${row.title || row.placeholder}`)]))
   const counts = new Map<string, number>()
   for (const slug of slugs.values())
     counts.set(slug, (counts.get(slug) ?? 0) + 1)
@@ -153,7 +155,7 @@ const howId = useId()
         :key="row.id"
         :row="row"
         :copy="row.caching.kind === 'copy' ? rowFor(row.caching.key) : null"
-        :anchor="anchors[row.id] ?? anchorSlug(`Saved lists ${row.id}`)"
+        :anchor="anchors[row.id] ?? anchorSlug(`${SUBSECTION} ${row.id}`)"
         :now="now.getTime()"
         @title-focus="holdRows(row.id)"
         @title-blur="releaseRows"

@@ -139,6 +139,7 @@ watch([lists, reviewedThrough], () => void readRecordsLine(), { deep: true })
 
 <template>
   <OptionRow
+    anchor="tracked-lists"
     :options="['trackedLists']"
     title="Tracked lists"
     subtitle="Mark a search, an uncommon tag's works or a series as tracked, and everything new or updated across all of them is gathered into one review stream on your readings page. You look through a range of days, mark what deserves marking, then mark the range reviewed."
