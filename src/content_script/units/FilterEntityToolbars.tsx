@@ -28,6 +28,7 @@ import { entityKey, ruleBehavior, ruleIndicatorBehavior } from '#content_script/
 import { openProgressEditor } from '#content_script/progressEditor.js'
 import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
+import { pressToUnsaveOnly } from '#content_script/units/CaptureMarkButtons.ts'
 import { applyMark, applyMarkGroup, applyMarkProgress } from '#content_script/workMarks.js'
 import { workPageId, workPageTitle } from '#content_script/workPage.ts'
 import React from '#dom'
@@ -606,8 +607,7 @@ abstract class FilterEntityToolbar extends Unit {
     // must not take the work off the list the way its neighbours do.
     const done = on && markRoot(marks, markId) === READ_MARK && !markTracksProgress(marks, markId)
     if (done && this.markShown(id) && state?.saved && !state.busy) {
-      // onMark toasts the "removed from your Marked for Later list" message.
-      await this.onMark(id)
+      await this.onMark(id, `Marked as ${noun} — removed from your Marked for Later list.`)
       return
     }
     toast(on ? `Marked as ${noun}.` : `Unmarked as ${noun}.`, { type: 'success' })
@@ -628,30 +628,20 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   /**
-   * Apply the read *disposition* rather than one specific mark — what AO3's own
-   * buttons mean. A work already marked with something finer keeps that mark
-   * (see {@link applyMarkGroup}).
+   * Clear the read *disposition* rather than one specific mark — what AO3's own
+   * Mark for Later button means (see {@link applyMarkGroup}).
    *
-   * The two progress-mark exemptions {@link setMarkGroup} makes have to be made
-   * here too, or the in-memory cache and storage disagree: an ongoing work would
-   * be promoted to `read` in the stored table but not in `markSets`, and the
+   * A progress mark stays, as {@link setMarkGroup} keeps it in storage: an
+   * ongoing work belongs on the list. Mirrored here so `markSets` agrees, or the
    * indicator would go on showing the old mark until the next full re-run.
    */
-  protected setReadLocally(id: string, read: boolean): void {
+  protected clearReadLocally(id: string): void {
     const marks = this.options.workMarks
-    const carried = markGroup(marks.marks, READ_MARK).filter(markId => markSets.get(markId)?.has(id))
-    const blocking = carried.filter(markId => !markTracksProgress(marks.marks, markId))
-    if (read) {
-      // noteMark(on) clears the whole group first, so the ongoing mark comes off
-      // here exactly as it does in storage — it just didn't get a vote.
-      if (blocking.length === 0)
-        noteMark(marks, id, READ_MARK, true)
-    }
-    else {
-      for (const markId of blocking)
+    for (const markId of markGroup(marks.marks, READ_MARK)) {
+      if (markSets.get(markId)?.has(id) && !markTracksProgress(marks.marks, markId))
         noteMark(marks, id, markId, false)
     }
-    applyMarkGroup(marks, id, read)
+    applyMarkGroup(marks, id, false)
     this.syncEntriesFor(id)
   }
 
@@ -881,7 +871,13 @@ abstract class FilterEntityToolbar extends Unit {
       entry.link.append(indicator)
   }
 
-  async onMark(id: string): Promise<void> {
+  /**
+   * Toggle the work on or off the Marked for Later list. Saving it clears the
+   * read mark — it's back on the to-read pile — but taking it off leaves the
+   * marks alone: that is a choice not to mark it read, and a caller that did
+   * mark it has already said so (and says so in `removed`, the toast).
+   */
+  async onMark(id: string, removed = 'Removed from your Marked for Later list.'): Promise<void> {
     const state = savedState.get(id) ?? { saved: false, busy: false, known: false, acted: false, cached: false }
     if (state.busy)
       return
@@ -892,7 +888,10 @@ abstract class FilterEntityToolbar extends Unit {
     // nothing below runs.
     const native = nativeMarkButton(id, save)
     if (native) {
-      native.click()
+      if (save)
+        native.click()
+      else
+        pressToUnsaveOnly(native)
       return
     }
 
@@ -909,20 +908,15 @@ abstract class FilterEntityToolbar extends Unit {
       // Keep the cached index in step, so every other listing agrees with what
       // just happened rather than waiting for the next bulk scrape.
       noteMarkedForLater(id, save)
-      // Read and Marked for Later are opposite ends of one decision, so keep the
-      // read mark in step: saving a work for later clears it, taking it off the
-      // list records it. On the native-button path CaptureMarkButtons does this
-      // same step — this branch is the fetch fallback, where no button exists.
-      if (this.marksEnabled())
-        this.setReadLocally(id, !save)
+      // On the native-button path CaptureMarkButtons clears the read mark — this
+      // branch is the fetch fallback, where no button exists.
+      if (save && this.marksEnabled())
+        this.clearReadLocally(id)
       if (save)
         await this.keepSaved(id)
       else
         takenOffListeners.forEach(listener => listener(id))
-      toast(
-        save ? 'Saved for later.' : 'Marked as read — removed from your Marked for Later list.',
-        { type: 'success' },
-      )
+      toast(save ? 'Saved for later.' : removed, { type: 'success' })
     }
     catch (err) {
       this.logger.error(`Failed to update mark-for-later for work ${id}.`, err)

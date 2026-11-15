@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { createDefaultMarks, markItems, packIds } from '../../src/common/workMarks.ts'
 import { ensureBuilt, findChrome, installMock, storedListIds, storedLists } from './helpers.mjs'
 import { until } from './optionsPage.mjs'
 import { inject, launch, openMenu, pickRow, toastTypes } from './trackedPages.mjs'
@@ -33,11 +34,16 @@ const SEARCH_PAGE = `<!doctype html>
   </div>
 </body></html>`
 
-/** The work's own page, as the menu fetches it to learn the work isn't saved yet. */
-const WORK_PAGE = `<!doctype html>
+/** The work's own page, as the menu fetches it to learn whether the work is saved. */
+function workPage({ saved }) {
+  const form = saved
+    ? `<form class="button_to" method="post" action="/works/${WORK_ID}/mark_as_read"><button type="submit">Mark as Read</button></form>`
+    : `<form class="button_to" method="post" action="/works/${WORK_ID}/mark_for_later"><button type="submit">Mark for Later</button></form>`
+  return `<!doctype html>
 <html><head><meta charset="utf-8"><title>A work</title></head><body class="logged-in">
-  <ul class="work navigation actions"><li class="mark"><form class="button_to" method="post" action="/works/${WORK_ID}/mark_for_later"><button type="submit">Mark for Later</button></form></li></ul>
+  <ul class="work navigation actions"><li class="mark">${form}</li></ul>
 </body></html>`
+}
 
 /**
  * Saving a work for later from search results puts it on the stored copy of
@@ -56,7 +62,7 @@ describe('Marked for Later kept from a listing', { skip }, () => {
     await browser?.close()
   })
 
-  const open = async (seed) => {
+  const open = async (seed, { saved = false } = {}) => {
     const tab = await browser.newPage()
     const posts = []
     await tab.setRequestInterception(true)
@@ -66,7 +72,7 @@ describe('Marked for Later kept from a listing', { skip }, () => {
         return void req.abort()
       if (req.method() === 'POST')
         posts.push(url.pathname)
-      const body = url.pathname === `/works/${WORK_ID}` ? WORK_PAGE : SEARCH_PAGE
+      const body = url.pathname === `/works/${WORK_ID}` ? workPage({ saved }) : SEARCH_PAGE
       void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body })
     })
     await tab.evaluateOnNewDocument(installMock, {
@@ -79,16 +85,18 @@ describe('Marked for Later kept from a listing', { skip }, () => {
     return { tab, posts }
   }
 
-  /** Mark the work for later through its own menu, and wait for the menu to say it's done. */
-  const markForLater = async (tab) => {
+  /** Pick the row that does `action` (with `value`) in the work's own menu, and wait for the menu to say it's done. */
+  const pick = async (tab, action, value) => {
     await openMenu(tab, () => tab.evaluate((id) => {
       document.querySelector(`#work_${id} h4.heading a`).dispatchEvent(
         new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }),
       )
     }, WORK_ID))
-    await until('the menu offers to save it', () => pickRow(tab, 'mark-for-later'))
-    await until('the work is saved', async () => (await toastTypes(tab)).includes('success'))
+    await until(`the menu offers ${action}`, () => pickRow(tab, action, value))
+    await until(`${action} is done`, async () => (await toastTypes(tab)).includes('success'))
   }
+
+  const markForLater = tab => pick(tab, 'mark-for-later')
 
   const read = (tab, key) => tab.evaluate(async k => (await browser.storage.local.get(k))[k] ?? null, key)
   const listIds = async tab => storedListIds((await read(tab, 'cache.searchLists'))?.[LIST_KEY])
@@ -125,5 +133,38 @@ describe('Marked for Later kept from a listing', { skip }, () => {
     finally {
       await tab.close()
     }
+  })
+
+  describe('taking a saved work off the list', () => {
+    const savedSeed = () => ({
+      'option.workMarks': { enabled: true, marks: createDefaultMarks() },
+      'cache.markedForLater': { userId: 'me', updatedAt: Date.now(), ids: packIds([WORK_ID]) },
+    })
+    const readMarked = async tab => markItems((await read(tab, 'option.workMarks')).marks, 'read').has(WORK_ID)
+
+    test('Remove from Marked for Later takes it off without marking it read', async () => {
+      const { tab, posts } = await open(savedSeed(), { saved: true })
+      try {
+        await pick(tab, 'unmark-for-later')
+        assert.deepEqual(posts, [`/works/${WORK_ID}/mark_as_read`])
+        assert.equal((await read(tab, 'cache.markedForLater')).ids, '')
+        assert.equal(await readMarked(tab), false)
+      }
+      finally {
+        await tab.close()
+      }
+    })
+
+    test('Mark as read takes it off and marks it read', async () => {
+      const { tab, posts } = await open(savedSeed(), { saved: true })
+      try {
+        await pick(tab, 'mark', 'read')
+        assert.deepEqual(posts, [`/works/${WORK_ID}/mark_as_read`])
+        await until('the read mark is stored', () => readMarked(tab))
+      }
+      finally {
+        await tab.close()
+      }
+    })
   })
 })

@@ -163,6 +163,20 @@ describe('the work indicator beside Mark as Read at the foot of a work', { skip 
     assert.ok(!markItems(marks, 'read').has(WORK_ID), 'and AO3\'s button did not flatten it to plain read')
   })
 
+  test('Remove from Marked for Later takes it off through AO3\'s button without marking it read', async () => {
+    const tab = await open(workPage({ saved: true }))
+    await openMenu(tab, () => tab.click(`${FOOT_INDICATOR} .AO3E--indicator`))
+    assert.ok(await pickRow(tab, 'unmark-for-later'))
+    await until('AO3\'s Mark as Read to be submitted', () =>
+      tab.evaluate(() => window.__submitted.length > 0))
+    const submitted = await tab.evaluate(() => window.__submitted)
+    const marks = await lastMarks(tab)
+    await tab.close()
+
+    assert.deepEqual(submitted, [`/works/${WORK_ID}/mark_as_read`])
+    assert.ok(!marks || !markItems(marks, 'read').has(WORK_ID), 'no read mark is recorded')
+  })
+
   test('the title keeps its own indicator', async () => {
     const tab = await open(workPage({ saved: true }))
     const title = await tab.evaluate(() =>

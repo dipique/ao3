@@ -33,6 +33,18 @@ import { applyMarkGroup } from '#content_script/workMarks.js'
  * exactly as it always has.
  */
 
+const UNSAVE_ONLY_ATTR = 'data-ao3e-unsave-only'
+
+/**
+ * Press AO3's Mark as Read only to take the work off the list. The reader
+ * chose that *instead of* marking it read, so the read mark must not ride
+ * along; the flag on the form is spent on that one press.
+ */
+export function pressToUnsaveOnly(button: HTMLButtonElement): void {
+  button.form?.setAttribute(UNSAVE_ONLY_ATTR, '')
+  button.click()
+}
+
 /** AO3's mark controls, either direction. */
 const FORM_SELECTOR = 'form.button_to[action*="/mark_as_read"], form.button_to[action*="/mark_for_later"]'
 
@@ -83,8 +95,10 @@ export class CaptureMarkButtons extends Unit {
       const mark = parseMarkForm(form)
       if (!mark)
         return
+      const unsaveOnly = form.hasAttribute(UNSAVE_ONLY_ATTR)
+      form.removeAttribute(UNSAVE_ONLY_ATTR)
       // A no-op when our own menu already applied it before pressing this button.
-      if (this.options.workMarks.enabled && applyMarkGroup(this.options.workMarks, mark.id, mark.read))
+      if (this.options.workMarks.enabled && !unsaveOnly && applyMarkGroup(this.options.workMarks, mark.id, mark.read))
         this.logger.debug(`Work ${mark.id} marked ${mark.read ? 'read' : 'unread'} from AO3's own button.`)
       // Mark as Read takes the work off the list; Mark for Later puts it on.
       // (A no-op unless FilterWorkToolbar has loaded the index for this page.)
