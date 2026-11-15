@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { CLAIM_RENEW_MS, unpackRows } from '../../src/common/trackedReads.ts'
+import { CLAIM_RENEW_MS, readQuery, readSummary, unpackRows } from '../../src/common/trackedReads.ts'
 import { bundleForPage } from '../siteExport/helpers.mjs'
 import { findChrome, hurryTimers, installMock, launch } from './helpers.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, readsOf, resetWorkIds, series, TODAY, works } from './trackedReview.mjs'
@@ -67,6 +67,9 @@ describe('tracked lists: the reader', { skip }, () => {
     }, { lists: fixtures.map(fixture => fixture.entry), start: START, days, ms, day: MS_PER_DAY, patience, budget })
   }
 
+  /** What one list was doing through a run, a phase each time it changed. */
+  const phasesOf = (statuses, id) => statuses.map(status => status.byList[id]?.phase).filter((phase, i, all) => phase && phase !== all[i - 1])
+
   /** The records the tab's store holds, by list id. */
   async function records(tab, fixtures) {
     const ids = fixtures.map(fixture => fixture.entry.id)
@@ -124,7 +127,20 @@ describe('tracked lists: the reader', { skip }, () => {
       assert.equal(blurbs.length, 1, 'each page’s works go to the blurb store')
 
       const last = outcome.statuses.at(-1)
-      assert.deepEqual({ ...last, waitUntil: 0 }, { listsDone: 3, lists: 3, reading: null, waitUntil: 0, requests: 6 })
+      assert.deepEqual({ ...last, waitUntil: 0 }, {
+        listsDone: 3,
+        lists: 3,
+        reading: null,
+        waitUntil: 0,
+        requests: 6,
+        byList: {
+          alpha: { name: 'alpha', phase: 'done', page: 4, of: 4 },
+          beta: { name: 'beta', phase: 'done', page: 1, of: 1 },
+          gamma: { name: 'gamma', phase: 'done', page: 1, of: 1 },
+        },
+      })
+      const alphaPhases = phasesOf(outcome.statuses, 'alpha')
+      assert.deepEqual(alphaPhases, ['queued', 'reading', 'queued', 'reading', 'queued', 'reading', 'done'], 'alpha waits its turn while a list read less far is read')
     })
 
     test('a second run the same day asks each list only for today', async () => {
@@ -181,6 +197,9 @@ describe('tracked lists: the reader', { skip }, () => {
       assert.equal(unpackRows(stored.get('alpha').rows).length, 40, 'alpha’s first two pages are kept')
       assert.equal(stored.get('alpha').through, START + 2)
       assert.equal(stored.get('beta').through, TODAY - 1, 'beta was read to its end before the refusal')
+      const halted = outcome.statuses.at(-1).byList
+      assert.deepEqual([halted.alpha.phase, halted.alpha.page, halted.alpha.of], ['queued', 2, 4], 'alpha stops waiting its turn, two of its four pages read')
+      assert.equal(halted.beta.phase, 'done')
 
       const before = fetched.length
       const again = await run(tab, fixtures, { ms: RETRY_AFTER_S * 1000 })
@@ -254,6 +273,10 @@ describe('tracked lists: the reader', { skip }, () => {
       const outcome = await run(tab, fixtures)
       assert.deepEqual(outcome.failed.sort(), ['blank', 'out'])
       assert.equal(asked(fetched, fixtures).filter(([id]) => id === 'out').length, 1, 'signed out is not tried again')
+      const { byList } = outcome.statuses.at(-1)
+      assert.deepEqual([byList.out.phase, byList.out.failure], ['failed', 'signed-out'])
+      assert.deepEqual([byList.blank.phase, byList.blank.failure], ['failed', 'request'])
+      assert.ok(byList.blank.error, 'what went wrong with the page is kept')
       const stored = await records(tab, fixtures)
       for (const id of ['out', 'blank']) {
         assert.equal(stored.get(id).failed, true)
@@ -328,10 +351,38 @@ describe('tracked lists: the reader', { skip }, () => {
       const outcome = await run(tab, fixtures)
       assert.deepEqual(outcome.failed, ['broken'])
       assert.equal(asked(fetched, fixtures).filter(([id]) => id === 'broken').length, 3, 'three tries, then no more')
+      assert.deepEqual(phasesOf(outcome.statuses, 'broken'), ['queued', 'reading', 'retrying', 'reading', 'retrying', 'reading', 'failed'])
+      const attempts = outcome.statuses.map(status => status.byList.broken).filter(read => read.phase === 'retrying').map(read => read.attempt)
+      assert.deepEqual([...new Set(attempts)], [1, 2], 'each retry says which try failed')
+      assert.equal(outcome.statuses.at(-1).byList.broken.failure, 'request')
       const stored = await records(tab, fixtures)
       assert.equal(stored.get('broken').failed, true)
       assert.equal(stored.get('broken').through, START - 1)
       assert.equal(stored.get('alpha').through, TODAY - 1)
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  test('a list that fails is counted as read, or not, just as it was before the run', async () => {
+    resetWorkIds(9100)
+    const covering = listing('covering', [[START, 2]], { list: { fail: true } })
+    const stale = listing('stale', [[START, 2]], { list: { fail: true } })
+    const fixtures = [covering, stale]
+    const { tab } = await openTab(fixtures)
+    try {
+      const earlier = (fixture, from) => ({ v: 1, query: readQuery(fixture.entry), from, through: TODAY - 2, readAt: 1234, rows: '' })
+      await tab.evaluate(async (records) => {
+        for (const [id, record] of records)
+          await window.RL.writeReadRecord(id, record)
+      }, [['covering', earlier(covering, START)], ['stale', earlier(stale, START + 5)]])
+      const behind = async () => readSummary(fixtures.map(fixture => fixture.entry), await records(tab, fixtures), START).behind
+      const before = await behind()
+      assert.deepEqual(before, ['stale'], 'a record that begins after the window is read afresh, so it is not read yet')
+      const outcome = await run(tab, fixtures)
+      assert.deepEqual(outcome.failed.sort(), ['covering', 'stale'])
+      assert.deepEqual(await behind(), before)
     }
     finally {
       await tab.close()

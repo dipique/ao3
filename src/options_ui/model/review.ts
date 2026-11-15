@@ -109,11 +109,11 @@ export interface ReviewBlockView {
   /** What the cell says with no window. */
   empty: string | null
   /**
-   * Cache works and Download Offline Copy; Stop while the job on the window
+   * Cache works and Download; Stop while the job on the window
    * runs; Continue or Discard while it is stopped; nothing with no window.
    */
   actions: JobActions | null
-  /** Why Cache works and Download Offline Copy are off: another list's job. */
+  /** Why Cache works and Download are off: another list's job. */
   offlineOff: string | null
   /** The job is on the window, so its line goes in the cell. */
   job: boolean

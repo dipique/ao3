@@ -5,6 +5,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { formatDay, isoDay, utcToday } from '../../src/common/trackedLists.ts'
 import { READING_ELSEWHERE } from '../../src/common/trackedReads.ts'
+import { FAILED_LINE, failedNote } from '../../src/options_ui/model/preload.ts'
 import { recordsLine, REVIEW_EMPTY, REVIEW_NAME, reviewedThroughLabel, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { DIST, installMock, storedLists } from './helpers.mjs'
@@ -301,7 +302,7 @@ describe('options UI — the Review block', { skip }, () => {
     await saysOn(await inCell('this-review', 'cache'))
   })
 
-  test('Download Offline Copy caches the window\'s works, then exports them', async () => {
+  test('Download caches the window\'s works, then exports them', async () => {
     await options.press(await inCell('this-review', 'download'))
     await until('the job to be running', async () => await jobState(await cell('this-review')) === 'running')
     const before = await jobWrites()
@@ -639,5 +640,68 @@ describe('options UI — Pre-load', { skip }, () => {
     await until('the refusal to be said', async () => mentions(await options.text(await cell()), READING_ELSEWHERE))
     assert.equal(fetched.length, before, 'nothing asked of AO3')
     assert.equal(await records(), null)
+  })
+})
+
+describe('options UI — Pre-load, list by list', { skip }, () => {
+  let session
+  let options
+  let page
+  let release
+  const held = new Promise((resolve) => {
+    release = resolve
+  })
+
+  resetWorkIds(15000)
+  const since = TODAY - 4
+  const alpha = listing('alpha', Array.from({ length: 4 }, (_, i) => [since + i, 2]), { entry: { alias: 'Alpha', since } })
+  const broken = listing('broken', [[since, 2]], { entry: { alias: 'Broken', since }, list: { fail: true } })
+  const fixtures = [alpha, broken]
+
+  before(async () => {
+    session = await startOptions()
+    options = await session.open({
+      seed: {
+        'option.user': { userId: 'me' },
+        'option.trackedLists': trackedOption(fixtures, { reviewedThrough: since - 1 }),
+        'cache.markedForLater': { userId: 'me', updatedAt: Date.now(), ids: '' },
+      },
+      hash: '#review',
+      viewport: { width: 1440, height: 900 },
+      // Alpha, read first, is held on its first page until the second test lets it go.
+      prepare: p => stubArchive(p, async (url) => {
+        const at = new URL(url)
+        if (at.pathname.startsWith('/tags/alpha/'))
+          await held
+        return archiveAnswers({ fixtures })(at)
+      }),
+    })
+    page = options.page
+  }, { timeout: 180000 })
+
+  after(() => {
+    release()
+    return session?.close()
+  })
+
+  const cell = () => page.$('[data-review-cell="this-review"]')
+  /** The state of the read a list's row draws under it, or null with none. */
+  const rowRead = async id => (await options.savedList(id)).evaluate(el => el.querySelector('[data-saved-list-read] [data-job-state]')?.dataset.jobState ?? null)
+
+  test('while a list is read, its row draws the read as a refresh, and This review names the list', async () => {
+    await (await options.action(await cell(), 'preload')).click()
+    await until('Alpha’s row to draw its read', async () => (await rowRead('alpha')) === 'running')
+    assert.ok(mentions(await options.text(await cell()), 'Alpha'), 'This review says which list is being read')
+    assert.equal(await rowRead('broken'), null, 'a list not reached yet draws nothing')
+  })
+
+  test('a list given up on says so in its row, and This review names it once the run is done', async () => {
+    release()
+    await until('the run to finish', async () => (await cell()).evaluate(el => el.querySelector('[data-job-state]')?.dataset.jobState === 'finished'))
+    assert.equal(await rowRead('broken'), 'stopped')
+    assert.ok(mentions(await options.text(await options.savedList('broken')), FAILED_LINE))
+    assert.equal(await rowRead('alpha'), null, 'a list read to its end draws nothing more')
+    assert.ok(mentions(await options.text(await cell()), failedNote({ broken: { name: 'Broken', phase: 'failed', page: 0, of: 0 } })))
+    assert.equal(await options.text(await page.$('[data-review-records]')), recordsLine({ through: TODAY - 1, behind: 1 }), 'the list that failed is the one not yet read')
   })
 })

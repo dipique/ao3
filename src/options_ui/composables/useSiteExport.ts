@@ -23,6 +23,7 @@ import { formatBytes } from '../model/buckets.ts'
 import { changeImportView } from '../model/changeImport.ts'
 import { foreignView, jobView, offReason } from '../model/jobView.ts'
 import { timeAgo } from '../model/moments.ts'
+import { withReads } from '../model/preload.ts'
 import { PROFILE_LISTS } from '../model/profileLists.ts'
 import { REVIEW_NAME } from '../model/review.ts'
 import { copyTitle, savedListRows, titlePlaceholder } from '../model/savedListRows.ts'
@@ -240,8 +241,11 @@ function nameOf(key: string): string {
   return row ? listName(row) : ''
 }
 
-/** The job as the page shows it ({@link jobView}): every control it turns off, and its own line, read it from here. */
-const view = computed(() => jobView(status.value, nameOf, now.value))
+/** The job as the page shows it ({@link jobView}, with Pre-load's lines, {@link withReads}): every control it turns off, and its own line, read it from here. */
+const view = computed(() => withReads(jobView(status.value, nameOf, now.value), status.value.reads))
+
+/** Pre-load's reads, by tracked list id, while the job is Pre-load: each list's row draws its own. */
+const reads = computed(() => status.value.reads)
 
 /** The import of changes being taken in, as its row's line shows it ({@link changeImportView}). */
 const changeImport = computed(() => changeImportView(changeProgress.value, now.value, stoppingChanges.value))
@@ -407,6 +411,7 @@ export function useSiteExport() {
     orphans,
     loading,
     view,
+    reads,
     foreign,
     reload,
     changeReport,

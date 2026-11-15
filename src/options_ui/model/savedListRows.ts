@@ -10,7 +10,7 @@ import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLi
 import { bucketBar, formatBytes } from './buckets.ts'
 import { isRunning, jobIsOn, jobVerb, listJob, removeOff } from './jobView.ts'
 import { timeAgo } from './moments.ts'
-import { sentence, withReason } from './phrases.ts'
+import { sentence, titlesInWords, withReason } from './phrases.ts'
 import { refreshNeeds } from './profileLists.ts'
 
 /** What each kind of query is called in the reader's words. */
@@ -266,12 +266,6 @@ export function describeList(list: Pick<TrackedList, 'id' | 'alias' | 'url' | 't
 /** Why a title typed for a list isn't saved: `takenBy` has it. */
 export function titleRefusal(takenBy: SavedList): string {
   return `Another list is already called ${describeList(aliasOf(takenBy))}, so this title isn't saved. Choose a different one.`
-}
-
-/** Titles as a sentence names them: “A”, “A” and “B”, “A”, “B” and “C”. */
-export function titlesInWords(titles: readonly string[]): string {
-  const quoted = titles.map(title => `“${title}”`)
-  return quoted.length > 1 ? `${quoted.slice(0, -1).join(', ')} and ${quoted.at(-1)}` : quoted.join('')
 }
 
 /** The other lists at a list's address, which search what it does, by title; null with none. */

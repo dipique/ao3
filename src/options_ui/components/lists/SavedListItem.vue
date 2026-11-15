@@ -7,13 +7,15 @@ import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 import type { SavedListRow } from '../../model/savedListRows.ts'
 
 import { sentence, withReason } from '../../model/phrases.ts'
+import { listReadView } from '../../model/preload.ts'
 import { cachingCell, COPIED_MS, describeList, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, offlineDetails, rowAction, rowJob, sameSearchNote, SHARED_TITLE_NOTE, statusCell, titleRefusal, TRACK_OFF, trackingDetails, VIEW_EDIT_NOTE } from '../../model/savedListRows.ts'
 
 /**
  * One saved list, as a row of Saved lists: what it is, whether it is tracked,
  * what of it is cached, and Download, with the rest behind the details
  * chevron — the offline copy's actions on one side, tracking and removing the
- * list on the other. A job on its copy grows its line under the row.
+ * list on the other. A job on its copy grows its line under the row, and so
+ * does Pre-load reading the list, as a refresh's line.
  *
  * A stored list no saved list is at is a row too, by the title its record will
  * take, or by its raw key: it has no record, so no title to set and no list to
@@ -46,6 +48,7 @@ const emit = defineEmits<{
 
 const {
   view,
+  reads,
   refreshList,
   cacheWorks,
   refreshAndCache,
@@ -77,6 +80,8 @@ const action = computed(() => rowAction(props.row, view.value))
 const copyKey = computed(() => (props.row.caching.kind === 'copy' ? props.row.caching.key : null))
 /** The job's line is this row's: running, stopped or finished on any of its copies. */
 const job = computed(() => rowJob(props.row, view.value))
+/** Pre-load reading this list, drawn as a refresh of it is. */
+const read = computed(() => (job.value?.here ? null : listReadView(reads.value?.[props.row.id], view.value)))
 
 const open = ref(false)
 const offline = computed(() => offlineDetails(props.row, view.value, props.now, prune.value))
@@ -234,7 +239,7 @@ function removeTheList(): void {
     :data-list-row="row.id"
     :data-saved-list="row.id"
     class="saved-list"
-    :class="{ 'saved-list--job': job?.here }"
+    :class="{ 'saved-list--job': job?.here || read }"
     style="scroll-margin-top: var(--shell-top);"
   >
     <div class="saved-list__row">
@@ -441,6 +446,9 @@ function removeTheList(): void {
           </button>
         </template>
       </SiteExportProgress>
+    </div>
+    <div v-else-if="read" class="saved-list__job" data-saved-list-read>
+      <SiteExportProgress :view="read" />
     </div>
 
     <div v-if="open" class="saved-list__details" data-saved-list-part="details">

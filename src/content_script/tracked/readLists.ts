@@ -1,7 +1,7 @@
-import type { Day, NextRead, PageRead, PassState, TrackedList } from '#common'
+import type { Day, ListRead, ListReadFailure, NextRead, PageRead, PassState, TrackedList } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
-import { applyPage, dayOf, excludedTagNames, getArchiveLink, nextRead, PAGE_SIZE, pageUrl, pruneReviewed, recordFor, storedRecordOf, toShortId, unpackRows, utcToday } from '#common'
+import { applyPage, dayOf, excludedTagNames, getArchiveLink, MAX_REQUEST_ATTEMPTS, nextRead, PAGE_SIZE, pageUrl, pruneReviewed, recordFor, sourceLabel, storedRecordOf, toShortId, unpackRows, utcToday } from '#common'
 import { archiveWaitRemaining, onArchiveWait, waitForArchive } from '#content_script/archiveFetch.js'
 import { storeWorks } from '#content_script/searchView/blurbStore.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
@@ -37,9 +37,6 @@ import { readStoredRecords, writeReadRecord } from './readStore.ts'
  */
 const SCAN_PAGE_CAP = 5
 
-/** How often one request may fail on its own account before its list is given up on for the run. */
-const MAX_REQUEST_ATTEMPTS = 3
-
 /**
  * How often in a row the archive may call the run off before it stops coming
  * back, however much of its waiting budget is left. A short `Retry-After`
@@ -64,6 +61,8 @@ export interface ReadStatus {
   waitUntil: number
   /** Requests made, retries included. */
   requests: number
+  /** Every list's own progress, by id. */
+  byList: Record<string, ListRead>
 }
 
 export interface ReadOptions {
@@ -159,6 +158,13 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
     scanned: isScanned(list),
   }))
 
+  const byList = new Map<string, ListRead>(states.map(state => [state.listId, { name: sourceLabel(state.list), phase: 'queued', page: 0, of: 0 }]))
+  /** Move a list on: what a retry said goes unless it is said again. */
+  const mark = (listId: string, fields: Partial<ListRead>): void => {
+    const { attempt: _attempt, error: _error, ...rest } = byList.get(listId)!
+    byList.set(listId, { ...rest, ...fields })
+  }
+
   const failed: string[] = []
   const attempts = new Map<string, number>()
   let requests = 0
@@ -169,16 +175,17 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
   let waitUntil = 0
 
   const report = (): void => {
-    opts.onProgress?.({ listsDone: states.filter(state => state.done).length, lists: states.length, reading, waitUntil, requests })
+    opts.onProgress?.({ listsDone: states.filter(state => state.done).length, lists: states.length, reading, waitUntil, requests, byList: Object.fromEntries(byList) })
   }
   const unwatch = onArchiveWait((until) => {
     waitUntil = until
     report()
   })
 
-  const giveUp = async (state: ListState): Promise<void> => {
+  const giveUp = async (state: ListState, failure: ListReadFailure, error?: string): Promise<void> => {
     state.done = true
     failed.push(state.listId)
+    mark(state.listId, error === undefined ? { phase: 'failed', failure } : { phase: 'failed', failure, error })
     state.record = { ...state.record, failed: true }
     await writeReadRecord(state.listId, state.record)
   }
@@ -194,7 +201,7 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
     // arrived through sync, or was edited by hand — can't be read at all.
     for (const state of states) {
       if (pageUrl(state.list, state.record.from, 1) === null)
-        await giveUp(state)
+        await giveUp(state, 'not-archive')
     }
     report()
 
@@ -206,10 +213,11 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
       const state = states.find(candidate => candidate.listId === next.listId)!
       const key = `${next.listId}\u0000${next.from}\u0000${next.page}`
       reading = state.listId
+      mark(state.listId, { phase: 'reading', page: next.page - 1 })
       try {
         const read = await readPage(state, next, get)
         if (!read) {
-          await giveUp(state)
+          await giveUp(state, 'signed-out')
           continue
         }
         refusedRounds = 0
@@ -234,6 +242,7 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
         state.pass = { from: next.from, page: next.page }
         if (read.page.reachedEnd)
           state.done = true
+        mark(state.listId, { phase: state.done ? 'done' : 'queued', page: next.page, of: read.of || byList.get(state.listId)!.of })
         attempts.delete(key)
       }
       catch (err) {
@@ -255,8 +264,14 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
         const tries = (attempts.get(key) ?? 0) + 1
         attempts.set(key, tries)
         console.warn('[tracked] page fetch failed', err)
-        if (tries >= MAX_REQUEST_ATTEMPTS)
-          await giveUp(state)
+        const error = err instanceof Error ? err.message : String(err)
+        if (tries >= MAX_REQUEST_ATTEMPTS) {
+          await giveUp(state, 'request', error)
+        }
+        else {
+          mark(state.listId, { phase: 'retrying', attempt: tries, error })
+          report()
+        }
       }
     }
   }
@@ -264,6 +279,10 @@ export async function readTrackedLists(opts: ReadOptions): Promise<ReadOutcome> 
     unwatch()
     reading = null
     waitUntil = 0
+    for (const [listId, read] of byList) {
+      if (read.phase === 'reading' || read.phase === 'retrying')
+        mark(listId, { phase: 'queued' })
+    }
     report()
   }
   return { blocked, failed, requests }
@@ -284,7 +303,7 @@ async function readPage(
   state: ListState,
   next: NextRead,
   get: (url: string) => Promise<Document>,
-): Promise<{ works: Work[], page: PageRead } | null> {
+): Promise<{ works: Work[], page: PageRead, of: number } | null> {
   const urlFor = (page: number): string => {
     const url = pageUrl(state.list, next.from, page, { exclude: state.exclude })
     if (!url)
@@ -319,11 +338,14 @@ async function readPage(
   }
 
   let reachedEnd = true
+  let of = 0
   if (!state.scanned) {
     const count = detectResultCount(first)
     if (count === null && listed === 0)
       throw new Error(`No listing on the page: ${urlFor(next.page)}`)
     reachedEnd = listed < PAGE_SIZE || (count !== null && next.page * PAGE_SIZE >= count)
+    if (count !== null)
+      of = Math.max(next.page, Math.ceil(count / PAGE_SIZE))
   }
-  return { works, page: { from: next.from, page: next.page, rows, reachedEnd } }
+  return { works, page: { from: next.from, page: next.page, rows, reachedEnd }, of }
 }

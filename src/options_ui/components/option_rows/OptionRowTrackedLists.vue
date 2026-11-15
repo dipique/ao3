@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Day } from '#common'
 
-import { getArchiveLink, isoDay, readSummary, utcToday } from '#common'
+import { getArchiveLink, isoDay, readSummary, reviewStart, utcToday } from '#common'
 import { onReadRecordsChanged, readStoredRecords } from '#content_script/tracked/readStore.ts'
 
 import { sentence, withReason } from '../../model/phrases.ts'
@@ -123,7 +123,8 @@ const recordsText = computed(() => recordsLine(records.value))
 
 async function readRecordsLine(): Promise<void> {
   const tracked = lists.value.filter(list => list.tracked)
-  const summary = readSummary(tracked, await readStoredRecords(tracked.map(list => list.id)))
+  const start = reviewStart({ reviewedThrough: reviewedThrough.value, lists: lists.value })
+  const summary = readSummary(tracked, await readStoredRecords(tracked.map(list => list.id)), start)
   records.value = { through: summary.through, behind: summary.behind.length }
 }
 
@@ -133,7 +134,7 @@ onMounted(() => {
   stopRecords = onReadRecordsChanged(() => void readRecordsLine())
 })
 onBeforeUnmount(() => stopRecords?.())
-watch(lists, () => void readRecordsLine(), { deep: true })
+watch([lists, reviewedThrough], () => void readRecordsLine(), { deep: true })
 </script>
 
 <template>
@@ -267,7 +268,7 @@ watch(lists, () => void readRecordsLine(), { deep: true })
                     @click="download"
                   >
                     <span class="i-tabler-download" aria-hidden="true" />
-                    Download Offline Copy
+                    Download
                   </button>
                   <button
                     type="button"

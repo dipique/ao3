@@ -292,22 +292,56 @@ export function pruneReviewed(record: TrackedRead, reviewedThrough: Day): { reco
 /**
  * For the options page's records line: the day the tracked lists are all read
  * through (the lowest `through` of those read at all), and the ids of the lists
- * not yet read — no record, one of another query, or none of its pages written.
+ * not yet read for the window starting on `start` — each judged by the record
+ * the next read takes up ({@link recordFor}), so one it would start afresh is
+ * not read, and a read that fails leaves the count as it found it.
  */
-export function readSummary(lists: readonly TrackedList[], records: ReadonlyMap<string, unknown>): { through: Day | null, behind: string[] } {
+export function readSummary(lists: readonly TrackedList[], records: ReadonlyMap<string, unknown>, start: Day): { through: Day | null, behind: string[] } {
   let through: Day | null = null
   const behind: string[] = []
   for (const list of lists) {
     if (!list.tracked)
       continue
-    const record = storedRecordOf(list, records.get(list.id))
-    if (!record || record.readAt === 0) {
+    const record = recordFor(list, records.get(list.id), start)
+    if (record.readAt === 0) {
       behind.push(list.id)
       continue
     }
     through = through === null ? record.through : Math.min(through, record.through)
   }
   return { through, behind }
+}
+
+/** How often one request may fail on its own account before its list is given up on for the run. */
+export const MAX_REQUEST_ATTEMPTS = 3
+
+/**
+ * Where one list has got in a run. `queued` has yet to be read, or waits its
+ * turn partway, while a list read less far goes first; `retrying` is between
+ * a failed request and its next try.
+ */
+export type ListReadPhase = 'queued' | 'reading' | 'retrying' | 'done' | 'failed'
+
+/**
+ * Why a list was given up on: signed out, an address that isn't a page on the
+ * archive, or {@link MAX_REQUEST_ATTEMPTS} failed requests.
+ */
+export type ListReadFailure = 'signed-out' | 'not-archive' | 'request'
+
+export interface ListRead {
+  /** What the review calls the list. */
+  name: string
+  phase: ListReadPhase
+  /** The pages of its pass read this run, so the one being read or retried is the next; 0 before the first. */
+  page: number
+  /** The pages its pass has, as its first page counts them; 0 before then, and for a list read whole. */
+  of: number
+  /** While retrying: how many tries of the page have failed. */
+  attempt?: number
+  /** Once failed: why. */
+  failure?: ListReadFailure
+  /** What went wrong with the last request, while retrying and once failed by it. */
+  error?: string
 }
 
 /** What {@link windowFromRecords} is given. */

@@ -1,4 +1,4 @@
-import type { SnapshotDescriptor } from '#common'
+import type { ListRead, SnapshotDescriptor } from '#common'
 import type { WaitReason } from '#content_script/archiveFetch.js'
 import type { Work } from '#content_script/blurb.js'
 import type { FollowState, ListRefresh, RefreshOutcome } from '#content_script/searchView/listRefresh.ts'
@@ -124,6 +124,12 @@ export interface JobStatus {
   waitingUntil: number | null
   /** Which kind of pause {@link waitingUntil} is: the archive refusing us, or us pacing ourselves. */
   waitReason: WaitReason | null
+  /**
+   * The review's refresh (Pre-load): every tracked list's read, by id, as the
+   * reader last said; kept once the run stops, so a list it gave up on can say
+   * why. Null for any other job, and before the reader first says.
+   */
+  reads: Readonly<Record<string, ListRead>> | null
 }
 
 type Listener = (status: JobStatus) => void
@@ -138,19 +144,20 @@ let error: string | null = null
 let warnings: string[] = []
 let waitingUntil: number | null = null
 let waitReason: WaitReason | null = null
+let reads: Readonly<Record<string, ListRead>> | null = null
 let controller: AbortController | null = null
 /** The running job is to be thrown away once it stops, not left to continue. */
 let cancelling = false
 /** A refresh another page runs that the job's refresh step is waiting on, for a Cancel to name. */
 let following: { cacheKey: string, id: string } | null = null
 
-let status: JobStatus = { job: null, running: false, message: '', error: null, warnings: [], waitingUntil: null, waitReason: null }
+let status: JobStatus = { job: null, running: false, message: '', error: null, warnings: [], waitingUntil: null, waitReason: null, reads: null }
 
 function publish(): void {
   // A fresh outer object each time, so a `shallowRef` on the Vue side sees the
   // change; `queue` and `errors` stay shared, since a run mutates them per work
   // and copying a thousand-id queue that often would be the expensive part.
-  status = { job: current ? { ...current } : null, running, message, error, warnings, waitingUntil, waitReason }
+  status = { job: current ? { ...current } : null, running, message, error, warnings, waitingUntil, waitReason, reads }
   for (const listener of listeners)
     listener(status)
 }
@@ -177,6 +184,7 @@ browser.storage.onChanged.addListener((changes, area) => {
   current = null
   error = null
   warnings = []
+  reads = null
   publish()
 })
 
@@ -209,6 +217,7 @@ export async function loadJob(): Promise<ExportJob | null> {
   warnings = []
   waitingUntil = null
   waitReason = null
+  reads = null
   publish()
   return current
 }
@@ -301,6 +310,7 @@ export async function discardJob(): Promise<void> {
   warnings = []
   waitingUntil = null
   waitReason = null
+  reads = null
   await forget()
   publish()
 }
@@ -314,6 +324,7 @@ async function drive(job: ExportJob): Promise<void> {
   warnings = []
   waitingUntil = null
   waitReason = null
+  reads = null
   publish()
 
   // A pause can run to minutes, and every worker is inside it, so without this
@@ -363,6 +374,7 @@ async function drive(job: ExportJob): Promise<void> {
       current = null
       error = null
       warnings = []
+      reads = null
     }
     else if (job.blocked === 'rate-limited' && !error) {
       error = 'AO3 kept asking us to wait, so the run stopped after waiting it out for as long as is sensible. '
@@ -442,7 +454,7 @@ async function readReview(job: ExportJob, signal: AbortSignal): Promise<void> {
       onProgress: (status) => {
         job.done = status.listsDone
         job.total = status.lists
-        message = `Read ${status.listsDone} of ${status.lists} tracked ${status.lists === 1 ? 'list' : 'lists'}`
+        reads = status.byList
         publish()
       },
     }).catch((err: unknown) => {

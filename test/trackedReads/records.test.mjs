@@ -316,7 +316,7 @@ describe('readSummary', () => {
       ['a', record(lists[0], { through: START + 4, readAt: AT })],
       ['b', record(lists[1], { through: START + 2, readAt: AT })],
     ])
-    assert.deepEqual(readSummary(lists, records), { through: START + 2, behind: ['c'] })
+    assert.deepEqual(readSummary(lists, records, START), { through: START + 2, behind: ['c'] })
   })
 
   test('a record of another query, or never read, is not read', () => {
@@ -325,7 +325,16 @@ describe('readSummary', () => {
       ['a', record(list('a', { url: '/tags/other/works' }), { through: START + 4, readAt: AT })],
       ['b', record(lists[1])],
     ])
-    assert.deepEqual(readSummary(lists, records), { through: null, behind: ['a', 'b'] })
+    assert.deepEqual(readSummary(lists, records, START), { through: null, behind: ['a', 'b'] })
+  })
+
+  test('a record the next read starts afresh, since it begins after the window, is not read', () => {
+    const lists = [list('a'), list('b')]
+    const records = new Map([
+      ['a', record(lists[0], { from: START + 3, through: START + 6, readAt: AT })],
+      ['b', record(lists[1], { through: START + 4, readAt: AT })],
+    ])
+    assert.deepEqual(readSummary(lists, records, START), { through: START + 4, behind: ['a'] })
   })
 })
 
