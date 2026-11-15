@@ -13,7 +13,7 @@ import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import type { MarkConfig, MarkId } from '#common'
 
-import { ADDON_CLASS, isExtensionContextValid, markIds, REOPEN_GUARD_MS, toast } from '#common'
+import { ADDON_CLASS, isExtensionContextValid, markIds, markTooltip, REOPEN_GUARD_MS, toast } from '#common'
 import { markIcon } from '#content_script/markIcons.js'
 import React from '#dom'
 
@@ -552,7 +552,7 @@ function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] 
     const config = opts.marks![id]!
     out.push({
       suffix: `mark  ${INDICATOR_CLASS}--mark-${id}`,
-      label: opts.titles?.[id] || config.label || id,
+      label: markTooltip(opts.marks!, id, opts.titles?.[id] || config.label || id),
       icon: markIcon(config.icon),
       color: opts.colors?.[id] || config.color,
     })

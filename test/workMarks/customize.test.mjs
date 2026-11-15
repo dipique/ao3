@@ -14,7 +14,9 @@ import {
 import {
   addMark,
   createDefaultMarks,
+  describeMark,
   localMarkIds,
+  markDescription,
   markHidesResults,
   markIdFor,
   markIsExclusive,
@@ -22,6 +24,7 @@ import {
   markIsReorderable,
   markNameError,
   markRoot,
+  markTooltip,
   READ_MARK,
   reorderableMarkIds,
   sanitizeMarkId,
@@ -120,6 +123,57 @@ describe('switching a mark off', () => {
     assert.ok(markIsOffered(marks, 'bad'), 'one mark at a time')
     assert.equal(markHidesResults(marks, 'boring'), false, 'it still follows read on hiding')
     assert.ok(localMarkIds(marks).includes('boring'), 'and it is still in the table')
+  })
+})
+
+describe('describing a mark', () => {
+  const INTENT = 'Stopped because it went further than I read for'
+
+  test('no shipped mark carries a description', () => {
+    const marks = createDefaultMarks()
+    for (const [id, config] of Object.entries(marks)) {
+      assert.ok(!('description' in config), `${id} ships without the field`)
+      assert.equal(markDescription(marks, id), '')
+    }
+  })
+
+  test('the description is stored trimmed, and nothing else about the mark moves', () => {
+    const marks = createDefaultMarks()
+    const described = describeMark(marks.dark, `  ${INTENT}\n`)
+    assert.deepEqual(described, { ...marks.dark, description: INTENT })
+    assert.ok(!('description' in marks.dark), 'the mark it was given is left as it was')
+  })
+
+  test('a description keeps the line breaks inside it', () => {
+    const described = describeMark(createDefaultMarks().dark, 'First line\nSecond line')
+    assert.equal(described.description, 'First line\nSecond line')
+  })
+
+  test('a blank description is no field at all, so clearing one restores the shape it shipped as', () => {
+    const marks = createDefaultMarks()
+    const described = describeMark(marks.dark, INTENT)
+    for (const blank of ['', '   ', '\n\t']) {
+      const cleared = describeMark(described, blank)
+      assert.ok(!('description' in cleared), `${JSON.stringify(blank)} clears it`)
+      assert.deepEqual(cleared, marks.dark)
+    }
+  })
+
+  test('reading a description gives empty text for a mark without one, or one that is not there', () => {
+    const marks = createDefaultMarks()
+    marks.dark.description = `  ${INTENT}  `
+    marks.bad.description = '   '
+    assert.equal(markDescription(marks, 'dark'), INTENT)
+    assert.equal(markDescription(marks, 'bad'), '')
+    assert.equal(markDescription(marks, 'good'), '')
+    assert.equal(markDescription(marks, 'no-such-mark'), '')
+  })
+
+  test('a tooltip naming the mark puts its description on the line below', () => {
+    const marks = createDefaultMarks()
+    assert.equal(markTooltip(marks, 'dark', 'Dark'), 'Dark', 'just the heading while it has none')
+    marks.dark.description = INTENT
+    assert.equal(markTooltip(marks, 'dark', 'Dark'), `Dark\n${INTENT}`)
   })
 })
 

@@ -7,7 +7,7 @@ import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markGroup, markIsExclusive, markIsOffered, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markIsExclusive, markIsOffered, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -420,6 +420,7 @@ abstract class FilterEntityToolbar extends Unit {
       items.push({
         icon: markIcon(config.icon),
         label: has ? `Unmark as ${noun}` : `Mark as ${noun}`,
+        tip: markDescription(marks, markId),
         action: has ? 'unmark' : 'mark',
         value: markId,
         scope: 'settings',
@@ -452,6 +453,7 @@ abstract class FilterEntityToolbar extends Unit {
       return [{
         icon: markIcon(config.icon),
         label: `Mark as ${noun}…`,
+        tip: markDescription(marks, markId),
         action: 'mark',
         value: markId,
         scope: 'settings',
@@ -492,6 +494,7 @@ abstract class FilterEntityToolbar extends Unit {
     rows.push({
       icon: markIcon(config.icon),
       label: `Unmark as ${noun}`,
+      tip: markDescription(marks, markId),
       action: 'unmark',
       value: markId,
       scope: 'settings',

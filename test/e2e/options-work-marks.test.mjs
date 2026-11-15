@@ -365,6 +365,62 @@ describe('options UI — work marks', { skip }, () => {
     )
   })
 
+  /** Replace the dialog's description, the way a reader would, and wait until it holds `text`. */
+  const typeDescription = async (text) => {
+    const field = '[role="dialog"] textarea[name="mark-description"]'
+    await page.click(field)
+    await page.keyboard.down('Control')
+    await page.keyboard.press('a')
+    await page.keyboard.up('Control')
+    await page.keyboard.press('Backspace')
+    if (text)
+      await page.type(field, text)
+    await page.waitForFunction((selector, value) => document.querySelector(selector)?.value === value, {}, field, text)
+  }
+
+  /** The description each row shows, and the text it carries for hovering, by mark. */
+  const shownDescriptions = async () => Object.fromEntries(
+    await (await options.list(LIST)).$$eval('[data-list-row]', els => els.flatMap((row) => {
+      const shown = row.querySelector('[data-mark-description]')
+      return shown ? [[row.dataset.listRow, { text: shown.textContent.trim(), title: shown.title }]] : []
+    })),
+  )
+
+  test('the dialog writes a mark\'s description, the row shows it, and clearing it removes the field', async () => {
+    const INTENT = 'Body horror past what I signed up for'
+    assert.deepEqual(await shownDescriptions(), {}, 'no row shows one before it is written')
+
+    await options.openDialog(await options.action(await options.listRow(LIST, 'gross'), 'rename'))
+    await typeDescription(`  ${INTENT}  `)
+    await saveDialog()
+
+    const stored = await storedMarks()
+    assert.equal(stored.marks.gross.description, INTENT, 'stored trimmed')
+    assert.equal(stored.marks.gross.label, 'Gross', 'the rest of the mark is untouched')
+    assert.deepEqual(await shownDescriptions(), { gross: { text: INTENT, title: INTENT } }, 'shown on its own row, whole on hover')
+
+    await options.openDialog(await options.action(await options.listRow(LIST, 'gross'), 'rename'))
+    assert.equal(
+      await page.$eval('[role="dialog"] textarea[name="mark-description"]', el => el.value),
+      INTENT,
+      'the dialog opens on the description it has',
+    )
+    await typeDescription('')
+    await saveDialog()
+
+    assert.ok(!('description' in (await storedMarks()).marks.gross), 'back to the shape it shipped as')
+    assert.deepEqual(await shownDescriptions(), {})
+  })
+
+  test('a mark is added with its description', async () => {
+    await openAddDialog()
+    await typeName('Comfort read')
+    await typeDescription('For a bad day')
+    await saveDialog()
+
+    assert.equal((await storedMarks()).marks['comfort-read'].description, 'For a bad day')
+  })
+
   /**
    * The two settings that speak for every hiding mark rather than one: the
    * work-marks row's only dropdown and only number box.
@@ -496,7 +552,10 @@ describe('options UI — work marks', { skip }, () => {
   })
 
   test('at a phone\'s width every mark keeps its name whole and its controls inside the frame', async () => {
-    const narrow = await session.open({ seed: COUNTED, hash: HASH, viewport: { width: 390, height: 844 } })
+    // A long description beside a name gives way to it rather than squeezing it.
+    const described = structuredClone(COUNTED)
+    described[KEY].marks.favorite.description = 'The ones I would press on a friend, and read again myself, given half a chance'
+    const narrow = await session.open({ seed: described, hash: HASH, viewport: { width: 390, height: 844 } })
     try {
       const layout = await narrow.page.evaluate((id) => {
         const frame = document.querySelector(`[data-list="${id}"]`).getBoundingClientRect()

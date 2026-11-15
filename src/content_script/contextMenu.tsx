@@ -62,6 +62,8 @@ export interface MenuItem {
   icon?: Node | (() => Node) | null
   /** The row's text. */
   label: string
+  /** Shown on hover: what the row's label leaves out. */
+  tip?: string
   /** What the row does, as a short verb: its `data-ao3e-action`, which finds it whatever its label says. */
   action?: string
   /**
@@ -177,6 +179,10 @@ function makeRow(): { el: HTMLButtonElement, set: (item: MenuItem) => void } {
       el.dataset.ao3eValue = item.value
     else
       delete el.dataset.ao3eValue
+    if (item.tip)
+      el.title = item.tip
+    else
+      el.removeAttribute('title')
     el.replaceChildren(
       <span class={ICON_CLASS}>{resolveIcon(item.icon)}</span>,
       <span class={LABEL_CLASS}>{item.label}</span>,

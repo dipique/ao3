@@ -56,6 +56,15 @@ export interface MarkConfig {
   icon: string
   /** Display noun, e.g. "Read", "Favorite". Menus read "Mark as <label>". */
   label: string
+  /**
+   * What the reader means by this mark, in their own words — the thing a
+   * one-word name stops telling you about a mark you reach for twice a year.
+   * Shown beside the name in the options list and on hover wherever a work is
+   * marked with it. No mark ships with one, and a blank one is stored as no
+   * field at all; write it through {@link describeMark}, read it through
+   * {@link markDescription}.
+   */
+  description?: string
   /** Indicator colour (any CSS colour). Falls back to the muted default in CSS. */
   color?: string
   /**
@@ -644,6 +653,33 @@ export function marksHideAnything(marks: Record<MarkId, MarkConfig>): boolean {
   return progressMarkIds(marks).some(
     id => markHidesResults(marks, id) && countIds(marks[id]?.progress ?? '') > 0,
   )
+}
+
+// ---------------------------------------------------------------------------
+// Describing a mark.
+// ---------------------------------------------------------------------------
+
+/** The mark's description, trimmed; empty when it has none. */
+export function markDescription(marks: Record<MarkId, MarkConfig>, id: MarkId): string {
+  const text = marks[id]?.description
+  return typeof text === 'string' ? text.trim() : ''
+}
+
+/**
+ * `config` with its description set to `text`, trimmed. A blank one leaves the
+ * field off altogether, so a mark nobody has described — or whose description
+ * was cleared — is the shape it shipped as.
+ */
+export function describeMark(config: MarkConfig, text: string): MarkConfig {
+  const { description: _old, ...rest } = config
+  const description = text.trim()
+  return description ? { ...rest, description } : rest
+}
+
+/** A tooltip that names a mark: `heading`, then the mark's description on the line below when it has one. */
+export function markTooltip(marks: Record<MarkId, MarkConfig>, id: MarkId, heading: string): string {
+  const description = markDescription(marks, id)
+  return description ? `${heading}\n${description}` : heading
 }
 
 // ---------------------------------------------------------------------------

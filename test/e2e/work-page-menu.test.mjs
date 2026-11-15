@@ -270,6 +270,30 @@ describe('the work menu on a work page', { skip }, () => {
     assert.ok(withMark.some(row => row.action === 'unmark' && row.value === 'boring'), withMark.map(row => `${row.action} ${row.value}`).join(' | '))
   })
 
+  test('a mark\'s description is what its menu rows and its indicator say on hover', async () => {
+    const DARK = 'Stopped because it went further than I read for'
+    const ONGOING = 'Waiting on the author'
+    const marks = createDefaultMarks()
+    marks.dark.description = DARK
+    marks.dark.items = packIds([WORK_ID])
+    marks.continue.description = ONGOING
+
+    const tab = await open(WORK_URL, { 'option.workMarks': { enabled: true, marks } })
+    const indicator = await tab.$eval('.AO3E--indicator--mark-dark', el => el.title)
+    await openTitleMenu(tab)
+    const tips = await tab.evaluate(() => Object.fromEntries(
+      [...document.querySelectorAll('.AO3E--menu .AO3E--menu--item')]
+        .filter(el => el.dataset.ao3eAction === 'mark' || el.dataset.ao3eAction === 'unmark')
+        .map(el => [el.dataset.ao3eValue, el.title]),
+    ))
+    await tab.close()
+
+    assert.equal(tips.dark, DARK, 'the row that takes it off')
+    assert.equal(tips.continue, ONGOING, 'the row that opens the progress editor')
+    assert.equal(tips.good, '', 'a mark without one has no tooltip')
+    assert.equal(indicator, `${marks.dark.label}\n${DARK}`, 'the indicator names the mark, then says what it is for')
+  })
+
   test('an ongoing work drops the Marked-for-Later clock from its indicators', async () => {
     // The two always travel together — an ongoing work is kept on the list on
     // purpose — so showing both says nothing the calendar didn't already.

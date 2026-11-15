@@ -3,7 +3,7 @@ import type { ComponentInstance, GlobalComponents } from 'vue'
 
 import type { HideMode, MarkId } from '#common'
 
-import { addMark, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, listedMarkIds, MARK_ICON_NAMES, markedWorkCount, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
+import { addMark, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, describeMark, listedMarkIds, MARK_ICON_NAMES, markDescription, markedWorkCount, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
 
 import type { MarkSort } from '../../model/listView.ts'
 
@@ -138,6 +138,7 @@ const rows = computed(() => local.value.map((id) => {
   return {
     id,
     label: label(id),
+    description: markDescription(marks.value, id),
     icon: markIconClass(marks.value[id]?.icon),
     color: marks.value[id]?.color,
     count: count(id),
@@ -177,8 +178,9 @@ const header = computed(() => {
 
 /**
  * Each row is the mark's order buttons, or its pin; its icon; its name with
- * the pencil; its count, in a column of its own so the counts line up; then
- * its Hide and In menus toggles and Clear. In a narrow frame the count goes
+ * the pencil, then its description in whatever room the name leaves; its
+ * count, in a column of its own so the counts line up; then its Hide and In
+ * menus toggles and Clear. In a narrow frame the count goes
  * under the name, as wide as the row leaves it.
  */
 const ROW = '"order icon identity meta actions" / 48px 24px minmax(6rem, 1fr) minmax(0, 13rem) auto'
@@ -219,7 +221,7 @@ function clear(id: MarkId) {
 }
 
 // ---------------------------------------------------------------------------
-// The edit dialog. One dialog for both jobs, because both are the same three
+// The edit dialog. One dialog for both jobs, because both are the same four
 // fields — adding a mark is editing one that doesn't exist yet. Opened by a
 // row's icon or the pencil beside its name, both detached triggers, or by the
 // frame's Add, and focus comes back to whichever was pressed.
@@ -236,6 +238,7 @@ function setDialogRef(instance: unknown) {
 /** The mark being edited, or null while adding one. */
 const editing = ref<MarkId | null>(null)
 const draftLabel = ref('')
+const draftDescription = ref('')
 const draftIcon = ref(DEFAULT_MARK_ICON)
 const draftColor = ref('')
 
@@ -274,6 +277,7 @@ function edit(id: MarkId | null) {
   editing.value = id
   const config = id ? marks.value[id] : undefined
   draftLabel.value = config?.label ?? ''
+  draftDescription.value = id ? markDescription(marks.value, id) : ''
   draftIcon.value = config?.icon ?? DEFAULT_MARK_ICON
   // A mark with no colour of its own falls back to a muted default in CSS, and
   // the picker has no way to say "no colour" — so it opens on `read`'s, which is
@@ -289,19 +293,17 @@ function save() {
   if (creating.value) {
     const id = markIdFor(marks.value, name)
     const next = addMark(marks.value, name)
-    // `addMark` builds the mark out of defaults; the dialog offered a look as
-    // well as a name, so the two chosen fields go over the top of it before the
+    // `addMark` builds the mark out of defaults; the dialog offered a look and a
+    // description as well as a name, so those go over the top of it before the
     // table is stored — one option write rather than two.
-    next[id] = { ...next[id]!, icon: draftIcon.value, color: draftColor.value }
+    next[id] = describeMark({ ...next[id]!, icon: draftIcon.value, color: draftColor.value }, draftDescription.value)
     marks.value = next
   }
   else {
-    const config = marks.value[editing.value!]
-    if (config) {
-      config.label = name
-      config.icon = draftIcon.value
-      config.color = draftColor.value
-    }
+    const id = editing.value!
+    const config = marks.value[id]
+    if (config)
+      marks.value[id] = describeMark({ ...config, label: name, icon: draftIcon.value, color: draftColor.value }, draftDescription.value)
   }
   open.value = false
 }
@@ -436,13 +438,21 @@ function save() {
                 v-if="dialog"
                 class="icon-btn"
                 :dialog="dialog"
-                :title="`Rename ${row.label}`"
+                :title="`Rename or describe ${row.label}`"
                 data-action="rename"
                 @click="edit(row.id)"
               >
-                <Icon i-tabler-pencil text="[13px]" :label="`Rename ${row.label}`" />
+                <Icon i-tabler-pencil text="[13px]" :label="`Rename or describe ${row.label}`" />
               </DialogDetachedTrigger>
             </span>
+            <!-- No width of its own, so it takes only the room the name leaves. -->
+            <span
+              v-if="row.description"
+              class="min-w-0 flex-1 basis-0 truncate"
+              text="[11.5px] muted-fg"
+              :title="row.description"
+              data-mark-description
+            >{{ row.description }}</span>
           </span>
           <template #meta>
             {{ row.count.toLocaleString() }} {{ row.count === 1 ? 'work' : 'works' }}<template v-if="row.tracksProgress">
@@ -501,7 +511,7 @@ function save() {
           {{ creating ? 'Add mark' : 'Edit mark' }}
         </DialogTitle>
         <DialogDescription class="sr-only">
-          Set the name a mark is shown under, the icon it is drawn with, and the colour of that icon.
+          Set the name a mark is shown under, what you mean by it, the icon it is drawn with, and the colour of that icon.
         </DialogDescription>
         <div flex="~ col gap-4" pt-4>
           <label flex="~ col gap-1">
@@ -524,6 +534,22 @@ function save() {
             <p v-else text="xs muted-fg" pl-1>
               Shown in menus, indicators and hide reasons. Stored under the key <code>{{ draftId }}</code>, which
               can't change.
+            </p>
+          </label>
+
+          <label flex="~ col gap-1">
+            <span text="sm muted-fg">Description</span>
+            <div border="1 input" rounded-md>
+              <textarea
+                v-model="draftDescription"
+                name="mark-description"
+                rows="3"
+                class="default input-ring"
+                block w-full resize-y rounded-md p-2 text-sm leading-5
+              />
+            </div>
+            <p text="xs muted-fg" pl-1>
+              What this mark is for. Shown beside its name here, and on hover wherever you mark a work.
             </p>
           </label>
 
