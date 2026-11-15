@@ -36,7 +36,7 @@ const skip = skipWithoutChrome
  * resolving. Both are reproduced here, because both are branches in the sender.
  */
 function installBrowser() {
-  const state = { fetches: [], archive: 'ok', tabs: [1], listening: true }
+  const state = { fetches: [], archive: 'ok', retryAfter: null, tabs: [1], listening: true }
   window.__delegation = state
 
   window.fetch = async (url, init = {}) => {
@@ -46,7 +46,8 @@ function installBrowser() {
       return new Response('{"token":"a-fetched-token"}', { status: 200, headers: { 'content-type': 'application/json' } })
     if (state.archive === 'network')
       throw new TypeError('Failed to fetch')
-    return new Response('', { status: state.archive === 'ok' ? 200 : state.archive })
+    const headers = state.retryAfter === null ? {} : { 'Retry-After': state.retryAfter }
+    return new Response('', { status: state.archive === 'ok' ? 200 : state.archive, headers })
   }
 
   const messageListeners = new Set()
@@ -97,10 +98,11 @@ describe('markForLater — delegation', { skip }, () => {
 
   after(async () => close?.())
 
-  const reset = ({ archive = 'ok', tabs = [1], listening = true, token = null } = {}) => page.evaluate(
-    (outcome, openTabs, hasListeners, headToken) => {
+  const reset = ({ archive = 'ok', retryAfter = null, tabs = [1], listening = true, token = null } = {}) => page.evaluate(
+    (outcome, wait, openTabs, hasListeners, headToken) => {
       window.__delegation.fetches.length = 0
       window.__delegation.archive = outcome
+      window.__delegation.retryAfter = wait
       window.__delegation.tabs = openTabs
       window.__delegation.listening = hasListeners
       document.head.querySelector('meta[name="csrf-token"]')?.remove()
@@ -112,6 +114,7 @@ describe('markForLater — delegation', { skip }, () => {
       }
     },
     archive,
+    retryAfter,
     tabs,
     listening,
     token,
@@ -157,6 +160,20 @@ describe('markForLater — delegation', { skip }, () => {
     await reset({ archive: 422 })
     const said = await viaTab('11', false)
     assert.ok(said?.includes('422'), `the archive's answer, got ${said}`)
+  })
+
+  /**
+   * Being told to slow down is a pause for the run asking, not a failure of the
+   * work: the run can only wait it out if the tab hands it back as the archive
+   * said it, status and `Retry-After` both, rather than as a sentence.
+   */
+  test('a tab told to slow down hands back the refusal itself, and how long to wait', async () => {
+    await reset({ archive: 429, retryAfter: '7' })
+    const refusal = await page.evaluate(() => window.MarkForLater.submitMarkViaTab('11', false).then(
+      () => null,
+      error => ({ status: error.status, retryAfter: error.retryAfter }),
+    ))
+    assert.deepEqual(refusal, { status: 429, retryAfter: '7' })
   })
 
   test('with no AO3 tab open, the message says what to do about it', async () => {

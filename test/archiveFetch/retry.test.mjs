@@ -4,7 +4,7 @@ import { describe, test } from 'node:test'
 // Node strips the TS types on import; archiveFetch.ts imports nothing at all, so
 // it loads under a plain `node --test`. `fetch` is stubbed per test and the
 // clock is mocked, which is the only way an hours-long budget is testable.
-import { archivePause, archiveWaitRemaining, BLIND_WAIT_STEP_MS, countdown, fetchWithRetry, MAX_WAIT_MS, onArchiveWait, PACE_EVERY, PACE_IDLE_RESET_MS, PACE_PAUSE_MS, PATIENCE, retryAfterMs, WAIT_WORDS, waitLine, watchWaitLine } from '../../src/content_script/archiveFetch.ts'
+import { archivePause, archiveWaitRemaining, askWithRetry, BLIND_WAIT_STEP_MS, countdown, fetchWithRetry, MAX_WAIT_MS, onArchiveWait, PACE_EVERY, PACE_IDLE_RESET_MS, PACE_PAUSE_MS, PATIENCE, retryAfterMs, WAIT_WORDS, waitLine, watchWaitLine } from '../../src/content_script/archiveFetch.ts'
 
 const MINUTE = 60_000
 
@@ -516,6 +516,72 @@ describe('archiveFetch — when waiting stops being sensible', () => {
     // wait it was in is long over.
     await clk.tick(2 * retryAfter * 1000)
     assert.equal(calls.length, 1)
+  })
+})
+
+/**
+ * Not every exchange with the archive is one GET whose `Response` comes back
+ * whole: a Marked for Later request is a token and a POST, and reports a
+ * refusal by throwing. It waits out a 429 by the same rules and the same
+ * shared pause as any fetch, so the exchange is handed over whole and the
+ * caller says which of its answers was the archive pacing us.
+ */
+describe('archiveFetch — any exchange, not only a fetch', () => {
+  /** An exchange that answers from a script, recording when each was made. */
+  function scripted(script) {
+    const calls = []
+    const ask = async () => {
+      calls.push(Date.now())
+      return script[Math.min(calls.length - 1, script.length - 1)]
+    }
+    return { calls, ask }
+  }
+  const refusal = answer => (answer.refused ? { retryAfter: answer.retryAfter ?? null } : null)
+
+  test('a refused exchange is waited out the time it was told, then made again', async (t) => {
+    const clk = useClock(t)
+    const { calls, ask } = scripted([{ refused: true, retryAfter: '2' }, { done: 'yes' }])
+
+    const state = watch(askWithRetry(ask, refusal))
+    await clk.until(() => state.done)
+
+    assert.deepEqual(state.value, { done: 'yes' })
+    assert.equal(calls[1] - calls[0], 2000)
+  })
+
+  test('its refusal is everyone\'s pause, so the next fetch waits it out too', async (t) => {
+    const clk = useClock(t)
+    const { calls, ask } = scripted([{ refused: true, retryAfter: '30' }])
+    const fetches = stubFetch(t, [200])
+
+    const state = watch(askWithRetry(ask, refusal, undefined, PATIENCE.suggestion))
+    await clk.until(() => state.done)
+    assert.deepEqual(state.value, { refused: true, retryAfter: '30' }, 'with no patience, the refusal comes straight back')
+
+    const pending = watch(fetchWithRetry(url))
+    await clk.until(() => pending.done)
+    assert.equal(fetches[0].at - calls[0], 30_000)
+  })
+
+  test('once patience is spent, the refused answer is handed back as it came', async (t) => {
+    const clk = useClock(t)
+    const { calls, ask } = scripted([{ refused: true }])
+
+    const state = watch(askWithRetry(ask, refusal))
+    await clk.until(() => state.done)
+
+    assert.deepEqual(state.value, { refused: true })
+    assert.equal(calls.length, 1, 'a blind wait is longer than an interactive patience, so it was not started')
+  })
+
+  test('once its signal has stopped it, no exchange is made', async (t) => {
+    useClock(t)
+    const { calls, ask } = scripted([{ done: 'yes' }])
+    const controller = new AbortController()
+    controller.abort()
+
+    await assert.rejects(askWithRetry(ask, refusal, controller.signal), err => err.name === 'AbortError')
+    assert.equal(calls.length, 0)
   })
 })
 

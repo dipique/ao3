@@ -1,6 +1,6 @@
 import type { JoinedSavedList, SnapshotDescriptor, StoredListRef } from '#common'
 import type { ListRefresh } from '#content_script/searchView/listRefresh.ts'
-import type { ChangeImportReport } from '#content_script/siteExport/importChanges.js'
+import type { ChangeImportProgress, ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { CachingBuckets, WorkTextUsage } from '#content_script/siteExport/workText.js'
 
@@ -20,6 +20,7 @@ import type { JobView } from '../model/jobView.ts'
 import type { ProfileList, ProfileListId } from '../model/profileLists.ts'
 
 import { formatBytes } from '../model/buckets.ts'
+import { changeImportView } from '../model/changeImport.ts'
 import { foreignView, jobView, offReason } from '../model/jobView.ts'
 import { timeAgo } from '../model/moments.ts'
 import { PROFILE_LISTS } from '../model/profileLists.ts'
@@ -108,6 +109,11 @@ const status = shallowRef<JobStatus>(jobStatus())
  */
 const changeReport = shallowRef<ChangeImportReport | null>(null)
 const importingChanges = ref(false)
+/** How far the import being taken in has got, as it last said; null between imports. */
+const changeProgress = shallowRef<ChangeImportProgress | null>(null)
+/** The running import's Stop, and whether it has been pressed. */
+let changeStop: AbortController | null = null
+const stoppingChanges = ref(false)
 
 /**
  * The saved lists, read here so a stored list can say which saved list it is,
@@ -212,14 +218,14 @@ subscribeJob((next) => {
 })
 
 /**
- * A clock, ticking only while the job sits out a pause, so its countdown goes
- * down. The runner reports when it may next ask AO3 for something rather than
- * how long that is, and a permanent interval would be a poor trade for a line
- * that is usually absent.
+ * A clock, ticking only while the job or an import of changes sits out a
+ * pause, so its countdown goes down. Each reports when it may next ask AO3 for
+ * something rather than how long that is, and a permanent interval would be a
+ * poor trade for a line that is usually absent.
  */
 const now = ref(Date.now())
 watchEffect((onCleanup) => {
-  if (!status.value.waitingUntil)
+  if (!status.value.waitingUntil && !changeProgress.value?.waitingUntil)
     return
   now.value = Date.now()
   const timer = setInterval(() => {
@@ -236,6 +242,9 @@ function nameOf(key: string): string {
 
 /** The job as the page shows it ({@link jobView}): every control it turns off, and its own line, read it from here. */
 const view = computed(() => jobView(status.value, nameOf, now.value))
+
+/** The import of changes being taken in, as its row's line shows it ({@link changeImportView}). */
+const changeImport = computed(() => changeImportView(changeProgress.value, now.value, stoppingChanges.value))
 
 /**
  * The refresh claims of the stored lists that share their refresh between
@@ -402,6 +411,8 @@ export function useSiteExport() {
     reload,
     changeReport,
     importingChanges,
+    changeImport,
+    stoppingChanges,
 
     /**
      * Pre-load: read the tracked lists' records up to date, as the review does
@@ -581,18 +592,41 @@ export function useSiteExport() {
         return
       importingChanges.value = true
       changeReport.value = null
+      changeStop = new AbortController()
       try {
-        const report = await replayChangeFile(await file.text(), { tellArchive: opts.tellArchive !== false })
+        const report = await replayChangeFile(await file.text(), {
+          tellArchive: opts.tellArchive !== false,
+          signal: changeStop.signal,
+          onProgress: (progress) => {
+            changeProgress.value = progress
+          },
+        })
         changeReport.value = report
-        toast(describeChangeReport(report), { type: report.archiveFailed.length ? 'error' : 'success' })
+        const type = report.archiveFailed.length || report.rateLimited ? 'error' : report.stopped ? undefined : 'success'
+        toast(describeChangeReport(report), { type })
       }
       catch (err) {
         toast(err instanceof Error ? err.message : 'That file of changes could not be read.', { type: 'error' })
       }
       finally {
         importingChanges.value = false
+        changeProgress.value = null
+        changeStop = null
+        stoppingChanges.value = false
       }
       await reload()
+    },
+
+    /**
+     * Stop the running import: AO3 is asked about nothing more, and the works
+     * it was not told about stay owed for the next import. A request already
+     * out is let finish, so the line says it is stopping until it has.
+     */
+    stopImport() {
+      if (!changeStop || stoppingChanges.value)
+        return
+      stoppingChanges.value = true
+      changeStop.abort()
     },
 
     /**

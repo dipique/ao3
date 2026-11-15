@@ -52,13 +52,16 @@ export const NOT_SIGNED_IN = 401
 export class MarkRequestError extends Error {
   /** What AO3 answered with, or {@link NOT_SIGNED_IN}. */
   readonly status: number
+  /** The answer's `Retry-After`, for a caller that waits out a 429. */
+  readonly retryAfter: string | null
 
-  constructor(status: number) {
+  constructor(status: number, retryAfter: string | null = null) {
     super(status === NOT_SIGNED_IN
       ? 'AO3 answered as though you are signed out — sign in to AO3 and try again'
       : status >= 500 ? ARCHIVE_UNAVAILABLE : `Mark request failed (${status})`)
     this.name = 'MarkRequestError'
     this.status = status
+    this.retryAfter = retryAfter
   }
 }
 
@@ -75,7 +78,7 @@ export async function submitMark(workId: string, save: boolean): Promise<void> {
   const action = save ? 'mark_for_later' : 'mark_as_read'
   // A token AO3 would not hand out is AO3's answer to this request too.
   const token = pageToken() ?? await fetchToken().catch((error: unknown) => {
-    throw error instanceof ResponseStatusError ? new MarkRequestError(error.status) : error
+    throw error instanceof ResponseStatusError ? new MarkRequestError(error.status, error.retryAfter) : error
   })
   const res = await fetch(getArchiveLink(`/works/${workId}/${action}`), {
     method: 'POST',
@@ -95,7 +98,7 @@ export async function submitMark(workId: string, save: boolean): Promise<void> {
   // what it cost before: the answer is in the URL, not in the HTML.
   void res.body?.cancel().catch(() => {})
   if (!res.ok)
-    throw new MarkRequestError(res.status)
+    throw new MarkRequestError(res.status, res.headers.get('Retry-After'))
   if (isLoginUrl(res.url))
     throw new MarkRequestError(NOT_SIGNED_IN)
 }
@@ -186,7 +189,7 @@ export async function submitMarkViaTab(workId: string, save: boolean): Promise<v
       continue
     if (answer.ok)
       return
-    throw new Error(answer.error)
+    throw answer.status === undefined ? new Error(answer.error) : new MarkRequestError(answer.status, answer.retryAfter)
   }
 
   throw new Error(NO_ARCHIVE_TAB.silent)
@@ -207,6 +210,8 @@ export function serveMarkRequests(): void {
       return { ok: true }
     }
     catch (error) {
+      if (error instanceof MarkRequestError)
+        return { ok: false, error: error.message, status: error.status, retryAfter: error.retryAfter }
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   })

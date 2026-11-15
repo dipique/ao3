@@ -133,7 +133,7 @@ export function foreignView(claim: ListRefresh, key: string, names: (key: string
 }
 
 /** `view`, sitting out a pause in requests until `until`, if it hasn't run out. */
-function waiting(view: JobView, until: number | null, reason: WaitReason | null, now: number): void {
+export function waiting(view: JobView, until: number | null, reason: WaitReason | null, now: number): void {
   const left = (until ?? 0) - now
   if (left <= 0 || !reason)
     return

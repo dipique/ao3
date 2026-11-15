@@ -4,6 +4,7 @@ import { useFileDialog } from '@vueuse/core'
 // Named rather than left to the auto-import, which would make a function from
 // this feature's own composable look like one of Vue's globals.
 import { describeChangeReport } from '../../composables/useSiteExport.ts'
+import { IMPORT_RATE_LIMITED, IMPORT_STOPPED } from '../../model/changeImport.ts'
 
 /**
  * The way back in: a file of marks made inside an exported site, replayed onto
@@ -20,8 +21,13 @@ import { describeChangeReport } from '../../composables/useSiteExport.ts'
  * reaches off this device — so it is the plain button, and declining it is the
  * menu item. Nothing is lost by declining: what AO3 wasn't asked is kept as
  * owed, and the next import asks it.
+ *
+ * Telling AO3 is one request per work, paced and waiting out any 429, so a big
+ * file takes minutes: while it runs, the row shows the job line a site export
+ * gets — a bar, the count, the countdown of any pause, and Stop — and once it
+ * ends, the report.
  */
-const { changeReport, importingChanges, importChanges } = useSiteExport()
+const { changeReport, importingChanges, importChanges, changeImport, stoppingChanges, stopImport } = useSiteExport()
 
 /** Which of the two the reader picked, held across the file dialog's round trip. */
 const tellArchive = ref(true)
@@ -100,10 +106,24 @@ const showProblems = ref(false)
     </div>
 
     <template #extra>
-      <div v-if="changeReport" flex="~ col gap-1" pt-1>
+      <SiteExportProgress v-if="importingChanges" :view="changeImport">
+        <template #foot>
+          <button type="button" class="outline-btn small-btn" data-action="stop" :disabled="stoppingChanges" @click="stopImport()">
+            <span class="i-tabler-player-stop" aria-hidden="true" />
+            Stop
+          </button>
+        </template>
+      </SiteExportProgress>
+      <div v-else-if="changeReport" flex="~ col gap-1" pt-1>
         <p text="[12.5px] muted-fg" leading="[18px]" data-change-summary>
           {{ summary }}
         </p>
+        <Callout v-if="changeReport.rateLimited" severity="warning">
+          <p>{{ IMPORT_RATE_LIMITED }}</p>
+        </Callout>
+        <Callout v-else-if="changeReport.stopped" severity="neutral">
+          <p>{{ IMPORT_STOPPED }}</p>
+        </Callout>
         <div v-if="problems.length" flex="~ col gap-1">
           <Button variant="link" self-start p-0 @click.prevent="showProblems = !showProblems">
             {{ problems.length.toLocaleString() }} {{ problems.length === 1 ? 'work needs' : 'works need' }} a look

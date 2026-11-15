@@ -100,9 +100,11 @@ function createAPI<const API extends { [k: string]: (...args: any) => Promise<an
  * {@link file://./../content_script/markForLater.ts}. The answer comes back as a
  * value rather than as a rejection, because a message that crosses contexts
  * loses everything about an error except its text anyway, and the caller has to
- * tell "no tab heard this" from "a tab tried and AO3 said no".
+ * tell "no tab heard this" from "a tab tried and AO3 said no". Where AO3 did
+ * answer, its status and `Retry-After` come too, so a 429 the tab was given can
+ * be waited out by the page that asked.
  */
-export type MarkDelegation = { ok: true } | { ok: false, error: string }
+export type MarkDelegation = { ok: true } | { ok: false, error: string, status?: number, retryAfter?: string | null }
 
 /** Lightweight backup descriptor for the options UI (no heavy options blob). */
 export type BackupKind = 'daily' | 'pre-restore' | 'pre-sync' | 'sync-held' | 'sync-declined'

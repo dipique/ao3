@@ -35,11 +35,14 @@ export async function fetchAndParseDocument(
 /** A response {@link safeFetch} turned down, with the status it came back with. */
 export class ResponseStatusError extends Error {
   readonly status: number
+  /** Its `Retry-After`, for a caller that waits out a 429. */
+  readonly retryAfter: string | null
 
-  constructor(status: number) {
+  constructor(status: number, retryAfter: string | null = null) {
     super(`Status was ${status}, not 200 OK`)
     this.name = 'ResponseStatusError'
     this.status = status
+    this.retryAfter = retryAfter
   }
 }
 
@@ -49,7 +52,7 @@ export async function safeFetch(
   cachedToken = undefined
   const res = await globalThis.fetch(...args)
   if (res.status !== 200)
-    throw new ResponseStatusError(res.status)
+    throw new ResponseStatusError(res.status, res.headers.get('Retry-After'))
 
   return res
 }

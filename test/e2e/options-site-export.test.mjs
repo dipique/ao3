@@ -177,6 +177,12 @@ const SEED = {
  */
 const rateLimitOnce = new Set(['12'])
 
+/**
+ * Works whose first request to be taken off Marked for Later is refused once
+ * with `Retry-After: 1`, so an import of changes has a wait to show.
+ */
+const markRateLimitOnce = new Set(['11'])
+
 describe('options UI — site export', { skip }, () => {
   let session
   let browser
@@ -212,6 +218,18 @@ describe('options UI — site export', { skip }, () => {
         })
       }
       const markedRead = /^\/works\/(\d+)\/mark_as_read$/.exec(path)?.[1]
+      if (markedRead && markRateLimitOnce.delete(markedRead)) {
+        return void req.respond({
+          status: 429,
+          contentType: 'text/plain; charset=utf-8',
+          headers: {
+            'access-control-allow-origin': '*',
+            'access-control-expose-headers': 'Retry-After',
+            'retry-after': '1',
+          },
+          body: 'slow down',
+        })
+      }
       if (markedRead) {
         marked.push({ workId: markedRead, method: req.method(), body: req.postData() ?? '' })
         return void req.respond({
@@ -1350,13 +1368,45 @@ describe('options UI — site export', { skip }, () => {
     // another origin, with no extension under it.
     assert.equal((await marks()).marks.boring.items, '')
 
+    // AO3 refuses the first request to take work 11 off Marked for Later (see
+    // `markRateLimitOnce`), so for a second the row has a wait to show rather
+    // than sitting mute. The page watches for it from before the press.
+    await page.evaluate((id) => {
+      const look = () => {
+        const line = document.querySelector(`[id="${id}"] [data-job-state="waiting"]`)
+        if (!line)
+          return false
+        const bar = line.querySelector('[role="progressbar"]')
+        window.__importWait = {
+          state: line.dataset.jobState,
+          wait: line.dataset.jobWait ?? null,
+          bar: bar && { now: bar.getAttribute('aria-valuenow'), max: bar.getAttribute('aria-valuemax') },
+        }
+        return true
+      }
+      const watch = new MutationObserver(() => look() && watch.disconnect())
+      watch.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true })
+    }, CHANGES_ROW)
+
     await importFile()
+    await page.waitForFunction(() => window.__importWait)
+    assert.deepEqual(await page.evaluate(() => window.__importWait), {
+      state: 'waiting',
+      wait: 'refused',
+      bar: { now: '0', max: '1' },
+    }, 'the import shows its progress, and that AO3 asked it to wait')
+    assert.equal(markRateLimitOnce.size, 0, 'the stub should have refused work 11 once')
+
     await until('the mark to arrive', async () => (await marks()).marks.boring.items !== '')
 
     // Both halves. The mark is in this device's table…
     const table = await marks()
     assert.notEqual(table.marks.boring.items, '')
     assert.equal(table.marks.read.items, '', 'a specific verdict is not also plain read')
+
+    await until('the import to report', async () => (await reported()).length > 0)
+    assert.deepEqual(await reported(), [1, 1], 'one applied, and one marked read on AO3')
+    assert.equal(await (await options.row(CHANGES_ROW)).$('[data-job-state]'), null, 'the progress line gives way to the report')
 
     // …and AO3 has been asked to take the work off Marked for Later, with the
     // token this page had to go and fetch, having no AO3 document to read one
@@ -1366,9 +1416,6 @@ describe('options UI — site export', { skip }, () => {
     assert.match(marked[0].body, /_method=patch/)
     assert.match(marked[0].body, /authenticity_token=a-token/)
 
-    await until('the import to report', async () => (await reported()).length > 0)
-    assert.deepEqual(await reported(), [1, 1], 'one applied, and one marked read on AO3')
-
     // What the second import reads, and the only thing that makes it free.
     const ledger = await options.stored('cache.appliedChangeOps')
     assert.equal(ledger.length, 1)
@@ -1376,6 +1423,50 @@ describe('options UI — site export', { skip }, () => {
     await importFile()
     await until('the second import to report', async () => (await reported()).join() === '0,1')
     assert.deepEqual(marked.map(entry => entry.workId), ['11'], 'AO3 is not asked twice')
+  })
+
+  /**
+   * Stop, pressed while AO3 is making the import wait: the run ends there and
+   * then, the marks are already in, and every work AO3 was not told about is
+   * kept for the next import. A page of its own, because the wait AO3 asks for
+   * holds every request that page makes.
+   */
+  test('Stop ends an import where it stands, and keeps what AO3 was not told for next time', async () => {
+    let archive
+    const stopping = await session.open({
+      seed: { 'option.user': { userId: 'tester' } },
+      hash: `#${CHANGES_ROW}`,
+      prepare: async (p) => {
+        archive = await standInForArchive(p, url => (url.includes('token_dispenser')
+          ? { json: { token: 'a-token' } }
+          : { status: 429, headers: { 'retry-after': '600' } }))
+      },
+    })
+    try {
+      const at = Date.now() - 60_000
+      const ops = ['41', '42'].map((workId, i) => ({ id: `stop-${i}`, at: at + i, workId, op: 'markAsRead', payload: { markId: 'boring', on: true } }))
+      await stopping.page.evaluate((text) => {
+        HTMLInputElement.prototype.click = function () {
+          const data = new DataTransfer()
+          data.items.add(new File([text], 'ao3e-changes-stop.json', { type: 'application/json' }))
+          this.files = data.files
+          this.dispatchEvent(new Event('change'))
+        }
+      }, JSON.stringify({ v: 1, sourceId: 'marked-for-later', exportedAt: at, ops }))
+
+      await stopping.press(await stopping.action(await stopping.row(CHANGES_ROW), 'import'))
+      await stopping.page.waitForFunction(id => document.querySelector(`[id="${id}"] [data-job-wait="refused"]`), {}, CHANGES_ROW)
+      await stopping.press(await stopping.action(await stopping.row(CHANGES_ROW), 'stop'))
+      await until('the import to report', async () => !!(await (await stopping.row(CHANGES_ROW)).$('[data-change-summary]')))
+
+      assert.notEqual((await stopping.stored('option.workMarks')).marks.boring.items, '', 'the marks are in')
+      const owed = await stopping.stored('cache.owedArchiveActs')
+      assert.deepEqual(owed.map(act => act.workId), ['41', '42'], 'and both works are kept for the next import')
+      assert.equal(archive.asked.filter(url => url.includes('/mark_as_read')).length, 1, 'AO3 was asked about nothing after the refusal')
+    }
+    finally {
+      await stopping.page.close()
+    }
   })
 
   /**

@@ -2,9 +2,11 @@
  * How this extension asks AO3 for a page when it's asking for a great many of
  * them: one request, retried on 429 with `Retry-After` honoured, and nothing
  * else. Every bulk path goes through here — the listing scrape
- * ({@link file://./searchView/scrape.ts}) and the work-text cache
- * ({@link file://./siteExport/fetchWorkText.ts}) — so there is exactly one place
- * that decides how patient we are with an archive running on donated hardware.
+ * ({@link file://./searchView/scrape.ts}), the work-text cache
+ * ({@link file://./siteExport/fetchWorkText.ts}) and the requests an import of
+ * changes makes to Marked for Later ({@link file://./siteExport/importChanges.ts})
+ * — so there is exactly one place that decides how patient we are with an
+ * archive running on donated hardware.
  *
  * Being asked to wait is not an error, and it is not about the page. A 429 is
  * the archive pacing us: the same request a minute later succeeds, and any other
@@ -393,6 +395,55 @@ export function retryAfterMs(header: string | null, now: number): number | null 
   return ms > 0 ? ms : null
 }
 
+/** An answer that was AO3 refusing us with a 429, and the `Retry-After` it came with. */
+export interface ArchiveRefusal {
+  retryAfter: string | null
+}
+
+/**
+ * Make an exchange with the archive, waiting out 429s rather than failing on
+ * them: {@link fetchWithRetry} for an exchange that is more than one GET, such
+ * as a token and then a POST, or one that reports a refusal by throwing.
+ *
+ * `ask` makes the exchange and settles with its answer; `refusal` says whether
+ * that answer was a 429, and what it said about waiting. The final refused
+ * answer — the one that arrives once `patience` is spent — is returned like any
+ * other, so the caller decides what still being refused means for it. Once
+ * `signal` aborts, a wait is cut short and no exchange is begun: it rejects
+ * with the signal's reason instead.
+ */
+export async function askWithRetry<T>(
+  ask: () => Promise<T>,
+  refusal: (answer: T) => ArchiveRefusal | null,
+  signal?: AbortSignal,
+  patience: number = PATIENCE.interactive,
+): Promise<T> {
+  const startedAt = clock.now()
+  for (;;) {
+    await waitForArchive(signal)
+    signal?.throwIfAborted()
+    paceOne()
+    const answer = await ask()
+    const refused = refusal(answer)
+    if (!refused) {
+      // Something got through, so whatever we were being paced for is over.
+      blindWait = 0
+      return answer
+    }
+    // Recorded before we decide whether to carry on, because the refusal is the
+    // archive's and not this exchange's. Giving up without writing it down is
+    // how a queue of pages used to fail one at a time, each rediscovering the
+    // same wall from scratch; with it written down, everything else holds off,
+    // and a job that means to come back knows exactly how long to wait.
+    pauseFor(retryAfterMs(refused.retryAfter, clock.now()))
+    // Would sitting this one out spend the budget? Measured from the start
+    // rather than accumulated, so a wait this exchange merely joined still
+    // counts against it.
+    if (clock.now() + archiveWaitRemaining() - startedAt >= patience)
+      return answer
+  }
+}
+
 /**
  * Fetch a URL, waiting out 429s rather than failing on them.
  *
@@ -400,31 +451,15 @@ export function retryAfterMs(header: string | null, now: number): number | null 
  * like any other response rather than thrown, so a caller can tell "AO3 is still
  * asking us to stop" from "that work is gone" and act accordingly.
  */
-export async function fetchWithRetry(
+export function fetchWithRetry(
   url: string,
   signal?: AbortSignal,
   patience: number = PATIENCE.interactive,
 ): Promise<Response> {
-  const startedAt = clock.now()
-  for (;;) {
-    await waitForArchive(signal)
-    paceOne()
-    const res = await fetch(url, { credentials: 'same-origin', signal })
-    if (res.status !== 429) {
-      // Something got through, so whatever we were being paced for is over.
-      blindWait = 0
-      return res
-    }
-    // Recorded before we decide whether to carry on, because the refusal is the
-    // archive's and not this URL's. Giving up without writing it down is how a
-    // queue of pages used to fail one at a time, each rediscovering the same
-    // wall from scratch; with it written down, everything else holds off, and a
-    // job that means to come back knows exactly how long to wait.
-    pauseFor(retryAfterMs(res.headers.get('Retry-After'), clock.now()))
-    // Would sitting this one out spend the budget? Measured from the start
-    // rather than accumulated, so a wait this request merely joined still
-    // counts against it.
-    if (clock.now() + archiveWaitRemaining() - startedAt >= patience)
-      return res
-  }
+  return askWithRetry(
+    () => fetch(url, { credentials: 'same-origin', signal }),
+    res => (res.status === 429 ? { retryAfter: res.headers.get('Retry-After') } : null),
+    signal,
+    patience,
+  )
 }
