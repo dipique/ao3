@@ -438,7 +438,7 @@ describe('options UI — work marks', { skip }, () => {
     // with nothing.
     const got = await hideSettings()
     assert.equal(got.mode, 'collapse', 'collapsed to a reason line')
-    assert.equal(got.priority, '9', 'above an "always show" rule at its own default of 4')
+    assert.equal(got.priority, '9', 'above an "always show" rule at its own default')
   })
 
   test('typing a priority stores it against the whole table, not one mark', async () => {

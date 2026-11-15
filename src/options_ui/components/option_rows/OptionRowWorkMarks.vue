@@ -3,7 +3,7 @@ import type { ComponentInstance, GlobalComponents } from 'vue'
 
 import type { HideMode, MarkId } from '#common'
 
-import { addMark, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, describeMark, listedMarkIds, MARK_ICON_NAMES, markDescription, markedWorkCount, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
+import { addMark, clampPriority, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, describeMark, listedMarkIds, MARK_ICON_NAMES, markDescription, markedWorkCount, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
 
 import type { MarkSort } from '../../model/listView.ts'
 
@@ -36,9 +36,7 @@ const mode = computed({
 const priority = computed({
   get: () => hidePriority!.value ?? DEFAULT_MARK_HIDE_PRIORITY,
   set: (v: number | null) => {
-    hidePriority!.value = typeof v === 'number' && Number.isFinite(v)
-      ? Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.trunc(v)))
-      : DEFAULT_MARK_HIDE_PRIORITY
+    hidePriority!.value = clampPriority(v) ?? DEFAULT_MARK_HIDE_PRIORITY
   },
 })
 

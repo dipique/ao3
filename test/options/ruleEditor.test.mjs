@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 
 import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_PRESETS, RULE_TARGETS, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, ruleTargetLabel, ruleValueMatches, TagType } from '../../src/common/data.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { compilePattern, ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
 import { canSave, checkedNames, checkedPattern, CHECKING, describeRule, draftRule, EXACT_HELP, NO_PATTERN, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, ruleSummary, saveButton, suggestSource, swatchFor, TESTER_HELP, TESTER_STOPPED, TOO_SLOW, usesColor, usesPriority, valueField, VERDICT_LABELS, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
 
@@ -26,11 +27,18 @@ const recorded = endpoint => Object.entries(RECORDED).find(([request]) => reques
 
 const NO_COLORS = {}
 
+/** The rules settings a fresh install starts with. */
+const SETTINGS = OPTION_DEFAULTS.rules
+/** The priority an "always show" rule gets when it sets none of its own. */
+const ALWAYS_SHOW = SETTINGS.alwaysShowPriority
+/** The "always show" default moved one step, as a reader might set it. */
+const MOVED = { alwaysShowPriority: ALWAYS_SHOW + 1 }
+
 /** A draft opened on `rule`, given the default colours. */
-const opened = (rule, colors = NO_COLORS) => openDraft(rule, colors)
+const opened = (rule, colors = NO_COLORS) => openDraft(rule, colors, SETTINGS)
 
 /** What saving the draft writes. */
-const saved = (draft, colors = NO_COLORS) => draftRule(draft, colors)
+const saved = (draft, colors = NO_COLORS) => draftRule(draft, colors, SETTINGS)
 
 describe('HIGHLIGHT_PRESETS', () => {
   test('Sky, Amber and Violet, in that order', () => {
@@ -117,7 +125,8 @@ describe('openDraft', () => {
     const draft = opened({ target: 'F', value: 'Fluff', matcher: 'exact' })
     assert.equal(draft.action, 'hide')
     assert.equal(draft.priority, 0)
-    assert.equal(opened({ target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'invert' }).priority, 4)
+    assert.equal(opened({ target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'invert' }).priority, ALWAYS_SHOW)
+    assert.equal(openDraft({ target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'invert' }, NO_COLORS, MOVED).priority, MOVED.alwaysShowPriority, 'whatever the settings say')
   })
 
   test('a disabled rule opens switched off, on Hide Work, with its priority and colour kept', () => {
@@ -154,44 +163,48 @@ describe('openDraft', () => {
 
 describe('withAction', () => {
   test('choosing an action sets the priority it implies', () => {
-    const always = withAction(opened(undefined), 'invert')
+    const always = withAction(opened(undefined), 'invert', SETTINGS)
     assert.equal(always.action, 'invert')
-    assert.equal(always.priority, 4)
-    assert.equal(withAction({ ...always, priority: 8 }, 'collapse').priority, 0)
+    assert.equal(always.priority, ALWAYS_SHOW)
+    assert.equal(withAction({ ...always, priority: 8 }, 'collapse', SETTINGS).priority, 0)
+  })
+
+  test('Always show starts at the default in the settings', () => {
+    assert.equal(withAction(opened(undefined), 'invert', MOVED).priority, MOVED.alwaysShowPriority)
   })
 
   test('choosing the action already chosen keeps a priority typed over it', () => {
-    const draft = { ...withAction(opened(undefined), 'invert'), priority: 8 }
-    assert.equal(withAction(draft, 'invert').priority, 8)
+    const draft = { ...withAction(opened(undefined), 'invert', SETTINGS), priority: 8 }
+    assert.equal(withAction(draft, 'invert', SETTINGS).priority, 8)
   })
 
   test('Hide Tag is refused for an author, a work or a series', () => {
     for (const target of ['author', 'work', 'series']) {
-      const draft = withTarget(opened(undefined), target)
-      assert.equal(withAction(draft, 'hideFilter'), draft, target)
+      const draft = withTarget(opened(undefined), target, SETTINGS)
+      assert.equal(withAction(draft, 'hideFilter', SETTINGS), draft, target)
     }
-    assert.equal(withAction(opened(undefined), 'hideFilter').action, 'hideFilter')
+    assert.equal(withAction(opened(undefined), 'hideFilter', SETTINGS).action, 'hideFilter')
   })
 })
 
 describe('withTarget', () => {
   test('Hide Tag falls back to Hide Work when the rule stops being about a tag', () => {
-    const hideTag = withAction(opened(undefined), 'hideFilter')
-    assert.equal(withTarget(hideTag, 'R').action, 'hideFilter')
-    const author = withTarget(hideTag, 'author')
+    const hideTag = withAction(opened(undefined), 'hideFilter', SETTINGS)
+    assert.equal(withTarget(hideTag, 'R', SETTINGS).action, 'hideFilter')
+    const author = withTarget(hideTag, 'author', SETTINGS)
     assert.equal(author.action, 'hide')
     assert.equal(author.priority, 0)
   })
 
   test('a pseud goes when the rule stops being about an author', () => {
-    const author = { ...withTarget(opened(undefined), 'author'), pseud: 'sideblog' }
-    assert.equal(withTarget(author, 'author').pseud, 'sideblog')
-    assert.equal(withTarget(author, 'work').pseud, '')
+    const author = { ...withTarget(opened(undefined), 'author', SETTINGS), pseud: 'sideblog' }
+    assert.equal(withTarget(author, 'author', SETTINGS).pseud, 'sideblog')
+    assert.equal(withTarget(author, 'work', SETTINGS).pseud, '')
   })
 
   test('leaves the rest alone', () => {
     const draft = { ...opened(undefined), value: 'Fluff', matcher: 'regex', priority: 3 }
-    assert.deepEqual(withTarget(draft, 'F'), { ...draft, target: 'F' })
+    assert.deepEqual(withTarget(draft, 'F', SETTINGS), { ...draft, target: 'F' })
   })
 })
 
@@ -219,63 +232,69 @@ describe('draftRule', () => {
     assert.deepEqual(saved(base), { target: 'F', value: 'Fluff', matcher: 'exact' })
   })
 
+  test('an Always show at the default in the settings stores no priority; one at the shipped default stores it once that moves', () => {
+    const always = withAction(base, 'invert', MOVED)
+    assert.equal('priority' in draftRule(always, NO_COLORS, MOVED), false)
+    assert.equal(draftRule({ ...always, priority: ALWAYS_SHOW }, NO_COLORS, MOVED).priority, ALWAYS_SHOW)
+  })
+
   test('stores what differs from the defaults', () => {
-    const draft = { ...withAction(base, 'collapse'), matcher: 'contains', priority: 6 }
+    const draft = { ...withAction(base, 'collapse', SETTINGS), matcher: 'contains', priority: 6 }
     assert.deepEqual(saved(draft), { target: 'F', value: 'Fluff', matcher: 'contains', behavior: 'collapse', priority: 6 })
   })
 
   test('a pseud is stored only for an author, and only when given', () => {
-    const author = { ...withTarget(base, 'author'), value: 'someone', pseud: 'sideblog' }
+    const author = { ...withTarget(base, 'author', SETTINGS), value: 'someone', pseud: 'sideblog' }
     assert.equal(saved(author).pseud, 'sideblog')
     assert.equal('pseud' in saved({ ...author, pseud: '' }), false)
     assert.equal('pseud' in saved({ ...base, pseud: 'stray' }), false)
   })
 
   test('Amber writes #f59e0b', () => {
-    const draft = withSwatch(withAction(base, 'highlight'), 'Amber')
+    const draft = withSwatch(withAction(base, 'highlight', SETTINGS), 'Amber')
     assert.deepEqual(saved(draft), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'highlight', color: '#f59e0b' })
   })
 
   test('Default writes no colour of the rule\'s own', () => {
-    const draft = withSwatch(withSwatch(withAction(base, 'highlight'), 'Amber'), 'default')
+    const draft = withSwatch(withSwatch(withAction(base, 'highlight', SETTINGS), 'Amber'), 'default')
     assert.equal('color' in saved(draft), false)
   })
 
   test('Custom writes the picker\'s colour, unless it is the target\'s default', () => {
-    const custom = withSwatch(withAction(base, 'highlight'), 'custom')
+    const custom = withSwatch(withAction(base, 'highlight', SETTINGS), 'custom')
     assert.equal(saved({ ...custom, color: '#123456' }).color, '#123456')
     assert.equal('color' in saved({ ...custom, color: DEFAULT_HIGHLIGHT_COLOR }), false)
     assert.equal('color' in saved({ ...custom, color: '#abcdef' }, { F: '#ABCDEF' }), false)
   })
 
   test('a preset that is the target\'s default writes no colour', () => {
-    const draft = withSwatch(withAction(base, 'highlight'), 'Sky')
+    const draft = withSwatch(withAction(base, 'highlight', SETTINGS), 'Sky')
     assert.equal('color' in saved(draft, { F: '#0ea5e9' }), false)
   })
 
   test('Always show writes its colour too, or transparent for No highlight', () => {
-    const always = withSwatch(withAction(base, 'invert'), 'Violet')
+    const always = withSwatch(withAction(base, 'invert', SETTINGS), 'Violet')
     assert.equal(saved(always).color, '#7c3aed')
     assert.equal(saved({ ...always, noHighlight: true }).color, 'transparent')
   })
 
   test('No highlight means nothing to a Highlight rule', () => {
-    const draft = { ...withSwatch(withAction(base, 'highlight'), 'Violet'), noHighlight: true }
+    const draft = { ...withSwatch(withAction(base, 'highlight', SETTINGS), 'Violet'), noHighlight: true }
     assert.equal(saved(draft).color, '#7c3aed')
   })
 
   test('an action that draws no colour stores none', () => {
-    const draft = withAction(withSwatch(withAction(base, 'highlight'), 'Amber'), 'collapse')
+    const draft = withAction(withSwatch(withAction(base, 'highlight', SETTINGS), 'Amber'), 'collapse', SETTINGS)
     assert.equal('color' in saved(draft), false)
   })
 
   test('switched off it stores behaviour none, keeping the priority', () => {
-    const draft = { ...withAction(base, 'invert'), enabled: false }
+    const draft = { ...withAction(base, 'invert', SETTINGS), enabled: false }
     assert.deepEqual(saved(draft), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'none', priority: 4 })
   })
 
   test('switched off it keeps the colour its action would draw', () => {
-    const draft = { ...withSwatch(withAction(base, 'highlight'), 'Amber'), enabled: false }
+    const draft = { ...withSwatch(withAction(base, 'highlight', SETTINGS), 'Amber'), enabled: false }
     assert.equal(saved(draft).color, '#f59e0b')
   })
 
@@ -582,7 +601,7 @@ describe('regexTester', () => {
 
 describe('describeRule', () => {
   const rule = fields => ({ target: 'F', value: 'Fluff', matcher: 'exact', ...fields })
-  const said = fields => describeRule(rule(fields))
+  const said = fields => describeRule(rule(fields), SETTINGS)
   /** The sentences are each different. */
   const distinct = (sentences) => {
     assert.equal(new Set(sentences).size, sentences.length, sentences.join(' | '))
@@ -625,7 +644,9 @@ describe('describeRule', () => {
   test('a priority is mentioned only where it differs from its action\'s default, and the action has one', () => {
     assert.ok(said({ priority: 6 }).includes('6'))
     assert.notEqual(said({ priority: 6 }), said({}))
-    assert.equal(said({ behavior: 'invert', priority: 4 }), said({ behavior: 'invert' }))
+    assert.equal(said({ behavior: 'invert', priority: ALWAYS_SHOW }), said({ behavior: 'invert' }))
+    assert.equal(describeRule(rule({ behavior: 'invert', priority: MOVED.alwaysShowPriority }), MOVED), describeRule(rule({ behavior: 'invert' }), MOVED), 'the default is the one in the settings')
+    assert.ok(describeRule(rule({ behavior: 'invert', priority: ALWAYS_SHOW }), MOVED).includes(String(ALWAYS_SHOW)))
     assert.ok(said({ behavior: 'invert', priority: 2 }).includes('2'))
     assert.equal(said({ behavior: 'highlight', priority: 3 }), said({ behavior: 'highlight' }))
     assert.equal(said({ behavior: 'none', priority: 3 }), said({ behavior: 'none' }))
@@ -716,28 +737,28 @@ describe('ruleSummary', () => {
 
   test('the sentence in parts: the action first, drawn bold, and the value, drawn as a quote', () => {
     for (const behavior of ['hide', 'collapse', 'invert', 'highlight', 'hideFilter', 'none']) {
-      const parts = ruleSummary(rule({ behavior }))
+      const parts = ruleSummary(rule({ behavior }), SETTINGS)
       assert.equal(parts[0].kind, 'verb', behavior)
       assert.equal(parts.filter(part => part.kind === 'value').length, 1, behavior)
       assert.ok(parts.find(part => part.kind === 'value').text.includes('Fluff'), behavior)
     }
-    assert.deepEqual(kinds(ruleSummary(rule({}))), ['verb', 'words', 'value', 'words'])
-    const author = ruleSummary(rule({ behavior: 'invert', target: 'author', value: 'someone', pseud: 'sideblog' }))
+    assert.deepEqual(kinds(ruleSummary(rule({}), SETTINGS)), ['verb', 'words', 'value', 'words'])
+    const author = ruleSummary(rule({ behavior: 'invert', target: 'author', value: 'someone', pseud: 'sideblog' }), SETTINGS)
     assert.deepEqual(kinds(author), ['verb', 'words', 'value', 'words'])
     assert.ok(author[2].text.includes('someone') && !author[2].text.includes('sideblog'), 'the pseud is no part of the value')
     assert.ok(author[3].text.includes('sideblog'))
   })
 
   test('each action that hides, collapses, shows or highlights has a verb of its own, and so does a disabled rule', () => {
-    const verbs = ['hide', 'collapse', 'invert', 'highlight', 'none'].map(behavior => ruleSummary(rule({ behavior }))[0].text)
+    const verbs = ['hide', 'collapse', 'invert', 'highlight', 'none'].map(behavior => ruleSummary(rule({ behavior }), SETTINGS)[0].text)
     assert.equal(new Set(verbs).size, verbs.length, verbs.join(' | '))
   })
 
   test('an id is no quote, and an untyped value is no quote either', () => {
-    const byId = ruleSummary(rule({ target: 'work', value: '123' }))
+    const byId = ruleSummary(rule({ target: 'work', value: '123' }), SETTINGS)
     assert.deepEqual(kinds(byId), ['verb', 'words'])
     assert.ok(byId[1].text.includes('123'))
-    assert.deepEqual(kinds(ruleSummary(rule({ value: '', target: 'author' }))), ['verb', 'words'])
+    assert.deepEqual(kinds(ruleSummary(rule({ value: '', target: 'author' }), SETTINGS)), ['verb', 'words'])
   })
 
   test('its parts read as the sentence', () => {
@@ -756,6 +777,6 @@ describe('ruleSummary', () => {
       rule({ value: '' }),
     ]
     for (const each of rules)
-      assert.equal(ruleSummary(each).map(part => part.text).join(''), describeRule(each))
+      assert.equal(ruleSummary(each, SETTINGS).map(part => part.text).join(''), describeRule(each, SETTINGS))
   })
 })

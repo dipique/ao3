@@ -1,4 +1,4 @@
-import type { FilterBehavior, Rule, RuleKey, Tag, TagType } from '#common'
+import type { FilterBehavior, Rule, RuleKey, RulePriorityDefaults, Tag, TagType } from '#common'
 
 import { findExactRule, options, ruleHasKey, setExactRulePriority, setRulePriorityOf, toggleExactRule } from '#common'
 
@@ -61,27 +61,27 @@ export function ruleIndicatorBehavior(behavior: FilterBehavior | null): Exclude<
  * {@link file://./extensionAlive.ts}). `enable` switches the rules on as well,
  * for a change that adds a rule the reader means to see work.
  */
-async function changeRules(change: (filters: Rule[]) => Rule[], enable = false): Promise<void> {
+async function changeRules(change: (filters: Rule[], defaults: RulePriorityDefaults) => Rule[], enable = false): Promise<void> {
   if (!extensionAlive())
     return
 
   const rules = await options.get('rules')
-  await options.set({ rules: { ...rules, ...enable ? { enabled: true } : {}, filters: change(rules.filters) } })
+  await options.set({ rules: { ...rules, ...enable ? { enabled: true } : {}, filters: change(rules.filters, rules) } })
 }
 
 /** Toggle `behavior` for an exact key in the rules list (re-selecting clears it). */
 export function toggleRuleBehavior(key: RuleKey, behavior: FilterBehavior): Promise<void> {
-  return changeRules(filters => toggleExactRule(filters, key, behavior), true)
+  return changeRules((filters, defaults) => toggleExactRule(filters, key, behavior, defaults), true)
 }
 
 /** Set the priority of the exact rule on this key; nothing happens when it has none. */
 export function setRulePriority(key: RuleKey, priority: number): Promise<void> {
-  return changeRules(filters => setExactRulePriority(filters, key, priority))
+  return changeRules((filters, defaults) => setExactRulePriority(filters, key, priority, defaults))
 }
 
 /** Set the priority of the stored rule equal to `rule`; nothing happens when there is none. */
 export function setPriorityOf(rule: Rule, priority: number): Promise<void> {
-  return changeRules(filters => setRulePriorityOf(filters, rule, priority))
+  return changeRules((filters, defaults) => setRulePriorityOf(filters, rule, priority, defaults))
 }
 
 /** Remove any exact rule on this key (back to no rule at all). */

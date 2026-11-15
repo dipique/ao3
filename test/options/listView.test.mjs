@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { MIN_PRIORITY } from '../../src/common/data.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { capFor, cycleSort, filterRows, filterSavedLists, focusSuccessor, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, SAVED_LIST_SORTS, savedListsHead, shownRules, shownSavedLists, SORT_HINTS, sortHint, sortMarks, sortRows, sortSavedLists, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
 import { figures } from '../facts.mjs'
+
+/** The rules settings a fresh install starts with. */
+const SETTINGS = OPTION_DEFAULTS.rules
+/** The priority an "always show" rule gets when it sets none of its own. */
+const ALWAYS_SHOW = SETTINGS.alwaysShowPriority
 
 const MARKS = [
   { id: 'read', label: 'Read', icon: 'Check' },
@@ -209,7 +216,7 @@ describe('shownRules: the filter', () => {
     { target: 'tag', value: 'A.B.O. Dynamics', matcher: 'exact' },
     { target: 'tag', value: '5*Stars', matcher: 'exact' },
   ]
-  const shown = query => shownRules(RULES, query, UNSORTED).map(at => RULES[at].value)
+  const shown = query => shownRules(RULES, query, UNSORTED, SETTINGS).map(at => RULES[at].value)
 
   test('a blank query shows every rule', () => {
     assert.equal(shown('').length, RULES.length)
@@ -241,7 +248,7 @@ describe('shownRules: the filter', () => {
   })
 
   test('hands back each shown rule\'s place in the list it was given', () => {
-    assert.deepEqual(shownRules(RULES, 'slow', UNSORTED), [1, 0])
+    assert.deepEqual(shownRules(RULES, 'slow', UNSORTED, SETTINGS), [1, 0])
   })
 })
 
@@ -255,7 +262,7 @@ describe('shownRules: the sort', () => {
     { target: 'series', value: 'banana', matcher: 'exact', behavior: 'hideFilter', priority: 2 },
   ]
   const order = (key, direction = 'asc', query = '', rules = RULES) =>
-    shownRules(rules, query, key ? { key, direction } : UNSORTED).map(at => rules[at].value)
+    shownRules(rules, query, key ? { key, direction } : UNSORTED, SETTINGS).map(at => rules[at].value)
 
   test('four keys: action, priority, the rule\'s text, and what it applies to', () => {
     assert.deepEqual(RULE_SORTS.map(sort => sort.value), ['behavior', 'priority', 'value', 'target'])
@@ -273,6 +280,16 @@ describe('shownRules: the sort', () => {
   test('priority sorts by number, both ways, with the rules that show none after', () => {
     assert.deepEqual(order('priority'), ['Zebra', 'apple', 'Mango', 'banana'])
     assert.deepEqual(order('priority', 'desc'), ['apple', 'Zebra', 'Mango', 'banana'])
+  })
+
+  test('an "always show" with no priority of its own sorts at the default in the settings', () => {
+    const rules = [
+      { target: 'F', value: 'Zebra', matcher: 'exact', behavior: 'hide', priority: MIN_PRIORITY + 1 },
+      { target: 'f', value: 'apple', matcher: 'exact', behavior: 'invert' },
+    ]
+    const sorted = settings => shownRules(rules, '', { key: 'priority', direction: 'asc' }, settings).map(at => rules[at].value)
+    assert.deepEqual(sorted({ alwaysShowPriority: MIN_PRIORITY + 2 }), ['Zebra', 'apple'])
+    assert.deepEqual(sorted({ alwaysShowPriority: MIN_PRIORITY }), ['apple', 'Zebra'])
   })
 
   test('the rules that show no priority keep the list\'s own order among themselves, whichever way the sort points', () => {
@@ -333,31 +350,40 @@ describe('rulePriorityCell', () => {
   const rule = props => ({ target: 'tag', value: 'x', matcher: 'exact', ...props })
   /** The cell, with its tooltip as the priority it gives, if any. */
   const cell = (props) => {
-    const { text, title, custom } = rulePriorityCell(rule(props))
+    const { text, title, custom } = rulePriorityCell(rule(props), SETTINGS)
     return { text, gives: figures(title), custom }
   }
 
   test('a priority its action gives it is plain, and says it is the default', () => {
     assert.deepEqual(cell({}), { text: '0', gives: [0], custom: false })
-    assert.deepEqual(cell({ behavior: 'invert' }), { text: '4', gives: [4], custom: false })
+    assert.deepEqual(cell({ behavior: 'invert' }), { text: String(ALWAYS_SHOW), gives: [ALWAYS_SHOW], custom: false })
+  })
+
+  test('an "always show" at the default in the settings is plain, and one at the shipped default stands out once that moves', () => {
+    const moved = { alwaysShowPriority: ALWAYS_SHOW + 1 }
+    const at = props => rulePriorityCell(rule(props), moved)
+    assert.deepEqual(at({ behavior: 'invert' }), rulePriorityCell(rule({ behavior: 'invert', priority: moved.alwaysShowPriority }), moved))
+    assert.equal(at({ behavior: 'invert' }).text, String(moved.alwaysShowPriority))
+    assert.equal(at({ behavior: 'invert' }).custom, false)
+    assert.equal(at({ behavior: 'invert', priority: ALWAYS_SHOW }).custom, true)
   })
 
   test('a priority of the rule\'s own stands out, and says what it does', () => {
     assert.deepEqual(cell({ priority: 6 }), { text: '6', gives: [6], custom: true })
-    assert.notEqual(rulePriorityCell(rule({ priority: 6 })).title, rulePriorityCell(rule({ behavior: 'hide' })).title, 'it says something the default doesn\'t')
+    assert.notEqual(rulePriorityCell(rule({ priority: 6 }), SETTINGS).title, rulePriorityCell(rule({ behavior: 'hide' }), SETTINGS).title, 'it says something the default doesn\'t')
     assert.equal(cell({ behavior: 'invert', priority: 2 }).custom, true)
   })
 
   test('highlight and hide-tag rules show none, since they never contest a work', () => {
     assert.deepEqual(cell({ behavior: 'highlight', priority: 7 }), { text: '–', gives: [], custom: false })
     assert.deepEqual(cell({ behavior: 'hideFilter' }), { text: '–', gives: [], custom: false })
-    assert.notEqual(rulePriorityCell(rule({ behavior: 'highlight' })).title, rulePriorityCell(rule({ behavior: 'hideFilter' })).title, 'each names its own kind of rule')
+    assert.notEqual(rulePriorityCell(rule({ behavior: 'highlight' }), SETTINGS).title, rulePriorityCell(rule({ behavior: 'hideFilter' }), SETTINGS).title, 'each names its own kind of rule')
   })
 
   test('a disabled rule shows the priority it keeps for when it is on again', () => {
     assert.deepEqual(cell({ behavior: 'none' }), { text: '0', gives: [0], custom: false })
     assert.deepEqual(cell({ behavior: 'none', priority: 4 }), { text: '4', gives: [4], custom: true })
-    assert.notEqual(rulePriorityCell(rule({ behavior: 'none' })).title, rulePriorityCell(rule({})).title, 'it says it is kept, not that it is the default')
+    assert.notEqual(rulePriorityCell(rule({ behavior: 'none' }), SETTINGS).title, rulePriorityCell(rule({}), SETTINGS).title, 'it says it is kept, not that it is the default')
   })
 })
 

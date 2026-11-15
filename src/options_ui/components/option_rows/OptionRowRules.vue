@@ -1,5 +1,20 @@
 <script setup lang="ts">
-const { enabled } = useOption('rules')
+import { DEFAULT_ALWAYS_SHOW_PRIORITY, defaultRulePriority, MAX_PRIORITY, MIN_PRIORITY } from '#common'
+
+const { enabled, alwaysShowPriority } = useOption('rules')
+const defaults = useRulePriorityDefaults()
+
+/**
+ * The priority every "Always show" rule without one of its own takes. Kept on
+ * the scale on the way in; an emptied box hands back `null`, which reads as the
+ * shipped default rather than as zero.
+ */
+const alwaysShow = computed({
+  get: () => defaultRulePriority('invert', defaults.value),
+  set: (v: number | null) => {
+    alwaysShowPriority!.value = defaultRulePriority('invert', { alwaysShowPriority: v ?? DEFAULT_ALWAYS_SHOW_PRIORITY })
+  },
+})
 
 OptionRowRulesContext.provide({
   editDialog: ref(null),
@@ -15,7 +30,19 @@ OptionRowRulesContext.provide({
     <OptionRowRulesList />
 
     <div flex="~ items-center gap-3 justify-between" mt-3>
-      <OptionRowRuleColors />
+      <div flex="~ items-center gap-3 wrap">
+        <OptionRowRuleColors />
+        <label flex="~ items-center gap-2" data-setting="always-show-priority">
+          <span text="[12.5px] muted-fg">Always show priority</span>
+          <Input
+            v-model.number="alwaysShow"
+            type="number"
+            :min="MIN_PRIORITY"
+            :max="MAX_PRIORITY"
+            class="h-[26px] w-14 rounded-[7px] px-2 text-[12.5px] tabular-nums"
+          />
+        </label>
+      </div>
       <Dialog>
         <DialogTrigger as-child>
           <Button variant="link" text="[12px]!">

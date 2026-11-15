@@ -1,4 +1,4 @@
-import type { Completion, Crossovers, Language, Rule, RuleColors, TextReplacement } from './data.ts'
+import type { Completion, Crossovers, Language, Rule, RuleColors, RulePriorityDefaults, TextReplacement } from './data.ts'
 import type { SavedListsOption } from './savedLists.ts'
 import type { TrackedListsOption } from './trackedLists.ts'
 import type { WordCountRange } from './wordCount.ts'
@@ -41,7 +41,7 @@ export interface Options {
    * `hideSeries` lists; see the migration in `background/migrations.ts`). What
    * each rule matches is its `target`; see {@link Rule}.
    */
-  rules: {
+  rules: RulePriorityDefaults & {
     enabled: boolean
     /** The rules themselves, in no particular order (the options list sorts for display). */
     filters: Rule[]

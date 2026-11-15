@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 // Node strips the TS types on import; workMarks.ts is pure (its one import is
 // the equally pure icon-name list), so it loads without a build, a DOM, or the
 // extension APIs.
@@ -322,7 +323,8 @@ describe('how mark-hiding weighs against the rules', () => {
   test('an option that says nothing collapses, at the top of the priority scale', () => {
     const marks = { enabled: true, marks: createDefaultMarks() }
     assert.equal(markHideMode(marks), 'collapse')
-    assert.equal(markHidePriority(marks), 9, 'high enough to beat an "always show" rule at its own default of 4')
+    assert.equal(markHidePriority(marks), 9)
+    assert.ok(markHidePriority(marks) > OPTION_DEFAULTS.rules.alwaysShowPriority, 'high enough to beat an "always show" rule at its own default')
   })
 
   test('an answer the reader gave is taken as given', () => {

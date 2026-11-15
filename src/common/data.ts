@@ -228,38 +228,57 @@ export const MIN_PRIORITY = 0
 export const MAX_PRIORITY = 9
 
 /**
- * The priority a rule gets when it doesn't carry one of its own — set from the
- * behaviour chosen when the rule was created. Everything is `0` except
- * `'invert'`, which sits at `4`: high enough to beat every other rule by default
- * (which is what "Always show" has always meant), with room above it for a hide
- * rule that should win anyway, and room below for a force-show that shouldn't.
+ * The priority an "Always show" rule gets when neither it nor the rules
+ * settings ({@link RulePriorityDefaults.alwaysShowPriority}) say otherwise: high
+ * enough to beat every other rule by default (which is what "Always show" has
+ * always meant), with room above it for a hide rule that should win anyway, and
+ * room below for a force-show that shouldn't.
  */
-export const DEFAULT_BEHAVIOR_PRIORITY: Record<FilterBehavior, number> = {
-  hide: 0,
-  // Collapsing is a hide that leaves a trace, so it starts out exactly as strong
-  // as one — which also means a tie between the two is settled by the tie-break
-  // in HideWorks (hide wins) rather than by the numbers here.
-  collapse: 0,
-  invert: 4,
-  highlight: 0,
-  hideFilter: 0,
-  // A disabled rule never enters the contest, so its priority is only ever the
-  // one it will have again when re-enabled — which the editor preserves rather
-  // than resetting to this.
-  none: 0,
+export const DEFAULT_ALWAYS_SHOW_PRIORITY = 4
+
+/** The part of the rules settings that decides what a rule's priority is when it sets none. */
+export interface RulePriorityDefaults {
+  /**
+   * The priority of an "Always show" rule that sets none of its own. Absent
+   * means {@link DEFAULT_ALWAYS_SHOW_PRIORITY}.
+   */
+  alwaysShowPriority?: number
+}
+
+/** `value` truncated onto the 0-{@link MAX_PRIORITY} scale, or `undefined` when it isn't a number at all. */
+export function clampPriority(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value))
+    return undefined
+  return Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.trunc(value)))
+}
+
+/**
+ * The priority a rule doing `behavior` gets when it doesn't carry one of its
+ * own. Everything is {@link MIN_PRIORITY} except `'invert'`, which takes the
+ * settings' {@link RulePriorityDefaults.alwaysShowPriority}.
+ *
+ * Collapsing is a hide that leaves a trace, so it starts out exactly as strong
+ * as one — which also means a tie between the two is settled by the tie-break
+ * in HideWorks (hide wins) rather than by the numbers here. A disabled rule
+ * never enters the contest, so its priority is only ever the one it will have
+ * again when re-enabled — which the editor preserves rather than resetting to
+ * this.
+ */
+export function defaultRulePriority(behavior: FilterBehavior, defaults: RulePriorityDefaults): number {
+  if (behavior !== 'invert')
+    return MIN_PRIORITY
+  return clampPriority(defaults.alwaysShowPriority) ?? DEFAULT_ALWAYS_SHOW_PRIORITY
 }
 
 /**
  * A rule's effective priority: its own `priority` when set (clamped to
  * 0-{@link MAX_PRIORITY}), else the default for its behaviour. Rules only store a
  * `priority` when it differs from that default, so a rule written before
- * priorities existed still behaves exactly as it used to.
+ * priorities existed still behaves exactly as it used to, and an "Always show"
+ * rule left at its default follows the settings when they change.
  */
-export function rulePriority(rule: { behavior?: FilterBehavior, priority?: number }): number {
-  const own = rule.priority
-  if (typeof own === 'number' && Number.isFinite(own))
-    return Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.trunc(own)))
-  return DEFAULT_BEHAVIOR_PRIORITY[rule.behavior ?? 'hide']
+export function rulePriority(rule: { behavior?: FilterBehavior, priority?: number }, defaults: RulePriorityDefaults): number {
+  return clampPriority(rule.priority) ?? defaultRulePriority(rule.behavior ?? 'hide', defaults)
 }
 
 // ---------------------------------------------------------------------------
@@ -319,7 +338,7 @@ export interface Rule {
   behavior?: FilterBehavior
   /**
    * How strongly this rule asserts itself, 0-9. Only stored when it differs from
-   * the behaviour's default ({@link DEFAULT_BEHAVIOR_PRIORITY}); read it through
+   * the behaviour's default ({@link defaultRulePriority}); read it through
    * {@link rulePriority}.
    */
   priority?: number
@@ -531,11 +550,9 @@ export function findExactRule(rules: Rule[], key: RuleKey): Rule | undefined {
  * and left out when it is the behaviour's default, which {@link rulePriority}
  * supplies anyway.
  */
-function storedPriority(behavior: FilterBehavior, priority: number | undefined): number | undefined {
-  if (priority === undefined)
-    return undefined
-  const clamped = rulePriority({ priority })
-  return clamped === DEFAULT_BEHAVIOR_PRIORITY[behavior] ? undefined : clamped
+export function storedPriority(behavior: FilterBehavior, priority: number | undefined, defaults: RulePriorityDefaults): number | undefined {
+  const clamped = clampPriority(priority)
+  return clamped === defaultRulePriority(behavior, defaults) ? undefined : clamped
 }
 
 /**
@@ -547,12 +564,12 @@ function storedPriority(behavior: FilterBehavior, priority: number | undefined):
  * takes the new behaviour's default instead: it never asked for a strength of
  * its own.
  */
-export function replaceExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior | null): Rule[] {
+export function replaceExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior | null, defaults: RulePriorityDefaults): Rule[] {
   const old = findExactRule(rules, key)
   const next = rules.filter(rule => rule !== old)
   if (behavior === null)
     return next
-  const priority = storedPriority(behavior, old?.priority)
+  const priority = storedPriority(behavior, old?.priority, defaults)
   next.push({
     target: key.target,
     value: key.value,
@@ -568,15 +585,15 @@ export function replaceExactRule(rules: Rule[], key: RuleKey, behavior: FilterBe
  * Choosing `behavior` for a key from a menu: the behaviour the rule already has
  * clears it, and anything else replaces it (see {@link replaceExactRule}).
  */
-export function toggleExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior): Rule[] {
+export function toggleExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior, defaults: RulePriorityDefaults): Rule[] {
   const current = findExactRule(rules, key)
   const chosenAgain = current !== undefined && (current.behavior ?? 'hide') === behavior
-  return replaceExactRule(rules, key, chosenAgain ? null : behavior)
+  return replaceExactRule(rules, key, chosenAgain ? null : behavior, defaults)
 }
 
 /** `rules` with the key's exact rule set to `priority`, in place. Unchanged when the key has no rule. */
-export function setExactRulePriority(rules: Rule[], key: RuleKey, priority: number): Rule[] {
-  return withPriority(rules, findExactRule(rules, key), priority)
+export function setExactRulePriority(rules: Rule[], key: RuleKey, priority: number, defaults: RulePriorityDefaults): Rule[] {
+  return withPriority(rules, findExactRule(rules, key), priority, defaults)
 }
 
 /**
@@ -585,8 +602,8 @@ export function setExactRulePriority(rules: Rule[], key: RuleKey, priority: numb
  * weighed against, which may match by `contains` or `regex` and so has no
  * {@link RuleKey}. Unchanged when no stored rule is equal to it.
  */
-export function setRulePriorityOf(rules: Rule[], rule: Rule, priority: number): Rule[] {
-  return withPriority(rules, rules.find(stored => sameRule(stored, rule)), priority)
+export function setRulePriorityOf(rules: Rule[], rule: Rule, priority: number, defaults: RulePriorityDefaults): Rule[] {
+  return withPriority(rules, rules.find(stored => sameRule(stored, rule)), priority, defaults)
 }
 
 function sameRule(a: Rule, b: Rule): boolean {
@@ -594,12 +611,12 @@ function sameRule(a: Rule, b: Rule): boolean {
   return keys.length === Object.keys(b).length && keys.every(k => a[k] === b[k])
 }
 
-function withPriority(rules: Rule[], target: Rule | undefined, priority: number): Rule[] {
+function withPriority(rules: Rule[], target: Rule | undefined, priority: number, defaults: RulePriorityDefaults): Rule[] {
   return rules.map((rule) => {
     if (rule !== target)
       return rule
     const { priority: _old, ...rest } = rule
-    const stored = storedPriority(rule.behavior ?? 'hide', priority)
+    const stored = storedPriority(rule.behavior ?? 'hide', priority, defaults)
     return stored === undefined ? rest : { ...rest, priority: stored }
   })
 }

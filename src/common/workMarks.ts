@@ -35,7 +35,7 @@
 
 import type { HideMode } from './data.ts'
 
-import { MAX_PRIORITY, MIN_PRIORITY } from './data.ts'
+import { clampPriority, MAX_PRIORITY } from './data.ts'
 import { DEFAULT_MARK_ICON } from './markIcons.ts'
 
 /** A mark's id — the key it lives under in {@link WorkMarks.marks}. */
@@ -220,10 +220,7 @@ export function markHideMode(workMarks: Pick<WorkMarks, 'hideMode'>): HideMode {
  * the two numbers are weighed against each other.
  */
 export function markHidePriority(workMarks: Pick<WorkMarks, 'hidePriority'>): number {
-  const own = workMarks.hidePriority
-  if (typeof own === 'number' && Number.isFinite(own))
-    return Math.min(MAX_PRIORITY, Math.max(MIN_PRIORITY, Math.trunc(own)))
-  return DEFAULT_MARK_HIDE_PRIORITY
+  return clampPriority(workMarks.hidePriority) ?? DEFAULT_MARK_HIDE_PRIORITY
 }
 
 /**

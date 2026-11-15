@@ -1,7 +1,7 @@
-import type { FilterBehavior, HighlightPreset, Rule, RuleColors, RuleTarget } from '../../common/data.ts'
+import type { FilterBehavior, HighlightPreset, Rule, RuleColors, RulePriorityDefaults, RuleTarget } from '../../common/data.ts'
 import type { RegexRun } from './regexCheck.ts'
 
-import { DEFAULT_BEHAVIOR_PRIORITY, HIGHLIGHT_PRESETS, isTagTarget, ruleAffectsWorks, rulePriority, ruleTargetColor, ruleTargetLabel, TagType } from '../../common/data.ts'
+import { defaultRulePriority, HIGHLIGHT_PRESETS, isTagTarget, ruleAffectsWorks, rulePriority, ruleTargetColor, ruleTargetLabel, storedPriority, TagType } from '../../common/data.ts'
 import { compilePattern } from './regexCheck.ts'
 
 /**
@@ -86,7 +86,7 @@ export interface RuleDraft {
  * rule for any tag. A disabled rule keeps nothing of what it did, so it opens
  * on Hide Work, which is what a rule with no behaviour does.
  */
-export function openDraft(rule: Rule | undefined, colors: RuleColors): RuleDraft {
+export function openDraft(rule: Rule | undefined, colors: RuleColors, defaults: RulePriorityDefaults): RuleDraft {
   const target = rule?.target ?? 'tag'
   const targetDefault = ruleTargetColor(target, colors)
   const own = rule?.color === 'transparent' ? undefined : rule?.color
@@ -98,7 +98,7 @@ export function openDraft(rule: Rule | undefined, colors: RuleColors): RuleDraft
     matcher: rule?.matcher ?? 'exact',
     action: behavior === 'none' ? 'hide' : behavior,
     enabled: behavior !== 'none',
-    priority: rulePriority(rule ?? {}),
+    priority: rulePriority(rule ?? {}, defaults),
     swatch: swatchFor(own, targetDefault),
     color: own || targetDefault,
     noHighlight: rule?.color === 'transparent',
@@ -111,20 +111,20 @@ export function openDraft(rule: Rule | undefined, colors: RuleColors): RuleDraft
  * Always show starts out above a plain hide. Choosing it again keeps a
  * priority typed over it. Hide Tag is refused for anything but a tag.
  */
-export function withAction(draft: RuleDraft, action: RuleAction): RuleDraft {
+export function withAction(draft: RuleDraft, action: RuleAction, defaults: RulePriorityDefaults): RuleDraft {
   if (action === draft.action || (action === 'hideFilter' && !isTagTarget(draft.target)))
     return draft
-  return { ...draft, action, priority: DEFAULT_BEHAVIOR_PRIORITY[action] }
+  return { ...draft, action, priority: defaultRulePriority(action, defaults) }
 }
 
 /**
  * Changing what the rule applies to: Hide Tag falls back to Hide Work for an
  * author, a work or a series, and a pseud goes with an author.
  */
-export function withTarget(draft: RuleDraft, target: RuleTarget): RuleDraft {
+export function withTarget(draft: RuleDraft, target: RuleTarget, defaults: RulePriorityDefaults): RuleDraft {
   const next = { ...draft, target, pseud: target === 'author' ? draft.pseud : '' }
   if (next.action === 'hideFilter' && !isTagTarget(target))
-    return { ...next, action: 'hide', priority: DEFAULT_BEHAVIOR_PRIORITY.hide }
+    return { ...next, action: 'hide', priority: defaultRulePriority('hide', defaults) }
   return next
 }
 
@@ -179,18 +179,19 @@ function actionColor(draft: RuleDraft, targetDefault: string): string | undefine
  * action draws, or else the colour it was opened with, so turning it back on
  * gets them back.
  */
-export function draftRule(draft: RuleDraft, colors: RuleColors): Rule {
+export function draftRule(draft: RuleDraft, colors: RuleColors, defaults: RulePriorityDefaults): Rule {
   const behavior: FilterBehavior = draft.enabled ? draft.action : 'none'
   const color = usesColor(draft.action)
     ? actionColor(draft, ruleTargetColor(draft.target, colors))
     : draft.enabled ? undefined : draft.kept
+  const priority = storedPriority(behavior, draft.priority, defaults)
   return {
     target: draft.target,
     value: draft.value,
     ...draft.target === 'author' && draft.pseud ? { pseud: draft.pseud } : {},
     matcher: draft.matcher,
     ...behavior === 'hide' ? {} : { behavior },
-    ...draft.priority === DEFAULT_BEHAVIOR_PRIORITY[behavior] ? {} : { priority: draft.priority },
+    ...priority === undefined ? {} : { priority },
     ...color === undefined ? {} : { color },
   }
 }
@@ -462,7 +463,7 @@ function sentenceOf(verb: string, ...rest: SummaryPart[]): SummaryPart[] {
  * in parts: the action, the works or tags it acts on, and a priority where it
  * isn't the action's own.
  */
-export function ruleSummary(rule: Rule): SummaryPart[] {
+export function ruleSummary(rule: Rule, defaults: RulePriorityDefaults): SummaryPart[] {
   const behavior = rule.behavior ?? 'hide'
   switch (behavior) {
     case 'none':
@@ -472,14 +473,14 @@ export function ruleSummary(rule: Rule): SummaryPart[] {
     case 'hideFilter':
       return sentenceOf('Hide', words(' '), ...matchedTags(rule), words(' from tag lists and the filter sidebar; the works stay'))
     default: {
-      const priority = rulePriority(rule)
-      const tail = priority === DEFAULT_BEHAVIOR_PRIORITY[behavior] ? [] : [words(`, at priority ${priority}`)]
+      const priority = rulePriority(rule, defaults)
+      const tail = priority === defaultRulePriority(behavior, defaults) ? [] : [words(`, at priority ${priority}`)]
       return sentenceOf(VERBS[behavior], words(' '), ...matchedWorks(rule), ...tail)
     }
   }
 }
 
 /** {@link ruleSummary}'s sentence as one string. */
-export function describeRule(rule: Rule): string {
-  return ruleSummary(rule).map(part => part.text).join('')
+export function describeRule(rule: Rule, defaults: RulePriorityDefaults): string {
+  return ruleSummary(rule, defaults).map(part => part.text).join('')
 }

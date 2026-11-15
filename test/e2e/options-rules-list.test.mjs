@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { ruleTargetLabel } from '../../src/common/data.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { rulePriorityCell } from '../../src/options_ui/model/listView.ts'
 import { figures, mentions, skip, startOptions, until } from './optionsPage.mjs'
 
@@ -16,6 +17,8 @@ const RULES = [
 ]
 
 const SEED = { 'option.rules': { enabled: true, filters: RULES, colors: {} } }
+/** The rules settings the page reads SEED with: it stores no "Always show" priority, so it has the shipped one. */
+const SETTINGS = OPTION_DEFAULTS.rules
 const HASH = '#customize-search-results'
 const LIST = 'rules'
 
@@ -57,7 +60,7 @@ describe('options UI — rules list', { skip }, () => {
       for (const glyph of glyphs)
         assert.ok(await handle.$(glyph), `row ${at} draws ${glyph}`)
       const text = await options.text(handle)
-      for (const fact of [rulePriorityCell(RULES[at]).title, RULES[at].value, ruleTargetLabel(RULES[at].target), ...facts])
+      for (const fact of [rulePriorityCell(RULES[at], SETTINGS).title, RULES[at].value, ruleTargetLabel(RULES[at].target), ...facts])
         assert.ok(mentions(text, fact), `row ${at} says ${fact}: ${text}`)
     }
     await shows(0, ['[i-mdi-arrow-collapse-vertical]', '[i-codicon-symbol-string]'], RULES[0].pseud)
@@ -72,7 +75,7 @@ describe('options UI — rules list', { skip }, () => {
 
   test('a highlight rule has no priority to show, and its star is in its colour', async () => {
     const highlight = await row(2)
-    assert.ok(mentions(await options.text(highlight), rulePriorityCell(RULES[2]).title))
+    assert.ok(mentions(await options.text(highlight), rulePriorityCell(RULES[2], SETTINGS).title))
     const star = await highlight.$('[i-mdi-star]')
     assert.deepEqual(await options.colour(star), [124, 58, 237])
   })
@@ -108,7 +111,7 @@ describe('options UI — rules list', { skip }, () => {
     for (const action of ['edit', 'remove'])
       assert.equal(await opacity(await options.action(off, action)), 0.48, `${action} fades`)
     const quiet = { opacity: 1, colour: `rgba(${r}, ${g}, ${b}, 0.57)` }
-    const drawn = [rulePriorityCell(RULES[3]).text, RULES[3].value, ruleTargetLabel(RULES[3].target)]
+    const drawn = [rulePriorityCell(RULES[3], SETTINGS).text, RULES[3].value, ruleTargetLabel(RULES[3].target)]
     assert.deepEqual(await words(off), drawn.map(text => ({ text, ...quiet })))
 
     const on = await row(0)
@@ -143,6 +146,25 @@ describe('options UI — rules list', { skip }, () => {
     assert.deepEqual(stored.filters.map(rule => rule.value), RULES.filter((_, at) => at !== 3).map(rule => rule.value))
     assert.equal((await options.listRowIds(LIST)).length, RULES.length - 1)
     assert.deepEqual(figures(await options.listCount(LIST)), [RULES.length - 1])
+  })
+
+  test('the "Always show" priority is stored as typed, and moves every "always show" without one of its own', async () => {
+    const moved = SETTINGS.alwaysShowPriority + 1
+    const box = await page.$('[data-setting="always-show-priority"] input')
+    assert.equal(await box.evaluate(el => el.value), String(SETTINGS.alwaysShowPriority))
+    await box.evaluate((el) => {
+      el.focus()
+      el.select()
+    })
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type(String(moved))
+    await options.saved()
+
+    const stored = await options.stored('option.rules')
+    assert.equal(stored.alwaysShowPriority, moved)
+    assert.equal('priority' in stored.filters.find(rule => rule.value === RULES[1].value), false, 'the rule itself is not rewritten')
+    const cell = rulePriorityCell(RULES[1], { alwaysShowPriority: moved })
+    await until('the row to follow the setting', async () => mentions(await options.text(await row(1)), cell.title))
   })
 
   test('renders without console errors', () => {

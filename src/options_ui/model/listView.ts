@@ -1,7 +1,7 @@
-import type { Rule } from '../../common/data.ts'
+import type { Rule, RulePriorityDefaults } from '../../common/data.ts'
 import type { SavedListRow } from './savedListRows.ts'
 
-import { DEFAULT_BEHAVIOR_PRIORITY, rulePriority, ruleTargetLabel } from '../../common/data.ts'
+import { defaultRulePriority, rulePriority, ruleTargetLabel } from '../../common/data.ts'
 import { searchTerms, textMatches } from './settingsSearch.ts'
 
 /**
@@ -101,14 +101,20 @@ const BEHAVIOR_RANK: Record<string, number> = { hide: 0, collapse: 1, invert: 2,
 
 const byText: Compare<Rule> = (a, b) => a.value.localeCompare(b.value, undefined, { sensitivity: 'base' })
 
-const RULE_COMPARE: Record<RuleSortKey, Compare<Rule>> = {
+const RULE_COMPARE: Record<Exclude<RuleSortKey, 'priority'>, Compare<Rule>> = {
   behavior: (a, b) => (BEHAVIOR_RANK[a.behavior ?? 'hide'] ?? 0) - (BEHAVIOR_RANK[b.behavior ?? 'hide'] ?? 0),
-  priority: (a, b) => rulePriority(a) - rulePriority(b),
   value: byText,
   // By the name shown, so the order matches what the reader sees. A target
   // this build doesn't know, which an old export or a hand-edited import can
   // carry, has no name, and must not be what takes the list down.
   target: (a, b) => (ruleTargetLabel(a.target) ?? '').localeCompare(ruleTargetLabel(b.target) ?? ''),
+}
+
+/** How each key compares two rules; a priority is weighed as the settings give it. */
+function ruleCompare(key: RuleSortKey, defaults: RulePriorityDefaults): Compare<Rule> {
+  return key === 'priority'
+    ? (a, b) => rulePriority(a, defaults) - rulePriority(b, defaults)
+    : RULE_COMPARE[key]
 }
 
 /**
@@ -128,7 +134,7 @@ const RULE_COMPARE: Record<RuleSortKey, Compare<Rule>> = {
  * numbered ones whichever way the sort points, in the unsorted order: a
  * number they store but don't show would put them in an order nobody can see.
  */
-export function shownRules(rules: readonly Rule[], query: string, sort: KeySort<RuleSortKey>): number[] {
+export function shownRules(rules: readonly Rule[], query: string, sort: KeySort<RuleSortKey>, defaults: RulePriorityDefaults): number[] {
   const needle = query.trim().toLowerCase()
   const kept = [...rules.keys()].filter(at => rules[at]!.value.toLowerCase().includes(needle))
   const rule = (compare: Compare<Rule>): Compare<number> => (a, b) => compare(rules[a]!, rules[b]!)
@@ -136,7 +142,7 @@ export function shownRules(rules: readonly Rule[], query: string, sort: KeySort<
   const { key, direction } = sort
   if (!key)
     return sortRows(kept, unsorted)
-  const sorted = (rows: number[]): number[] => sortRows(rows, rule(RULE_COMPARE[key]), { direction, then: rule(byText) })
+  const sorted = (rows: number[]): number[] => sortRows(rows, rule(ruleCompare(key, defaults)), { direction, then: rule(byText) })
   if (key !== 'priority')
     return sorted(kept)
   return [
@@ -159,14 +165,14 @@ function showsPriority(rule: Pick<Rule, 'behavior'>): boolean {
  * it rather than taking its action's default; or "–" for a rule that shows
  * none ({@link showsPriority}).
  */
-export function rulePriorityCell(rule: Pick<Rule, 'behavior' | 'priority'>): { text: string, title: string, custom: boolean } {
+export function rulePriorityCell(rule: Pick<Rule, 'behavior' | 'priority'>, defaults: RulePriorityDefaults): { text: string, title: string, custom: boolean } {
   const behavior = rule.behavior ?? 'hide'
   if (!showsPriority(rule)) {
     const kind = behavior === 'highlight' ? 'Highlight' : 'Hide-tag'
     return { text: '–', title: `${kind} rules have no priority: they never conflict with other rules`, custom: false }
   }
-  const priority = rulePriority(rule)
-  const custom = priority !== DEFAULT_BEHAVIOR_PRIORITY[behavior]
+  const priority = rulePriority(rule, defaults)
+  const custom = priority !== defaultRulePriority(behavior, defaults)
   const title = behavior === 'none'
     ? `Priority ${priority}, kept while the rule is disabled`
     : custom

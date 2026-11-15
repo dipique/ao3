@@ -1,7 +1,7 @@
 import { debounce, objectEntries } from '@antfu/utils'
-import type { Ref, ToRefs } from 'vue'
+import type { ComputedRef, Ref, ToRefs } from 'vue'
 
-import type { Options } from '#common'
+import type { Options, RulePriorityDefaults } from '#common'
 
 import { createLogger, deepToRaw, options, OPTIONS_SAVE_DELAY_MS, toast } from '#common'
 
@@ -78,6 +78,12 @@ export function useOption<K extends options.Id>(id: K): Options[K] extends objec
   const val = allOptions[id] as object
 
   return isReactive(val) ? toRefs(val) as any : toRef(allOptions, id) as any
+}
+
+/** The rules settings that give a rule its priority when it sets none of its own. */
+export function useRulePriorityDefaults(): ComputedRef<RulePriorityDefaults> {
+  const { alwaysShowPriority } = useOption('rules')
+  return computed(() => ({ alwaysShowPriority: alwaysShowPriority!.value }))
 }
 
 export function useOptionsReady() {

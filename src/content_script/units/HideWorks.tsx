@@ -2,7 +2,7 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import type { HideMode, MarkId, Options, ProgressSource, Rule } from '#common'
+import type { HideMode, MarkId, Options, ProgressSource, Rule, RulePriorityDefaults } from '#common'
 import type { FilterTarget } from '#content_script/filterTarget.js'
 
 import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHideMode, markHidePriority, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
@@ -366,8 +366,9 @@ export class HideWorks extends Unit {
    * bar survive. A tie goes to the force-show — "always show" is a promise, and
    * matching a hide rule of equal strength shouldn't quietly break it. With
    * everything at its default that reproduces the old behaviour exactly
-   * (force-show at 4, every other rule at 0), while leaving a hide rule at 5+ able
-   * to win, and a force-show dropped below 4 able to lose.
+   * (force-show at the rules settings' "Always show" priority, every other rule
+   * at 0), while leaving a hide rule above that able to win, and a force-show
+   * dropped below it able to lose.
    *
    * Crossover hiding isn't a rule at all and weighs 0, so an "always show" still
    * overrules it. Mark-hiding is weighed too, but at
@@ -383,7 +384,7 @@ export class HideWorks extends Unit {
    * crossover hiding with {@link Options.hideShowReason}.
    */
   processBlurb(blurb: Blurb): HideVerdict {
-    const { options: { hideCrossovers, workMarks, hideShowReason } } = this
+    const { options: { hideCrossovers, workMarks, hideShowReason, rules: defaults } } = this
     const { hiddenMarks, progress, today, rules, markMode, markPriority } = this.run
     const reasons: HideReasons = {}
     const kinds = new Set<HideKind>()
@@ -404,7 +405,7 @@ export class HideWorks extends Unit {
     const weigh = (matched: Rule[]): Rule | undefined => {
       let best: Rule | undefined
       for (const rule of matched) {
-        const priority = rulePriority(rule)
+        const priority = rulePriority(rule, defaults)
         if (rule.behavior === 'invert') {
           if (priority > bar)
             bar = priority
@@ -414,7 +415,7 @@ export class HideWorks extends Unit {
           best = rule
           continue
         }
-        const bestPriority = rulePriority(best)
+        const bestPriority = rulePriority(best, defaults)
         if (priority > bestPriority)
           best = rule
         else if (priority === bestPriority && ruleHideMode(rule) === 'hide')
@@ -428,9 +429,9 @@ export class HideWorks extends Unit {
         label,
         kind,
         rule,
-        priority: rulePriority(rule),
+        priority: rulePriority(rule, defaults),
         mode: ruleHideMode(rule),
-        item: { ...item, rule: describeRule(rule) },
+        item: { ...item, rule: describeRule(rule, defaults) },
       })
     }
 
@@ -766,9 +767,9 @@ function hintNode(text: string): Node {
  * rules for tags, authors, works and series — and calls out a non-default
  * priority, which is otherwise invisible at exactly the moment it decided things.
  */
-function describeRule(rule: Rule): string {
+function describeRule(rule: Rule, defaults: RulePriorityDefaults): string {
   const body = describeSubject(rule)
-  const priority = rulePriority(rule)
+  const priority = rulePriority(rule, defaults)
   return priority === 0 ? body : `${body} (priority ${priority})`
 }
 

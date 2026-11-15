@@ -8,6 +8,7 @@ import type { KeySort, RuleSortKey } from '../../model/listView.ts'
 import { RULE_SORTS, rulePriorityCell, shownRules, UNSORTED } from '../../model/listView.ts'
 
 const { filters, colors } = useOption('rules')
+const defaults = useRulePriorityDefaults()
 
 const context = OptionRowRulesContext.inject()
 
@@ -18,9 +19,9 @@ const context = OptionRowRulesContext.inject()
 const query = ref('')
 const sort = ref<KeySort<RuleSortKey>>(UNSORTED)
 
-const shown = computed(() => shownRules(filters.value, query.value, sort.value).map((at) => {
+const shown = computed(() => shownRules(filters.value, query.value, sort.value, defaults.value).map((at) => {
   const rule = filters.value[at]!
-  return { at, rule, priority: rulePriorityCell(rule) }
+  return { at, rule, priority: rulePriorityCell(rule, defaults.value) }
 }))
 
 const count = computed(() => {

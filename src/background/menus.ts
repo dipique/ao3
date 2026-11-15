@@ -122,7 +122,7 @@ if (browser.contextMenus) {
     // Clicking the behaviour it already had removes the rule; anything else replaces it.
     const undoing = active !== undefined && wasShown !== hiding
     const behavior = undoing ? null : hiding ? 'hide' : 'invert'
-    await options.set({ rules: { ...rules, enabled: true, filters: replaceExactRule(rules.filters, key, behavior) } })
+    await options.set({ rules: { ...rules, enabled: true, filters: replaceExactRule(rules.filters, key, behavior, rules) } })
   }
 
   async function onMenuClick(info: browser.contextMenus.OnClickData, tab: browser.tabs.Tab) {

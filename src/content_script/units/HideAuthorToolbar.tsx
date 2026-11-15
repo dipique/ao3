@@ -113,12 +113,13 @@ export class HideAuthorToolbar extends Unit {
     const items: MenuItem[] = []
 
     if (caps.hide) {
-      const { filters } = await options.get('rules')
+      const rules = await options.get('rules')
       const key = authorKey(author.userId)
       // An author byline hides behind a person rather than the generic eye.
-      items.push(...ruleBehaviorItems(key, findExactRule(filters, key), {
+      items.push(...ruleBehaviorItems(key, findExactRule(rules.filters, key), {
         noun: 'author',
         at: link,
+        defaults: rules,
         icons: { hide: () => <MdiAccountOff /> },
       }))
       if (author.pseud !== undefined) {
@@ -127,7 +128,7 @@ export class HideAuthorToolbar extends Unit {
           label: 'Hide this pseud',
           scope: 'settings',
           danger: true,
-          active: ruleBehavior(filters, authorKey(author.userId, author.pseud)) === 'hide',
+          active: ruleBehavior(rules.filters, authorKey(author.userId, author.pseud)) === 'hide',
           onSelect: () => toggleRuleBehavior(authorKey(author.userId, author.pseud), 'hide'),
         })
       }

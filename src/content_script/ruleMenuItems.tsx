@@ -7,7 +7,7 @@ import MdiFormatListNumbered from '~icons/mdi/format-list-numbered.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
-import type { FilterBehavior, Rule, RuleKey } from '#common'
+import type { FilterBehavior, Rule, RuleKey, RulePriorityDefaults } from '#common'
 
 import { isTagTarget, MAX_PRIORITY, MIN_PRIORITY, ruleAffectsWorks, rulePriority } from '#common'
 import React from '#dom'
@@ -79,6 +79,8 @@ export interface RuleMenuOptions {
    * change that rule's priority.
    */
   at?: Element
+  /** The rules settings, for the priority a rule takes when it sets none of its own. */
+  defaults: RulePriorityDefaults
 }
 
 /**
@@ -93,7 +95,7 @@ export interface RuleMenuOptions {
 export function ruleBehaviorItems(
   key: RuleKey,
   rule: Rule | undefined,
-  { noun, icons, at }: RuleMenuOptions,
+  { noun, icons, at, defaults }: RuleMenuOptions,
 ): MenuItem[] {
   const behavior = behaviorOf(rule)
   const items: MenuItem[] = []
@@ -119,11 +121,11 @@ export function ruleBehaviorItems(
       label: 'Update Priority',
       action: 'priority',
       scope: 'settings',
-      submenu: priorityRows(rulePriority(rule), priority => setRulePriority(key, priority)),
+      submenu: priorityRows(rulePriority(rule, defaults), priority => setRulePriority(key, priority)),
     })
   }
   if (rule?.behavior === 'invert' && at)
-    items.push(...overridingItems(rulePriority(rule), at))
+    items.push(...overridingItems(rulePriority(rule, defaults), at))
   if (behavior) {
     items.push({
       icon: () => <MdiCloseCircleOutline />,

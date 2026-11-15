@@ -11,11 +11,12 @@ import { canSave, draftRule, HIDE_TAG_OFF, openDraft, RULE_ACTIONS, RULE_OFF_HEL
 
 const context = OptionRowRulesContext.inject()
 const { filters, colors } = useOption('rules')
+const defaults = useRulePriorityDefaults()
 
 const open = ref(false)
 /** The stored rule being edited, or null while adding one. */
 const editing = shallowRef<Rule | null>(null)
-const draft = ref(openDraft(undefined, {}))
+const draft = ref(openDraft(undefined, {}, defaults.value))
 /** What the regex tester tests the pattern against. It is no part of the rule. */
 const testSubject = ref('')
 const suggest = useTagSuggestions(draft, open)
@@ -71,11 +72,11 @@ const actionHelp = computed(() => draft.value.enabled
   ? RULE_ACTIONS.find(action => action.value === draft.value.action)!.help
   : RULE_OFF_HELP)
 const noHighlight = computed(() => draft.value.action === 'invert' && draft.value.noHighlight)
-const sentence = computed(() => ruleSummary(draftRule(draft.value, colors.value)))
+const sentence = computed(() => ruleSummary(draftRule(draft.value, colors.value, defaults.value), defaults.value))
 
 context.edit = (rule?: Rule) => {
   editing.value = rule ?? null
-  draft.value = openDraft(rule, colors.value)
+  draft.value = openDraft(rule, colors.value, defaults.value)
   testSubject.value = ''
   open.value = true
 }
@@ -95,7 +96,7 @@ async function commit() {
   await check.settled()
   if (!open.value || !canSave(draft.value, check.run))
     return
-  const rule = draftRule(draft.value, colors.value)
+  const rule = draftRule(draft.value, colors.value, defaults.value)
   const at = editing.value ? filters.value.indexOf(editing.value) : -1
   if (at === -1)
     filters.value.push(rule)
@@ -125,7 +126,7 @@ async function commit() {
             aria-label="What the rule matches"
             data-rule-field="target"
             class="chips"
-            @update:model-value="draft = withTarget(draft, $event as RuleTarget)"
+            @update:model-value="draft = withTarget(draft, $event as RuleTarget, defaults)"
           >
             <RekaRadioGroupItem v-for="target in RULE_TARGETS" :key="target" :value="target" class="chip input-ring">
               {{ ruleTargetLabel(target) }}
@@ -299,7 +300,7 @@ async function commit() {
               :aria-describedby="helpId"
               class="acts"
               :disabled="!draft.enabled"
-              @update:model-value="draft = withAction(draft, $event as RuleAction)"
+              @update:model-value="draft = withAction(draft, $event as RuleAction, defaults)"
             >
               <RekaRadioGroupItem
                 v-for="action in RULE_ACTIONS"

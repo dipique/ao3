@@ -64,9 +64,9 @@ function computeStates(entry: TagLinkEntry): IndicatorState[] {
 export async function buildTagLinkMenu(entry: TagLinkEntry): Promise<MenuItem[]> {
   const items: MenuItem[] = filterMenuItems(entry.filter, entry.tag.name)
 
-  const { filters } = await options.get('rules')
+  const rules = await options.get('rules')
   const key = tagKey(entry.tag)
-  items.push(...ruleBehaviorItems(key, findExactRule(filters, key), { noun: entry.noun, at: entry.link }))
+  items.push(...ruleBehaviorItems(key, findExactRule(rules.filters, key), { noun: entry.noun, at: entry.link, defaults: rules }))
 
   items.push(...standardLinkItems(entry.link))
   return items

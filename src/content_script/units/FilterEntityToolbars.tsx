@@ -354,9 +354,9 @@ abstract class FilterEntityToolbar extends Unit {
 
   async buildMenu(id: string, link: HTMLElement): Promise<MenuItem[]> {
     // Read the freshest rules so the checked state is current.
-    const { filters } = await options.get('rules')
+    const rules = await options.get('rules')
     const key = entityKey(this.noun, id)
-    const items: MenuItem[] = ruleBehaviorItems(key, findExactRule(filters, key), { noun: this.noun, at: link })
+    const items: MenuItem[] = ruleBehaviorItems(key, findExactRule(rules.filters, key), { noun: this.noun, at: link, defaults: rules })
 
     if (this.marksEnabled())
       items.push(...this.markSetItems(id, link))

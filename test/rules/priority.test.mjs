@@ -7,9 +7,11 @@ import { describe, test } from 'node:test'
 //   node --experimental-transform-types --test test/rules/priority.test.mjs
 import {
   DEFAULT_AUTHOR_HIGHLIGHT_COLOR,
-  DEFAULT_BEHAVIOR_PRIORITY,
   DEFAULT_HIGHLIGHT_COLOR,
+  defaultRulePriority,
   isTagTarget,
+  MAX_PRIORITY,
+  MIN_PRIORITY,
   ruleAffectsWorks,
   ruleHideMode,
   ruleHighlightColor,
@@ -21,8 +23,18 @@ import {
   ruleValueMatches,
   TagType,
 } from '../../src/common/data.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 
 const rule = props => ({ target: 'tag', value: '', matcher: 'exact', ...props })
+
+/** The rules settings a fresh install starts with. */
+const SETTINGS = OPTION_DEFAULTS.rules
+/** The priority an "always show" rule gets when it sets none of its own. */
+const ALWAYS_SHOW = SETTINGS.alwaysShowPriority
+/** Every behaviour other than "always show", none of which the setting touches. */
+const OTHER_BEHAVIORS = ['hide', 'collapse', 'highlight', 'hideFilter', 'none']
+/** Every priority on the scale. */
+const SCALE = Array.from({ length: MAX_PRIORITY - MIN_PRIORITY + 1 }, (_, i) => MIN_PRIORITY + i)
 
 describe('ruleValueMatches', () => {
   test('exact is case-sensitive; contains and regex are not', () => {
@@ -86,38 +98,67 @@ describe('ruleValueMatches', () => {
 
 describe('rulePriority', () => {
   test('an unset priority follows the behaviour', () => {
-    assert.equal(rulePriority(rule({})), 0, 'hide is the default behaviour')
-    assert.equal(rulePriority(rule({ behavior: 'hide' })), 0)
+    assert.equal(rulePriority(rule({}), SETTINGS), MIN_PRIORITY, 'hide is the default behaviour')
     // Collapsing is a hide that leaves a trace, so it starts out just as strong.
-    assert.equal(rulePriority(rule({ behavior: 'collapse' })), 0)
-    assert.equal(rulePriority(rule({ behavior: 'highlight' })), 0)
-    assert.equal(rulePriority(rule({ behavior: 'hideFilter' })), 0)
-    assert.equal(rulePriority(rule({ behavior: 'none' })), 0)
-    // The one non-zero default: "always show" has to beat an ordinary hide, which
-    // is what it meant before priorities existed.
-    assert.equal(rulePriority(rule({ behavior: 'invert' })), 4)
-    assert.equal(DEFAULT_BEHAVIOR_PRIORITY.invert, 4)
+    for (const behavior of OTHER_BEHAVIORS)
+      assert.equal(rulePriority(rule({ behavior }), SETTINGS), MIN_PRIORITY, behavior)
+    assert.equal(rulePriority(rule({ behavior: 'invert' }), SETTINGS), ALWAYS_SHOW)
+  })
+
+  test('out of the box, "always show" beats an ordinary hide, with room above it', () => {
+    // What it meant before priorities existed — and a hide can still be raised
+    // over it.
+    assert.ok(ALWAYS_SHOW > MIN_PRIORITY)
+    assert.ok(ALWAYS_SHOW < MAX_PRIORITY)
+  })
+
+  test('an "always show" with no priority of its own takes the setting', () => {
+    for (const alwaysShowPriority of SCALE) {
+      assert.equal(rulePriority(rule({ behavior: 'invert' }), { alwaysShowPriority }), alwaysShowPriority)
+      assert.equal(defaultRulePriority('invert', { alwaysShowPriority }), alwaysShowPriority)
+    }
+  })
+
+  test('the setting moves no other behaviour', () => {
+    for (const alwaysShowPriority of SCALE) {
+      for (const behavior of OTHER_BEHAVIORS)
+        assert.equal(rulePriority(rule({ behavior }), { alwaysShowPriority }), MIN_PRIORITY, `${behavior} with the setting at ${alwaysShowPriority}`)
+    }
+  })
+
+  test('settings stored before the setting existed read as the shipped default', () => {
+    assert.equal(rulePriority(rule({ behavior: 'invert' }), {}), ALWAYS_SHOW)
+  })
+
+  test('the setting is clamped to the scale, and junk reads as the shipped default', () => {
+    assert.equal(defaultRulePriority('invert', { alwaysShowPriority: MAX_PRIORITY + 5 }), MAX_PRIORITY)
+    assert.equal(defaultRulePriority('invert', { alwaysShowPriority: MIN_PRIORITY - 5 }), MIN_PRIORITY)
+    assert.equal(defaultRulePriority('invert', { alwaysShowPriority: MIN_PRIORITY + 1.7 }), MIN_PRIORITY + 1)
+    assert.equal(defaultRulePriority('invert', { alwaysShowPriority: Number.NaN }), ALWAYS_SHOW)
+    assert.equal(defaultRulePriority('invert', { alwaysShowPriority: String(MAX_PRIORITY) }), ALWAYS_SHOW, 'not a number at all')
   })
 
   test('an explicit priority wins over the behaviour default', () => {
-    assert.equal(rulePriority(rule({ behavior: 'invert', priority: 1 })), 1)
-    assert.equal(rulePriority(rule({ behavior: 'hide', priority: 7 })), 7)
-    assert.equal(rulePriority(rule({ priority: 0 })), 0)
+    const own = (ALWAYS_SHOW + 1) % (MAX_PRIORITY + 1)
+    assert.equal(rulePriority(rule({ behavior: 'invert', priority: own }), SETTINGS), own)
+    assert.equal(rulePriority(rule({ behavior: 'invert', priority: own }), { alwaysShowPriority: MAX_PRIORITY }), own, 'whatever the setting says')
+    assert.equal(rulePriority(rule({ behavior: 'hide', priority: 7 }), SETTINGS), 7)
+    assert.equal(rulePriority(rule({ priority: 0 }), SETTINGS), 0)
   })
 
   test('clamps to 0-9 and ignores junk', () => {
-    assert.equal(rulePriority(rule({ priority: 42 })), 9)
-    assert.equal(rulePriority(rule({ priority: -3 })), 0)
-    assert.equal(rulePriority(rule({ priority: 3.7 })), 3)
-    assert.equal(rulePriority(rule({ behavior: 'invert', priority: Number.NaN })), 4, 'falls back to the default')
+    assert.equal(rulePriority(rule({ priority: 42 }), SETTINGS), 9)
+    assert.equal(rulePriority(rule({ priority: -3 }), SETTINGS), 0)
+    assert.equal(rulePriority(rule({ priority: 3.7 }), SETTINGS), 3)
+    assert.equal(rulePriority(rule({ behavior: 'invert', priority: Number.NaN }), SETTINGS), ALWAYS_SHOW, 'falls back to the default')
   })
 
   test('a hide rule can be raised above a force-show', () => {
     // The point of the whole feature: an "always show" tag no longer overrules a
     // fandom you never want to see, as long as you say so.
     const alwaysShow = rule({ behavior: 'invert' })
-    const hardHide = rule({ target: TagType.Fandom, value: 'Naruto', behavior: 'hide', priority: 5 })
-    assert.ok(rulePriority(hardHide) > rulePriority(alwaysShow))
+    const hardHide = rule({ target: TagType.Fandom, value: 'Naruto', behavior: 'hide', priority: ALWAYS_SHOW + 1 })
+    assert.ok(rulePriority(hardHide, SETTINGS) > rulePriority(alwaysShow, SETTINGS))
   })
 })
 
@@ -248,7 +289,7 @@ describe('ruleAffectsWorks', () => {
     // Priority and colour survive for when it is turned back on; neither lets it
     // back into the contest while it is off.
     assert.equal(ruleAffectsWorks(rule({ behavior: 'none', priority: 9, color: '#abcdefff' })), false)
-    assert.equal(rulePriority(rule({ behavior: 'none', priority: 7 })), 7)
+    assert.equal(rulePriority(rule({ behavior: 'none', priority: 7 }), SETTINGS), 7)
   })
 })
 

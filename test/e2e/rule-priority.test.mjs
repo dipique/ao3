@@ -3,15 +3,21 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
+/** The priority an "always show" rule takes when it sets none of its own. */
+const ALWAYS_SHOW = OPTION_DEFAULTS.rules.alwaysShowPriority
+/** One step above it: the strength a hide needs to beat it. */
+const ABOVE = ALWAYS_SHOW + 1
+
 /**
- * One "always show" tag rule at its default strength (4), and collapse rules on
- * three fandoms at 0, 5 and 4 — everything needed to see which side of a
+ * One "always show" tag rule at its default strength, and collapse rules on
+ * three fandoms at 0, one above that default, and at it — everything needed to see which side of a
  * priority tie each blurb lands on. Collapsing rather than hiding so a work that
  * loses still has a reason line to read the verdict off; which of the two the
  * winner asks for is its own contest, exercised at the end of this file.
@@ -22,8 +28,8 @@ const SEED = {
     colors: {},
     filters: [
       { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse' },
-      { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'collapse', priority: 5 },
-      { target: 'f', value: 'Tied Fandom', matcher: 'exact', behavior: 'collapse', priority: 4 },
+      { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'collapse', priority: ABOVE },
+      { target: 'f', value: 'Tied Fandom', matcher: 'exact', behavior: 'collapse', priority: ALWAYS_SHOW },
       { target: 'F', value: 'Keeper', matcher: 'exact', behavior: 'invert' },
       { target: 'F', value: 'Override', matcher: 'exact', behavior: 'invert', priority: 9 },
       // For the hide-vs-collapse contest below: an ordinary hide rule, at the
@@ -69,10 +75,38 @@ const PAGE = `
 </div>
 `
 
+/** Load the content script over PAGE with this storage, and wait for it to settle. */
+async function openPage(chromePath, seed) {
+  // Injected as content rather than by URL: an about:blank document has an
+  // opaque origin and can't load them cross-origin from a local server.
+  const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
+  const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
+
+  const browser = await launch(chromePath)
+  const page = await browser.newPage()
+  await page.goto('about:blank')
+  await page.evaluate(installMock, seed)
+  await page.evaluate((html) => {
+    document.body.innerHTML = html
+  }, PAGE)
+  await page.addStyleTag({ content: css })
+  await page.addScriptTag({ content: js })
+  await settled(page)
+  return { browser, page }
+}
+
+/** Which kinds of rule hid a blurb, or null when it wasn't hidden at all. */
+function hiddenByOn(page, id) {
+  return page.evaluate(
+    sel => document.getElementById(sel)?.dataset.ao3eHiddenBy ?? null,
+    id,
+  )
+}
+
 /**
  * Rule priority decides which of several matching rules has the last word on
  * whether a work is hidden. With everything at its default an "always show"
- * (priority 4) beats an ordinary hide (0) — the long-standing behaviour — but a
+ * (at the rules settings' "Always show" priority) beats an ordinary hide (0) — the long-standing behaviour — but a
  * hide raised above it now wins, and a tie goes back to the force-show.
  */
 describe('rule priority', { skip }, () => {
@@ -81,21 +115,7 @@ describe('rule priority', { skip }, () => {
 
   before(async () => {
     ensureBuilt()
-    // Injected as content rather than by URL: an about:blank document has an
-    // opaque origin and can't load them cross-origin from a local server.
-    const css = await readFile(join(DIST, 'content_script', 'content_script.css'), 'utf8')
-    const js = await readFile(join(DIST, 'content_script', 'content_script.js'), 'utf8')
-
-    browser = await launch(chromePath)
-    page = await browser.newPage()
-    await page.goto('about:blank')
-    await page.evaluate(installMock, SEED)
-    await page.evaluate((html) => {
-      document.body.innerHTML = html
-    }, PAGE)
-    await page.addStyleTag({ content: css })
-    await page.addScriptTag({ content: js })
-    await settled(page)
+    ;({ browser, page } = await openPage(chromePath, SEED))
   }, { timeout: 180000 })
 
   after(async () => {
@@ -103,10 +123,7 @@ describe('rule priority', { skip }, () => {
   })
 
   /** Which kinds of rule hid a blurb, or null when it wasn't hidden at all. */
-  const hiddenBy = id => page.evaluate(
-    sel => document.getElementById(sel)?.dataset.ao3eHiddenBy ?? null,
-    id,
-  )
+  const hiddenBy = id => hiddenByOn(page, id)
 
   /** The reason line the collapsed work shows. Null on a work hidden outright. */
   const reason = id => page.evaluate(
@@ -128,7 +145,7 @@ describe('rule priority', { skip }, () => {
   )
 
   test('an "always show" tag overrules an ordinary hide', async () => {
-    assert.equal(await hiddenBy('b1'), null, 'invert at 4 beats hide at 0')
+    assert.equal(await hiddenBy('b1'), null, 'invert at its default beats hide at 0')
   })
 
   test('the same hide still applies without the force-show', async () => {
@@ -137,16 +154,16 @@ describe('rule priority', { skip }, () => {
   })
 
   test('a hide raised above the force-show wins', async () => {
-    assert.equal(await hiddenBy('b3'), 'tags', 'hide at 5 beats invert at 4')
+    assert.equal(await hiddenBy('b3'), 'tags', 'a hide above the default beats invert at it')
     assert.match(await reason('b3'), /Hard Fandom/)
   })
 
   test('a force-show raised higher still wins', async () => {
-    assert.equal(await hiddenBy('b4'), null, 'invert at 9 beats hide at 5')
+    assert.equal(await hiddenBy('b4'), null, 'invert at 9 beats the raised hide')
   })
 
   test('a tie goes to the force-show', async () => {
-    assert.equal(await hiddenBy('b5'), null, 'hide at 4 does not beat invert at 4')
+    assert.equal(await hiddenBy('b5'), null, 'a hide at the default does not beat invert at it')
   })
 
   test('reasons that lost the contest are not listed', async () => {
@@ -172,7 +189,7 @@ describe('rule priority', { skip }, () => {
   })
 
   test('a stronger collapse keeps a work an ordinary hide would take away', async () => {
-    // "Tied Fandom" collapses at 4, "Banished" hides at 0: the strongest
+    // "Tied Fandom" collapses at the default, "Banished" hides at 0: the strongest
     // surviving reason says how the work goes, and both are still listed.
     assert.equal(await isHidden('b9'), false)
     const text = await reason('b9')
@@ -181,7 +198,7 @@ describe('rule priority', { skip }, () => {
   })
 
   test('the reason that took precedence is marked on a line listing several', async () => {
-    // "Tied Fandom" at 4 decided b9 collapses; "Banished" at 0 only rode along.
+    // "Tied Fandom" at the default decided b9 collapses; "Banished" at 0 only rode along.
     const marked = await decisive('b9')
     assert.equal(marked.length, 1)
     assert.match(marked[0], /Tied Fandom/)
@@ -190,5 +207,39 @@ describe('rule priority', { skip }, () => {
   test('nothing is marked when no reason outranks another', async () => {
     assert.deepEqual(await decisive('b2'), [], 'a single reason has nothing to win over')
     assert.deepEqual(await decisive('b10'), [], 'two collapses at 0 tie')
+  })
+})
+
+/**
+ * The "always show" default is a setting: raised to the strength of the hide
+ * that beat it, an "always show" that sets no priority of its own ties that
+ * hide and keeps its work, while a hide it still outranks stays beaten.
+ */
+describe('rule priority with the "Always show" priority changed', { skip }, () => {
+  let browser
+  let page
+
+  before(async () => {
+    ensureBuilt()
+    const seed = { 'option.rules': { ...SEED['option.rules'], alwaysShowPriority: ABOVE } }
+    ;({ browser, page } = await openPage(chromePath, seed))
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  test('a hide that beat the old default now ties, and loses', async () => {
+    assert.equal(await hiddenByOn(page, 'b3'), null)
+  })
+
+  test('the hides it beat before, it still beats', async () => {
+    assert.equal(await hiddenByOn(page, 'b1'), null)
+    assert.equal(await hiddenByOn(page, 'b5'), null)
+  })
+
+  test('a work no force-show matches is hidden as before', async () => {
+    assert.equal(await hiddenByOn(page, 'b2'), 'tags')
+    assert.equal(await hiddenByOn(page, 'b6'), null, 'while one carrying both hides and the force-show is kept')
   })
 })

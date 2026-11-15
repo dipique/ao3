@@ -3,16 +3,21 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, beforeEach, describe, test } from 'node:test'
 
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { menuClosed, menuRows, openMenu, pickRow, settled } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
 
+/** The priority an "always show" rule takes when it sets none of its own. */
+const ALWAYS_SHOW = OPTION_DEFAULTS.rules.alwaysShowPriority
+
 /**
  * A collapse rule raised to 6, a highlight, and a tag with no rule at all; and
  * for the works an "always show" keeps on the page, two fandom collapses (at 0
- * and 5) and two force-shows (at their default 4, and at 9).
+ * and one above the "always show" default) and two force-shows (at that
+ * default, and at 9).
  */
 const SEED = {
   'option.tagToolbar': true,
@@ -23,7 +28,7 @@ const SEED = {
       { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'collapse', priority: 6 },
       { target: 'F', value: 'Waff', matcher: 'exact', behavior: 'highlight' },
       { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse' },
-      { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'collapse', priority: 5 },
+      { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'collapse', priority: ALWAYS_SHOW + 1 },
       { target: 'F', value: 'Keeper', matcher: 'exact', behavior: 'invert' },
       { target: 'F', value: 'Override', matcher: 'exact', behavior: 'invert', priority: 9 },
     ],
@@ -174,14 +179,16 @@ describe('rule priority from the tag menu', { skip }, () => {
 
     await click('overriding', 'Soft Fandom')
     assert.deepEqual((await submenuRows()).filter(r => r.active).map(r => r.value), ['0'])
-    await click('set-priority', '5')
+    // One above "Keeper" at its default is enough to beat it.
+    const above = ALWAYS_SHOW + 1
+    await click('set-priority', String(above))
     await menuClosed(page)
-    assert.deepEqual(await storedRule('Soft Fandom'), { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse', priority: 5 })
+    assert.deepEqual(await storedRule('Soft Fandom'), { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse', priority: above })
     await page.waitForFunction(() => document.getElementById('work_2').dataset.ao3eHiddenBy === 'tags')
   })
 
   test('lists only the hides this force-show outranks by itself', async () => {
-    // "Hard Fandom" collapses at 5: above "Keeper" at 4, so it's "Override" at 9 holding it off.
+    // "Hard Fandom" collapses above "Keeper" at its default, so it's "Override" at 9 holding it off.
     const keeper = await openMenuOn('Keeper', 'work_3')
     assert.deepEqual(valuesOf(keeper, 'overriding'), [])
     const override = await openMenuOn('Override', 'work_3')
