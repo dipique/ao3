@@ -1,4 +1,5 @@
-import type { Completion, Crossovers, Language, Rule, RuleColors, RulePriorityDefaults, TextReplacement } from './data.ts'
+import type { Completion, Crossovers, Language, TextReplacement } from './data.ts'
+import type { Rule, RuleColors, RulePriorityDefaults } from './rules.ts'
 import type { SavedListsOption } from './savedLists.ts'
 import type { TrackedListsOption } from './trackedLists.ts'
 import type { WordCountRange } from './wordCount.ts'

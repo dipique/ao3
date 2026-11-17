@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-// data.ts is pure (no imports at all), so it needs no build, no DOM and no
-// extension APIs — but it does declare an enum, which strip-only mode refuses:
+// rules.ts and data.ts are pure, so this needs no build, no DOM and no
+// extension APIs:
 //
-//   node --experimental-transform-types --test test/rules/priority.test.mjs
+//   node --test test/rules/priority.test.mjs
+import { TagType } from '../../src/common/data.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import {
   DEFAULT_AUTHOR_HIGHLIGHT_COLOR,
   DEFAULT_HIGHLIGHT_COLOR,
@@ -21,9 +23,7 @@ import {
   rulePriority,
   ruleTargetColor,
   ruleValueMatches,
-  TagType,
-} from '../../src/common/data.ts'
-import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+} from '../../src/common/rules.ts'
 
 const rule = props => ({ target: 'tag', value: '', matcher: 'exact', ...props })
 

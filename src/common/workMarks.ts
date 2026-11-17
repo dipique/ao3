@@ -33,10 +33,10 @@
  * pure icon-name list) so it can be unit-tested headlessly with `node --test`.
  */
 
-import type { HideMode } from './data.ts'
+import type { HideMode } from './rules.ts'
 
-import { clampPriority, MAX_PRIORITY } from './data.ts'
 import { DEFAULT_MARK_ICON } from './markIcons.ts'
+import { clampPriority, MAX_PRIORITY } from './rules.ts'
 
 /** A mark's id — the key it lives under in {@link WorkMarks.marks}. */
 export type MarkId = string
@@ -216,7 +216,7 @@ export function markHideMode(workMarks: Pick<WorkMarks, 'hideMode'>): HideMode {
 
 /**
  * Mark-hiding's effective priority, clamped to the rule scale — the same
- * treatment `rulePriority` ({@link file://./data.ts}) gives a rule's own, since
+ * treatment `rulePriority` ({@link file://./rules.ts}) gives a rule's own, since
  * the two numbers are weighed against each other.
  */
 export function markHidePriority(workMarks: Pick<WorkMarks, 'hidePriority'>): number {
@@ -393,12 +393,17 @@ export function readWorkIdsIn(marks: Record<MarkId, MarkConfig>): Set<string> {
  * own counts would count such a work twice.
  */
 export function markedWorkCount(marks: Record<MarkId, MarkConfig>): number {
+  return markedWorkIds(marks).size
+}
+
+/** Every work carrying a mark of the table's own, once each. */
+export function markedWorkIds(marks: Record<MarkId, MarkConfig>): Set<string> {
   const ids = new Set<string>()
   for (const mark of localMarkIds(marks)) {
     for (const workId of markItems(marks, mark))
       ids.add(workId)
   }
-  return ids.size
+  return ids
 }
 
 /**
@@ -655,6 +660,11 @@ export function marksHideAnything(marks: Record<MarkId, MarkConfig>): boolean {
 // ---------------------------------------------------------------------------
 // Describing a mark.
 // ---------------------------------------------------------------------------
+
+/** What a mark goes by: its label, else its id. */
+export function markLabel(marks: Record<MarkId, MarkConfig>, id: MarkId): string {
+  return marks[id]?.label || id
+}
 
 /** The mark's description, trimmed; empty when it has none. */
 export function markDescription(marks: Record<MarkId, MarkConfig>, id: MarkId): string {

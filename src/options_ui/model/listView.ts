@@ -1,7 +1,7 @@
-import type { Rule, RulePriorityDefaults } from '../../common/data.ts'
+import type { Rule, RulePriorityDefaults } from '../../common/rules.ts'
 import type { SavedListRow } from './savedListRows.ts'
 
-import { defaultRulePriority, rulePriority, ruleTargetLabel } from '../../common/data.ts'
+import { defaultRulePriority, rulePriority, ruleTargetLabel } from '../../common/rules.ts'
 import { searchTerms, textMatches } from './settingsSearch.ts'
 
 /**

@@ -4,7 +4,7 @@ import type { ViewState } from '#content_script/searchView/view.tsx'
 import { ADDON_CLASS, builtinOpens, getArchiveLink, parseUser, readWorkIds, toast } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
-import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
+import { clearHistoryItem, hideClearHistory, onHistoryPage, readingsUser, showClearHistory } from '#content_script/readingsNav.ts'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
 import { readMisses } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
@@ -29,19 +29,6 @@ const LIST_NAME = 'Read'
  * and collapsed groups whichever account they are signed in as.
  */
 const SOURCE_ID = 'read-works'
-
-/**
- * Both halves of `/users/:user/readings`: `?show=to-read` is the Marked for
- * Later list, anything else is History.
- */
-function readingsUser(): string | null {
-  return location.pathname.match(/^\/users\/([^/]+)\/readings\/?$/)?.[1] ?? null
-}
-
-/** Whether the page being shown is the History listing rather than the to-read one. */
-function onHistoryPage(): boolean {
-  return new URLSearchParams(location.search).get('show') !== 'to-read'
-}
 
 /**
  * Adds a "Search read items" button to your own readings pages, next to the

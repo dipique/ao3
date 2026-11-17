@@ -1,6 +1,6 @@
 import type { RuleKey } from '#common'
 
-import { api, createLogger, findExactRule, options, replaceExactRule } from '#common'
+import { api, authorKey, createLogger, findExactRule, options, replaceExactRule, tagKey } from '#common'
 
 let lastMenuInstanceId = 0
 let nextMenuInstanceId = 1
@@ -70,26 +70,21 @@ if (browser.contextMenus) {
       show: menus.tag.show,
       async key(linkUrl: string, _parts: string[], tabId: number): Promise<MenuRuleKey> {
         const tag = await api.getTag.sendToTab(tabId, linkUrl)
-        return { target: tag.type ?? 'tag', value: tag.name, describe: `tag "${tag.name}"` }
+        return { ...tagKey(tag), describe: `tag "${tag.name}"` }
       },
     },
     {
       hide: menus.author.hide,
       show: menus.author.show,
       async key(_linkUrl: string, parts: string[]): Promise<MenuRuleKey> {
-        return { target: 'author', value: parts[1]!, describe: `author "${parts[1]}"` }
+        return { ...authorKey(parts[1]!), describe: `author "${parts[1]}"` }
       },
     },
     {
       hide: menus.author.hidePseud,
       show: menus.author.showPseud,
       async key(_linkUrl: string, parts: string[]): Promise<MenuRuleKey> {
-        return {
-          target: 'author',
-          value: parts[1]!,
-          pseud: parts[3],
-          describe: `pseud "${parts[3]}" of author "${parts[1]}"`,
-        }
+        return { ...authorKey(parts[1]!, parts[3]), describe: `pseud "${parts[3]}" of author "${parts[1]}"` }
       },
     },
   ]

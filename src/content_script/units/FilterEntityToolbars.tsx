@@ -7,7 +7,7 @@ import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markIsExclusive, markIsOffered, markItems, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, entityIdFromURL, entityKey, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markIsExclusive, markIsOffered, markItems, markLabel, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -24,7 +24,6 @@ import { ownMarkedForLaterPage, putOnMarkedForLater } from '#content_script/mark
 import { loadMarkedForLaterIndex, noteMarkedForLater, onSavedChange } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
 import { markIcon } from '#content_script/markIcons.js'
-import { entityKey, ruleBehavior, ruleIndicatorBehavior } from '#content_script/persistentFilters.js'
 import { openProgressEditor } from '#content_script/progressEditor.js'
 import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
@@ -319,19 +318,12 @@ abstract class FilterEntityToolbar extends Unit {
    * series use each series link.
    */
   protected links(): EntityLink[] {
-    const idRe = new RegExp(`^/${this.kind}/(\\d+)(?:/|$)`)
     const out: EntityLink[] = []
     const selector = this.kind === 'works'
       ? '.blurb .header h4.heading a[href*="/works/"]'
       : 'a[href*="/series/"]'
     for (const el of this.root.querySelectorAll<HTMLAnchorElement>(selector)) {
-      let id: string | undefined
-      try {
-        id = new URL(el.href).pathname.match(idRe)?.[1]
-      }
-      catch {
-        continue
-      }
+      const id = entityIdFromURL(el.href, this.kind)
       if (id)
         out.push({ id, link: el })
     }
@@ -417,7 +409,7 @@ abstract class FilterEntityToolbar extends Unit {
         items.push(...this.progressItems(id, markId, link, separatorBefore))
         continue
       }
-      const noun = (config.label || markId).toLowerCase()
+      const noun = markLabel(marks, markId).toLowerCase()
       items.push({
         icon: markIcon(config.icon),
         label: has ? `Unmark as ${noun}` : `Mark as ${noun}`,
@@ -446,7 +438,7 @@ abstract class FilterEntityToolbar extends Unit {
   private progressItems(id: string, markId: MarkId, link: HTMLElement, separatorBefore: boolean): MenuItem[] {
     const { marks } = this.options.workMarks
     const config = marks[markId]!
-    const noun = (config.label || markId).toLowerCase()
+    const noun = markLabel(marks, markId).toLowerCase()
     const openEditor = (): void => this.openProgressEditor(id, markId, link)
 
     const progress = progressFor(marks, markId, id)
@@ -535,7 +527,7 @@ abstract class FilterEntityToolbar extends Unit {
     applyMarkProgress(marks, id, markId, entry)
     this.syncEntriesFor(id)
 
-    const noun = (marks.marks[markId]?.label || markId).toLowerCase()
+    const noun = markLabel(marks.marks, markId).toLowerCase()
     toast(`Marked as ${noun} — last finished chapter ${entry.chapter}.`, { type: 'success' })
 
     // An ongoing work is the one disposition that isn't "done with it", so it
@@ -597,7 +589,7 @@ abstract class FilterEntityToolbar extends Unit {
    * session); an unknown state is left alone rather than paying for a page fetch.
    */
   private async onToggleMark(id: string, markId: MarkId, on: boolean): Promise<void> {
-    const noun = (this.options.workMarks.marks[markId]?.label || markId).toLowerCase()
+    const noun = markLabel(this.options.workMarks.marks, markId).toLowerCase()
     this.setMarkLocally(id, markId, on)
 
     const state = savedState.get(id)
@@ -824,7 +816,7 @@ abstract class FilterEntityToolbar extends Unit {
       const published = publishedChapters(entry.link)
       if (published === null)
         continue
-      const label = marks[markId]?.label || markId
+      const label = markLabel(marks, markId)
       titles ??= {}
       titles[markId] = `${label}\n${describeProgress(progress, published, today)}`
       const color = readinessColor(readiness(progress, published, today), marks[markId]?.color)

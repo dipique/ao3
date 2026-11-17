@@ -2,7 +2,7 @@ import type { Options } from './options.ts'
 
 import { canonicalStringify } from './syncCodec.ts'
 import { trackedKey } from './trackedLists.ts'
-import { countIds, localMarkIds, markItems } from './workMarks.ts'
+import { countIds, localMarkIds, markedWorkIds } from './workMarks.ts'
 
 /**
  * The deletion guard: whether an incoming sync update would take a large share
@@ -46,7 +46,7 @@ export interface PullLoss {
 export function assessPull(current: Options, incoming: Options): PullLoss | null {
   const loss: PullLoss = {
     rules: lossOf(ruleKeys(current), ruleKeys(incoming)),
-    markedWorks: lossOf(markedWorkIds(current), markedWorkIds(incoming)),
+    markedWorks: lossOf(markedWorkIds(current.workMarks?.marks ?? {}), markedWorkIds(incoming.workMarks?.marks ?? {})),
     textReplacements: lossOf(replacementKeys(current), replacementKeys(incoming)),
     trackedLists: lossOf(trackedListKeys(current), trackedListKeys(incoming)),
     marks: lostMarks(current, incoming),
@@ -87,16 +87,6 @@ function replacementKeys(options: Options): Set<string> {
 function trackedListKeys(options: Options): Set<string> {
   return new Set((options.trackedLists?.lists ?? []).map(entry =>
     typeof entry.id === 'string' && entry.id ? `#${entry.id}` : `@${trackedKey(entry) ?? ''}`))
-}
-
-function markedWorkIds(options: Options): Set<string> {
-  const marks = options.workMarks?.marks ?? {}
-  const ids = new Set<string>()
-  for (const mark of localMarkIds(marks)) {
-    for (const id of markItems(marks, mark))
-      ids.add(id)
-  }
-  return ids
 }
 
 function lostMarks(current: Options, incoming: Options): string[] {

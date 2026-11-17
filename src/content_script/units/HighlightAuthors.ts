@@ -1,6 +1,4 @@
-import type { Rule } from '#common'
-
-import { ADDON_CLASS, ruleHighlightColor, ruleMatchesAuthor } from '#common'
+import { ADDON_CLASS, authorFromURL, highlightingRules, ruleMatchesAuthor } from '#common'
 import { isOrphanAccount } from '#content_script/authorPage.js'
 import { Unit } from '#content_script/Unit.js'
 
@@ -9,14 +7,6 @@ const COLOR_PROP = '--ao3e-highlight-color'
 
 /** Author byline links AO3 marks with rel="author" (blurbs, work pages, etc.). */
 const AUTHOR_LINK_SELECTOR = 'a[rel=author]'
-
-/** Pull the userId (and pseud, if present) out of a `/users/:id/pseuds/:pseud` link. */
-function parseAuthorLink(link: HTMLAnchorElement): { userId: string, pseud?: string } | null {
-  const parts = new URL(link.href).pathname.split('/').filter(Boolean)
-  if (parts[0] !== 'users' || !parts[1])
-    return null
-  return { userId: parts[1], pseud: parts[2] === 'pseuds' ? parts[3] : undefined }
-}
 
 /**
  * Highlights bylines of "favourite" authors: any author link matching an author
@@ -41,12 +31,7 @@ export class HighlightAuthors extends Unit {
 
   override async ready(): Promise<void> {
     const { filters, colors } = this.options.rules
-    const highlights: { filter: Rule, color: string }[] = []
-    for (const filter of filters) {
-      const color = ruleHighlightColor(filter, colors)
-      if (color !== null)
-        highlights.push({ filter, color })
-    }
+    const highlights = highlightingRules(filters, colors)
     if (highlights.length === 0)
       return
 
@@ -54,11 +39,11 @@ export class HighlightAuthors extends Unit {
     for (const el of this.root.querySelectorAll(AUTHOR_LINK_SELECTOR)) {
       if (!(el instanceof HTMLAnchorElement))
         continue
-      const author = parseAuthorLink(el)
+      const author = authorFromURL(el.href)
       // The orphan account isn't a real user; nothing to favourite there.
       if (!author || isOrphanAccount(author.userId))
         continue
-      const match = highlights.find(h => ruleMatchesAuthor(h.filter, author))
+      const match = highlights.find(h => ruleMatchesAuthor(h.rule, author))
       if (!match)
         continue
       el.classList.add(HIGHLIGHT_CLASS)

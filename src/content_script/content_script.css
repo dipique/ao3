@@ -1173,6 +1173,23 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: var(--ao3e-indicator-color, #d8a200);
 }
 
+/* A rule that matched the tag by more than its exact name: dashed round the icon
+   for "contains", a ".*" beside it for a regex. The margin keeps the outline
+   clear of the next icon. */
+.AO3E--indicator[data-ao3e-matcher='contains'] {
+  margin-inline: 1px;
+  border-radius: 3px;
+  outline: 1px dashed currentColor;
+}
+
+.AO3E--indicator[data-ao3e-matcher='regex']::after {
+  content: '.*';
+  align-self: flex-start;
+  font-size: 0.7rem;
+  font-weight: bold;
+  line-height: 1;
+}
+
 /* Per-work marks (read, favorite, and the finer dispositions). Each mark carries
    its own colour in the mark table — see common/workMarks.ts — which the
    indicator hands over as a custom property, so adding a mark needs no CSS. The

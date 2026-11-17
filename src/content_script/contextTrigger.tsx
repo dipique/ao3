@@ -11,9 +11,9 @@ import MdiPlusCircle from '~icons/mdi/plus-circle.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
-import type { MarkConfig, MarkId } from '#common'
+import type { MarkConfig, MarkId, Rule, RuleIndicator } from '#common'
 
-import { ADDON_CLASS, isExtensionContextValid, markIds, markTooltip, REOPEN_GUARD_MS, toast } from '#common'
+import { ADDON_CLASS, isExtensionContextValid, markIds, markLabel, markTooltip, REOPEN_GUARD_MS, toast } from '#common'
 import { markIcon } from '#content_script/markIcons.js'
 import React from '#dom'
 
@@ -477,7 +477,7 @@ const FILTER_ICONS: Record<FilterState, () => Node> = {
 }
 
 /** Hover text, so an icon's meaning doesn't depend on recognising it. */
-const FILTER_LABELS: Record<FilterState, string> = {
+export const FILTER_LABELS: Record<FilterState, string> = {
   require: 'Required in the filter',
   // Search-view only: AO3's sidebar ANDs the tags it is told to include, so on a
   // native listing that selection shows as `require` instead — see `presentDir`
@@ -517,6 +517,11 @@ export interface IndicatorOptions {
    * Falls back to the mark's own colour.
    */
   colors?: Record<MarkId, string>
+  /**
+   * The rules behind the rule states. A state whose rule matched by `contains`
+   * or `regex` is marked as such, and one with rules to name names them on hover.
+   */
+  rules?: RuleIndicator[]
 }
 
 /** One indicator's rendered parts, whatever kind of state it came from. */
@@ -525,6 +530,13 @@ interface Indicator {
   label: string
   icon: () => Node
   color?: string
+  /** How the rule behind it matched, when by more than the exact name. */
+  matcher?: Exclude<Rule['matcher'], 'exact'>
+}
+
+/** A rule state's hover text: its label, then the rules behind it, on the same line when there is one. */
+function ruleStateLabel(label: string, reasons: string[]): string {
+  return reasons.length === 1 ? `${label}: ${reasons[0]}` : [`${label}:`, ...reasons].join('\n')
 }
 
 /** Resolve the active states into indicators, in display order (filters, then marks). */
@@ -532,11 +544,13 @@ function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] 
   const out: Indicator[] = []
   for (const state of FILTER_STATES) {
     if (set.has(state)) {
+      const rule = opts.rules?.find(r => r.behavior === state)
       out.push({
         suffix: state,
-        label: FILTER_LABELS[state],
+        label: rule?.reasons.length ? ruleStateLabel(FILTER_LABELS[state], rule.reasons) : FILTER_LABELS[state],
         icon: FILTER_ICONS[state],
         color: state === 'highlight' ? opts.highlightColor : undefined,
+        matcher: rule && rule.matcher !== 'exact' ? rule.matcher : undefined,
       })
     }
   }
@@ -552,7 +566,7 @@ function resolve(set: Set<IndicatorState>, opts: IndicatorOptions): Indicator[] 
     const config = opts.marks![id]!
     out.push({
       suffix: `mark  ${INDICATOR_CLASS}--mark-${id}`,
-      label: markTooltip(opts.marks!, id, opts.titles?.[id] || config.label || id),
+      label: markTooltip(opts.marks!, id, opts.titles?.[id] || markLabel(opts.marks!, id)),
       icon: markIcon(config.icon),
       color: opts.colors?.[id] || config.color,
     })
@@ -589,7 +603,7 @@ export function buildIndicators(states: Iterable<IndicatorState>, opts: Indicato
     return null
 
   const span = (<span class={`${ADDON_CLASS}  ${INDICATORS_CLASS}`} aria-hidden="true" />) as HTMLElement
-  for (const { suffix, label, icon, color } of indicators) {
+  for (const { suffix, label, icon, color, matcher } of indicators) {
     const el = (
       <span
         class={`${INDICATOR_CLASS}  ${INDICATOR_CLASS}--${suffix}`}
@@ -600,6 +614,8 @@ export function buildIndicators(states: Iterable<IndicatorState>, opts: Indicato
     ) as HTMLElement
     if (color)
       el.style.setProperty('--ao3e-indicator-color', color)
+    if (matcher)
+      el.dataset.ao3eMatcher = matcher
     span.append(el)
   }
   return span

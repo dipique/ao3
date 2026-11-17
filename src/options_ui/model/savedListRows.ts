@@ -1,12 +1,12 @@
 import type { SavedList, SavedListJoin, StoredListRef } from '../../common/savedLists.ts'
-import type { Day, TrackedFilterSummary, TrackedKind, TrackedList, TrackedMeta } from '../../common/trackedLists.ts'
+import type { Day, TrackedFilterSummary, TrackedKind, TrackedMeta } from '../../common/trackedLists.ts'
 import type { CachingBuckets } from '../../content_script/siteExport/workText.ts'
 import type { BucketBar } from './buckets.ts'
 import type { JobView } from './jobView.ts'
 
 import { hostPage, openLink } from '../../common/listLinks.ts'
 import { aliasOf, defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
-import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, TRACKED_TYPE_LABELS, trackedMeta } from '../../common/trackedLists.ts'
+import { defaultTitle, describeFilters, describeList, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, titleKey, TRACKED_TYPE_LABELS, trackedMeta } from '../../common/trackedLists.ts'
 import { bucketBar, formatBytes } from './buckets.ts'
 import { isRunning, jobIsOn, jobVerb, listJob, removeOff } from './jobView.ts'
 import { timeAgo } from './moments.ts'
@@ -200,11 +200,6 @@ export function savedListRows(join: SavedListJoin, ctx: SavedListRowsContext): S
   return [...lists, ...copies]
 }
 
-/** A title as titles are compared: trimmed, in any case. */
-function titleKey(title: unknown): string {
-  return typeof title === 'string' ? title.trim().toLowerCase() : ''
-}
-
 function titleOf(list: SavedList): string {
   return typeof list.title === 'string' ? list.title : ''
 }
@@ -253,14 +248,6 @@ export function copyTitle(copy: StoredListRef): string {
   const normalized = SAVED_LIST_SOURCE_IDS.includes(copy.sourceId ?? '') ? normalizeTrackedUrl(copy.listUrl ?? '') : null
   const meta = normalized ? storedListMeta(normalized.url, copy.label ?? '') : null
   return (meta && defaultTitle(meta)) || (copy.sourceId !== undefined && copy.label?.trim()) || copy.key
-}
-
-/** A list by its title, and by what it searches where the title doesn't say: “Mine” (Search: tea). */
-export function describeList(list: Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>): string {
-  const meta = trackedMeta(list)
-  const title = sourceLabel(list)
-  const what = meta && titleKey(defaultTitle(meta)) !== titleKey(title) ? ` (${defaultTitle(meta)})` : ''
-  return `“${title}”${what}`
 }
 
 /** Why a title typed for a list isn't saved: `takenBy` has it. */

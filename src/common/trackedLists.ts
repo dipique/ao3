@@ -1018,7 +1018,7 @@ export function defaultTitle(meta: TrackedMeta): string {
 }
 
 /** What a title is compared as: trimmed, in any case. */
-function titleKey(title: unknown): string {
+export function titleKey(title: unknown): string {
   return typeof title === 'string' ? title.trim().toLowerCase() : ''
 }
 
@@ -1879,6 +1879,13 @@ export function titleAfterUpdate(
 /** Whether two titles are one, the way titles are compared: trimmed, in any case. */
 export function sameTitle(a: unknown, b: unknown): boolean {
   return titleKey(a) === titleKey(b)
+}
+
+/** A list by its title, and by what it searches where the title doesn't say: “Mine” (Search: tea). */
+export function describeList(list: Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>): string {
+  const meta = trackedMeta(list)
+  const title = sourceLabel(list)
+  return meta && !sameTitle(title, defaultTitle(meta)) ? `“${title}” (${defaultTitle(meta)})` : `“${title}”`
 }
 
 /**

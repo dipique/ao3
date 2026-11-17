@@ -1,7 +1,8 @@
-import type { FilterBehavior, HighlightPreset, Rule, RuleColors, RulePriorityDefaults, RuleTarget } from '../../common/data.ts'
+import type { FilterBehavior, HighlightPreset, Rule, RuleColors, RulePriorityDefaults, RuleTarget } from '../../common/rules.ts'
 import type { RegexRun } from './regexCheck.ts'
 
-import { defaultRulePriority, HIGHLIGHT_PRESETS, isTagTarget, ruleAffectsWorks, rulePriority, ruleTargetColor, ruleTargetLabel, storedPriority, TagType } from '../../common/data.ts'
+import { TagType } from '../../common/data.ts'
+import { defaultRulePriority, HIGHLIGHT_PRESETS, isEntityTarget, isTagTarget, matchesById, ruleAffectsWorks, rulePriority, ruleTargetColor, ruleTargetLabel, storedPriority } from '../../common/rules.ts'
 import { compilePattern } from './regexCheck.ts'
 
 /**
@@ -196,16 +197,6 @@ export function draftRule(draft: RuleDraft, colors: RuleColors, defaults: RulePr
   }
 }
 
-/** Whether a rule is about a work or a series, which it matches by title or by the id in its link. */
-function isEntityTarget(target: RuleTarget): target is 'work' | 'series' {
-  return target === 'work' || target === 'series'
-}
-
-/** Whether a work or series rule's text is a number, which matches the id in its link whatever the matcher. */
-function matchesId(target: RuleTarget, value: string): boolean {
-  return isEntityTarget(target) && /^\d+$/.test(value.trim())
-}
-
 /** What a rule's text is matched against, for each kind of target. */
 function subjectNoun(target: RuleTarget): string {
   if (target === 'author')
@@ -232,7 +223,7 @@ export const EXACT_HELP: Record<SuggestSource['kind'], string> = {
  * means nothing).
  */
 export function valueField(target: RuleTarget, matcher: Rule['matcher'], value: string): { label: string, placeholder: string, help: string, byId: boolean } {
-  const byId = matchesId(target, value)
+  const byId = matchesById(target, value)
   const noun = subjectNoun(target)
   const label = target === TagType.Fandom ? 'Fandom' : isTagTarget(target) ? 'Tag' : ruleTargetLabel(target)
   const suggestions = matcher === 'exact' ? suggestSource(target).kind : 'none'
@@ -259,7 +250,7 @@ export function valueField(target: RuleTarget, matcher: Rule['matcher'], value: 
  */
 export function checkedPattern(draft: Pick<RuleDraft, 'target' | 'matcher' | 'value'>): string | null {
   const { target, matcher, value } = draft
-  if (matcher !== 'regex' || matchesId(target, value))
+  if (matcher !== 'regex' || matchesById(target, value))
     return null
   const pattern = isEntityTarget(target) ? value.trim() : value
   return pattern.trim() === '' || typeof compilePattern(pattern) === 'string' ? null : pattern
@@ -334,7 +325,7 @@ export const TESTER_STOPPED = 'Testing stopped: the pattern took too long.'
  */
 export function regexTester(draft: Pick<RuleDraft, 'target' | 'matcher' | 'value'>, subject: string, run: RegexRun): RegexTester | null {
   const { target, matcher, value } = draft
-  if (matcher !== 'regex' || matchesId(target, value))
+  if (matcher !== 'regex' || matchesById(target, value))
     return null
   const noun = isTagTarget(target) ? 'tag' : subjectNoun(target)
   const verdict = regexVerdict(isEntityTarget(target) ? value.trim() : value, subject, run)
@@ -409,7 +400,7 @@ const quoted = (text: string): SummaryPart => (text.trim() ? { text: `“${text}
 function matchedWorks(rule: Rule): SummaryPart[] {
   const value = quoted(rule.value)
   const how = rule.matcher === 'regex' ? 'matches' : 'contains'
-  if (matchesId(rule.target, rule.value))
+  if (matchesById(rule.target, rule.value))
     return [words(rule.target === 'work' ? `the work with id ${rule.value.trim()}` : `every work in the series with id ${rule.value.trim()}`)]
   switch (rule.target) {
     case 'author': {

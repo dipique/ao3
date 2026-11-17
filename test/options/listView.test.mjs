@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { MIN_PRIORITY } from '../../src/common/data.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { MIN_PRIORITY } from '../../src/common/rules.ts'
 import { capFor, cycleSort, filterRows, filterSavedLists, focusSuccessor, heldOrderStale, holdWithout, keepOrder, LIST_CAPS, MARK_ORDER_OFF, MARK_SORTS, markOrderOff, RULE_SORTS, rulePriorityCell, SAVED_LIST_SORTS, savedListsHead, shownRules, shownSavedLists, SORT_HINTS, sortHint, sortMarks, sortRows, sortSavedLists, sortState, UNSORTED } from '../../src/options_ui/model/listView.ts'
 import { figures } from '../facts.mjs'
 

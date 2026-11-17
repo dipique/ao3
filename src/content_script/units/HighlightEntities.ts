@@ -1,6 +1,4 @@
-import type { Rule } from '#common'
-
-import { ADDON_CLASS, ruleHighlightColor, ruleMatchesEntity } from '#common'
+import { ADDON_CLASS, entityIdFromURL, highlightingRules, ruleMatchesEntity } from '#common'
 import { Unit } from '#content_script/Unit.js'
 
 const COLOR_PROP = '--ao3e-highlight-color'
@@ -25,37 +23,23 @@ abstract class HighlightEntities extends Unit {
   override get enabled() { return this.options.rules.enabled }
 
   /** The path segment this kind's links use. */
-  private get kind(): string {
+  private get kind(): 'works' | 'series' {
     return this.target === 'work' ? 'works' : 'series'
   }
 
   override async ready(): Promise<void> {
     const { filters, colors } = this.options.rules
-    const highlights: { filter: Rule, color: string }[] = []
-    for (const filter of filters) {
-      if (filter.target !== this.target)
-        continue
-      const color = ruleHighlightColor(filter, colors)
-      if (color !== null)
-        highlights.push({ filter, color })
-    }
+    const highlights = highlightingRules(filters.filter(rule => rule.target === this.target), colors)
     if (highlights.length === 0)
       return
 
-    const idRe = new RegExp(`^/${this.kind}/(\\d+)(?:/|$)`)
     let count = 0
     for (const el of this.root.querySelectorAll<HTMLAnchorElement>(`a[href*="/${this.kind}/"]`)) {
-      let id: string | undefined
-      try {
-        id = new URL(el.href).pathname.match(idRe)?.[1]
-      }
-      catch {
-        continue
-      }
+      const id = entityIdFromURL(el.href, this.kind)
       if (!id)
         continue
       const entity = { id, name: el.textContent!.trim() }
-      const match = highlights.find(h => ruleMatchesEntity(h.filter, this.target, entity))
+      const match = highlights.find(h => ruleMatchesEntity(h.rule, this.target, entity))
       if (!match)
         continue
       el.classList.add(this.highlightClass)

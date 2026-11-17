@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { ruleValueMatches } from '../../src/common/data.ts'
+import { ruleValueMatches } from '../../src/common/rules.ts'
 import { compilePattern, ended, IDLE_RUN, matchSpans, RUNNER_IDLE, runnerStep, runOf, sameJob } from '../../src/options_ui/model/regexCheck.ts'
 
 /** The spans `matchSpans` packs, one `[start, end]` or null per subject. */

@@ -1,6 +1,6 @@
-import type { FilterBehavior, Tag } from '#common'
+import type { RuleIndicator, Tag } from '#common'
 
-import { findExactRule, options, ruleTargetColor } from '#common'
+import { findExactRule, matchedTagRules, options, ruleTargetColor, tagKey, tagRuleIndicators } from '#common'
 
 import type { MenuItem } from './contextMenu.tsx'
 import type { IndicatorState } from './contextTrigger.tsx'
@@ -9,8 +9,7 @@ import type { FacetKey } from './searchView/engine.ts'
 
 import { attachMenuTrigger, buildIndicators, existingIndicator, standardLinkItems } from './contextTrigger.js'
 import { activeFilterDirs, facetForTagType, filterMenuItems, filterTargetFor } from './filterTarget.js'
-import { ruleBehavior, ruleIndicatorBehavior, tagKey } from './persistentFilters.js'
-import { ruleBehaviorItems } from './ruleMenuItems.tsx'
+import { matchedRuleItems, ruleBehaviorItems } from './ruleMenuItems.tsx'
 import { Unit } from './Unit.js'
 
 /**
@@ -29,8 +28,8 @@ import { Unit } from './Unit.js'
  */
 
 /**
- * A decorated tag link: the link itself (a menu trigger), the parsed tag, its
- * persistent hide/show/highlight behaviour (snapshot from options this run), the
+ * A decorated tag link: the link itself (a menu trigger), the parsed tag, the
+ * indicators its persistent rules give it (snapshot from options this run), the
  * filter its include/exclude rows drive (the search view the blurb sits in, else
  * the page's sidebar — null when neither can filter this tag), and the indicator
  * node currently shown after it (or null when nothing is active). Rebuilt each
@@ -39,7 +38,7 @@ import { Unit } from './Unit.js'
 export interface TagLinkEntry {
   link: HTMLAnchorElement
   tag: Tag
-  behavior: FilterBehavior | null
+  rules: RuleIndicator[]
   highlightColor: string
   filter: FilterTarget | null
   indicator: HTMLElement | null
@@ -53,11 +52,7 @@ export interface TagLinkEntry {
 }
 
 function computeStates(entry: TagLinkEntry): IndicatorState[] {
-  const states: IndicatorState[] = activeFilterDirs(entry.filter, entry.tag.name)
-  const behavior = ruleIndicatorBehavior(entry.behavior)
-  if (behavior)
-    states.push(behavior)
-  return states
+  return [...activeFilterDirs(entry.filter, entry.tag.name), ...entry.rules.map(rule => rule.behavior)]
 }
 
 /** Build the tag's menu fresh at open time (so include/exclude + saved state are current). */
@@ -67,6 +62,7 @@ export async function buildTagLinkMenu(entry: TagLinkEntry): Promise<MenuItem[]>
   const rules = await options.get('rules')
   const key = tagKey(entry.tag)
   items.push(...ruleBehaviorItems(key, findExactRule(rules.filters, key), { noun: entry.noun, at: entry.link, defaults: rules }))
+  items.push(...matchedRuleItems(matchedTagRules(rules.filters, entry.tag), rules))
 
   items.push(...standardLinkItems(entry.link))
   return items
@@ -75,7 +71,7 @@ export async function buildTagLinkMenu(entry: TagLinkEntry): Promise<MenuItem[]>
 /** Insert/replace/remove a tag's indicator to match its current active states. */
 export function syncTagLinkIndicator(entry: TagLinkEntry): void {
   const states = computeStates(entry)
-  const next = buildIndicators(states, { highlightColor: entry.highlightColor })
+  const next = buildIndicators(states, { highlightColor: entry.highlightColor, rules: entry.rules })
   if (next)
     attachMenuTrigger(next, () => buildTagLinkMenu(entry), { indicator: true, link: entry.link })
 
@@ -132,7 +128,7 @@ export abstract class TagLinkToolbar extends Unit {
 
     await this.prepare(links)
 
-    const { filters, colors } = this.options.rules
+    const { rules } = this.options
 
     for (const link of links) {
       const name = link.textContent?.trim()
@@ -145,10 +141,10 @@ export abstract class TagLinkToolbar extends Unit {
       const entry: TagLinkEntry = {
         link,
         tag,
-        behavior: ruleBehavior(filters, tagKey(tag)),
+        rules: tagRuleIndicators(rules.filters, tag, rules),
         // The star's colour follows the tag's own type, so a highlighted
         // relationship can read differently from a highlighted freeform.
-        highlightColor: ruleTargetColor(tag.type ?? 'tag', colors),
+        highlightColor: ruleTargetColor(tag.type ?? 'tag', rules.colors),
         filter: filterTargetFor(link, this.facetFor(tag), this.nativeTargetFor(link)),
         indicator: existingIndicator(link),
         noun: this.noun,

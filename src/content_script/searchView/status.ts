@@ -5,6 +5,7 @@ import {
   localMarkIds,
   markGroup,
   markItems,
+  markLabel,
   markProgress,
   markTracksProgress,
   READ_MARK,
@@ -62,7 +63,7 @@ export function applyStatus(works: Work[], options: Options): void {
   // once for the whole run, rather than per work.
   const carriers = localMarkIds(marks).map(id => ({
     id,
-    label: marks[id]?.label || id,
+    label: markLabel(marks, id),
     items: markItems(marks, id),
     progress: markTracksProgress(marks, id) ? markProgress(marks, id) : null,
   }))

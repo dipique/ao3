@@ -5,7 +5,7 @@
 import type { MarkConfig, MarkId } from '../../common/workMarks.ts'
 import type { ChangeOp } from './changeOps.ts'
 
-import { markIsLocal, markTracksProgress, readWorkIdsIn, setMark, setMarkGroup, setMarkProgress } from '../../common/workMarks.ts'
+import { markIsLocal, markLabel, markTracksProgress, readWorkIdsIn, setMark, setMarkGroup, setMarkProgress } from '../../common/workMarks.ts'
 
 /**
  * Replay what a reader did inside an export back onto their mark table.
@@ -169,12 +169,12 @@ function unapplicable(marks: Record<MarkId, MarkConfig>, op: ChangeOp): string |
   if (!marks[markId])
     return `the “${markId}” mark no longer exists here`
   if (!markIsLocal(marks, markId))
-    return `“${label(marks, markId)}” doesn't keep its own list of works here`
+    return `“${markLabel(marks, markId)}” doesn't keep its own list of works here`
   if (op.op === 'setProgress') {
     if (!op.payload.progress)
-      return `“${label(marks, markId)}” came without the chapter it was meant to record`
+      return `“${markLabel(marks, markId)}” came without the chapter it was meant to record`
     if (!markTracksProgress(marks, markId))
-      return `“${label(marks, markId)}” no longer tracks where you got to`
+      return `“${markLabel(marks, markId)}” no longer tracks where you got to`
   }
   return null
 }
@@ -200,8 +200,4 @@ function apply(marks: Record<MarkId, MarkConfig>, op: ChangeOp): Record<MarkId, 
 function alreadyOffTheList(ctx: ReplayContext, act: ArchiveAct): boolean {
   const listed = ctx.listed
   return !!listed && listed.updatedAt > act.at && !listed.ids.has(act.workId)
-}
-
-function label(marks: Record<MarkId, MarkConfig>, markId: MarkId): string {
-  return marks[markId]?.label || markId
 }

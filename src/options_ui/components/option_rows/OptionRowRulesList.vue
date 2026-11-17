@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Rule } from '#common'
 
-import { ruleTargetColor, ruleTargetLabel } from '#common'
+import { matchesById, ruleTargetColor, ruleTargetLabel } from '#common'
 
 import type { KeySort, RuleSortKey } from '../../model/listView.ts'
 
@@ -68,11 +68,6 @@ const count = computed(() => {
  */
 const ROW = '"icon numbers identity meta actions" / 26px 22px minmax(0, 1fr) minmax(0, 104px) auto'
 const NARROW_ROW = '"icon numbers identity actions" "icon numbers meta actions" / 22px 18px minmax(0, 1fr) auto'
-
-/** A work or series rule whose text is a number matches that id, whatever its matcher. */
-function matchesId(rule: Rule): boolean {
-  return (rule.target === 'work' || rule.target === 'series') && /^\d+$/.test(rule.value.trim())
-}
 
 /** The colour a highlight star shows for a rule: its own, else its target's. */
 function starColor(rule: Rule): string {
@@ -172,13 +167,13 @@ function add(event: MouseEvent) {
           <span class="overflow-hidden text-ellipsis whitespace-pre" :title="rule.value">{{ rule.value }}<span v-if="rule.pseud" class="text-muted-fg"> ({{ rule.pseud }})</span></span>
           <Tooltip>
             <span class="list-row__glyph grid shrink-0 place-items-center text-[13px] text-muted-fg">
-              <Icon v-if="matchesId(rule)" i-codicon-symbol-numeric label="Id" />
+              <Icon v-if="matchesById(rule.target, rule.value)" i-codicon-symbol-numeric label="Id" />
               <Icon v-else-if="rule.matcher === 'contains'" i-codicon-whole-word label="Contains" />
               <Icon v-else-if="rule.matcher === 'regex'" i-codicon-regex label="Regex" />
               <Icon v-else i-codicon-symbol-string label="Exact" />
             </span>
             <template #content>
-              <span v-if="matchesId(rule)">A numeric value matches the id exactly.</span>
+              <span v-if="matchesById(rule.target, rule.value)">A numeric value matches the id exactly.</span>
               <span v-else-if="rule.matcher === 'contains'">Matches if the value contains the rule. Often used for matching one person in a Relationship tag.</span>
               <span v-else-if="rule.matcher === 'regex'">Uses regular expressions to match the rule to the value.</span>
               <span v-else>Matches if the value exactly equals the rule. (default)</span>

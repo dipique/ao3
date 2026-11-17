@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
 import {
   findExactRule,
   replaceExactRule,
   setExactRulePriority,
   setRulePriorityOf,
   toggleExactRule,
-} from '../../src/common/data.ts'
-import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+} from '../../src/common/rules.ts'
 
 /** The rules settings a fresh install starts with. */
 const SETTINGS = OPTION_DEFAULTS.rules

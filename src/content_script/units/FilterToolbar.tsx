@@ -14,7 +14,7 @@ import type { FloatingToolbar } from '#content_script/floatingToolbar.tsx'
 import type { DetachedSnapshot } from '#content_script/searchView/cache.ts'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, aliasOf, api, cache, defaultTitle, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedMeta, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, aliasOf, api, cache, defaultTitle, describeList, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { BUTTON_CLASS, createFloatingToolbar, ICON_CLASS, toolbarButton } from '#content_script/floatingToolbar.tsx'
@@ -1329,13 +1329,6 @@ function rootMoveText(label: string, root: { from: TrackedMeta, to: TrackedMeta 
 /** Titles in the order a reader looks for them in. */
 function compareTitles(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
-}
-
-/** Which list a refusal is about: its title, and what it is when the title doesn't say. */
-function describeList(list: ListTitle): string {
-  const title = sourceLabel(list)
-  const meta = trackedMeta(list)
-  return meta && !sameTitle(title, defaultTitle(meta)) ? `“${title}” (${defaultTitle(meta)})` : `“${title}”`
 }
 
 /** A title the reader typed that another list already has. */

@@ -1,4 +1,4 @@
-import type { Rule } from './data.ts'
+import type { Rule } from './rules.ts'
 
 import { RULE_TIMING_MIN_KEPT, RULE_TIMING_WINDOW_MS } from './constants.ts'
 

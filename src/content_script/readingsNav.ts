@@ -39,3 +39,17 @@ export function showClearHistory(): void {
   for (const el of document.querySelectorAll(`.${HIDDEN_CLASS}`))
     el.classList.remove(HIDDEN_CLASS)
 }
+
+/**
+ * The user whose readings page this is, or null on any other page. Both halves
+ * of `/users/:user/readings` count: `?show=to-read` is the Marked for Later
+ * list, anything else is History.
+ */
+export function readingsUser(): string | null {
+  return location.pathname.match(/^\/users\/([^/]+)\/readings\/?$/)?.[1] ?? null
+}
+
+/** Whether the page being shown is the History listing rather than the to-read one. */
+export function onHistoryPage(): boolean {
+  return new URLSearchParams(location.search).get('show') !== 'to-read'
+}

@@ -1,6 +1,4 @@
-import type { Rule } from '#common'
-
-import { ADDON_CLASS, ruleHighlightColor, ruleMatchesTag } from '#common'
+import { ADDON_CLASS, highlightingRules, ruleMatchesTag } from '#common'
 import { Unit } from '#content_script/Unit.js'
 import { getTagFromElement } from '#content_script/utils.js'
 
@@ -32,19 +30,14 @@ export class HighlightTags extends Unit {
 
   override async ready(): Promise<void> {
     const { filters, colors } = this.options.rules
-    const highlights: { filter: Rule, color: string }[] = []
-    for (const filter of filters) {
-      const color = ruleHighlightColor(filter, colors)
-      if (color !== null)
-        highlights.push({ filter, color })
-    }
+    const highlights = highlightingRules(filters, colors)
     if (highlights.length === 0)
       return
 
     let count = 0
     for (const el of this.root.querySelectorAll(TAG_SELECTOR)) {
       const tag = getTagFromElement(el)
-      const match = highlights.find(h => ruleMatchesTag(h.filter, tag))
+      const match = highlights.find(h => ruleMatchesTag(h.rule, tag))
       if (!match)
         continue
       el.classList.add(HIGHLIGHT_CLASS)

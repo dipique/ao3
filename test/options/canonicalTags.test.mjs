@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { ruleValueMatches, TagType } from '../../src/common/data.ts'
+import { TagType } from '../../src/common/data.ts'
+import { ruleValueMatches } from '../../src/common/rules.ts'
 import { answeredNames, ASKING_AO3, CANONICAL_CAP, CANONICAL_HEADS, CANONICAL_NOTES, CANONICAL_NOUNS, CANONICAL_TOO_SLOW, canonicalAsks, canonicalMatches, canonicalPool, canonicalPreview, knownOnce, literalRuns, nextAsk, offersCanonical, usesBundledFandoms, withPress } from '../../src/options_ui/model/canonicalTags.ts'
 import { ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
 import { CHECKING, NO_PATTERN } from '../../src/options_ui/model/ruleEditor.ts'

@@ -9,13 +9,14 @@ import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import type { FilterBehavior, Rule, RuleKey, RulePriorityDefaults } from '#common'
 
-import { isTagTarget, MAX_PRIORITY, MIN_PRIORITY, ruleAffectsWorks, rulePriority } from '#common'
+import { behaviorOf, isTagTarget, MAX_PRIORITY, MIN_PRIORITY, ruleAffectsWorks, rulePriority, ruleSubject } from '#common'
 import React from '#dom'
 
 import type { MenuItem } from './contextMenu.tsx'
 
+import { FILTER_LABELS } from './contextTrigger.tsx'
 import { overruledOn } from './overruled.ts'
-import { behaviorOf, clearRule, setPriorityOf, setRulePriority, toggleRuleBehavior } from './persistentFilters.js'
+import { clearRule, setPriorityOf, setRulePriority, toggleRuleBehavior } from './persistentFilters.js'
 
 /**
  * The rows every menu that can write a rule offers — hide, collapse, always
@@ -155,6 +156,18 @@ function priorityRows(current: number, pick: (priority: number) => Promise<void>
   return rows
 }
 
+/** A row naming another rule, which opens that rule's priorities. */
+function otherRuleRow(rule: Rule, priority: number, row: { icon: () => Node, label: string, action: string }): MenuItem {
+  return {
+    icon: row.icon,
+    label: `${row.label} (priority ${priority})`,
+    action: row.action,
+    value: rule.value,
+    scope: 'settings',
+    submenu: priorityRows(priority, next => setPriorityOf(rule, next)),
+  }
+}
+
 /**
  * A row for each hide rule a force-show at `strength` outranks on the blurb `at`
  * sits in — by itself, so a hide that only a stronger force-show holds off is
@@ -166,12 +179,27 @@ function overridingItems(strength: number, at: Element): MenuItem[] {
     return []
   return overruledOn(blurb)
     .filter(({ priority }) => priority <= strength)
-    .map(({ rule, subject, priority }) => ({
+    .map(({ rule, subject, priority }) => otherRuleRow(rule, priority, {
       icon: () => <MdiEyeOffOutline />,
-      label: `Overriding ${subject} (priority ${priority})`,
+      label: `Overriding ${subject}`,
       action: 'overriding',
-      value: rule.value,
-      scope: 'settings',
-      submenu: priorityRows(priority, next => setPriorityOf(rule, next)),
     }))
+}
+
+/**
+ * A row for each rule that weighs in on a work through the item without being
+ * its exact rule (see `matchedTagRules`), saying what the rule does and naming
+ * it, as the item's indicator does. Each opens the rule's own priorities.
+ */
+export function matchedRuleItems(rules: Rule[], defaults: RulePriorityDefaults): MenuItem[] {
+  return rules.flatMap((rule) => {
+    const row = BEHAVIOR_ROWS.find(row => row.behavior === behaviorOf(rule))
+    return row
+      ? [otherRuleRow(rule, rulePriority(rule, defaults), {
+          icon: row.icon,
+          label: `${FILTER_LABELS[row.behavior]}: ${ruleSubject(rule)}`,
+          action: 'matched-rule',
+        })]
+      : []
+  })
 }

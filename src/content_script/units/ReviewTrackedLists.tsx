@@ -44,7 +44,7 @@ import { extensionAlive } from '#content_script/extensionAlive.js'
 import { linkedTo, openLinked } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, markedForLaterIds } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
-import { clearHistoryItem, hideClearHistory, showClearHistory } from '#content_script/readingsNav.ts'
+import { clearHistoryItem, hideClearHistory, onHistoryPage, readingsUser, showClearHistory } from '#content_script/readingsNav.ts'
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
 import { snapshotWorkIds } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
@@ -1224,19 +1224,6 @@ function confirmRow(text: string, label: string, onConfirm: () => void, onCancel
 // ---------------------------------------------------------------------------
 // The page it opens on.
 // ---------------------------------------------------------------------------
-
-/**
- * Both halves of `/users/:user/readings`: `?show=to-read` is the Marked for
- * Later list, anything else is History.
- */
-function readingsUser(): string | null {
-  return location.pathname.match(/^\/users\/([^/]+)\/readings\/?$/)?.[1] ?? null
-}
-
-/** Whether the page being shown is the History listing rather than the to-read one. */
-function onHistoryPage(): boolean {
-  return new URLSearchParams(location.search).get('show') !== 'to-read'
-}
 
 /**
  * The subnav item our button goes after: whatever of ours already sits behind

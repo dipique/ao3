@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { ruleTargetLabel } from '../../src/common/data.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { ruleTargetLabel } from '../../src/common/rules.ts'
 import { rulePriorityCell } from '../../src/options_ui/model/listView.ts'
 import { figures, mentions, skip, startOptions, until } from './optionsPage.mjs'
 

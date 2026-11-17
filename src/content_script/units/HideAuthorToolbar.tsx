@@ -7,7 +7,7 @@ import MdiBell from '~icons/mdi/bell.jsx'
 
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { findExactRule, options, ruleTargetColor, toast } from '#common'
+import { authorFromURL, authorKey, findExactRule, options, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, toast } from '#common'
 import { parseMuteState, parseSubscription, submitMuteForm, submitSubscription, type Subscription } from '#content_script/authorActions.js'
 import { getAuthorPage, isOrphanAccount, resetAuthorPageCache } from '#content_script/authorPage.js'
 import {
@@ -18,7 +18,7 @@ import {
   type IndicatorState,
   standardLinkItems,
 } from '#content_script/contextTrigger.js'
-import { authorKey, ruleBehavior, ruleIndicatorBehavior, toggleRuleBehavior } from '#content_script/persistentFilters.js'
+import { toggleRuleBehavior } from '#content_script/persistentFilters.js'
 import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -49,12 +49,10 @@ interface AuthorEntry {
 
 const entries: AuthorEntry[] = []
 
-/** Pull the userId (and pseud, if present) out of a `/users/:id/pseuds/:pseud` link. */
+/** The author a byline links to, and the link itself. */
 function parseAuthorLink(link: HTMLAnchorElement): AuthorLink | null {
-  const parts = new URL(link.href).pathname.split('/').filter(Boolean)
-  if (parts[0] !== 'users' || !parts[1])
-    return null
-  return { userId: parts[1], pseud: parts[2] === 'pseuds' ? parts[3] : undefined, href: link.href }
+  const author = authorFromURL(link.href)
+  return author && { ...author, href: link.href }
 }
 
 export class HideAuthorToolbar extends Unit {

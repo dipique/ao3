@@ -3,7 +3,7 @@ import type { ComponentInstance, GlobalComponents } from 'vue'
 
 import type { HideMode, MarkId } from '#common'
 
-import { addMark, clampPriority, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, describeMark, listedMarkIds, MARK_ICON_NAMES, markDescription, markedWorkCount, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
+import { addMark, clampPriority, countIds, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, DEFAULT_MARK_ICON, describeMark, listedMarkIds, MARK_ICON_NAMES, markDescription, markedWorkCount, markHidesResults, markIconClassName, markIdFor, markIsLocal, markIsOffered, markLabel, markNameError, markRoot, markTracksProgress, MAX_PRIORITY, MIN_PRIORITY, moveMark, reorderableMarkIds, SAVED_MARK } from '#common'
 
 import type { MarkSort } from '../../model/listView.ts'
 
@@ -67,7 +67,7 @@ function count(id: MarkId): number {
 }
 
 function label(id: MarkId): string {
-  return marks.value[id]?.label || id
+  return markLabel(marks.value, id)
 }
 
 /**

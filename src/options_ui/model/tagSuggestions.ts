@@ -1,4 +1,4 @@
-import type { Rule } from '../../common/data.ts'
+import type { Rule } from '../../common/rules.ts'
 import type { ArchivePause } from '../../content_script/archiveFetch.ts'
 import type { SuggestSource } from './ruleEditor.ts'
 

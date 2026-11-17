@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 
-import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_PRESETS, RULE_TARGETS, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, ruleTargetLabel, ruleValueMatches, TagType } from '../../src/common/data.ts'
+import { TagType } from '../../src/common/data.ts'
 import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { DEFAULT_AUTHOR_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_COLOR, HIGHLIGHT_PRESETS, RULE_TARGETS, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, ruleTargetLabel, ruleValueMatches } from '../../src/common/rules.ts'
 import { compilePattern, ended, IDLE_RUN, matchSpans } from '../../src/options_ui/model/regexCheck.ts'
 import { canSave, checkedNames, checkedPattern, CHECKING, describeRule, draftRule, EXACT_HELP, NO_PATTERN, openDraft, parseAutocomplete, regexTester, regexVerdict, RULE_ACTIONS, ruleSummary, saveButton, suggestSource, swatchFor, TESTER_HELP, TESTER_STOPPED, TOO_SLOW, usesColor, usesPriority, valueField, VERDICT_LABELS, withAction, withSwatch, withTarget } from '../../src/options_ui/model/ruleEditor.ts'
 

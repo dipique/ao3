@@ -2,10 +2,10 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiEye from '~icons/mdi/eye.jsx'
 import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 
-import type { HideMode, MarkId, Options, ProgressSource, Rule, RulePriorityDefaults } from '#common'
+import type { HideMode, MarkId, Options, ProgressSource, Rule } from '#common'
 import type { FilterTarget } from '#content_script/filterTarget.js'
 
-import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHideMode, markHidePriority, markHidesResults, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleTargetLabel, TagType, todayEpochDays } from '#common'
+import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHideMode, markHidePriority, markHidesResults, markLabel, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleDescription, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleSubject, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb, knownBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -431,7 +431,7 @@ export class HideWorks extends Unit {
         rule,
         priority: rulePriority(rule, defaults),
         mode: ruleHideMode(rule),
-        item: { ...item, rule: describeRule(rule, defaults) },
+        item: { ...item, rule: ruleDescription(rule, defaults) },
       })
     }
 
@@ -440,14 +440,15 @@ export class HideWorks extends Unit {
     const markId = blurb.work ? hiddenMarks.get(blurb.work.id) : undefined
     if (markId) {
       const config = workMarks.marks[markId]
+      const label = markLabel(workMarks.marks, markId)
       hides.push({
-        label: config?.label || markId,
+        label,
         kind: 'marks',
         priority: markPriority,
         mode: markMode,
         item: {
           value: blurb.work!.name,
-          rule: `You marked this work as ${(config?.label || markId).toLowerCase()}`,
+          rule: `You marked this work as ${label.toLowerCase()}`,
           icon: markIcon(config?.icon),
         },
       })
@@ -464,7 +465,7 @@ export class HideWorks extends Unit {
       if (state !== 'ready') {
         const config = workMarks.marks[ongoing.id]
         hides.push({
-          label: hiddenLabel(state, config?.label || ongoing.id),
+          label: hiddenLabel(state, markLabel(workMarks.marks, ongoing.id)),
           kind: 'marks',
           priority: markPriority,
           mode: markMode,
@@ -548,7 +549,7 @@ export class HideWorks extends Unit {
     // that survived, or was merely collapsed, the collected reasons describe a
     // work still on the page.
     const overruled = hides.flatMap(({ rule, priority }) =>
-      rule && priority <= bar ? [{ rule, subject: describeSubject(rule), priority }] : [])
+      rule && priority <= bar ? [{ rule, subject: ruleSubject(rule), priority }] : [])
     return { mode, reasons, kinds, excludes: mode === 'hide' ? excludes : [], overruled }
   }
 
@@ -759,32 +760,6 @@ function hintNode(text: string): Node {
   for (const line of text.split('\n'))
     fragment.append(<div>{line}</div>)
   return fragment
-}
-
-/**
- * Human description of the rule that matched, for the hover/rule display. Names
- * what the rule targets as well as how it matched, since one list now holds
- * rules for tags, authors, works and series — and calls out a non-default
- * priority, which is otherwise invisible at exactly the moment it decided things.
- */
-function describeRule(rule: Rule, defaults: RulePriorityDefaults): string {
-  const body = describeSubject(rule)
-  const priority = rulePriority(rule, defaults)
-  return priority === 0 ? body : `${body} (priority ${priority})`
-}
-
-/** What a rule matches, and how: `Fandom "Some Fandom"`, `Any tag contains "au"`. */
-function describeSubject(rule: Rule): string {
-  const noun = ruleTargetLabel(rule.target)
-  const value = rule.value.trim()
-
-  return (rule.target === 'work' || rule.target === 'series') && /^\d+$/.test(value)
-    ? `${noun} id ${value}`
-    : rule.matcher === 'contains'
-      ? `${noun} contains "${rule.value}"`
-      : rule.matcher === 'regex'
-        ? `${noun} matches /${rule.value}/`
-        : `${noun} "${rule.value}"`
 }
 
 /**

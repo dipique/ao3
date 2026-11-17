@@ -12,6 +12,7 @@ import {
   localMarkIds,
   markClears,
   markedWorkCount,
+  markedWorkIds,
   markGroup,
   markHideMode,
   markHidePriority,
@@ -21,6 +22,7 @@ import {
   markIsLocal,
   markIsReorderable,
   markItems,
+  markLabel,
   markRoot,
   marksForWork,
   moveMark,
@@ -220,6 +222,23 @@ describe('markedWorkCount', () => {
   test('a table with nothing marked counts nothing', () => {
     assert.equal(markedWorkCount(createDefaultMarks()), 0)
     assert.equal(markedWorkCount({}), 0)
+  })
+})
+
+describe('markedWorkIds', () => {
+  test('every work carrying a mark of the table’s own, once each', () => {
+    const marks = marksWith({ read: ['1', '2'], favorite: ['2', '3'] })
+    assert.deepEqual([...markedWorkIds(marks)].sort(), ['1', '2', '3'])
+    assert.deepEqual([...markedWorkIds({})], [])
+  })
+})
+
+describe('markLabel', () => {
+  test('a mark goes by its label, else by its id', () => {
+    const marks = createDefaultMarks()
+    assert.equal(markLabel(marks, READ_MARK), marks[READ_MARK].label)
+    assert.equal(markLabel({ ...marks, [READ_MARK]: { ...marks[READ_MARK], label: '' } }, READ_MARK), READ_MARK)
+    assert.equal(markLabel(marks, 'nonesuch'), 'nonesuch')
   })
 })
 

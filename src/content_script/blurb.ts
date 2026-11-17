@@ -1,5 +1,6 @@
 import type { BlurbSource, Tag, TagType } from '#common'
 
+import { entityIdFromURL } from '#common'
 import { getTagFromElement } from '#content_script/utils.js'
 
 /** A blurb tag, plus the fandom link href (needed to resolve a fandom's id). */
@@ -58,16 +59,6 @@ export function readChapterCounts(el: Element | null | undefined): ChapterCounts
   return { written, total }
 }
 
-/** Parse the `:id` from a `/works/:id` or `/series/:id` link, ignoring any trailing path. */
-function parseEntityId(href: string, kind: 'works' | 'series'): string | undefined {
-  try {
-    return new URL(href).pathname.match(new RegExp(`^/${kind}/(\\d+)(?:/|$)`))?.[1]
-  }
-  catch {
-    return undefined
-  }
-}
-
 /**
  * Parse a work blurb (`li.blurb`) into the structured shape HideWorks uses for
  * its hide decision. Shared so the Marked-for-Later search view (see
@@ -113,7 +104,7 @@ export function getBlurb(blurbElement: Element): Blurb {
 
   // The work this blurb is for, from its title link (absent on e.g. series-listing blurbs).
   const titleLink = blurbElement.querySelector<HTMLAnchorElement>('.header h4.heading a[href*="/works/"]')
-  const workId = titleLink ? parseEntityId(titleLink.href, 'works') : undefined
+  const workId = titleLink ? entityIdFromURL(titleLink.href, 'works') : undefined
   const work: BlurbEntity | undefined = titleLink && workId
     ? { id: workId, name: titleLink.textContent!.trim() }
     : undefined
@@ -123,7 +114,7 @@ export function getBlurb(blurbElement: Element): Blurb {
   const series: BlurbEntity[] = []
   const seenSeries = new Set<string>()
   for (const link of blurbElement.querySelectorAll<HTMLAnchorElement>('a[href*="/series/"]')) {
-    const id = parseEntityId(link.href, 'series')
+    const id = entityIdFromURL(link.href, 'series')
     if (!id || seenSeries.has(id))
       continue
     seenSeries.add(id)
