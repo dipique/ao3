@@ -18,6 +18,7 @@ import { ADDON_CLASS, aliasOf, api, cache, defaultTitle, describeUpdate, fillMet
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { BUTTON_CLASS, createFloatingToolbar, ICON_CLASS, toolbarButton } from '#content_script/floatingToolbar.tsx'
+import { mutedBlurbSelector } from '#content_script/mutedUsers.ts'
 import { holdSearchPrompt } from '#content_script/pendingSearch.ts'
 import { detachSnapshot, pruneDetached, restoreSnapshot } from '#content_script/searchView/cache.ts'
 import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
@@ -48,17 +49,29 @@ const TYPED_KEY = 'ao3eTyped'
 const PEEK_CLASS = `${ADDON_CLASS}--peek-hidden`
 
 /**
- * Blurbs HideWorks hid (at least partly) — by a tag, author or crossover
- * filter. Every hidden work carries `data-ao3e-hidden-by`, so this
- * matches them all regardless of which filter kind was responsible.
+ * Blurbs kept off the page that peek can bring back: those HideWorks hid (at
+ * least partly) — by a tag, author or crossover filter, each carrying
+ * `data-ao3e-hidden-by` whichever kind was responsible — and those AO3 hides
+ * because the reader muted the author, which {@link markMuted} marks.
  */
-const HIDDEN_SELECTOR = 'li[data-ao3e-hidden-by]'
+const HIDDEN_SELECTOR = 'li[data-ao3e-hidden-by], li[data-ao3e-muted]'
 
 /**
- * How many works the reader's filters have hidden *in the listing they're
- * looking at* — the only ones peek could reveal. Two kinds are in the page but
- * not in front of the reader, and neither counts: the native listing a custom
- * search view is standing in for, and the works that view is holding back
+ * Mark the blurbs `selector` finds — the works by authors the reader muted, see
+ * {@link mutedBlurbSelector} — so the peek CSS can reveal them and
+ * {@link countHidden} count them. Run before every count: a search view mounts
+ * its blurbs a page at a time, long after this unit ran.
+ */
+function markMuted(selector: string): void {
+  for (const li of document.querySelectorAll<HTMLElement>(selector))
+    li.dataset.ao3eMuted = ''
+}
+
+/**
+ * How many works the reader's filters or mutes have hidden *in the listing
+ * they're looking at* — the only ones peek could reveal. Two kinds are in the
+ * page but not in front of the reader, and neither counts: the native listing a
+ * custom search view is standing in for, and the works that view is holding back
  * because they're filtered out or on another of its pages.
  *
  * Recounted rather than cached because a search view marks its works as it
@@ -132,10 +145,10 @@ let mounted: FloatingToolbar | null = null
  * The floating control in the bottom-right corner of AO3's pages
  * ({@link file://../floatingToolbar.tsx}), with these pills:
  *
- * - **Peek** — on any listing where the extension hid one or more works, toggles
- *   a body class that reveals them (and hides them again) without touching the
- *   saved filters. Gated by the `filterToolbar` option, shown only when works
- *   were hidden.
+ * - **Peek** — on any listing where the extension hid one or more works, or AO3
+ *   hid them for an author the reader muted, toggles a body class that reveals
+ *   them (and hides them again) without touching the saved filters or the mutes.
+ *   Gated by the `filterToolbar` option, shown only when works were hidden.
  * - **Disable menus** — the escape hatch for the in-page context menus: flips
  *   `contextMenusEnabled`, restoring the browser's native menu on links. Shown
  *   whenever any menu decorator is active on the page, so it's always reachable.
@@ -181,11 +194,15 @@ export class FilterToolbar extends Unit {
       || o.workMarks.enabled
   }
 
-  /** Whether the peek pill could apply here (the `filterToolbar` option + a hide feature). */
-  private get peekAvailable(): boolean {
+  /**
+   * Whether the peek pill could apply here: the `filterToolbar` option, and a
+   * hide feature or a page whose `muted` selector finds the works AO3 hides.
+   */
+  private peekAvailable(muted: string | null): boolean {
     const { filterToolbar, rules, hideCrossovers, workMarks } = this.options
     return filterToolbar && (
-      rules.enabled || hideCrossovers.enabled
+      muted !== null
+      || rules.enabled || hideCrossovers.enabled
       || (workMarks.enabled && marksHideAnything(workMarks.marks))
     )
   }
@@ -203,13 +220,16 @@ export class FilterToolbar extends Unit {
     syncTrack = null
     trackWritten = null
     document.body.classList.remove(PEEK_CLASS)
+    for (const li of document.querySelectorAll<HTMLElement>('li[data-ao3e-muted]'))
+      delete li.dataset.ao3eMuted
   }
 
   override async ready(): Promise<void> {
     // The pill is built whenever peeking *could* apply here, not only when
     // something is hidden already: a custom search view hides its works long
     // after this runs, and there'd be nothing left to add the pill to.
-    const showPeek = this.peekAvailable
+    const muted = mutedBlurbSelector(document)
+    const peek = this.peekAvailable(muted) ? { muted } : null
     const showMenus = this.menuFeaturesActive
     // The reader pill needs the actual work text present, not just a work URL.
     const showReader = this.onWorkPage && document.querySelector('#workskin') !== null
@@ -228,11 +248,12 @@ export class FilterToolbar extends Unit {
     if (trackable && tracking)
       void this.learnMeta(trackable)
 
-    document.body.append(this.buildToolbar(showPeek, showMenus, showReader, showReplace, trackable))
-    this.logger.debug(`Filter toolbar added (peek: ${showPeek}, menus toggle: ${showMenus}, reader: ${showReader}, replace tools: ${showReplace}, trackable: ${trackable?.normalized.kind ?? 'no'}).`)
+    document.body.append(this.buildToolbar(peek, showMenus, showReader, showReplace, trackable))
+    this.logger.debug(`Filter toolbar added (peek: ${!!peek}, muted authors: ${!!muted}, menus toggle: ${showMenus}, reader: ${showReader}, replace tools: ${showReplace}, trackable: ${trackable?.normalized.kind ?? 'no'}).`)
   }
 
-  buildToolbar(showPeek: boolean, showMenus: boolean, showReader: boolean, showReplace: boolean, trackable: TrackablePage | null): HTMLElement {
+  /** `peekWith` is null for no peek pill, else what it needs: the selector for works by muted authors, if the page has any. */
+  buildToolbar(peekWith: { muted: string | null } | null, showMenus: boolean, showReader: boolean, showReplace: boolean, trackable: TrackablePage | null): HTMLElement {
     mounted?.detach()
     const toolbar = createFloatingToolbar({ onOpenChange: holdSearchPrompt })
     mounted = toolbar
@@ -255,7 +276,7 @@ export class FilterToolbar extends Unit {
     // Built up front but only put in the panel while it has something to say —
     // see syncVisible below. The menus pill is kept to hand as the insertion
     // point, so the peek pill always comes back in the same place.
-    const peek = showPeek ? this.buildPeekButton() : null
+    const peek = peekWith ? this.buildPeekButton(peekWith.muted) : null
     const menusButton = showMenus ? this.buildMenusButton() : null
     if (menusButton)
       panel.append(menusButton)
@@ -286,8 +307,11 @@ export class FilterToolbar extends Unit {
     return container
   }
 
-  /** The peek pill, plus the sync that relabels it and reports the current count. */
-  buildPeekButton(): { button: HTMLButtonElement, sync: () => number } {
+  /**
+   * The peek pill, plus the sync that relabels it and reports the current count.
+   * `muted` finds the works by muted authors ({@link mutedBlurbSelector}).
+   */
+  buildPeekButton(muted: string | null): { button: HTMLButtonElement, sync: () => number } {
     const icon: HTMLElement = <span class={ICON_CLASS} />
     const text: HTMLElement = <span />
     const button: HTMLButtonElement = (
@@ -298,6 +322,8 @@ export class FilterToolbar extends Unit {
     ) as HTMLElement as HTMLButtonElement
 
     const sync = (): number => {
+      if (muted)
+        markMuted(muted)
       const count = countHidden()
       if (count === 0)
         return 0
@@ -307,8 +333,8 @@ export class FilterToolbar extends Unit {
       text.textContent = `${peeking ? 'Hide' : 'Show'} ${count} filtered ${noun}`
       button.setAttribute('aria-pressed', String(peeking))
       const label = peeking
-        ? 'Re-hide works your filters hid'
-        : 'Temporarily show works your filters hid (does not change your filters)'
+        ? 'Re-hide works your filters or muted authors hid'
+        : 'Temporarily show works your filters or muted authors hid (changes neither)'
       button.title = label
       button.setAttribute('aria-label', label)
       return count

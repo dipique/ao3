@@ -95,8 +95,9 @@ export interface Options {
   markForLaterToolbar: boolean
   /**
    * Add the "Show N filtered works" pill to the floating toolbar, which
-   * temporarily reveals works any filter hid. Only that pill: the toolbar
-   * itself is always there, because its options pill applies on every page.
+   * temporarily reveals works any filter hid, and the works AO3 hides because
+   * the reader muted their author. Only that pill: the toolbar itself is always
+   * there, because its options pill applies on every page.
    */
   filterToolbar: boolean
   hideAuthorToolbar: boolean

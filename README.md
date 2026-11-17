@@ -43,7 +43,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
   - **Mark a work for later** adds "Mark for later" and "Mark as read" to a work's menu (needs you logged in). On your Marked for Later list's search view every work carries the Marked for Later clock whether this is on or not, and you mark a work read there from its menu.
 - **Open menus with a left-click** makes a plain click open the menu instead of following the link; Shift+click still follows it.
 - The browser's own right-click menu also gets entries to hide or always-show a tag, an author or one of an author's pseuds.
-- A floating button in the corner of AO3 pages holds quick actions: open the options, switch the menus off, toggle reader mode or the text replacement tools, "Track this search", and, with **Reveal filtered works** on, a peek at the works your filters hid.
+- A floating button in the corner of AO3 pages holds quick actions: open the options, switch the menus off, toggle reader mode or the text replacement tools, "Track this search", and, with **Reveal filtered works** on, a peek at the works your filters hid and those by authors you muted on AO3.
 - **Collapsible dashboard sidebar** folds away the sidebar on your own user pages.
 - **Extension theme** (follow AO3, light or dark) for the extension's own pages and menus, and **Hide "muted author" notices**.
 - **Dark skin for AO3** restyles AO3 itself to look like the options page in its dark theme — its palette, rounded fields and panels, outlined buttons — on top of any site skin you chose on AO3. The extension's own menus and search view follow it.

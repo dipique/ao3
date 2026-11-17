@@ -275,6 +275,24 @@ describe('hidden works in the search view', { skip }, () => {
     assert.deepEqual(await peekPill(), { peeking: false, count: [1] })
   })
 
+  test('peeking leaves the work the view filtered out off the page', async () => {
+    const drawn = title => page.evaluate((want) => {
+      const li = [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
+        .find(one => one.querySelector('h4.heading a').textContent === want)
+      return { marked: li.dataset.ao3eHiddenBy !== undefined, display: getComputedStyle(li).display }
+    }, title)
+    const peek = () => page.evaluate(() => document.querySelector('.AO3E--filter-toolbar [data-ao3e-action="peek"]').click())
+    assert.equal((await drawn('A rule-hidden one')).marked, true)
+    await peek()
+    try {
+      assert.deepEqual(await drawn('A rule-hidden one'), { marked: true, display: 'none' })
+      assert.notEqual((await drawn('A crossover')).display, 'none')
+    }
+    finally {
+      await peek()
+    }
+  })
+
   test('a crossover offers no exclude, its fandom count being no value to filter by', async () => {
     const crossover = await page.evaluateHandle(() => [...document.querySelectorAll('.AO3E--search-view--results > li.blurb')]
       .find(li => li.querySelector('h4.heading a').textContent === 'A crossover'))
