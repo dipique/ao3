@@ -16,7 +16,7 @@ import { CONFIRM_MS } from '../../src/options_ui/model/confirmInPlace.ts'
 import { jobVerb } from '../../src/options_ui/model/jobView.ts'
 import { PROFILE_LISTS } from '../../src/options_ui/model/profileLists.ts'
 import { blurbsOnRemove, COPY_REMOVAL, NEEDS_VISIT_NOTE, OFFLINE_OFF } from '../../src/options_ui/model/savedListRows.ts'
-import { serveDir, storedListIds, storedLists } from './helpers.mjs'
+import { liveElements, serveDir, storedListIds, storedLists } from './helpers.mjs'
 import { captureDownloads, figures, mentions, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
 import { menuRows, openMenu, pickRow } from './trackedPages.mjs'
 
@@ -971,6 +971,64 @@ describe('options UI — site export', { skip }, () => {
       await reader.click('.AO3E--site--nav a')
       await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)
       assert.equal(await handles(), 0, 'the handles belong to the work, not the list')
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * A file opened at a work is a tab for reading that work, and there may be
+   * many of them: it keeps neither the data block it was read out of nor a list
+   * nobody has looked at, and builds the list the first time it is shown.
+   */
+  test('a file opened at a work holds the work, and builds the list only once it is shown', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('pageerror', e => errors.push(e.message))
+    try {
+      await openFresh(reader, `${fileUrl(dir, 'library.html')}#work/11`)
+      await reader.waitForFunction(() => document.querySelector('.AO3E--site--work .userstuff') !== null, { timeout: 15000 })
+      assert.equal(await reader.title(), 'Work number 11', 'the tab is named for the work')
+      assert.equal(await reader.$(`#${SITE_DATA_ID}`), null, 'the data block is gone once read')
+      assert.equal(await liveElements(reader, '.blurb'), 0, 'no blurb is built under a work')
+
+      await reader.click('.AO3E--site--nav a')
+      await reader.waitForSelector('.AO3E--search-view--results > li', { timeout: 15000 })
+      assert.equal(await reader.$$eval('.AO3E--search-view--results > li', els => els.length), 3)
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /** Every mark rebuilds the list; the one it replaces has to go with it. */
+  test('a rebuilt list lets go of the one it replaced', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'library.html')
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('pageerror', e => errors.push(e.message))
+    try {
+      await openFresh(reader, fileUrl(dir, 'library.html'))
+      // Waited for without a handle to a blurb, which would keep the first list.
+      await reader.waitForFunction(() => document.querySelector('.AO3E--search-view--results > li') !== null, { timeout: 15000 })
+      assert.equal(await liveElements(reader, '.blurb'), 3)
+
+      for (const perPage of [51, 50]) {
+        await reader.$eval('.AO3E--site--list > *', (el) => {
+          el.dataset.testReplaced = ''
+        })
+        await reader.evaluate(n => browser.storage.local.set({ 'option.searchPerPage': n }), perPage)
+        await until('the list to be rebuilt', () => reader.evaluate(() => document.querySelector('.AO3E--site--list > :not([data-test-replaced])') !== null))
+      }
+      assert.equal(await liveElements(reader, '.blurb'), 3, 'one copy of each blurb, however often the list is rebuilt')
       assert.deepEqual(errors, [])
     }
     finally {

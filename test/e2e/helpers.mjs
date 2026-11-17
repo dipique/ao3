@@ -368,6 +368,38 @@ export function hurryTimers(delays) {
 }
 
 /**
+ * How many elements matching `selector` are alive in `page` once garbage is
+ * collected, whether or not they are in its document: for a test of what a page
+ * lets go of. The handle the count is taken through is released before this
+ * returns, so it keeps nothing alive itself; one the test still holds, such as
+ * the element `waitForSelector` hands back, keeps that element's whole tree.
+ */
+export async function liveElements(page, selector) {
+  const cdp = await page.createCDPSession()
+  const objectGroup = 'live-elements'
+  try {
+    await cdp.send('HeapProfiler.collectGarbage')
+    const { result: proto } = await cdp.send('Runtime.evaluate', { expression: 'Element.prototype', objectGroup })
+    const { objects } = await cdp.send('Runtime.queryObjects', { prototypeObjectId: proto.objectId, objectGroup })
+    const { result, exceptionDetails } = await cdp.send('Runtime.callFunctionOn', {
+      objectId: objects.objectId,
+      // The query also turns up the prototypes below Element's (HTMLElement's
+      // and the rest), which own their `constructor` and can match nothing.
+      functionDeclaration: 'function (selector) { return this.filter(el => !Object.hasOwn(el, "constructor") && el.matches(selector)).length }',
+      arguments: [{ value: selector }],
+      returnByValue: true,
+    })
+    if (exceptionDetails)
+      throw new Error(`counting live elements failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`)
+    return result.value
+  }
+  finally {
+    await cdp.send('Runtime.releaseObjectGroup', { objectGroup }).catch(() => {})
+    await cdp.detach()
+  }
+}
+
+/**
  * Let `ms` go by in `page`, timed by the page's own timers: for a wait that
  * has to outlast a delay the page keeps, `ms` being the constant it keeps it
  * by. Timers fire in the order they were set when the later one's delay is no

@@ -42,11 +42,18 @@ async function boot(): Promise<void> {
   }
 }
 
+/**
+ * The data block, parsed — and taken off the page, since it is read once and is
+ * by far the largest thing on it: left in place, the page would hold every work
+ * twice, once in the block's text and once in what was parsed out of it.
+ */
 function readData(): SiteData {
   const el = document.getElementById(SITE_DATA_ID)
   if (!el?.textContent)
     throw new Error('the list and works are missing from this file')
-  return JSON.parse(el.textContent) as SiteData
+  const data = JSON.parse(el.textContent) as SiteData
+  el.remove()
+  return data
 }
 
 void boot()

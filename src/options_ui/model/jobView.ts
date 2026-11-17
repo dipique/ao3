@@ -173,7 +173,7 @@ export function offReason(view: JobView, keys: ListKeys): string | null {
   const verb = jobVerb(view)
   return jobIsOn(view, keys)
     ? `off while this list is ${verb}`
-    : `off for now: one job at a time, and ${view.name} is ${verb}`
+    : `off while ${view.name} is ${verb}`
 }
 
 /**
@@ -214,7 +214,7 @@ export function cachedTextOff(view: JobView): string | null {
  * none runs.
  */
 export function busyNotice(view: JobView): string | null {
-  return isRunning(view) ? `One job at a time — ${view.name} is ${jobVerb(view)}` : null
+  return isRunning(view) ? `Busy — ${view.name} is ${jobVerb(view)}` : null
 }
 
 /** The running job, for the rail: how far it has got, and what it is. Null while none runs. */

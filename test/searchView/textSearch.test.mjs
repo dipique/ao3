@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
 
 // Node strips the TS types on import; textSearch.ts is pure (no `#common`, no
 // `browser`, no DOM, nothing but the pure textQuery.ts), so it loads with a
@@ -95,7 +97,34 @@ describe('textSnippet', () => {
     assert.equal(textSnippet(plain, terms('coffee')), null)
     assert.equal(textSnippet('A preschool.', terms('"school"')), null)
   })
+
+  test('an excerpt kept keeps none of the work it was cut from', async () => {
+    setFlagsFromString('--expose-gc')
+    const gc = runInNewContext('gc')
+    const filler = 'and so it went on, at some length. '.repeat(300_000)
+    const searcher = createWorkTextSearcher({
+      has: () => true,
+      load: async ids => Object.fromEntries(ids.map(id => [id, storedWork(`<p>${filler}A dragon drank tea. ${filler}</p>`)])),
+    })
+    gc()
+    const before = process.memoryUsage().heapUsed
+    const snippet = await searcher.snippet('1', 'dragon')
+    forgetLastRegexInput()
+    gc()
+    const held = process.memoryUsage().heapUsed - before
+    assert.equal(snippet.match, 'dragon')
+    assert.ok(held < filler.length / 10, `an excerpt holds ${held} bytes of a ${2 * filler.length}-character work`)
+  })
 })
+
+/**
+ * The engine keeps the last string any regex ran over until the next regex runs
+ * anywhere — the work's text, after an excerpt is cut. Run one over nothing, so
+ * that string is not counted as what the excerpt keeps.
+ */
+function forgetLastRegexInput() {
+  return /./.test('.')
+}
 
 /** A source over a fixed library, counting what it was asked to load. */
 function library(works) {

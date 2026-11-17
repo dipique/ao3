@@ -143,8 +143,18 @@ describe('siteExport/payload — scriptJson', () => {
     assert.ok(!json.includes('<'))
   })
 
+  test('writes nothing past ASCII, and reads back as it was', () => {
+    // One character past Latin-1 anywhere in the block, a fandom's name in the
+    // settings, and the browser keeps the whole block's text at two bytes a
+    // character.
+    const value = { fandom: '崩坏：星穹铁道', dash: '—', accent: 'café', shelf: '📚' }
+    const json = scriptJson(value)
+    assert.ok(/^[\x20-\x7E]*$/.test(json), json)
+    assert.deepEqual(JSON.parse(json), value)
+  })
+
   test('touches nothing else', () => {
-    const value = { label: 'A & B > C', quote: '"quoted"', dash: '—' }
+    const value = { label: 'A & B > C', quote: '"quoted"', path: 'a\\b' }
     assert.deepEqual(JSON.parse(scriptJson(value)), value)
     assert.equal(scriptJson(value), JSON.stringify(value))
   })

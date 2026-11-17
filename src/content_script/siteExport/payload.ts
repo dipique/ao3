@@ -213,9 +213,14 @@ export function buildManifest(input: ManifestInput): SiteManifest {
  * difference. Escaping every `<` as a unicode escape is the whole fix, and
  * `JSON.parse` reads it back as the character it was. (Base64 holds no `<` at
  * all, so in practice this only ever fires on the manifest and the options.)
+ *
+ * Everything past ASCII is escaped the same way, for memory: the browser keeps
+ * the block's text at one byte a character only while every character fits in
+ * one, so a single fandom name in another script, anywhere in the settings,
+ * would double what the whole block costs to hold.
  */
 export function scriptJson(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, '\\u003c')
+  return JSON.stringify(value).replace(/[^\x20-\x7E]|</g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }
 
 /**

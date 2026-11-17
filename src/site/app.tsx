@@ -13,7 +13,7 @@ import type { SearchView, SearchViewConfig, ViewState } from '#content_script/se
 import type { SiteData, SiteManifestWork } from '#content_script/siteExport/payload.js'
 
 import { ADDON_CLASS, getArchiveLink, options } from '#common'
-import { openMenuOf, setMenusEnabled } from '#content_script/contextTrigger.js'
+import { openMenuOf, pruneDetachedTriggers, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { createFloatingToolbar, toolbarButton } from '#content_script/floatingToolbar.tsx'
 import { attachReaderSizing } from '#content_script/readerSizing.ts'
 import { worksFromHtml } from '#content_script/searchView/cache.js'
@@ -108,11 +108,17 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   // cached work, which is everything the reader chose to keep.
   const hidesNothing = sourceId === 'marked-for-later' || sourceId === 'read-works' || sourceId === ALL_CACHED
 
-  const blurbsHtml = JSON.parse(await decompressEntry(data.blurbs)) as string[]
+  /**
+   * The blurbs, unpacked the first time the list is shown. A tab opened at a
+   * work may never show it, and a file can be opened at a work in tab after tab.
+   */
+  let blurbsHtml: Promise<string[]> | null = null
   const texts = new Map(data.works.map(work => [work.id, work]))
   const listed = new Map(data.manifest.works.map(work => [work.id, work]))
-  const titles = new Map<string, string>()
   const listTitle = document.title
+  // A work's menu asks whether the work is on the list, built or not.
+  if (sourceId === 'marked-for-later')
+    seedMarkedForLater(data.manifest.works.map(work => work.id))
 
   /**
    * The search inside the works, over the copies this file carries. Made once
@@ -172,7 +178,14 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   let reading: OpenWork | null = null
   /** The open work's floating controls, rebuilt with it and gone with it. */
   let toolbar: FloatingToolbar | null = null
-  let view = mount(await build(opts))
+  /** The list on the page, once it has been shown. */
+  let view: SearchView | null = null
+  /**
+   * The latest build of the list, null until the list is first shown. Builds
+   * run one after another, each from the settings as they stand and the state
+   * the one before it left, and one that fails leaves the next to try again.
+   */
+  let listBuilt: Promise<void> | null = null
   readerEl.addEventListener('click', onReaderClick)
   document.addEventListener('pointerdown', closeChapterMenus, true)
 
@@ -191,7 +204,8 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     void (async () => {
       opts = settings(await options.get())
       applyChrome(opts)
-      view = mount(await build(opts, view.getState()))
+      if (listBuilt)
+        await renderList()
       route()
     })()
   })
@@ -199,6 +213,10 @@ export async function startSite(ctx: SiteContext): Promise<void> {
 
   window.addEventListener('hashchange', route)
   route()
+  // A list the file opens on is up before the app counts as started, so one
+  // that cannot be built says so in place of the shell.
+  if (listBuilt)
+    await listBuilt
 
   function applyChrome(current: Options): void {
     applySurfaceTheme(current.theme?.chosen)
@@ -222,8 +240,16 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     return { ...current, workMarks: { ...current.workMarks, enabled: false } }
   }
 
+  function renderList(): Promise<void> {
+    listBuilt = (listBuilt ?? Promise.resolve()).catch(() => {}).then(async () => {
+      mount(await build(opts, view?.getState()))
+    })
+    return listBuilt
+  }
+
   async function build(current: Options, initialState?: ViewState): Promise<SearchView> {
-    const works = worksFromHtml(blurbsHtml)
+    blurbsHtml ??= decompressEntry(data.blurbs).then(text => JSON.parse(text) as string[])
+    const works = worksFromHtml(await blurbsHtml)
     const autoExcludes = prepare(works, current)
     const config: SearchViewConfig = {
       perPage: current.searchPerPage,
@@ -265,12 +291,9 @@ export async function startSite(ctx: SiteContext): Promise<void> {
    * to say: which of these works it does not actually carry.
    */
   function prepare(works: Work[], current: Options): FacetValueRef[] {
-    if (sourceId === 'marked-for-later')
-      seedMarkedForLater(works.map(work => work.workId))
     applyStatus(works, current)
     const autoExcludes = applyHidden(works, current, { hidesNothing })
     for (const work of works) {
-      titles.set(work.workId, work.title)
       work.offline = texts.has(work.workId) ? CACHED : NOT_CACHED
       noteIfAbsent(work, listed.get(work.workId))
     }
@@ -283,14 +306,19 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     work.el.append(<p class={`${ADDON_CLASS}  ${cx('absent')}`}>{UNCACHED_REASON[entry?.status ?? 'uncached'] ?? UNCACHED_REASON.uncached!}</p>)
   }
 
-  function mount(next: SearchView): SearchView {
+  function mount(next: SearchView): void {
     listEl.replaceChildren(next.el)
+    // The view this replaces is off the page for good. What it registered
+    // outside itself — the bridge its blurbs' menus drive its facets through,
+    // and those menus' triggers — would otherwise keep every work it held.
+    view?.dispose()
+    pruneDetachedTriggers()
+    view = next
     // A blurb's title still points at AO3 — the work toolbars find their target
     // by that href. A click on a work this file carries opens the file's copy
     // instead, however it was clicked.
     next.el.addEventListener('click', onBlurbClick)
     next.el.addEventListener('auxclick', onBlurbClick)
-    return next
   }
 
   function onBlurbClick(event: MouseEvent): void {
@@ -316,14 +344,16 @@ export async function startSite(ctx: SiteContext): Promise<void> {
 
   function route(): void {
     const id = workRoute(location.hash)
-    document.title = (id && titles.get(id)) || listTitle
     // What this browser keeps, and the way to export it, is about the list as a
     // whole; over a work it is only in the way of the text.
     status.el.hidden = id !== undefined
     listEl.hidden = id !== undefined
     readerEl.hidden = id === undefined
     if (id === undefined) {
+      document.title = listTitle
       closeWork()
+      if (!listBuilt)
+        void renderList()
       return
     }
     // The view was rebuilt under a work that is still open — a mark made from
@@ -333,6 +363,8 @@ export async function startSite(ctx: SiteContext): Promise<void> {
       return
     }
     closeWork()
+    // Until the work's copy is unpacked and names it.
+    document.title = listTitle
     window.scrollTo(0, 0)
     void showWork(id)
   }
@@ -362,6 +394,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
         return
       body.innerHTML = html
       shown.body = body
+      document.title = workPageTitle(body)?.textContent?.replace(/\s+/g, ' ').trim() || listTitle
       const chapters = chaptersOf(body)
       if (chapters.length > 1)
         nav.append(chapterMenu(chapters))

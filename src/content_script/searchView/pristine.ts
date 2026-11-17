@@ -49,18 +49,24 @@ export function pristineBlurb<T extends Element>(blurb: T, { inPlace = false } =
   })
   li.querySelectorAll(`.${ADDON_CLASS}`).forEach(el => el.remove())
 
+  // Every element is read through its attribute strings, and `classList` and
+  // `style` are reached for only where those name something of ours: either one,
+  // read once, stays attached to its element for as long as the element lives,
+  // and an export keeps every blurb it strips.
   for (const el of [li, ...li.querySelectorAll('*')]) {
-    for (const name of [...el.classList]) {
-      if (name === ADDON_CLASS || name.startsWith(`${ADDON_CLASS}--`))
-        el.classList.remove(name)
+    if (el.getAttribute('class')?.includes(ADDON_CLASS)) {
+      for (const name of [...el.classList]) {
+        if (name === ADDON_CLASS || name.startsWith(`${ADDON_CLASS}--`))
+          el.classList.remove(name)
+      }
     }
     if (el.getAttribute('class') === '')
       el.removeAttribute('class')
-    for (const { name } of [...el.attributes]) {
+    for (const name of el.getAttributeNames()) {
       if (name.startsWith(DATA_PREFIX))
         el.removeAttribute(name)
     }
-    if (el instanceof HTMLElement && el.style.length) {
+    if (el instanceof HTMLElement && el.getAttribute('style')?.includes(STYLE_PREFIX)) {
       for (const prop of [...el.style]) {
         if (prop.startsWith(STYLE_PREFIX))
           el.style.removeProperty(prop)

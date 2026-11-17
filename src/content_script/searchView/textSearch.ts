@@ -182,12 +182,22 @@ export function textSnippet(plain: string, terms: readonly Term[], radius: numbe
       end = space
   }
   return {
-    before: source.slice(start, at),
-    match: source.slice(at, matchEnd),
-    after: source.slice(matchEnd, end),
+    before: copyOf(source.slice(start, at)),
+    match: copyOf(source.slice(at, matchEnd)),
+    after: copyOf(source.slice(matchEnd, end)),
     clippedStart: start > 0,
     clippedEnd: end < source.length,
   }
+}
+
+/**
+ * `text` with characters of its own. A slice of a long string may point into
+ * the long string rather than copy out what it holds, which keeps all of it
+ * alive for as long as the slice is — an excerpt kept for the latest query
+ * would keep the whole of its work's text.
+ */
+function copyOf(text: string): string {
+  return [...text].join('')
 }
 
 function yieldToPage(): Promise<void> {

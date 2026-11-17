@@ -201,6 +201,12 @@ export interface SearchView {
    * now holds, as for {@link update}.
    */
   merge: (added: Work[], goneIds: ReadonlySet<string>, autoExcludes?: FacetValueRef[]) => void
+  /**
+   * Let go of the registration a blurb's menu drives this view's facets
+   * through, for a caller that has taken the view off the page for good. The
+   * registry holds it until then, and with it every work the view holds.
+   */
+  dispose: () => void
 }
 
 export interface SearchViewConfig {
@@ -1910,7 +1916,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
   // Let shared blurb decorators (e.g. the required-tags menu) drive this view's
   // in-memory facets when they act on a blurb inside it, instead of the page's
   // native filter sidebar. Registered before the first decorateContainer run.
-  registerFacetBridge(resultsOl, {
+  const releaseFacetBridge = registerFacetBridge(resultsOl, {
     isSelected: (key, dir, value) => state.facets[key][dir].has(value),
     toggle: (key, dir, value) => toggleSelection(key, dir, value),
     has: (key, value) => pool.some(work => facetValues(work, key).includes(value)),
@@ -2015,5 +2021,6 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     getWorks: () => works,
     remove: removeWork,
     merge,
+    dispose: releaseFacetBridge,
   }
 }
