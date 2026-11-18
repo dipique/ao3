@@ -1,6 +1,10 @@
 import type { RuleKey } from '#common'
 
-import { api, authorKey, createLogger, findExactRule, options, replaceExactRule, tagKey } from '#common'
+import { api, authorKey, createLogger, options, tagKey } from '#common'
+
+import type { MenuChoice } from './menuRules.ts'
+
+import { menuChecks, menuClick, menuVerb } from './menuRules.ts'
 
 let lastMenuInstanceId = 0
 let nextMenuInstanceId = 1
@@ -89,35 +93,11 @@ if (browser.contextMenus) {
     },
   ]
 
-  function sendHideToast(tab: browser.tabs.Tab, action: 'hide' | 'show', what: string, alreadyExisted: boolean, wasInverted?: boolean) {
-    const actionVerb = action === 'hide'
-      ? (alreadyExisted && !wasInverted ? 'unhidden' : 'hidden')
-      : (alreadyExisted && wasInverted ? 'unshown' : 'shown')
-
-    void api.toast.sendToTab(tab.id!, `The ${what} has been ${actionVerb}.`, { type: 'success' })
-  }
-
-  /**
-   * Apply one menu click: replace the rule this link already has (if any) with
-   * the chosen behaviour, or remove it when the click was undoing what was
-   * already there. Written the way the in-page menus write it, so a priority
-   * the old rule set for itself carries over (see `replaceExactRule`).
-   */
-  async function applyMenuClick(hiding: boolean, key: MenuRuleKey, tab: browser.tabs.Tab) {
+  async function applyMenuClick(choice: MenuChoice, key: MenuRuleKey, tab: browser.tabs.Tab) {
     const rules = await options.get('rules')
-    const old = findExactRule(rules.filters, key)
-    // A disabled rule stands for nothing, so a click sets a behaviour rather
-    // than toggling against one — otherwise "Hide" on a disabled rule would read
-    // as undoing a hide and delete it.
-    const active = old && old.behavior !== 'none' ? old : undefined
-    const wasShown = active ? active.behavior === 'invert' : undefined
-
-    sendHideToast(tab, hiding ? 'hide' : 'show', key.describe, !!active, wasShown)
-
-    // Clicking the behaviour it already had removes the rule; anything else replaces it.
-    const undoing = active !== undefined && wasShown !== hiding
-    const behavior = undoing ? null : hiding ? 'hide' : 'invert'
-    await options.set({ rules: { ...rules, enabled: true, filters: replaceExactRule(rules.filters, key, behavior, rules) } })
+    const { filters, undone } = menuClick(rules.filters, key, choice, rules)
+    void api.toast.sendToTab(tab.id!, `The ${key.describe} has been ${menuVerb(choice, undone)}.`, { type: 'success' })
+    await options.set({ rules: { ...rules, enabled: true, filters } })
   }
 
   async function onMenuClick(info: browser.contextMenus.OnClickData, tab: browser.tabs.Tab) {
@@ -130,7 +110,7 @@ if (browser.contextMenus) {
       if (info.menuItemId !== pair.hide && info.menuItemId !== pair.show)
         continue
       const key = await pair.key(info.linkUrl, parts, tab.id!)
-      await applyMenuClick(info.menuItemId === pair.hide, key, tab)
+      await applyMenuClick(info.menuItemId === pair.hide ? 'hide' : 'show', key, tab)
     }
   }
 
@@ -148,15 +128,9 @@ if (browser.contextMenus) {
         if (!info.menuIds.includes(pair.hide!) && !info.menuIds.includes(pair.show!))
           continue
         const key = await pair.key(info.linkUrl, parts, tab.id!)
-        const { filters } = await options.get('rules')
-        // A disabled rule leaves both boxes clear — nothing is in force, which
-        // is exactly what the checkmarks report.
-        const found = findExactRule(filters, key)
-        const rule = found?.behavior !== 'none' ? found : undefined
-        const shown = rule ? rule.behavior === 'invert' : false
-
-        await browser.contextMenus.update(pair.hide!, { checked: !!rule && !shown })
-        await browser.contextMenus.update(pair.show!, { checked: !!rule && shown })
+        const checks = menuChecks((await options.get('rules')).filters, key)
+        await browser.contextMenus.update(pair.hide!, { checked: checks.hide })
+        await browser.contextMenus.update(pair.show!, { checked: checks.show })
       }
 
       // Abort if the menu got closed

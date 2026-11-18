@@ -4,10 +4,10 @@ import type { CachingBuckets } from '../../content_script/siteExport/workText.ts
 import type { JobActions, JobView } from './jobView.ts'
 
 import { hostPage, openLink } from '../../common/listLinks.ts'
+import { timeAgo } from '../../common/relativeTime.ts'
 import { formatDay, isoDay } from '../../common/trackedLists.ts'
 import { toEpochDays } from '../../common/workProgress.ts'
 import { listJob } from './jobView.ts'
-import { timeAgo } from './moments.ts'
 import { moreCounts } from './moreMenu.ts'
 import { TRACK_OFF } from './savedListRows.ts'
 

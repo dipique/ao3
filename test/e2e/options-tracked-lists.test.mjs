@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { timeAgo } from '../../src/common/relativeTime.ts'
 import { describeFilters, formatDay, TRACKED_TYPE_LABELS, utcToday } from '../../src/common/trackedLists.ts'
 import { formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { CONFIRM_MS } from '../../src/options_ui/model/confirmInPlace.ts'
-import { timeAgo } from '../../src/options_ui/model/moments.ts'
 import { COPIED_MS, KIND_LABELS, LIST_REMOVAL, NOT_ARCHIVE_STOP_NOTE, TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { storedLists } from './helpers.mjs'
 import { figures, mentions, skip, startOptions, until } from './optionsPage.mjs'

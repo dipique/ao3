@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { DEFAULT_HIGHLIGHT_COLOR, highlightingRules, isEntityTarget, matchesById, ruleSubject } from '../../src/common/rules.ts'
+import { OPTION_DEFAULTS } from '../../src/common/optionDefaults.ts'
+import { DEFAULT_HIGHLIGHT_COLOR, highlightingRules, isEntityTarget, matchesById, ruleDescription, ruleSubject } from '../../src/common/rules.ts'
 import { mentions } from '../facts.mjs'
 
 describe('matchesById', () => {
@@ -20,6 +21,22 @@ describe('matchesById', () => {
   test('a rule matching by id is described by it', () => {
     const subject = ruleSubject({ target: 'series', value: ' 77 ', matcher: 'contains' })
     assert.ok(mentions(subject, '77') && !mentions(subject, 'contains'), subject)
+  })
+})
+
+describe('ruleSubject', () => {
+  const pseudRule = props => ({ target: 'author', value: 'someone', pseud: 'Nightjar', ...props })
+
+  for (const matcher of ['exact', 'contains', 'regex']) {
+    test(`an author rule narrowed to one pseud names the pseud, matching by ${matcher}`, () => {
+      const subject = ruleSubject(pseudRule({ matcher }))
+      assert.ok(mentions(subject, 'someone') && mentions(subject, 'Nightjar'), subject)
+    })
+  }
+
+  test('a reason names the pseud beside the rule\'s priority', () => {
+    const description = ruleDescription(pseudRule({ matcher: 'exact', priority: 3 }), OPTION_DEFAULTS.rules)
+    assert.ok(mentions(description, 'Nightjar') && mentions(description, 3), description)
   })
 })
 

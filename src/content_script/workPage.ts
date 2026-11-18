@@ -1,3 +1,5 @@
+import { entityIdFromURL } from '#common'
+
 /**
  * The individual work page's own title heading — a bare `<h2>`, not a link, so a
  * blurb-link selector misses it. Null on any other page.
@@ -21,7 +23,7 @@ export function workPageTitle(root: ParentNode): HTMLElement | null {
  * than one it merely links to (a series, or an "inspired by" work).
  */
 export function workPageId(): string | null {
-  const fromUrl = location.pathname.match(/^\/works\/(\d+)(?:\/|$)/)?.[1]
+  const fromUrl = entityIdFromURL(location.href, 'works')
   if (fromUrl)
     return fromUrl
 
@@ -36,16 +38,7 @@ export function workPageId(): string | null {
   for (const selector of selectors) {
     for (const el of document.querySelectorAll(selector)) {
       const raw = el.getAttribute('href') ?? el.getAttribute('action')
-      if (!raw)
-        continue
-      let path: string
-      try {
-        path = new URL(raw, location.origin).pathname
-      }
-      catch {
-        continue
-      }
-      const id = path.match(/^\/works\/(\d+)(?:\/|$)/)?.[1]
+      const id = raw && entityIdFromURL(raw, 'works', location.origin)
       if (id)
         return id
     }

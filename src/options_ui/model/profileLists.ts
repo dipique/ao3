@@ -4,9 +4,9 @@ import type { BucketBar, BucketFigures } from './buckets.ts'
 import type { JobActions, JobView } from './jobView.ts'
 
 import { builtinOpens, hostPage, openLink } from '../../common/listLinks.ts'
+import { timeAgo } from '../../common/relativeTime.ts'
 import { bucketBar, bucketFigures } from './buckets.ts'
 import { listJob } from './jobView.ts'
-import { timeAgo } from './moments.ts'
 import { moreCounts } from './moreMenu.ts'
 
 /**

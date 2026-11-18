@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { timeAgo } from '../../src/common/relativeTime.ts'
 import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
 import { loadingLine } from '../../src/content_script/searchView/listRefresh.ts'
 import { REFRESH_REFUSED } from '../../src/content_script/siteExport/refreshRefusals.ts'
 import { bucketBar, formatBytes } from '../../src/options_ui/model/buckets.ts'
-import { timeAgo } from '../../src/options_ui/model/moments.ts'
 import { KEEP_BY_VIEW, PROFILE_LISTS, REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
 import { blurbsOnRemove } from '../../src/options_ui/model/savedListRows.ts'
 import { storedListIds, storedLists } from './helpers.mjs'

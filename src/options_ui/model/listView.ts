@@ -1,7 +1,7 @@
 import type { Rule, RulePriorityDefaults } from '../../common/rules.ts'
 import type { SavedListRow } from './savedListRows.ts'
 
-import { defaultRulePriority, rulePriority, ruleTargetLabel } from '../../common/rules.ts'
+import { defaultRulePriority, ruleHasPriority, rulePriority, ruleTargetLabel } from '../../common/rules.ts'
 import { searchTerms, textMatches } from './settingsSearch.ts'
 
 /**
@@ -191,28 +191,19 @@ function sortedRules(rules: readonly Rule[], query: string, sort: KeySort<RuleSo
   if (key !== 'priority')
     return sorted(kept)
   return [
-    ...sorted(kept.filter(at => showsPriority(rules[at]!))),
-    ...sortRows(kept.filter(at => !showsPriority(rules[at]!)), unsorted),
+    ...sorted(kept.filter(at => ruleHasPriority(rules[at]!))),
+    ...sortRows(kept.filter(at => !ruleHasPriority(rules[at]!)), unsorted),
   ]
 }
 
 /**
- * Whether a rule's row shows its priority. Highlight and hide-tag rules show
- * none, since they never take part in deciding whether a work is shown.
- */
-function showsPriority(rule: Pick<Rule, 'behavior'>): boolean {
-  const behavior = rule.behavior ?? 'hide'
-  return behavior !== 'highlight' && behavior !== 'hideFilter'
-}
-
-/**
  * A rule's priority as its row shows it: the number, and whether the rule set
- * it rather than taking its action's default; or "–" for a rule that shows
- * none ({@link showsPriority}).
+ * it rather than taking its action's default; or "–" for a rule that has none
+ * ({@link ruleHasPriority}).
  */
 export function rulePriorityCell(rule: Pick<Rule, 'behavior' | 'priority'>, defaults: RulePriorityDefaults): { text: string, title: string, custom: boolean } {
   const behavior = rule.behavior ?? 'hide'
-  if (!showsPriority(rule)) {
+  if (!ruleHasPriority(rule)) {
     const kind = behavior === 'highlight' ? 'Highlight' : 'Hide-tag'
     return { text: '–', title: `${kind} rules have no priority: they never conflict with other rules`, custom: false }
   }

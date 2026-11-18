@@ -9,12 +9,12 @@ import MdiPlaylistEdit from '~icons/mdi/playlist-edit.jsx'
 import MdiPlaylistPlay from '~icons/mdi/playlist-play.jsx'
 import MdiPlaylistPlus from '~icons/mdi/playlist-plus.jsx'
 
-import type { ListState, SaveBackDone, SaveBackPage, SaveBackPlan, SaveBackUndoPlan, SavedList, TrackedFilter, TrackedList, TrackedMeta } from '#common'
+import type { ListState, ListTitle, SaveBackDone, SaveBackPage, SaveBackPlan, SaveBackUndoPlan, SavedList, TrackedFilter, TrackedList, TrackedMeta } from '#common'
 import type { FloatingToolbar } from '#content_script/floatingToolbar.tsx'
 import type { DetachedSnapshot } from '#content_script/searchView/cache.ts'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, aliasOf, api, cache, defaultTitle, describeList, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleTakenBy, toast, trackedKey, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, aliasOf, alreadyTracked, api, cache, defaultTitle, describeList, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleRefusal, titleTakenBy, toast, trackedKey, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { BUTTON_CLASS, createFloatingToolbar, ICON_CLASS, toolbarButton } from '#content_script/floatingToolbar.tsx'
@@ -625,7 +625,7 @@ export class FilterToolbar extends Unit {
       const before = await readListState()
       const plan = planTrack(before, id, utcToday())
       if (!plan.ok) {
-        toast(`This search is already tracked as ${describeList(plan.twin)}.`, { type: 'error', name: 'refused-duplicate' })
+        toast(`${alreadyTracked(plan.twin)}.`, { type: 'error', name: 'refused-duplicate' })
         return
       }
       if (plan.state === before) {
@@ -932,7 +932,7 @@ export class FilterToolbar extends Unit {
     const pageKey = filteredKey(page.normalized.key, filter)
     const twin = tracked ? lists.find(one => one.id !== list.id && trackedKey(one) === pageKey) : undefined
     if (twin)
-      nodes.push(<p class={TRACK_WARN_CLASS} data-ao3e-warn="twin">{`This search is already tracked as “${sourceLabel(twin, lists)}”, so “${label}” can't become it.`}</p>)
+      nodes.push(<p class={TRACK_WARN_CLASS} data-ao3e-warn="twin">{`${alreadyTracked(twin)}, so “${label}” can't become it.`}</p>)
     return nodes
   }
 
@@ -985,7 +985,7 @@ export class FilterToolbar extends Unit {
           )
           return
         }
-        toast('twin' in plan ? `This search is already tracked as ${describeList(plan.twin)}.` : titleRefusal(aliasOf(plan.takenBy)), { type: 'error', name: 'twin' in plan ? 'refused-duplicate' : 'refused-title' })
+        toast('twin' in plan ? `${alreadyTracked(plan.twin)}.` : titleRefusal(aliasOf(plan.takenBy)), { type: 'error', name: 'twin' in plan ? 'refused-duplicate' : 'refused-title' })
       }
     }
     catch (err) {
@@ -1138,9 +1138,6 @@ function liveFilter(page: TrackablePage): TrackedFilter | undefined {
 function filterSignature(filter: TrackedFilter | undefined): string {
   return JSON.stringify(filter ?? null)
 }
-
-/** A list as the title helpers read one: a saved list's title as its alias. */
-type ListTitle = Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>
 
 /** The entries of the lists tracked right now, in their stored order. */
 function trackedOnly(state: ListState): TrackedList[] {
@@ -1331,15 +1328,10 @@ function compareTitles(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })
 }
 
-/** A title the reader typed that another list already has. */
-function titleRefusal(other: ListTitle): string {
-  return `Another list is already called ${describeList(other)}. Choose a different title.`
-}
-
 function saveBackRefusal(plan: Extract<SaveBackPlan, { ok: false }>, label: string): string {
   switch (plan.reason) {
     case 'duplicate':
-      return `This search is already tracked as ${describeList(plan.other)}, so “${label}” was left as it was.`
+      return `${alreadyTracked(plan.other)}, so “${label}” was left as it was.`
     case 'title':
       return titleRefusal(aliasOf(plan.other))
     case 'missing':

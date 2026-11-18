@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { joinSavedLists } from '../../src/common/savedLists.ts'
-import { describeFilters, describeList, formatDay, TRACKED_TYPE_LABELS } from '../../src/common/trackedLists.ts'
+import { timeAgo } from '../../src/common/relativeTime.ts'
+import { aliasOf, joinSavedLists } from '../../src/common/savedLists.ts'
+import { alreadyTracked, describeFilters, describeList, formatDay, titleRefusal, TRACKED_TYPE_LABELS } from '../../src/common/trackedLists.ts'
 import { bucketBar, formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { jobVerb, jobView, offReason } from '../../src/options_ui/model/jobView.ts'
-import { timeAgo } from '../../src/options_ui/model/moments.ts'
 import { titlesInWords } from '../../src/options_ui/model/phrases.ts'
 import { REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
-import { blurbsOnRemove, cachingCell, COPY_REMOVAL, copyTitle, KIND_LABELS, LIST_REMOVAL, NEEDS_VISIT_NOTE, NO_COPY, NO_SWITCH, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, STATUS_DETAILS, STATUS_TIPS, STATUS_WORDS, statusCell, STOP_NOTE, titleRefusal, TRACK_OFF, TRACKING_STATE, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
+import { blurbsOnRemove, cachingCell, COPY_REMOVAL, copyTitle, KIND_LABELS, LIST_REMOVAL, NEEDS_VISIT_NOTE, NO_COPY, NO_SWITCH, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, STATUS_DETAILS, STATUS_TIPS, STATUS_WORDS, statusCell, STOP_NOTE, TRACK_OFF, TRACKING_STATE, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
 import { figures, mentions } from '../facts.mjs'
 
 const AO3 = 'https://archiveofourown.org'
@@ -767,8 +767,13 @@ describe('naming lists', () => {
   })
 
   test('titleRefusal: names the list that has the title', () => {
-    const refusal = titleRefusal(record('lh', '/series/2947183', { kind: 'series-works', title: 'The Long Haul' }))
+    const refusal = titleRefusal(aliasOf(record('lh', '/series/2947183', { kind: 'series-works', title: 'The Long Haul' })))
     assert.ok(mentions(refusal, 'The Long Haul') && mentions(refusal, 'Series: 2947183'), refusal)
+  })
+
+  test('alreadyTracked: names the other list that is this search', () => {
+    const said = alreadyTracked(aliasOf(record('lh', '/series/2947183', { kind: 'series-works', title: 'The Long Haul' })))
+    assert.ok(mentions(said, 'The Long Haul') && mentions(said, 'Series: 2947183'), said)
   })
 
   test('titlesInWords: one, two, or more titles, in order', () => {

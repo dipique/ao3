@@ -4,7 +4,7 @@ import type { ChangeImportProgress, ChangeImportReport } from '#content_script/s
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { CachingBuckets, WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { cache, copyOwner, getArchiveLink, joinSavedLists, listCopies, listUrlFor, planRemoveList, planTrackCopy, REVIEW_SOURCE_ID, storedListRefs, toast, utcToday } from '#common'
+import { alreadyTracked, cache, copyOwner, getArchiveLink, joinSavedLists, listCopies, listUrlFor, planRemoveList, planTrackCopy, REVIEW_SOURCE_ID, storedListRefs, timeAgo, toast, utcToday } from '#common'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
@@ -22,7 +22,6 @@ import type { ProfileList, ProfileListId } from '../model/profileLists.ts'
 import { formatBytes } from '../model/buckets.ts'
 import { changeImportView } from '../model/changeImport.ts'
 import { foreignView, jobView, offReason } from '../model/jobView.ts'
-import { timeAgo } from '../model/moments.ts'
 import { withReads } from '../model/preload.ts'
 import { PROFILE_LISTS } from '../model/profileLists.ts'
 import { REVIEW_NAME } from '../model/review.ts'
@@ -573,7 +572,7 @@ export function useSiteExport() {
       }
       if (!plan.ok) {
         if ('twin' in plan)
-          toast(`“${listName(row)}” is already tracked.`)
+          toast(`${alreadyTracked(plan.twin)}.`)
         else
           toast(`Another list is already called “${plan.takenBy.title.trim()}”. Give one of them another title under Saved lists first.`, { type: 'error' })
         return

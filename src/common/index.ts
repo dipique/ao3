@@ -32,6 +32,8 @@ export * from './markIcons.ts'
 export { options } from './options.ts'
 export type { Options, ThemeOption } from './options.ts'
 
+export * from './relativeTime.ts'
+
 export * from './rules.ts'
 
 export * from './ruleTiming.ts'

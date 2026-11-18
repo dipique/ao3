@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { formatMoment, NEVER, RECENT_DAY, timeAgo } from '../../src/options_ui/model/moments.ts'
+import { NEVER, timeAgo } from '../../src/common/relativeTime.ts'
+import { formatMoment, RECENT_DAY } from '../../src/options_ui/model/moments.ts'
 
 const NOW = new Date(2026, 9, 3, 18, 4).getTime()
 

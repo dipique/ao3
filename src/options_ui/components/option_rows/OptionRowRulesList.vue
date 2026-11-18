@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Rule } from '#common'
 
-import { matchesById, ruleTargetColor, ruleTargetLabel } from '#common'
+import { matchesById, ruleHighlightColor, ruleTargetLabel } from '#common'
 
 import type { KeySort, RuleSortKey } from '../../model/listView.ts'
 
@@ -69,11 +69,6 @@ const count = computed(() => {
 const ROW = '"icon numbers identity meta actions" / 26px 22px minmax(0, 1fr) minmax(0, 104px) auto'
 const NARROW_ROW = '"icon numbers identity actions" "icon numbers meta actions" / 22px 18px minmax(0, 1fr) auto'
 
-/** The colour a highlight star shows for a rule: its own, else its target's. */
-function starColor(rule: Rule): string {
-  return rule.color || ruleTargetColor(rule.target, colors.value)
-}
-
 /**
  * Add, from the frame's header. The dialog gives focus back to whatever had it
  * when it opened, so the button takes focus first, as a click doesn't make it
@@ -138,7 +133,7 @@ function add(event: MouseEvent) {
         <template #icon>
           <Tooltip>
             <span class="grid place-items-center text-[15px]">
-              <Icon v-if="rule.behavior === 'highlight'" i-mdi-star :style="{ color: starColor(rule) }" label="Highlight" />
+              <Icon v-if="rule.behavior === 'highlight'" i-mdi-star :style="{ color: ruleHighlightColor(rule, colors) ?? undefined }" label="Highlight" />
               <Icon v-else-if="rule.behavior === 'collapse'" i-mdi-arrow-collapse-vertical label="Collapse" />
               <Icon v-else-if="rule.behavior === 'invert'" i-tabler-eye-exclamation class="text-brand-fg" label="Always show" />
               <Icon v-else-if="rule.behavior === 'hideFilter'" i-mdi-tag-off label="Hide tag" />

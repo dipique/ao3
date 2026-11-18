@@ -5,6 +5,7 @@ import MdiLoading from '~icons/mdi/loading.jsx'
 
 import type { Day, Options, SnapshotDescriptor, TrackedList, TrackedListsOption, TrackedRead, TrackedReviewCache } from '#common'
 import type { Work } from '#content_script/blurb.js'
+import type { ReadingsView } from '#content_script/readingsNav.tsx'
 import type { LoadResult, SearchHeaderControl, SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
 import type { ReadStatus } from '#content_script/tracked/readLists.ts'
@@ -19,8 +20,7 @@ import {
   formatRange,
   fromShortId,
   getArchiveLink,
-  markIds,
-  markItems,
+  markedWorkIds,
   options,
   packIds,
   parseUser,
@@ -44,10 +44,9 @@ import { extensionAlive } from '#content_script/extensionAlive.js'
 import { linkedTo, openLinked } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex, markedForLaterIds } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
-import { clearHistoryItem, hideClearHistory, onHistoryPage, readingsUser, showClearHistory } from '#content_script/readingsNav.ts'
+import { anchorItem, hideClearHistory, listChrome, onHistoryPage, readingsUser, showClearHistory, showListChrome } from '#content_script/readingsNav.tsx'
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
 import { snapshotWorkIds } from '#content_script/searchView/cache.ts'
-import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { closeSearchView, isSearchViewOpen, openSearchView, resumeSearchView, suspendSearchView, undecorated } from '#content_script/searchView/host.tsx'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { claimReads } from '#content_script/tracked/readClaim.ts'
@@ -65,6 +64,8 @@ const BAR_CLASS = `${FEATURE}--bar`
 
 /** What the page calls this list, in its heading and in the subnav. */
 const LIST_NAME = 'Tracked'
+
+const VIEW: ReadingsView = { buttonClass: BUTTON_CLASS, chromeClass: CHROME_CLASS, name: LIST_NAME }
 
 /** Identifies this use of the search view — one id for the feature, as everywhere else. */
 const SOURCE_ID = 'tracked-review'
@@ -350,13 +351,13 @@ export class ReviewTrackedLists extends Unit {
       refreshInterval: () => (factsStale ? 0 : Number.POSITIVE_INFINITY),
       nativeElements: () => [
         ...document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
-        ...listChrome(),
+        ...listChrome(VIEW),
       ],
       mount: (container) => {
         const anchor = document.querySelector('#main ul.navigation.actions')
           ?? document.querySelector('#main ol.reading.work.index.group')
         anchor?.after(container)
-        showReviewChrome(userId)
+        showListChrome(VIEW, userId)
       },
       unmount: () => {
         for (const el of document.querySelectorAll(`.${CHROME_CLASS}`))
@@ -1075,12 +1076,7 @@ function lastReadAt(records: ReadonlyMap<string, TrackedRead> | undefined): stri
 
 /** Every work id any mark holds — the works a retired blurb is kept for. */
 function keptWorkIds(opts: Options): Set<string> {
-  const kept = new Set<string>()
-  const marks = opts.workMarks.marks
-  for (const id of markIds(marks)) {
-    for (const workId of markItems(marks, id))
-      kept.add(workId)
-  }
+  const kept = markedWorkIds(opts.workMarks.marks)
   // The saved-work index as it stands, not as it stood when the review opened:
   // a work the reader saved for later *during* the review is exactly the one
   // whose blurb is worth the bytes. Null when nothing has read the index on this
@@ -1219,65 +1215,4 @@ function confirmRow(text: string, label: string, onConfirm: () => void, onCancel
     row.append(cancel)
   }
   return row
-}
-
-// ---------------------------------------------------------------------------
-// The page it opens on.
-// ---------------------------------------------------------------------------
-
-/**
- * The subnav item our button goes after: whatever of ours already sits behind
- * the Marked for Later one, which is the read list's button.
- */
-function anchorItem(): HTMLElement | null {
-  const item = Array.from(document.querySelectorAll('#main ul.navigation.actions > li'))
-    .find(li => li.textContent?.trim() === 'Marked for Later')
-  if (!item)
-    return null
-  let last: Element = item
-  while (last.nextElementSibling?.classList.contains(ADDON_CLASS))
-    last = last.nextElementSibling
-  return last as HTMLElement
-}
-
-/**
- * The furniture that names the list on screen — the page heading, the subnav
- * item AO3 marks as current, our own button, and History's "clear everything".
- * Hidden while the view is up, because none of it is true any more: the reader
- * is looking at the review, whichever page they opened it from.
- */
-function listChrome(): Element[] {
-  const nav = document.querySelector('#main ul.navigation.actions')
-  return [
-    document.querySelector('#main > h2.heading'),
-    nav?.querySelector(`:scope > li:not(.${ADDON_CLASS}) > span.current`)?.parentElement,
-    nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li'),
-    clearHistoryItem(),
-  ].filter((el): el is HTMLElement => !!el)
-}
-
-/**
- * Stand in for {@link listChrome} while the view is up, the way AO3 draws its
- * own lists: a heading naming the review, its subnav item as the current one in
- * place of our button (or where it would be), and the item that *was* current
- * turned back into a link.
- */
-function showReviewChrome(userId: string): void {
-  const hidden = `.${NATIVE_HIDDEN_CLASS}`
-  const heading = document.querySelector(`#main > h2.heading${hidden}`)
-  heading?.after(<h2 class={`heading ${ADDON_CLASS}  ${CHROME_CLASS}`}>{LIST_NAME}</h2>)
-
-  const nav = document.querySelector('#main ul.navigation.actions')
-  const current = nav?.querySelector(`:scope > li${hidden} > span.current`)
-  if (current) {
-    const path = `/users/${encodeURIComponent(userId)}/readings`
-    const href = onHistoryPage() ? path : `${path}?show=to-read`
-    current.parentElement!.after(
-      <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><a href={href}>{current.textContent?.trim() ?? ''}</a></li>,
-    )
-  }
-  const place = nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li') ?? anchorItem()
-  place?.after(
-    <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><span class="current">{LIST_NAME}</span></li>,
-  )
 }

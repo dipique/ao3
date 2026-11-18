@@ -62,7 +62,7 @@ export const LIST_VERSION = 3
  * 0 is what a migrated record carries: markup moved across without a DOM to
  * parse it in.
  */
-export const PARSE_VERSION = 1
+export const PARSE_VERSION = 2
 
 /** How stale a stored blurb's `seenAt` may get before an identical re-scrape rewrites it anyway. */
 export const TOUCH_MS = 24 * 60 * 60 * 1000

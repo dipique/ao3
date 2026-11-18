@@ -15,6 +15,7 @@ import {
   MAX_PRIORITY,
   MIN_PRIORITY,
   ruleAffectsWorks,
+  ruleHasPriority,
   ruleHideMode,
   ruleHighlightColor,
   ruleMatchesAuthor,
@@ -290,6 +291,18 @@ describe('ruleAffectsWorks', () => {
     // back into the contest while it is off.
     assert.equal(ruleAffectsWorks(rule({ behavior: 'none', priority: 9, color: '#abcdefff' })), false)
     assert.equal(rulePriority(rule({ behavior: 'none', priority: 7 }), SETTINGS), 7)
+  })
+})
+
+describe('ruleHasPriority', () => {
+  test('a rule that decides whether a work is shown has one, and so does a switched-off rule', () => {
+    for (const behavior of [undefined, 'hide', 'collapse', 'invert', 'none'])
+      assert.equal(ruleHasPriority(rule({ behavior })), true, String(behavior))
+  })
+
+  test('a rule that only changes how its match is drawn has none', () => {
+    for (const behavior of ['highlight', 'hideFilter'])
+      assert.equal(ruleHasPriority(rule({ behavior })), false, behavior)
   })
 })
 

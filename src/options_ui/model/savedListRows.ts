@@ -5,11 +5,11 @@ import type { BucketBar } from './buckets.ts'
 import type { JobView } from './jobView.ts'
 
 import { hostPage, openLink } from '../../common/listLinks.ts'
-import { aliasOf, defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
-import { defaultTitle, describeFilters, describeList, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, titleKey, TRACKED_TYPE_LABELS, trackedMeta } from '../../common/trackedLists.ts'
+import { timeAgo } from '../../common/relativeTime.ts'
+import { defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
+import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, titleKey, TRACKED_TYPE_LABELS, trackedMeta } from '../../common/trackedLists.ts'
 import { bucketBar, formatBytes } from './buckets.ts'
 import { isRunning, jobIsOn, jobVerb, listJob, removeOff } from './jobView.ts'
-import { timeAgo } from './moments.ts'
 import { sentence, titlesInWords, withReason } from './phrases.ts'
 import { refreshNeeds } from './profileLists.ts'
 
@@ -248,11 +248,6 @@ export function copyTitle(copy: StoredListRef): string {
   const normalized = SAVED_LIST_SOURCE_IDS.includes(copy.sourceId ?? '') ? normalizeTrackedUrl(copy.listUrl ?? '') : null
   const meta = normalized ? storedListMeta(normalized.url, copy.label ?? '') : null
   return (meta && defaultTitle(meta)) || (copy.sourceId !== undefined && copy.label?.trim()) || copy.key
-}
-
-/** Why a title typed for a list isn't saved: `takenBy` has it. */
-export function titleRefusal(takenBy: SavedList): string {
-  return `Another list is already called ${describeList(aliasOf(takenBy))}, so this title isn't saved. Choose a different one.`
 }
 
 /** The other lists at a list's address, which search what it does, by title; null with none. */

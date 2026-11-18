@@ -50,6 +50,15 @@ export function ruleAffectsWorks(rule: { behavior?: FilterBehavior }): boolean {
 }
 
 /**
+ * Whether a rule has a priority to show: it takes part in deciding whether a
+ * work is shown ({@link ruleAffectsWorks}), or it is switched off (`none`) and
+ * keeps its priority for when it's switched back on.
+ */
+export function ruleHasPriority(rule: { behavior?: FilterBehavior }): boolean {
+  return rule.behavior === 'none' || ruleAffectsWorks(rule)
+}
+
+/**
  * How a work that lost the contest is taken out of the listing: gone entirely,
  * or kept in place as a collapsed reason line. The two halves of what a `hide`
  * rule used to do under the old global "collapse or hide fully" switch — which
@@ -176,17 +185,21 @@ export function ruleTargetLabel(target: RuleTarget): string {
   }
 }
 
-/** What a rule matches, and how: `Fandom "Some Fandom"`, `Any tag contains "au"`. */
+/**
+ * What a rule matches, and how: `Fandom "Some Fandom"`, `Any tag contains "au"`,
+ * and with the pseud an author rule is narrowed to, `Author "someone" (alt)`.
+ */
 export function ruleSubject(rule: Rule): string {
   const noun = ruleTargetLabel(rule.target)
 
-  return matchesById(rule.target, rule.value)
+  const subject = matchesById(rule.target, rule.value)
     ? `${noun} id ${rule.value.trim()}`
     : rule.matcher === 'contains'
       ? `${noun} contains "${rule.value}"`
       : rule.matcher === 'regex'
         ? `${noun} matches /${rule.value}/`
         : `${noun} "${rule.value}"`
+  return rule.pseud ? `${subject} (${rule.pseud})` : subject
 }
 
 /**

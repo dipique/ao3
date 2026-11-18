@@ -26,10 +26,21 @@ describe('entityIdFromURL', () => {
     assert.equal(entityIdFromURL(`${ARCHIVE}/series/56/`, 'series'), '56')
   })
 
+  test('reads a work linked from inside a collection, as a collection’s works listing links every title', () => {
+    assert.equal(entityIdFromURL(`${ARCHIVE}/collections/yuletide/works/94069456`, 'works'), '94069456')
+    assert.equal(entityIdFromURL(`${ARCHIVE}/collections/yuletide/works/94069456/chapters/7`, 'works'), '94069456')
+  })
+
+  test('a relative link is read against the base given', () => {
+    assert.equal(entityIdFromURL('/works/12/chapters/34', 'works', ARCHIVE), '12')
+    assert.equal(entityIdFromURL('/works/12', 'works'), undefined)
+  })
+
   test('a link to anything else, or no address at all, is none', () => {
     assert.equal(entityIdFromURL(`${ARCHIVE}/series/56`, 'works'), undefined)
     assert.equal(entityIdFromURL(`${ARCHIVE}/works/12abc`, 'works'), undefined)
-    assert.equal(entityIdFromURL(`${ARCHIVE}/collections/x/works/12`, 'works'), undefined)
+    assert.equal(entityIdFromURL(`${ARCHIVE}/collections/yuletide/works`, 'works'), undefined)
+    assert.equal(entityIdFromURL(`${ARCHIVE}/tags/Fluff/works/12`, 'works'), undefined)
     assert.equal(entityIdFromURL('not a url', 'works'), undefined)
   })
 })

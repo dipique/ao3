@@ -12,7 +12,7 @@ import type { SearchViewPrefs } from '#content_script/searchView/prefs.js'
 import type { SearchView, SearchViewConfig, ViewState } from '#content_script/searchView/view.js'
 import type { SiteData, SiteManifestWork } from '#content_script/siteExport/payload.js'
 
-import { ADDON_CLASS, getArchiveLink, options } from '#common'
+import { ADDON_CLASS, entityIdFromURL, getArchiveLink, options, timeAgo } from '#common'
 import { openMenuOf, pruneDetachedTriggers, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { createFloatingToolbar, toolbarButton } from '#content_script/floatingToolbar.tsx'
 import { attachReaderSizing } from '#content_script/readerSizing.ts'
@@ -63,9 +63,6 @@ import { chaptersOf, fragmentTarget, workRoute } from './workNav.ts'
  * write it out beside that count, and why a page that cannot keep a journal
  * doesn't offer marks at all.
  */
-
-/** A work id inside an href, however the link was written. */
-const WORK_HREF_RE = /\/works\/(\d+)(?:[/?#]|$)/
 
 const ROOT = `${ADDON_CLASS}--site`
 const cx = (suffix: string): string => `${ROOT}--${suffix}`
@@ -326,7 +323,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
       return
     const link = (event.target as Element | null)?.closest('a[href]')
     const href = link?.getAttribute('href') ?? ''
-    const id = WORK_HREF_RE.exec(href)?.[1]
+    const id = entityIdFromURL(href, 'works')
     if (!link || !id || !texts.has(id))
       return
     if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
@@ -621,7 +618,7 @@ function statusPanel(storage: SiteStorage): StatusPanel {
     const oldest = journal?.pending.oldestAt
     pending.replaceChildren(
       <strong>{count === 1 ? '1 change' : `${count.toLocaleString('en-US')} changes`}</strong>,
-      ` not yet exported${oldest ? `, ${count === 1 ? 'made' : 'the oldest'} ${ago(oldest)}` : ''}.`,
+      ` not yet exported${oldest ? `, ${count === 1 ? 'made' : 'the oldest'} ${timeAgo(oldest, Date.now())}` : ''}.`,
     )
   }
 
@@ -692,32 +689,8 @@ function statusPanel(storage: SiteStorage): StatusPanel {
 function lifespan(storage: SiteStorage): string {
   const opened = storage.previousOpen === null
     ? 'Archive currently open for the first time.'
-    : `Archive opened ${storage.meta.opens.toLocaleString('en-US')}x as of ${ago(storage.previousOpen)}.`
+    : `Archive opened ${storage.meta.opens.toLocaleString('en-US')}x as of ${timeAgo(storage.previousOpen, Date.now())}.`
   return storage.meta.persisted === true
     ? `${opened} This browser has marked them to survive.`
     : `${opened} Saved marks can be suddenly discarded so export changes frequently.`
-}
-
-const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
-
-/** Largest unit first would read "0 years ago"; smallest first stops at the right one. */
-const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
-  ['second', 60],
-  ['minute', 60],
-  ['hour', 24],
-  ['day', 7],
-  ['week', 4.345],
-  ['month', 12],
-  ['year', Number.POSITIVE_INFINITY],
-]
-
-/** "3 days ago", from an epoch. */
-function ago(timestamp: number): string {
-  let value = (timestamp - Date.now()) / 1000
-  for (const [unit, span] of RELATIVE_STEPS) {
-    if (Math.abs(value) < span)
-      return RELATIVE.format(Math.round(value), unit)
-    value /= span
-  }
-  return RELATIVE.format(Math.round(value), 'year')
 }

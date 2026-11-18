@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { timeAgo } from '../../src/common/relativeTime.ts'
 import { formatDay, isoDay } from '../../src/common/trackedLists.ts'
 import { jobView } from '../../src/options_ui/model/jobView.ts'
-import { timeAgo } from '../../src/options_ui/model/moments.ts'
 import { latestReviewable, NOTHING_REVIEWED, recordsLine, REVIEW_EMPTY, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, START_OFF, WORKS_PER_REVIEW } from '../../src/options_ui/model/review.ts'
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { figures, mentions } from '../facts.mjs'

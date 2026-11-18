@@ -61,6 +61,19 @@ export const TagType = {
     }
   },
 
+  /** What a group of tags of this type is called: `Ratings`, `Archive Warnings`, `Additional Tags`. */
+  toPluralString(type: TagType): string {
+    switch (type) {
+      case TagType.Rating: return 'Ratings'
+      case TagType.ArchiveWarning: return 'Archive Warnings'
+      case TagType.Category: return 'Categories'
+      case TagType.Fandom: return 'Fandoms'
+      case TagType.Relationship: return 'Relationships'
+      case TagType.Character: return 'Characters'
+      case TagType.Freeform: return 'Additional Tags'
+    }
+  },
+
   /** The class AO3 puts on this tag type's list in a blurb. */
   toCSSClass(type: TagType): string {
     switch (type) {
@@ -122,10 +135,14 @@ export function authorFromURL(href: string): { userId: string, pseud?: string } 
   return { userId: parts[1], pseud: parts[2] === 'pseuds' ? parts[3] : undefined }
 }
 
-/** The `:id` of a `/works/:id` or `/series/:id` link, ignoring any trailing path; undefined for any other link. */
-export function entityIdFromURL(href: string, kind: 'works' | 'series'): string | undefined {
+/**
+ * The `:id` of a `/works/:id` or `/series/:id` link, ignoring any trailing path
+ * and the `/collections/:name` a collection's listing puts in front of its
+ * titles; undefined for any other link. A relative link is read against `base`.
+ */
+export function entityIdFromURL(href: string, kind: 'works' | 'series', base?: string): string | undefined {
   try {
-    return new URL(href).pathname.match(new RegExp(`^/${kind}/(\\d+)(?:/|$)`))?.[1]
+    return new URL(href, base).pathname.match(new RegExp(`^(?:/collections/[^/]+)?/${kind}/(\\d+)(?:/|$)`))?.[1]
   }
   catch {
     return undefined

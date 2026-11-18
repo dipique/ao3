@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { ORPHAN_GRACE_MS } from '../../src/common/blurbRecord.ts'
+import { ORPHAN_GRACE_MS, PARSE_VERSION } from '../../src/common/blurbRecord.ts'
 import { installMock } from '../e2e/helpers.mjs'
 import { loadModuleInPage, skipWithoutChrome } from '../siteExport/helpers.mjs'
 
@@ -257,7 +257,7 @@ describe('searchView/blurbStore', { skip }, () => {
       return { title: snapshot.works[0].title, pv: data.pv, storedTitle: data.work?.title }
     })
     assert.equal(result.title, 'Migrated')
-    assert.equal(result.pv, 1)
+    assert.equal(result.pv, PARSE_VERSION)
     assert.equal(result.storedTitle, 'Migrated')
   })
 

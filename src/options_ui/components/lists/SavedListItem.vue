@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { SavedList } from '#common'
 
-import { describeList, getArchiveLink, toast } from '#common'
+import { aliasOf, alreadyTracked, getArchiveLink, titleRefusal, toast } from '#common'
 
 import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 import type { SavedListRow } from '../../model/savedListRows.ts'
 
 import { sentence, withReason } from '../../model/phrases.ts'
 import { listReadView } from '../../model/preload.ts'
-import { cachingCell, COPIED_MS, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, offlineDetails, rowAction, rowJob, sameSearchNote, SHARED_TITLE_NOTE, statusCell, titleRefusal, TRACK_OFF, trackingDetails, VIEW_EDIT_NOTE } from '../../model/savedListRows.ts'
+import { cachingCell, COPIED_MS, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, offlineDetails, rowAction, rowJob, sameSearchNote, SHARED_TITLE_NOTE, statusCell, TRACK_OFF, trackingDetails, VIEW_EDIT_NOTE } from '../../model/savedListRows.ts'
 
 /**
  * One saved list, as a row of Saved lists: what it is, whether it is tracked,
@@ -166,7 +166,7 @@ function track(on: boolean): void {
   }
   const twin = setTracked(props.row.id, on)
   if (twin)
-    toast(`This search is already tracked as ${describeList(twin)}.`, { type: 'error' })
+    toast(`${alreadyTracked(twin)}.`, { type: 'error' })
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +269,7 @@ function removeTheList(): void {
         <p v-if="refused" class="saved-list__note" role="alert">
           <SeverityGlyph severity="destructive" class="saved-list__glyph" />
           <span>
-            {{ titleRefusal(refused) }}
+            {{ titleRefusal(aliasOf(refused)) }}
             <button type="button" class="saved-list__link-btn touch-target link" :aria-label="`Undo: put back the title ${row.title}`" data-action="undo" @click="undoTitle">(undo)</button>
           </span>
         </p>

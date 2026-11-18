@@ -1,13 +1,13 @@
+import type { ReadingsView } from '#content_script/readingsNav.tsx'
 import type { SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
 
 import { ADDON_CLASS, builtinOpens, getArchiveLink, parseUser, readWorkIds, toast } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
 import { loadMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
-import { clearHistoryItem, hideClearHistory, onHistoryPage, readingsUser, showClearHistory } from '#content_script/readingsNav.ts'
+import { anchorItem, hideClearHistory, listChrome, onHistoryPage, readingsUser, showClearHistory, showListChrome } from '#content_script/readingsNav.tsx'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
 import { readMisses } from '#content_script/searchView/cache.ts'
-import { NATIVE_HIDDEN_CLASS } from '#content_script/searchView/classes.ts'
 import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { limitFor, openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
 import { detectPageCount, fetchPageDoc } from '#content_script/searchView/scrape.ts'
@@ -22,6 +22,8 @@ const CHROME_CLASS = `${FEATURE}--chrome`
 
 /** What the page calls this list, in its heading and in the subnav. */
 const LIST_NAME = 'Read'
+
+const VIEW: ReadingsView = { buttonClass: BUTTON_CLASS, chromeClass: CHROME_CLASS, name: LIST_NAME }
 
 /**
  * Identifies this use of the search view for local layout prefs. One id for the
@@ -201,13 +203,13 @@ export class SearchReadWorks extends Unit {
       // `mount` stands in for.
       nativeElements: () => [
         ...document.querySelectorAll('#main ol.reading.work.index.group, #main ol.pagination'),
-        ...listChrome(),
+        ...listChrome(VIEW),
       ],
       mount: (container) => {
         const anchor = document.querySelector('#main ul.navigation.actions')
           ?? document.querySelector('#main ol.reading.work.index.group')
         anchor?.after(container)
-        showReadChrome(userId)
+        showListChrome(VIEW, userId)
       },
       unmount: () => {
         for (const el of document.querySelectorAll(`.${CHROME_CLASS}`))
@@ -246,70 +248,6 @@ export class SearchReadWorks extends Unit {
       errorMessage: 'Could not load your reading history.',
     }
   }
-}
-
-/**
- * The furniture that names the list on screen: the page heading ("History",
- * "Marked for Later"), the subnav item AO3 marks as current, and our own button.
- * Hidden while the view is up, because what they say is no longer true — the
- * reader is looking at the read list, whichever page they opened it from.
- */
-function listChrome(): Element[] {
-  const nav = document.querySelector('#main ul.navigation.actions')
-  return [
-    document.querySelector('#main > h2.heading'),
-    nav?.querySelector(`:scope > li:not(.${ADDON_CLASS}) > span.current`)?.parentElement,
-    nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li'),
-    // The read list isn't History, so History's "clear everything" goes too.
-    clearHistoryItem(),
-  ].filter((el): el is HTMLElement => !!el)
-}
-
-/**
- * Stand in for {@link listChrome} while the view is up, the way AO3 draws its
- * own lists: a heading naming the list, the list's subnav item as the current
- * one — in place of our button, which has nothing left to do, or where it
- * would be — and the item that *was* current turned back into a link, so the
- * reader can go to it.
- *
- * Everything added carries {@link CHROME_CLASS}, which is what `unmount` removes;
- * the originals come back with the rest of the native page.
- */
-function showReadChrome(userId: string): void {
-  const hidden = `.${NATIVE_HIDDEN_CLASS}`
-  const heading = document.querySelector(`#main > h2.heading${hidden}`)
-  heading?.after(<h2 class={`heading ${ADDON_CLASS}  ${CHROME_CLASS}`}>{LIST_NAME}</h2>)
-
-  const nav = document.querySelector('#main ul.navigation.actions')
-  const current = nav?.querySelector(`:scope > li${hidden} > span.current`)
-  if (current) {
-    // The page's own list, as a link to itself: the plain native page again.
-    const path = `/users/${userId}/readings`
-    const href = onHistoryPage() ? path : `${path}?show=to-read`
-    current.parentElement!.after(
-      <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><a href={href}>{current.textContent?.trim() ?? ''}</a></li>,
-    )
-  }
-  const place = nav?.querySelector(`.${BUTTON_CLASS}`)?.closest('li') ?? anchorItem()
-  place?.after(
-    <li class={`${ADDON_CLASS}  ${CHROME_CLASS}`}><span class="current">{LIST_NAME}</span></li>,
-  )
-}
-
-/**
- * The subnav item our button goes after: the Marked for Later one (a link on
- * History, the current page's own label on the to-read list), skipping past
- * anything of ours already there.
- */
-function anchorItem(): HTMLElement | null {
-  const item = Array.from(document.querySelectorAll('#main ul.navigation.actions > li'))
-    .find(li => li.textContent?.trim() === 'Marked for Later')
-  if (!item)
-    return null
-  let last: Element = item
-  while (last.nextElementSibling?.classList.contains(ADDON_CLASS))
-    last = last.nextElementSibling
-  return last as HTMLElement
 }
 
 function snapshotKey(userId: string): string {

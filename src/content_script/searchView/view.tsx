@@ -9,7 +9,7 @@ import MdiRefresh from '~icons/mdi/refresh.jsx'
 
 import type { Work } from '#content_script/blurb.js'
 
-import { ADDON_CLASS } from '#common'
+import { ADDON_CLASS, timeAgo } from '#common'
 import { hasNode } from '#content_script/blurb.js'
 import React from '#dom'
 
@@ -364,18 +364,6 @@ const DROP_REASONS: Record<StableDrop, string> = {
  */
 function results(works: Work[]): Work[] {
   return works.filter(work => !work.hidden)
-}
-
-/** `just now`, `5 minutes ago`, `3 hours ago`, `2 days ago`. */
-function timeAgo(at: number, now: number = Date.now()): string {
-  const minutes = Math.floor((now - at) / 60_000)
-  const say = (n: number, unit: string): string => `${n} ${unit}${n === 1 ? '' : 's'} ago`
-  if (minutes < 1)
-    return 'just now'
-  if (minutes < 60)
-    return say(minutes, 'minute')
-  const hours = Math.floor(minutes / 60)
-  return hours < 24 ? say(hours, 'hour') : say(Math.floor(hours / 24), 'day')
 }
 
 function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
@@ -959,7 +947,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
         // Worked out on hover rather than when set, so "just now" doesn't go on
         // saying so an hour later on a tab left open.
         button.addEventListener('mouseenter', () => {
-          button.title = refreshedAt === undefined ? 'Refresh' : `Refresh — last refreshed ${timeAgo(refreshedAt)}`
+          button.title = refreshedAt === undefined ? 'Refresh' : `Refresh — last refreshed ${timeAgo(refreshedAt, Date.now())}`
         })
         return button
       })()

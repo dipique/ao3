@@ -3,6 +3,7 @@ import type { Work } from '#content_script/blurb.js'
 
 import type { TextQuery } from './textQuery.ts'
 
+import { TagType } from '../../common/data.ts'
 import { foldText, parseTextQuery, queryMatches } from './textQuery.ts'
 
 /**
@@ -46,13 +47,13 @@ export const FACET_LABELS: Record<FacetKey, string> = {
   status: 'Status',
   source: 'List source',
   offline: 'Offline copy',
-  rating: 'Rating',
-  warnings: 'Archive Warnings',
-  categories: 'Categories',
-  fandoms: 'Fandoms',
-  relationships: 'Relationships',
-  characters: 'Characters',
-  freeforms: 'Additional Tags',
+  rating: TagType.toPluralString(TagType.Rating),
+  warnings: TagType.toPluralString(TagType.ArchiveWarning),
+  categories: TagType.toPluralString(TagType.Category),
+  fandoms: TagType.toPluralString(TagType.Fandom),
+  relationships: TagType.toPluralString(TagType.Relationship),
+  characters: TagType.toPluralString(TagType.Character),
+  freeforms: TagType.toPluralString(TagType.Freeform),
   language: 'Language',
   completion: 'Completion Status',
 }

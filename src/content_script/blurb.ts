@@ -1,6 +1,6 @@
 import type { BlurbSource, Tag, TagType } from '#common'
 
-import { entityIdFromURL } from '#common'
+import { authorFromURL, entityIdFromURL } from '#common'
 import { getTagFromElement } from '#content_script/utils.js'
 
 /** A blurb tag, plus the fandom link href (needed to resolve a fandom's id). */
@@ -71,15 +71,8 @@ export function getBlurb(blurbElement: Element): Blurb {
     fandom => fandom.textContent!,
   )
 
-  const authors = Array.from(
-    blurbElement.querySelectorAll('.heading a[rel=author]'),
-  ).map((author) => {
-    const parts = new URL((author as HTMLAnchorElement).href).pathname.split('/')
-    return {
-      userId: parts[2]!,
-      pseud: parts[4],
-    }
-  })
+  const authors = Array.from(blurbElement.querySelectorAll<HTMLAnchorElement>('.heading a[rel=author]'))
+    .flatMap(link => authorFromURL(link.href) ?? [])
 
   const tags: BlurbTag[] = [
     ...Array.from(blurbElement.querySelector('.required-tags .rating')?.textContent?.split(',') || []).map(name => ({
@@ -351,16 +344,15 @@ export function parseWork(el: HTMLLIElement, markedOrder: number): Work {
   // link the same way.
   const titleLink = el.querySelector<HTMLAnchorElement>('.header h4.heading a[href*="/works/"]')
   const workId = el.id.match(/work_(\d+)/)?.[1]
-    ?? (titleLink ? new URL(titleLink.href).pathname.match(/^\/works\/(\d+)/)?.[1] : undefined)
+    ?? (titleLink ? entityIdFromURL(titleLink.href, 'works') : undefined)
     ?? ''
   const title = titleLink?.textContent?.trim() ?? '(untitled)'
 
-  const authors: WorkAuthor[] = Array.from(
-    el.querySelectorAll<HTMLAnchorElement>('.heading a[rel=author]'),
-  ).map((a) => {
-    const parts = new URL(a.href).pathname.split('/')
-    return { userId: parts[2] ?? '', pseud: parts[4], text: a.textContent!.trim() }
-  })
+  const authors: WorkAuthor[] = Array.from(el.querySelectorAll<HTMLAnchorElement>('.heading a[rel=author]'))
+    .flatMap((link) => {
+      const author = authorFromURL(link.href)
+      return author ? [{ ...author, text: link.textContent!.trim() }] : []
+    })
 
   const chapters = readChapterCounts(el.querySelector('dd.chapters')) ?? { written: 0, total: null }
   const { written, total } = chapters

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { timeAgo } from '../../src/common/relativeTime.ts'
 import { claimRefresh } from '../../src/content_script/searchView/listRefresh.ts'
 import { bucketBar, bucketFigures } from '../../src/options_ui/model/buckets.ts'
 import { foreignView, jobView, offReason } from '../../src/options_ui/model/jobView.ts'
-import { timeAgo } from '../../src/options_ui/model/moments.ts'
 import { KEEP_BY_VIEW, PROFILE_LISTS, profileTiles, REFRESH_OFF, refreshNeeds } from '../../src/options_ui/model/profileLists.ts'
 import { mentions } from '../facts.mjs'
 

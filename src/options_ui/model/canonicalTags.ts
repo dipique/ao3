@@ -362,13 +362,7 @@ const BLANK: CanonicalPreview = { head: null, sources: null, rows: [], more: nul
 /** What the head line calls the tags it counts, by the rule's target. */
 export const CANONICAL_NOUNS: Record<'tag' | TagType, string> = {
   tag: 'tags',
-  [TagType.Rating]: 'Ratings',
-  [TagType.ArchiveWarning]: 'Archive Warnings',
-  [TagType.Category]: 'Categories',
-  [TagType.Fandom]: 'Fandoms',
-  [TagType.Relationship]: 'Relationships',
-  [TagType.Character]: 'Characters',
-  [TagType.Freeform]: 'Additional Tags',
+  ...Object.fromEntries(TagType.values().map(type => [type, TagType.toPluralString(type)])) as Record<TagType, string>,
 }
 
 /** Why AO3's part is missing. */

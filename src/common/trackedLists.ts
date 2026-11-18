@@ -1881,11 +1881,27 @@ export function sameTitle(a: unknown, b: unknown): boolean {
   return titleKey(a) === titleKey(b)
 }
 
+/** A list as the title helpers read one: a saved list's title as its alias. */
+export type ListTitle = Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>
+
 /** A list by its title, and by what it searches where the title doesn't say: “Mine” (Search: tea). */
-export function describeList(list: Pick<TrackedList, 'id' | 'alias' | 'url' | 'type' | 'entity'>): string {
+export function describeList(list: ListTitle): string {
   const meta = trackedMeta(list)
   const title = sourceLabel(list)
   return meta && !sameTitle(title, defaultTitle(meta)) ? `“${title}” (${defaultTitle(meta)})` : `“${title}”`
+}
+
+/** Why a title the reader typed isn't saved: `other` already has it. */
+export function titleRefusal(other: ListTitle): string {
+  return `Another list is already called ${describeList(other)}, so this title isn't saved. Choose a different one.`
+}
+
+/**
+ * That another tracked list is this same search, naming it: the start of a
+ * refusal, which goes on to say what was left undone, or ends there.
+ */
+export function alreadyTracked(twin: ListTitle): string {
+  return `This search is already tracked as ${describeList(twin)}`
 }
 
 /**
