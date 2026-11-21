@@ -43,7 +43,7 @@ const DB_NAME = 'ao3e-site'
 const STORAGE_STORE = 'storage'
 
 /**
- * The append-only record of what the reader did here, for the change ops an
+ * The record of what the reader did here, for the change ops an
  * export hands back to the extension. Created with the database rather than
  * waiting for the feature that fills it, so the store is already there for an
  * export built before it and one built after.

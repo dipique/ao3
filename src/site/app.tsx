@@ -36,7 +36,7 @@ import type { Journal } from './journal.ts'
 import type { SiteStorage } from './shim.ts'
 import type { ChapterEntry } from './workNav.ts'
 
-import { restoreUnimported, start as startJournal } from './journal.ts'
+import { dropImported, restoreUnimported, start as startJournal } from './journal.ts'
 import { chaptersOf, fragmentTarget, workRoute } from './workNav.ts'
 
 /**
@@ -137,6 +137,7 @@ export async function startSite(ctx: SiteContext): Promise<void> {
   })
 
   const status = statusPanel(storage)
+  await dropImported({ applied: data.applied, generatedAt: data.manifest.generatedAt }).catch(status.fail)
   if (storage.seeded)
     await restoreUnimported(data.applied).catch(status.fail)
   const loaded = await options.get()
@@ -623,7 +624,7 @@ function statusPanel(storage: SiteStorage): StatusPanel {
   }
 
   /**
-   * The button, and whatever it has to say for itself afterwards.
+   * The buttons, and whatever they have to say for themselves afterwards.
    *
    * Offered whenever there is a journal, not only when something is waiting in
    * it: the file carries everything ever recorded here ({@link
@@ -631,15 +632,30 @@ function statusPanel(storage: SiteStorage): StatusPanel {
    * download they lost. What it says afterwards names the file, because on the
    * device this was built for the next step is finding it in Files and getting
    * it back to the computer the extension is on.
+   *
+   * Once a file is saved, a second button clears what went into it from this
+   * browser, for a reader who has the file safe.
    */
   function offerExport(journal: Journal): void {
     const button = (<button type="button" class={cx('status-export')}>Export changes</button>) as HTMLElement as HTMLButtonElement
+    const clear = (<button type="button" class={cx('status-clear')} hidden>Clear exported changes</button>) as HTMLElement as HTMLButtonElement
     const said = (<span class={cx('status-said')} />) as HTMLElement
-    actions.replaceChildren(button, said)
+    actions.replaceChildren(
+      <span class={cx('status-buttons')}>
+        {button}
+        {clear}
+      </span>,
+      said,
+    )
     actions.hidden = false
+    const showClear = (): void => {
+      clear.hidden = !journal.clearable
+    }
+    journal.onChange(showClear)
 
     button.addEventListener('click', () => {
       button.disabled = true
+      clear.disabled = true
       said.textContent = 'Saving…'
       journal.save().then(
         (written) => {
@@ -652,6 +668,23 @@ function statusPanel(storage: SiteStorage): StatusPanel {
         },
       ).finally(() => {
         button.disabled = false
+        clear.disabled = false
+      })
+    })
+
+    clear.addEventListener('click', () => {
+      button.disabled = true
+      clear.disabled = true
+      journal.clearSaved().then(
+        (cleared) => {
+          said.textContent = `Cleared ${cleared.toLocaleString('en-US')} exported ${cleared === 1 ? 'change' : 'changes'} from this browser.`
+        },
+        (error: unknown) => {
+          said.textContent = `Exported changes could not be cleared — ${error instanceof Error ? error.message : String(error)}.`
+        },
+      ).finally(() => {
+        button.disabled = false
+        clear.disabled = false
       })
     })
   }

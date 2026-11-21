@@ -182,8 +182,9 @@ body.ao3e-site {
   grid-column: 2;
 }
 
-/* The way out of that warning: write everything recorded here to a file. Sized
-   for a thumb, because the device this is read on has no pointer. */
+/* The way out of that warning: write everything recorded here to a file, then
+   clear what the file took. Sized for a thumb, because the device this is read
+   on has no pointer. */
 .AO3E--site--status .AO3E--site--status-actions {
   display: contents;
 }
@@ -192,8 +193,14 @@ body.ao3e-site {
   display: none;
 }
 
-.AO3E--site--status-export {
+.AO3E--site--status-buttons {
   grid-column: 1;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.AO3E--site--status-export,
+.AO3E--site--status-clear {
   font: inherit;
   color: inherit;
   background: var(--ao3e-site-panel);
@@ -204,7 +211,12 @@ body.ao3e-site {
   cursor: pointer;
 }
 
-.AO3E--site--status-export:disabled {
+.AO3E--site--status-clear[hidden] {
+  display: none;
+}
+
+.AO3E--site--status-export:disabled,
+.AO3E--site--status-clear:disabled {
   cursor: default;
   opacity: 0.6;
 }
@@ -622,6 +634,13 @@ body.ao3e-site .AO3E--reader-handle-left {
 
 .ao3e-site .required-tags .complete-yes {
   color: var(--ao3e-site-sym-tick);
+}
+
+/* A phone has no width to give two buttons beside the line about storage. */
+@media (max-width: 34rem) {
+  .AO3E--site--status-buttons {
+    flex-direction: column;
+  }
 }
 
 /*

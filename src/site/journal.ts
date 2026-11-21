@@ -3,7 +3,7 @@ import type { ChangeExport, ChangeOp } from '#content_script/siteExport/changeOp
 import type { MarkWrite } from '#content_script/workMarks.js'
 
 import { markRoot, markTracksProgress, options, READ_MARK, saveAs } from '#common'
-import { CHANGE_SCHEMA_VERSION, changeFileName, changeOpFor, newOpId } from '#content_script/siteExport/changeOps.js'
+import { CHANGE_SCHEMA_VERSION, changeFileName, changeOpFor, importedOpIds, newOpId } from '#content_script/siteExport/changeOps.js'
 import { replayChanges } from '#content_script/siteExport/replay.js'
 import { observeMarkWrites } from '#content_script/workMarks.js'
 
@@ -14,9 +14,14 @@ import { JOURNAL_STORE, recordExport, siteDatabase } from './shim.ts'
  *
  * An export is read where the extension isn't, so marking one is only half an
  * act — the other half happens when the extension sees it again. Between the two
- * sits this: an **append-only journal** in the `journal` store of the one
- * `ao3e-site` database ({@link file://./shim.ts}), written as the reader marks
- * and read back when they export it.
+ * sits this: a **journal** in the `journal` store of the one `ao3e-site`
+ * database ({@link file://./shim.ts}), appended to as the reader marks and read
+ * back when they export it.
+ *
+ * **Ops leave it once the extension has them**, two ways. Opening an archive
+ * drops those its ledger says were imported ({@link dropImported}), and after a
+ * file is saved the reader can clear what went into it
+ * ({@link Journal.clearSaved}).
  *
  * **One journal, shared by every export.** Every local file lives on one `file:`
  * origin, so a re-export — which lands under a new name — finds what the last
@@ -58,6 +63,10 @@ export interface Journal {
   onChange: (fn: () => void) => void
   /** Hand everything recorded here to the reader as a file. See {@link save}. */
   save: () => Promise<Written>
+  /** Whether a file has been saved this session whose ops are still recorded here. */
+  readonly clearable: boolean
+  /** Delete the ops the last saved file carried, and say how many went. */
+  clearSaved: () => Promise<number>
 }
 
 export interface JournalContext {
@@ -101,14 +110,20 @@ export async function start(ctx: JournalContext): Promise<Journal | null> {
   }
 
   const listeners = new Set<() => void>()
+  const notify = (): void => {
+    for (const listener of listeners)
+      listener()
+  }
+  let lastExportedAt = ctx.lastExportedAt
+  /** The ids the last saved file carried, until they are cleared. */
+  let saved: string[] = []
   /** Appends are chained, so ops land in the order the reader made them. */
   let writes: Promise<void> = Promise.resolve()
 
   observeMarkWrites((write) => {
     const op = opFor(write, ctx)
     pending = { count: pending.count + 1, oldestAt: pending.oldestAt ?? op.at }
-    for (const listener of listeners)
-      listener()
+    notify()
     // A failed append is reported, not retried: the mark itself is already in
     // storage, and the honest thing to do about a journal that stopped taking
     // ops is to say so rather than to guess when it might start again.
@@ -122,8 +137,8 @@ export async function start(ctx: JournalContext): Promise<Journal | null> {
    * ops made since the last export — would make each file the only copy of the
    * afternoon it covers, on a device where a download is as easy to lose as a
    * browser is to clear. Ops are tiny, the ingest skips by id any it has already
-   * applied, and re-exporting is the reader's whole recovery from a file they
-   * mislaid. So the count resets and the store does not.
+   * applied, and re-exporting is the reader's recovery from a file they mislaid.
+   * So the count resets and the store does not, until the reader clears it.
    *
    * Outstanding appends are waited for first, so a mark made a second ago is in
    * this file rather than in the next one.
@@ -140,10 +155,26 @@ export async function start(ctx: JournalContext): Promise<Journal | null> {
     saveAs(new Blob([JSON.stringify(file)], { type: 'application/json' }), fileName)
 
     await recordExport(exportedAt)
+    lastExportedAt = exportedAt
+    saved = ops.map(op => op.id)
     pending = { count: 0, oldestAt: null }
-    for (const listener of listeners)
-      listener()
+    notify()
     return { ops: ops.length, fileName }
+  }
+
+  /**
+   * Forget what the last saved file carried, for a reader who has it safe. Only
+   * those ops, by id: a mark made since that file was written is in no file yet.
+   */
+  const clearSaved = async (): Promise<number> => {
+    const ids = saved
+    if (!ids.length)
+      return 0
+    await deleteOps(db, ids)
+    saved = []
+    pending = await countPending(db, lastExportedAt)
+    notify()
+    return ids.length
   }
 
   return {
@@ -152,7 +183,26 @@ export async function start(ctx: JournalContext): Promise<Journal | null> {
     },
     onChange: fn => void listeners.add(fn),
     save,
+    get clearable() {
+      return saved.length > 0
+    },
+    clearSaved,
   }
+}
+
+/**
+ * Delete the ops recorded here that the archive being opened says the
+ * extension has already imported ({@link importedOpIds}). What is left is what
+ * the extension has yet to see, which is what the count of unexported changes
+ * and the next change file should be about.
+ */
+export async function dropImported(archive: { applied: readonly string[], generatedAt: number }): Promise<void> {
+  const db = siteDatabase()
+  if (!db || !archive.applied.length)
+    return
+  const ids = importedOpIds(await readOps(db), archive)
+  if (ids.length)
+    await deleteOps(db, ids)
 }
 
 /**
@@ -179,7 +229,7 @@ export async function restoreUnimported(applied: readonly string[]): Promise<voi
     await options.set({ workMarks: { ...workMarks, marks } })
 }
 
-/** Every op ever recorded here, oldest first — the order an ingest replays in. */
+/** Every op recorded here, oldest first — the order an ingest replays in. */
 function readOps(db: IDBDatabase): Promise<ChangeOp[]> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(JOURNAL_STORE, 'readonly')
@@ -210,6 +260,18 @@ function opFor(write: MarkWrite, ctx: JournalContext): ChangeOp {
       && markRoot(table, write.markId) === READ_MARK
       && !markTracksProgress(table, write.markId),
     listedForLater: ctx.sourceId === MARKED_FOR_LATER,
+  })
+}
+
+function deleteOps(db: IDBDatabase, ids: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(JOURNAL_STORE, 'readwrite')
+    const store = tx.objectStore(JOURNAL_STORE)
+    for (const id of ids)
+      store.delete(id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error('the changes could not be cleared'))
+    tx.onabort = () => reject(tx.error ?? new Error('storage refused to clear the changes'))
   })
 }
 

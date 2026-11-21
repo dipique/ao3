@@ -7,6 +7,7 @@ import {
   CHANGE_SCHEMA_VERSION,
   changeFileName,
   changeOpFor,
+  importedOpIds,
   newOpId,
   parseChangeExport,
 } from '../../src/content_script/siteExport/changeOps.ts'
@@ -166,5 +167,40 @@ describe('siteExport/changeOps — the file', () => {
     }))
     assert.equal(unreadable, 0)
     assert.equal(file.ops.length, 1)
+  })
+})
+
+/**
+ * Which ops recorded in an export's browser the extension has already taken in,
+ * judged against the archive being opened: its ledger of applied op ids, and
+ * when it was made.
+ */
+describe('siteExport/changeOps — what an archive says was imported', () => {
+  const GENERATED = AT + 60_000
+  const op = (id, at) => ({ id, at, workId: '11', op: 'setMark', payload: { markId: 'favorite', on: true } })
+
+  test('an op the archive\'s ledger names, made before the archive, is imported', () => {
+    assert.deepEqual(importedOpIds([op('op-1', AT)], { applied: ['op-1'], generatedAt: GENERATED }), ['op-1'])
+  })
+
+  test('an op the ledger does not name is kept', () => {
+    assert.deepEqual(importedOpIds([op('op-1', AT)], { applied: ['op-2'], generatedAt: GENERATED }), [])
+  })
+
+  test('an op made after the archive is kept, whatever the ledger says', () => {
+    assert.deepEqual(importedOpIds([op('op-1', GENERATED + 1)], { applied: ['op-1'], generatedAt: GENERATED }), [])
+  })
+
+  test('an op made in the same millisecond as the archive is kept', () => {
+    assert.deepEqual(importedOpIds([op('op-1', GENERATED)], { applied: ['op-1'], generatedAt: GENERATED }), [])
+  })
+
+  test('picks the imported ones out of a mix, in the order given', () => {
+    const ops = [op('op-1', AT), op('op-2', AT + 1), op('op-3', AT + 2), op('op-4', GENERATED + 5)]
+    assert.deepEqual(importedOpIds(ops, { applied: ['op-3', 'op-1', 'op-4'], generatedAt: GENERATED }), ['op-1', 'op-3'])
+  })
+
+  test('an empty ledger imports nothing', () => {
+    assert.deepEqual(importedOpIds([op('op-1', AT)], { applied: [], generatedAt: GENERATED }), [])
   })
 })

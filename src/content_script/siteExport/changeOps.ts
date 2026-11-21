@@ -108,6 +108,28 @@ export function changeOpFor(
 }
 
 /**
+ * The ops, of those recorded in an export's browser, that the archive being
+ * opened says the extension has already taken in.
+ *
+ * `applied` is the extension's ledger as of the moment the archive was made, so
+ * an op it names has had its mark put in the table, and any request to AO3 the
+ * op carried is now the extension's to make. Nothing is left for the browser's
+ * record of it to do.
+ *
+ * The op must also predate the archive: the ledger can only have learned of
+ * ops made before it was copied, so one that claims a later moment is kept
+ * rather than trusted. That also keeps an op from a device whose clock runs
+ * ahead, which costs nothing worse than one more op in the next change file.
+ */
+export function importedOpIds(
+  ops: readonly ChangeOp[],
+  archive: { applied: readonly string[], generatedAt: number },
+): string[] {
+  const applied = new Set(archive.applied)
+  return ops.filter(op => op.at < archive.generatedAt && applied.has(op.id)).map(op => op.id)
+}
+
+/**
  * An id for a new op. `randomUUID` where it is there — it wants a secure
  * context, which a page opened from disk is not guaranteed to be — and a
  * timestamped random string otherwise. Uniqueness is all that is asked of it:

@@ -1637,6 +1637,135 @@ describe('options UI — site export', { skip }, () => {
     }
   })
 
+  /** Every op in the page's journal store, oldest first. */
+  const journalOps = reader => reader.evaluate(() => new Promise((resolve, reject) => {
+    const open = indexedDB.open('ao3e-site')
+    open.onerror = () => reject(open.error)
+    open.onsuccess = () => {
+      const db = open.result
+      const request = db.transaction('journal', 'readonly').objectStore('journal').index('at').getAll()
+      request.onsuccess = () => {
+        db.close()
+        resolve(request.result)
+      }
+      request.onerror = () => reject(request.error)
+    }
+  }))
+
+  /** The status panel's count of unexported changes, and whether it offers to clear the exported ones. */
+  const changesPanel = reader => reader.$eval('.AO3E--site--status', el => ({
+    count: el.dataset.ao3ePending,
+    clearable: !!el.querySelector('.AO3E--site--status-clear:not([hidden])'),
+  }))
+
+  /**
+   * Once a file of changes is saved, the page offers to forget what went into
+   * it. Only what went into it: a mark made after the file was written exists
+   * nowhere else, so clearing leaves it in the record and in the count.
+   */
+  test('changes written to a file can be cleared from the browser, and one made since is kept', async () => {
+    const { html } = await lastDownload()
+    const dir = writeExport(html, 'clear.html')
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('pageerror', e => errors.push(e.message))
+    await reader.evaluateOnNewDocument(captureDownloads)
+    const mark = async (id) => {
+      await openMenu(reader, () => reader.$eval(`#work_${id} h4.heading a`, el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))))
+      assert.ok(await pickRow(reader, 'mark', 'boring'))
+    }
+    try {
+      await openFresh(reader, fileUrl(dir, 'clear.html'))
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+      assert.equal((await changesPanel(reader)).clearable, false, 'nothing has been written to a file yet')
+
+      await mark('11')
+      await until('the change to be counted', async () => (await changesPanel(reader)).count === '1')
+      assert.equal((await changesPanel(reader)).clearable, false, 'an unexported change is not offered for clearing')
+
+      await reader.click('.AO3E--site--status-export')
+      await until('the change file to be handed over', () => reader.evaluate(() => window.__downloads.length > 0))
+      await until('clearing to be offered', async () => (await changesPanel(reader)).clearable)
+      const exported = await journalOps(reader)
+      assert.deepEqual(exported.map(op => op.workId), ['11'])
+
+      await mark('12')
+      await until('the later change to be counted', async () => (await changesPanel(reader)).count === '1')
+      await until('the later change to be recorded', async () => (await journalOps(reader)).length === 2)
+
+      await reader.click('.AO3E--site--status-clear')
+      await until('the exported change to be cleared', async () => (await journalOps(reader)).length === 1)
+      const kept = await journalOps(reader)
+      assert.equal(kept[0].workId, '12', 'the change made since the file was written is kept')
+      assert.notEqual(kept[0].id, exported[0].id)
+      assert.deepEqual(await changesPanel(reader), { count: '1', clearable: false })
+
+      await reader.reload({ waitUntil: 'load' })
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+      assert.deepEqual(await changesPanel(reader), { count: '1', clearable: false }, 'reopened, the kept change is still waiting')
+      assert.equal((await journalOps(reader)).length, 1)
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  /**
+   * An archive carries the extension's ledger of the changes it has taken in, as
+   * of when the archive was made. Opening it takes those out of this browser's
+   * record — they have nothing left to do here — and keeps the rest: what the
+   * ledger doesn't name, and what was made after the archive.
+   */
+  test('opening an archive drops the recorded changes its ledger says were imported', async () => {
+    const { html, data } = await lastDownload()
+    const generatedAt = data.manifest.generatedAt + 1
+    const op = (id, workId, at) => ({ id, at, workId, op: 'setMark', payload: { markId: 'boring', on: true } })
+    const recorded = [
+      op('imported', '11', generatedAt - 20_000),
+      op('not-imported', '12', generatedAt - 10_000),
+      op('made-after', '13', generatedAt + 10_000),
+    ]
+    const dir = writeExport(html, 'older.html')
+    writeFileSync(join(dir, 'newer.html'), withData(html, (d) => {
+      d.manifest.generatedAt = generatedAt
+      d.applied = ['imported', 'made-after']
+    }))
+    const reader = await browser.newPage()
+    const errors = []
+    reader.on('pageerror', e => errors.push(e.message))
+    try {
+      await openFresh(reader, fileUrl(dir, 'older.html'))
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+      await reader.evaluate(ops => new Promise((resolve, reject) => {
+        const open = indexedDB.open('ao3e-site')
+        open.onerror = () => reject(open.error)
+        open.onsuccess = () => {
+          const db = open.result
+          const tx = db.transaction('journal', 'readwrite')
+          for (const o of ops)
+            tx.objectStore('journal').put(o)
+          tx.oncomplete = () => {
+            db.close()
+            resolve()
+          }
+          tx.onerror = () => reject(tx.error)
+        }
+      }), recorded)
+
+      await reader.goto(fileUrl(dir, 'newer.html'), { waitUntil: 'load' })
+      await reader.waitForSelector(RESULTS, { timeout: 15000 })
+      assert.deepEqual((await journalOps(reader)).map(o => o.id), ['not-imported', 'made-after'])
+      assert.equal((await changesPanel(reader)).count, '2')
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   /**
    * Each open file holds its own copy of what this browser stores, read in when
    * it opened. A file open beside it has to hear about what it stores, or the
