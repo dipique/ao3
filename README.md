@@ -60,7 +60,8 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 ### Marks and progress
 
 - **Work marks**: mark a work Read, or give it a verdict (Favorite, Good, Boring, Bad, Gross, Hot, Dark, Feelsy, Fluff, No, Abandoned), from its menu, and an icon shows the mark wherever the work is listed. A mark can carry a description of what you mean by it, shown beside it in the options and on hover where you mark a work. Marks are kept by the extension, not on AO3; pressing AO3's own "Mark as Read" records one too.
-- Any mark can hide its works from listings. Marks can be renamed, reordered and given other icons, and you can add your own.
+- Any mark can hide its works from listings. Marks can be renamed, reordered and given other icons (among them rating badges and content-warning icons), and you can add your own.
+- **Rating grid**: press R on a work, on AO3 or in an offline copy, to see every mark in colour as a grid of large buttons. Each one clicked moves up into a row of the work's marks, and the grid stays open for the next; R, Escape or a click outside closes it.
 - The Ongoing mark ("Mark as ongoing…") records the chapter you reached and an optional wait-until date; instant search views then show the work as Ready, Waiting or Caught up.
 
 ### Tracked lists

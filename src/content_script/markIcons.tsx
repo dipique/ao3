@@ -1,3 +1,12 @@
+import Ao3eMarkCringe from '~icons/ao3e/mark-cringe.jsx'
+import Ao3eMarkDeadDove from '~icons/ao3e/mark-dead-dove.jsx'
+import Ao3eMarkPlusP from '~icons/ao3e/mark-plus-p.jsx'
+import Ao3eMarkRatingG from '~icons/ao3e/mark-rating-g.jsx'
+import Ao3eMarkRatingPg13 from '~icons/ao3e/mark-rating-pg13.jsx'
+import Ao3eMarkRatingPg from '~icons/ao3e/mark-rating-pg.jsx'
+import Ao3eMarkRatingR from '~icons/ao3e/mark-rating-r.jsx'
+import Ao3eMarkRelicCross from '~icons/ao3e/mark-relic-cross.jsx'
+import Ao3eMarkWardingFingers from '~icons/ao3e/mark-warding-fingers.jsx'
 import MdiAlert from '~icons/mdi/alert.jsx'
 import MdiBomb from '~icons/mdi/bomb.jsx'
 import MdiBookCheck from '~icons/mdi/book-check.jsx'
@@ -29,9 +38,11 @@ import MdiEyeOff from '~icons/mdi/eye-off.jsx'
 import MdiFire from '~icons/mdi/fire.jsx'
 import MdiFlag from '~icons/mdi/flag.jsx'
 import MdiGhost from '~icons/mdi/ghost.jsx'
+import MdiHandOkay from '~icons/mdi/hand-okay.jsx'
 import MdiHeartBroken from '~icons/mdi/heart-broken.jsx'
 import MdiHeartMultiple from '~icons/mdi/heart-multiple.jsx'
 import MdiHeart from '~icons/mdi/heart.jsx'
+import MdiKnifeMilitary from '~icons/mdi/knife-military.jsx'
 import MdiLightbulb from '~icons/mdi/lightbulb.jsx'
 import MdiLightningBolt from '~icons/mdi/lightning-bolt.jsx'
 import MdiMinusThick from '~icons/mdi/minus-thick.jsx'
@@ -106,6 +117,17 @@ const MARK_ICONS: Record<string, () => Node> = {
   'mdi/weather-rainy': () => <MdiWeatherRainy />,
   'mdi/creation': () => <MdiCreation />,
   'mdi/crown': () => <MdiCrown />,
+  'ao3e/mark-rating-g': () => <Ao3eMarkRatingG />,
+  'ao3e/mark-rating-pg': () => <Ao3eMarkRatingPg />,
+  'ao3e/mark-rating-pg13': () => <Ao3eMarkRatingPg13 />,
+  'ao3e/mark-rating-r': () => <Ao3eMarkRatingR />,
+  'ao3e/mark-plus-p': () => <Ao3eMarkPlusP />,
+  'ao3e/mark-dead-dove': () => <Ao3eMarkDeadDove />,
+  'mdi/hand-okay': () => <MdiHandOkay />,
+  'ao3e/mark-warding-fingers': () => <Ao3eMarkWardingFingers />,
+  'ao3e/mark-relic-cross': () => <Ao3eMarkRelicCross />,
+  'mdi/knife-military': () => <MdiKnifeMilitary />,
+  'ao3e/mark-cringe': () => <Ao3eMarkCringe />,
 }
 
 /** The icon factory for a mark's `icon` field, falling back to a generic bookmark. */

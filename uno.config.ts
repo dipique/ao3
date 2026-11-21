@@ -9,7 +9,7 @@ import { presetAttributify, presetIcons, presetWind3, transformerDirectives } fr
 import unocssPresetAnimations from 'unocss-preset-animations'
 import { FileSystemIconLoader } from 'unplugin-icons/loaders'
 
-import { MARK_ICON_NAMES, markIconClassName } from './src/common/markIcons.ts'
+import { knockOutWhite, MARK_ICON_NAMES, markIconClassName } from './src/common/markIcons.ts'
 
 export const SVGO_CONFIG = {
   plugins: [{
@@ -274,7 +274,9 @@ export default {
       // builders configure unplugin-icons.
       prefix: 'i-',
       collections: ICONS_CUSTOM_COLLECTIONS,
-      customizations: { transform: ICONS_TRANSFORM },
+      // A class draws its icon as a one-colour mask, so the white in the
+      // extension's own icons is cut out rather than lost (see knockOutWhite).
+      customizations: { transform: (svg, collection) => ICONS_TRANSFORM(collection === 'ao3e' ? knockOutWhite(svg) : svg) },
       extraProperties: {
         'display': 'inline-block',
         'vertical-align': 'middle',

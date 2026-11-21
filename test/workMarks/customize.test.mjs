@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import {
   DEFAULT_MARK_ICON,
   FALLBACK_MARK_ICON,
+  knockOutWhite,
   legacyMarkIcon,
   MARK_ICON_NAMES,
   markIconClassName,
@@ -220,5 +221,64 @@ describe('mark icons', () => {
     )
     for (const name of MARK_ICON_NAMES)
       assert.ok(source.includes(`'${name}':`), `content_script/markIcons.tsx has no entry for ${name}`)
+  })
+
+  test('the rating, warning and reaction icons are in the palette', () => {
+    for (const name of [
+      'ao3e/mark-rating-g',
+      'ao3e/mark-rating-pg',
+      'ao3e/mark-rating-pg13',
+      'ao3e/mark-rating-r',
+      'ao3e/mark-plus-p',
+      'ao3e/mark-dead-dove',
+      'mdi/hand-okay',
+      'ao3e/mark-warding-fingers',
+      'ao3e/mark-relic-cross',
+      'mdi/knife-military',
+      'ao3e/mark-cringe',
+    ]) {
+      assert.ok(MARK_ICON_NAMES.includes(name), `${name} is not in the palette`)
+    }
+  })
+
+  /** The extension's own collection is the SVG files in `src/icons`, named by file. */
+  test('every icon from the extension\'s own collection has its file', () => {
+    for (const name of MARK_ICON_NAMES.filter(name => name.startsWith('ao3e/'))) {
+      const file = new URL(`../../src/icons/${name.slice('ao3e/'.length)}.svg`, import.meta.url)
+      assert.ok(existsSync(fileURLToPath(file)), `no src/icons file for ${name}`)
+    }
+  })
+})
+
+describe('knockOutWhite', () => {
+  const BADGE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="4.5" fill="currentColor"/><path fill="none" stroke="#fff" stroke-width="3" d="M6 6h12"/></svg>'
+
+  test('turns the white parts into holes in everything else', () => {
+    const out = knockOutWhite(BADGE)
+    const mask = out.match(/<mask [^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/mask>/)
+    assert.ok(mask, 'a mask is defined')
+    const [, id, inside] = mask
+    assert.match(inside, /<path[^>]*stroke="#000"[^>]*d="M6 6h12"/, 'the white stroke cuts out of the mask')
+    assert.match(inside, /<rect[^>]*fill="#fff"/, 'the rest of the mask lets the icon through')
+    const outside = out.replace(mask[0], '')
+    assert.doesNotMatch(outside, /#fff/i, 'nothing white is left to draw')
+    assert.match(outside, new RegExp(`<g mask="url\\(#${id}\\)"><rect[^>]*fill="currentColor"`), 'the coloured parts are drawn through the mask')
+  })
+
+  test('covers the whole viewBox, wherever it starts', () => {
+    const out = knockOutWhite(BADGE.replace('0 0 24 24', '-2 -2 28 28'))
+    assert.match(out, /<rect x="-2" y="-2" width="28" height="28" fill="#fff"\/>/)
+  })
+
+  test('takes white fills as well as strokes, in any spelling', () => {
+    for (const white of ['#fff', '#FFFFFF', 'white']) {
+      const out = knockOutWhite(`<svg viewBox="0 0 24 24"><circle r="9" fill="currentColor"/><path fill="${white}" d="M1 1h2v2z"/></svg>`)
+      assert.match(out, /<mask[\s\S]*<path fill="#000" d="M1 1h2v2z"\/>[\s\S]*<\/mask>/, white)
+    }
+  })
+
+  test('leaves an icon with nothing white alone', () => {
+    const plain = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M0 0h24v24z"/></svg>'
+    assert.equal(knockOutWhite(plain), plain)
   })
 })

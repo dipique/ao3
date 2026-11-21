@@ -935,6 +935,36 @@ export function setMarkGroup(
   return next
 }
 
+/**
+ * The marks a work can be marked with, in table order, given which ones it
+ * already carries — what both its menu and the rating grid offer.
+ *
+ * A mark switched off ({@link markIsOffered}) is left out, unless this work
+ * carries it: offering it is then the only way back off, and dropping it would
+ * strand the mark on the work for good.
+ *
+ * The finer readings stack, so most marks are independent toggles. The one that
+ * isn't is the group's root: plain Read can't sit beside a verdict
+ * ({@link markIsExclusive}), so offering it on a work that already carries one
+ * would be offering a click that quietly clears it. It is left out instead, and
+ * comes back as soon as the last verdict does. A progress mark stands alone too
+ * but stays: it opens an editor rather than toggling, so the reader sees and
+ * confirms the trade before a verdict is replaced.
+ */
+export function offeredMarkIds(marks: Record<MarkId, MarkConfig>, carries: (id: MarkId) => boolean): MarkId[] {
+  const local = localMarkIds(marks)
+  const judged = new Set(
+    local.filter(id => !markIsExclusive(marks, id) && carries(id)).map(id => markRoot(marks, id)),
+  )
+  return local.filter((id) => {
+    if (carries(id))
+      return true
+    if (!markIsOffered(marks, id))
+      return false
+    return markTracksProgress(marks, id) || !markIsExclusive(marks, id) || !judged.has(markRoot(marks, id))
+  })
+}
+
 /** Which marks a work carries, in table order. */
 export function marksForWork(marks: Record<MarkId, MarkConfig>, workId: string): MarkId[] {
   return localMarkIds(marks).filter(id => workHasMark(marks, id, workId))

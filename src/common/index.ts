@@ -27,6 +27,8 @@ export { type Logger as BaseLogger, createLogger, logBanner, logger } from './lo
 
 export * from './markedForLater.ts'
 
+export * from './markGrid.ts'
+
 export * from './markIcons.ts'
 
 export { options } from './options.ts'

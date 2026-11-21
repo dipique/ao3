@@ -11,6 +11,7 @@ import { markIconClass } from '../../markIcons.ts'
 import { MARK_ORDER_OFF, MARK_SORTS, markOrderOff, sortMarks } from '../../model/listView.ts'
 
 const { enabled, marks, hideMode, hidePriority } = useOption('workMarks')
+const markGrid = useOption('markGrid')
 
 /**
  * The two settings that apply to every mark that hides, rather than to one:
@@ -311,7 +312,7 @@ function save() {
   <OptionRowCollapsable
     v-model:open="enabled"
     anchor="work-marks"
-    :options="['workMarks']"
+    :options="['workMarks', 'markGrid']"
     title="Work marks"
     subtitle="Mark a work read — or with a finer verdict, anything from Favorite to Abandoned — from its right-click menu. Pressing AO3's own “Mark as Read” marks it here too, so the list fills itself in as you browse."
   >
@@ -319,6 +320,22 @@ function save() {
       <ListNote>
         A work carries one mark at a time: the finer verdicts all count as Read, and take the work off Marked for Later.
       </ListNote>
+
+      <!-- Laid out as a setting but not an `OptionRow`, so the settings search
+           doesn't enter it as a row of its own apart from this one. -->
+      <label
+        for="ao3e-mark-grid"
+        grid="~ cols-[1fr_min-content] items-center"
+        cursor-pointer border-t pt-3
+      >
+        <div flex="~ col" mr-4>
+          <span text="[13.5px]" leading="[18px]">Rating grid</span>
+          <span text="[12px] muted-fg" leading="[17px]">
+            Press R on a work, here or in an offline copy, to see every mark in colour and pick several with a click each.
+          </span>
+        </div>
+        <Switch id="ao3e-mark-grid" v-model="markGrid" />
+      </label>
 
       <div flex="~ col gap-4 sm:row" border-t pt-3>
         <label flex="~ col gap-1" grow>

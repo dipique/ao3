@@ -7,7 +7,7 @@ import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, entityIdFromURL, entityKey, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markIsExclusive, markIsOffered, markItems, markLabel, markRoot, markTracksProgress, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, entityIdFromURL, entityKey, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markItems, markLabel, markRoot, markTracksProgress, offeredMarkIds, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -23,6 +23,7 @@ import { linkedTo } from '#content_script/lists/openLink.ts'
 import { ownMarkedForLaterPage, putOnMarkedForLater } from '#content_script/markedForLaterCopy.ts'
 import { loadMarkedForLaterIndex, noteMarkedForLater, onSavedChange } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
+import { retireMarkGridHost, setMarkGridHost } from '#content_script/markGrid.tsx'
 import { markIcon } from '#content_script/markIcons.js'
 import { openProgressEditor } from '#content_script/progressEditor.js'
 import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
@@ -203,6 +204,11 @@ function loadMarkSets(marks: WorkMarks): void {
   markSets = new Map(localMarkIds(marks.marks).map(id => [id, markItems(marks.marks, id)]))
 }
 
+/** Whether this work carries this mark, as the cached sets have it. */
+function carriesMark(workId: string, markId: MarkId): boolean {
+  return markSets.get(markId)?.has(workId) ?? false
+}
+
 /**
  * Mirror one mark write in the cached sets, so indicators can update without
  * waiting for the options round-trip. Reads the same {@link markClears} the
@@ -364,44 +370,20 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   /**
-   * One row per mark that holds its own ids — read, favorite, and whatever finer
-   * dispositions the mark table lists. All of it is local state we already hold,
-   * so unlike the mark-for-later row these render their real label immediately.
+   * One row per mark the work can take ({@link offeredMarkIds}) — read,
+   * favorite, and whatever finer dispositions the mark table lists. All of it is
+   * local state we already hold, so unlike the mark-for-later row these render
+   * their real label immediately.
    *
    * A mark that tracks progress is several rows rather than one toggle, since
    * setting it means saying *where* you got to — see {@link progressItems}.
-   *
-   * The finer readings stack, so most rows are plain independent toggles. The
-   * one that isn't is the group's root: plain "Read" can't sit beside a verdict
-   * ({@link markIsExclusive}), so offering it on a work that already carries one
-   * would be offering a click that quietly clears it. Its row is left out
-   * instead, and comes back as soon as the last verdict does.
-   *
-   * A mark switched off in the options ({@link markIsOffered}) is left out too —
-   * unless *this* work carries it, in which case its row is the only way back
-   * off, and dropping it would strand the mark on the work for good.
    */
   private markSetItems(id: string, link: HTMLElement): MenuItem[] {
     const { marks } = this.options.workMarks
     const items: MenuItem[] = []
-    // The trigger groups this work already carries a stacking reading from.
-    const judged = new Set(
-      localMarkIds(marks)
-        .filter(markId => !markIsExclusive(marks, markId) && markSets.get(markId)?.has(id))
-        .map(markId => markRoot(marks, markId)),
-    )
-    for (const markId of localMarkIds(marks)) {
+    for (const markId of offeredMarkIds(marks, markId => carriesMark(id, markId))) {
       const config = marks[markId]!
-      const has = markSets.get(markId)?.has(id) ?? false
-      if (!has && !markIsOffered(marks, markId))
-        continue
-      // The progress mark stands alone too, but keeps its rows: it opens an
-      // editor rather than toggling, so the reader gets to see and confirm the
-      // trade before a verdict is replaced by "actually, I'm still reading it".
-      if (!has && !markTracksProgress(marks, markId)
-        && markIsExclusive(marks, markId) && judged.has(markRoot(marks, markId))) {
-        continue
-      }
+      const has = carriesMark(id, markId)
       // The separator opens the mark block, so it belongs to whichever row comes
       // first — which is why this keys off the block, not the mark's position.
       const separatorBefore = items.length === 0
@@ -499,18 +481,18 @@ abstract class FilterEntityToolbar extends Unit {
   }
 
   /**
-   * Open the chapter/wait-until editor for one work. Positioned where the menu
-   * was opened, since the menu closes before a row's `onSelect` runs and there's
-   * no event of our own left to read a point off.
+   * Open the chapter/wait-until editor for one work. Positioned at `at`, or
+   * where the menu was opened, since the menu closes before a row's `onSelect`
+   * runs and there's no event of our own left to read a point off.
    */
-  private openProgressEditor(id: string, markId: MarkId, link: HTMLElement): void {
+  protected openProgressEditor(id: string, markId: MarkId, link: HTMLElement, at = lastFloatingPoint()): void {
     const { marks } = this.options.workMarks
     openProgressEditor({
       title: entityTitle(link),
       progress: progressFor(marks, markId, id),
       published: publishedChapters(link),
       current: currentChapter(),
-      at: lastFloatingPoint(),
+      at,
       onSave: entry => void this.saveProgress(id, markId, entry),
     })
   }
@@ -588,7 +570,7 @@ abstract class FilterEntityToolbar extends Unit {
    * only touched when its state is known first-hand (seeded or acted on this
    * session); an unknown state is left alone rather than paying for a page fetch.
    */
-  private async onToggleMark(id: string, markId: MarkId, on: boolean): Promise<void> {
+  protected async onToggleMark(id: string, markId: MarkId, on: boolean): Promise<void> {
     const noun = markLabel(this.options.workMarks.marks, markId).toLowerCase()
     this.setMarkLocally(id, markId, on)
 
@@ -966,6 +948,44 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
     await super.ready()
     stopHearing?.()
     stopHearing = this.markEnabled() ? onSavedChange((id, saved) => this.onSavedChange(id, saved)) : null
+    this.offerMarkGrid()
+  }
+
+  /**
+   * Hand the rating grid this page's work, when it is a work page and the grid
+   * is on. A run over somewhere with no work title (a site export's list) hands
+   * nothing over, and leaves the grid to the work page that did.
+   */
+  private offerMarkGrid(): void {
+    const work = this.workPage()
+    if (!work || !this.options.markGrid || !this.marksEnabled())
+      return
+    const { id, title } = work
+    setMarkGridHost({
+      workId: id,
+      title: entityTitle(title),
+      anchor: title,
+      marks: () => this.options.workMarks.marks,
+      carries: markId => carriesMark(id, markId),
+      opensEditor: markId => markTracksProgress(this.options.workMarks.marks, markId),
+      choose: (markId, on, at) => {
+        if (on && markTracksProgress(this.options.workMarks.marks, markId))
+          this.openProgressEditor(id, markId, title, at)
+        else
+          void this.onToggleMark(id, markId, on)
+      },
+    })
+  }
+
+  /**
+   * The work page's own title and the work it names, or null anywhere else. A
+   * site export's copy of a work names its work on the copy itself, where there
+   * is no AO3 address or work navigation to read it from.
+   */
+  private workPage(): { id: string, title: HTMLElement } | null {
+    const title = workPageTitle(this.root)
+    const id = title?.closest<HTMLElement>('[data-ao3e-work-id]')?.dataset.ao3eWorkId ?? workPageId()
+    return title && id ? { id, title } : null
   }
 
   /**
@@ -1036,12 +1056,10 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
    */
   protected override links(): EntityLink[] {
     const found = super.links()
-    const title = workPageTitle(this.root)
-    // A site export's copy of a work names its work on the copy itself, where
-    // there is no AO3 address or work navigation to read it from.
-    const id = title?.closest<HTMLElement>('[data-ao3e-work-id]')?.dataset.ao3eWorkId ?? workPageId()
-    if (!title || !id)
+    const work = this.workPage()
+    if (!work)
       return found
+    const { id, title } = work
     // The work page's own title opens on a plain click as well as the usual
     // right-click/long-press. Unlike a blurb's title it isn't a link, so there
     // is no navigation to suppress and nothing else a click could have meant.
@@ -1080,6 +1098,7 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
   static override async clean(): Promise<void> {
     stopHearing?.()
     stopHearing = null
+    retireMarkGridHost()
     workEntries.length = 0
     clearMenuTriggers()
   }

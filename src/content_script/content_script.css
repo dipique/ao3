@@ -837,6 +837,98 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   gap: 0.7em;
 }
 
+/* The rating grid (`markGrid.tsx`): centred over the page, the work's marks in a
+   row of their own above every other mark it can take. Big targets, so a mark
+   is a click rather than an aim. */
+.AO3E--mark-grid {
+  position: fixed;
+  z-index: 2147483600;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  width: min(36em, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 0.6em;
+  border: 1px solid var(--ao3e-surface-border);
+  border-radius: 0.75em;
+  background: var(--ao3e-surface-bg);
+  color: var(--ao3e-surface-fg);
+  box-shadow: var(--ao3e-surface-shadow);
+  color-scheme: var(--ao3e-color-scheme);
+  font-size: 0.875rem;
+  line-height: 1.25;
+}
+
+.AO3E--mark-grid--row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.25em, 1fr));
+  gap: 0.35em;
+}
+
+/* Holds a tile's height while empty, so the first mark chosen doesn't shift
+   the grid under the pointer. */
+.AO3E--mark-grid--selected {
+  min-height: 4.6em;
+  padding-bottom: 0.6em;
+  margin-bottom: 0.6em;
+  border-bottom: 1px solid var(--ao3e-surface-divider);
+}
+
+.AO3E--mark-grid[data-ao3e-empty] .AO3E--mark-grid--selected {
+  border-radius: 0.5em;
+  outline: 1px dashed var(--ao3e-surface-divider);
+  outline-offset: -1px;
+}
+
+.AO3E--mark-grid--tile {
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
+  min-height: 4.6em;
+  box-sizing: border-box;
+  padding: 0.55em 0.3em !important;
+  margin: 0 !important;
+  border: 1px solid transparent !important;
+  border-radius: 0.5em !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  font: inherit;
+  cursor: pointer;
+}
+
+.AO3E--mark-grid--tile:hover {
+  background: var(--ao3e-surface-hover) !important;
+}
+
+.AO3E--mark-grid--tile:focus-visible {
+  outline: 2px solid var(--ao3e-surface-accent);
+  outline-offset: 1px;
+}
+
+.AO3E--mark-grid--tile[aria-pressed='true'] {
+  border-color: var(--ao3e-mark-color, #6b7280) !important;
+  background: color-mix(in srgb, var(--ao3e-mark-color, #6b7280) 16%, transparent) !important;
+  font-weight: 600;
+}
+
+.AO3E--mark-grid--icon {
+  display: inline-flex;
+  color: var(--ao3e-mark-color, #6b7280);
+  font-size: 1.75em;
+}
+
+.AO3E--mark-grid--label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .AO3E--progress-editor--title {
   font-weight: 700;
   line-height: 1.3;

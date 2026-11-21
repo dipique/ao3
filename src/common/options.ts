@@ -74,6 +74,12 @@ export interface Options {
    * the id sets are stored delta-packed — see {@link file://./workMarks.ts}.
    */
   workMarks: WorkMarks
+  /**
+   * Press R on a work — on AO3 or in an offline copy — for the rating grid:
+   * every mark it can take, in colour, chosen with one click each (see
+   * {@link file://./markGrid.ts}). Only while {@link workMarks} is on.
+   */
+  markGrid: boolean
 
   /**
    * Discard a stored blurb as soon as no stored list holds it — when a refresh

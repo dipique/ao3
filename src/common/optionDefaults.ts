@@ -35,6 +35,7 @@ export const OPTION_DEFAULTS: Options = {
     hidePriority: DEFAULT_MARK_HIDE_PRIORITY,
     version: MARKS_VERSION,
   },
+  markGrid: false,
 
   pruneOrphanedBlurbs: false,
   cacheComments: false,

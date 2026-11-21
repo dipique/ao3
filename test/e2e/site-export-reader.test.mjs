@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { unpackIds } from '../../src/common/workMarks.ts'
 import { COMMENTS_CLASS } from '../../src/content_script/siteExport/workText.ts'
 import { comment, pagination } from '../siteExport/workPages.mjs'
 import { storedLists } from './helpers.mjs'
@@ -109,10 +110,13 @@ const SEED = {
   }),
   'option.cacheComments': true,
   'option.readerMode': true,
+  'option.markGrid': true,
   'option.workMarks': {
     enabled: true,
     marks: {
       read: { icon: 'read', label: 'Read', color: '#6b7280', hideSearchResult: false, items: '' },
+      good: { icon: 'mdi/thumb-up', label: 'Good', color: '#2f8f4e', triggerAlias: 'read', items: '' },
+      hot: { icon: 'mdi/chili-hot', label: 'Hot', color: '#d0342c', triggerAlias: 'read', items: '' },
     },
   },
 }
@@ -267,6 +271,38 @@ describe('site export — reading a long work', { skip }, () => {
       await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)
       assert.equal(await reader.$eval('.AO3E--site--status', el => el.hidden), false)
       assert.equal(await reader.$('.AO3E--filter-toolbar'), null)
+      assert.deepEqual(errors, [])
+    }
+    finally {
+      await reader.close()
+    }
+  })
+
+  test('the rating grid marks a work in the copy, several marks from one opening', async () => {
+    const { reader, errors } = await openReader(`#work/${SHORT}`)
+    const grid = '[data-ao3e-mark-grid]'
+    const selected = () => reader.$$eval(`${grid} [data-ao3e-row="selected"] [data-ao3e-value]`, els => els.map(el => el.dataset.ao3eValue))
+    const carries = async markId => unpackIds(await reader.evaluate(async (id) => {
+      const { 'option.workMarks': table } = await window.browser.storage.local.get('option.workMarks')
+      return table?.marks?.[id]?.items ?? ''
+    }, markId)).has(SHORT)
+    try {
+      await reader.waitForSelector('#workskin > .preface h2.title.heading.AO3E--menu-trigger', { timeout: 5000 })
+      await reader.keyboard.press('r')
+      await reader.waitForSelector(grid)
+      await reader.click(`${grid} [data-ao3e-value="good"]`)
+      await until('Good to be kept', () => carries('good'))
+      await reader.click(`${grid} [data-ao3e-value="hot"]`)
+      await until('Hot to be kept', () => carries('hot'))
+      assert.ok(await reader.$(grid), 'the grid stays open')
+      assert.deepEqual(await selected(), ['good', 'hot'])
+
+      // Back on the list there is no work to rate.
+      await reader.keyboard.press('Escape')
+      await reader.click('.AO3E--site--nav a')
+      await reader.waitForFunction(() => !document.querySelector('.AO3E--site--list').hidden)
+      await reader.keyboard.press('r')
+      assert.equal(await reader.$(grid), null)
       assert.deepEqual(errors, [])
     }
     finally {
