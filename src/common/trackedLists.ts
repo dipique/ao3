@@ -302,6 +302,16 @@ export function isoDay(day: Day): string {
   return new Date(day * MS_PER_DAY).toISOString().slice(0, 10)
 }
 
+/**
+ * The day a list is tracked from, given `since`: that day, when it is a whole
+ * day no later than `today`. Tracking can't start on a day yet to come, so
+ * that, and anything that isn't a day, is `today`.
+ */
+export function startDay(since: unknown, today: Day): Day {
+  const day = wholeNumber(since)
+  return day === null || day > today ? today : day
+}
+
 /** A day the way the archive writes dates on blurbs: `05 Sep 2026`. */
 export function formatDay(day: Day): string {
   const date = new Date(day * MS_PER_DAY)
@@ -463,6 +473,37 @@ export function dateFilterOf(href: string): string | null {
  */
 export function withDateFilter(url: string, dateFilter: string | null | undefined): string {
   return dateFilter ? `${url}${url.includes('?') ? '&' : '?'}${dateFilter}` : url
+}
+
+/**
+ * `url` with its absolute date bounds taken off, in whichever spelling it has
+ * them, the relative bound and everything else kept: the read
+ * {@link withDateFilter} puts a date filter on. `url` as it is with none.
+ */
+export function withoutDateBounds(url: string): string {
+  const at = url.indexOf('?')
+  if (at === -1)
+    return url
+  const params = new URLSearchParams(url.slice(at + 1))
+  if (![...params.keys()].some(name => DATE_BOUND_PARAMS.has(name)))
+    return url
+  const kept = [...params].filter(([name]) => !DATE_BOUND_PARAMS.has(name))
+  return withQuery(url.slice(0, at), kept.map(serializeParam))
+}
+
+/**
+ * The date filter a tracked list's offline copy is read under: the works
+ * updated from the day it is tracked from, on, as a query in the spelling
+ * {@link dateFilterOf} reads back off the page it opens. Only a filtered
+ * listing and a works search take one; an uncommon tag's page and a series
+ * can't be filtered by date, so their copies are read whole, and have none.
+ * None either for a day that isn't one.
+ */
+export function copyDateFilter(list: Pick<TrackedList, 'kind' | 'since'>): string | null {
+  const since = wholeNumber(list.since)
+  if (since === null || (list.kind !== 'works-filter' && list.kind !== 'text-search'))
+    return null
+  return serializeParam(['work_search[date_from]', isoDay(since)])
 }
 
 /**

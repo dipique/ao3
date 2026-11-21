@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { SavedList } from '#common'
 
-import { aliasOf, alreadyTracked, getArchiveLink, titleRefusal, toast } from '#common'
+import { aliasOf, alreadyTracked, getArchiveLink, isoDay, titleRefusal, toast, toEpochDays, utcToday } from '#common'
 
 import type { SiteExportListRow } from '../../composables/useSiteExport.ts'
 import type { SavedListRow } from '../../model/savedListRows.ts'
 
 import { sentence, withReason } from '../../model/phrases.ts'
 import { listReadView } from '../../model/preload.ts'
-import { cachingCell, COPIED_MS, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, offlineDetails, rowAction, rowJob, sameSearchNote, SHARED_TITLE_NOTE, statusCell, TRACK_OFF, trackingDetails, VIEW_EDIT_NOTE } from '../../model/savedListRows.ts'
+import { cachingCell, COPIED_MS, NEEDS_VISIT_NOTE, NOT_ARCHIVE_NOTE, offlineDetails, rowAction, rowJob, sameSearchNote, SHARED_TITLE_NOTE, sinceDay, statusCell, TRACK_OFF, trackingDetails, VIEW_EDIT_NOTE } from '../../model/savedListRows.ts'
 
 /**
  * One saved list, as a row of Saved lists: what it is, whether it is tracked,
@@ -63,7 +63,7 @@ const {
   discard,
   trackCopy,
 } = useSiteExport()
-const { retitle, setTracked } = useSavedLists()
+const { retitle, setTracked, setSince } = useSavedLists()
 const prune = useOption('pruneOrphanedBlurbs')
 const confirm = useConfirmInPlace()
 
@@ -167,6 +167,36 @@ function track(on: boolean): void {
   const twin = setTracked(props.row.id, on)
   if (twin)
     toast(`${alreadyTracked(twin)}.`, { type: 'error' })
+}
+
+// ---------------------------------------------------------------------------
+// The day it is tracked from
+// ---------------------------------------------------------------------------
+
+/** The day a tracked list is tracked from, where it can be changed here; null otherwise. */
+const since = computed(() => sinceDay(props.row))
+const sinceField = useTemplateRef<HTMLInputElement>('sinceField')
+/** What the last day picked can't do, said until another is picked. */
+const backfill = ref<string | null>(null)
+
+/** Open the details on the day, ready to change. */
+async function editSince(): Promise<void> {
+  open.value = true
+  await nextTick()
+  sinceField.value?.focus()
+}
+
+/** Track the list from the day picked. A date half typed writes nothing. */
+async function pickSince(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const day = toEpochDays(input.value)
+  if (day === null)
+    return
+  backfill.value = setSince(props.row.id, day)
+  // A day yet to come is stored as today, which the field may already have been bound to.
+  await nextTick()
+  if (since.value !== null)
+    input.value = isoDay(since.value)
 }
 
 // ---------------------------------------------------------------------------
@@ -360,7 +390,16 @@ function removeTheList(): void {
         </span>
         <span class="saved-list__lines" :title="status.tip" :class="{ 'saved-list__lines--muted': row.status !== 'tracked' }">
           <span class="saved-list__l1">{{ status.word }}</span>
-          <span v-if="status.detail" class="saved-list__l2">{{ status.detail }}</span>
+          <button
+            v-if="since !== null"
+            type="button"
+            class="saved-list__l2 saved-list__since touch-target"
+            data-action="edit-since"
+            :aria-label="`Change the day ${name} is tracked from: ${status.detail}`"
+            title="Change the day this list is tracked from"
+            @click="editSince"
+          >{{ status.detail }}</button>
+          <span v-else-if="status.detail" class="saved-list__l2">{{ status.detail }}</span>
         </span>
         <span v-if="row.trackOff" :id="ids.trackOff" hidden>{{ sentence(row.trackOff) }}.</span>
       </div>
@@ -576,6 +615,23 @@ function removeTheList(): void {
         </p>
         <p v-if="tracking.what" class="saved-list__dd saved-list__muted">
           {{ tracking.what }}
+        </p>
+        <label v-if="since !== null" class="saved-list__since-field">
+          <span>Tracked from</span>
+          <input
+            ref="sinceField"
+            type="date"
+            class="saved-list__date input-ring"
+            data-saved-list-since
+            :value="isoDay(since)"
+            :max="isoDay(utcToday())"
+            title="Works added or updated from this day on turn up in your review, and in this list's offline copy"
+            @change="pickSince"
+          >
+        </label>
+        <p v-if="backfill" class="saved-list__note" data-saved-list-note="backfill">
+          <SeverityGlyph severity="neutral" class="saved-list__glyph" />
+          <span class="saved-list__muted">{{ backfill }}</span>
         </p>
         <p v-if="tracking.problem" class="saved-list__note">
           <SeverityGlyph severity="destructive" class="saved-list__glyph" />
@@ -981,6 +1037,37 @@ function removeTheList(): void {
   font: inherit;
   font-size: 12px;
   cursor: pointer;
+}
+.saved-list__since {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.saved-list__since:hover {
+  color: rgb(var(--color-brand-fg));
+}
+.saved-list__since-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.saved-list__date {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--color-input));
+  border-radius: 7px;
+  background-color: rgb(var(--color-default));
+  color: rgb(var(--color-default-fg));
+  font: inherit;
+  font-size: 12.5px;
 }
 .saved-list__link-btn:disabled {
   cursor: default;

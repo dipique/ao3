@@ -3,9 +3,11 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { textSearchKey } from '../../src/common/listLinks.ts'
+import { isoDay } from '../../src/common/trackedLists.ts'
 import { mentions } from '../facts.mjs'
-import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
-import { boxAction, boxActions, clickBoxAction, openToolbar, pillRow, rerun, settled, toastNamed } from './trackedPages.mjs'
+import { DIST, ensureBuilt, findChrome, installMock, launch, storedListIds, until } from './helpers.mjs'
+import { boxAction, boxActions, clickBoxAction, openToolbar, pickSince, pillRow, rerun, settled, SINCE_INPUT, toastNamed } from './trackedPages.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -97,13 +99,16 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     await browser?.close()
   })
 
+  /** Open `url`, answering every request to the archive with `body`; what the tab asked for is its `asked`. */
   const load = async (url, body, seed = {}) => {
     const tab = await browser.newPage()
+    tab.asked = []
     await tab.setViewport({ width: 1280, height: 900 })
     await tab.setRequestInterception(true)
     tab.on('request', (req) => {
       if (!req.url().startsWith('https://archiveofourown.org/'))
         return void req.abort()
+      tab.asked.push(req.url())
       void req.respond({ status: 200, contentType: 'text/html; charset=utf-8', body })
     })
     await tab.evaluateOnNewDocument(installMock, seed)
@@ -137,6 +142,19 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
   const pillText = tab => tab.$eval(TRACK_TEXT, el => el.textContent.trim())
 
+  /** Where the works search the pages here are keeps its copy. */
+  const COFFEE_KEY = textSearchKey('?work_search[query]=coffee')
+
+  /** The copy stored under `key`, once there is one. */
+  const keptCopy = async (tab, key) => {
+    const copyOf = () => tab.evaluate(async k => (await browser.storage.local.get('cache.searchLists'))['cache.searchLists']?.[k] ?? null, key)
+    await until('the first copy to be kept', copyOf)
+    return copyOf()
+  }
+
+  /** The days the tab asked the archive for works updated from, in order, by the requests that named one. */
+  const askedFrom = tab => tab.asked.map(url => new URL(url).searchParams.get('work_search[date_from]')).filter(Boolean)
+
   let tab
 
   test('a works search offers to be tracked', async () => {
@@ -153,6 +171,10 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     // What kind of list it is, and the words the reader searched for — a name
     // they have just seen.
     assert.equal(await tab.$eval(ALIAS_INPUT, el => el.value), 'Search: coffee')
+  })
+
+  test('beside the title, the day it would be tracked from: today, and no later', async () => {
+    assert.deepEqual(await tab.$eval(SINCE_INPUT('new'), input => ({ value: input.value, max: input.max })), { value: isoDay(TODAY), max: isoDay(TODAY) })
   })
 
   test('Cancel closes it again, having written nothing', async () => {
@@ -193,6 +215,14 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     // The list is this browser's saved list too, under the same id and title.
     const records = await savedOption(tab, 'savedLists')
     assert.deepEqual(records.lists[entry.id], { id: entry.id, kind: 'text-search', url: entry.url, title: 'Coffee shop AUs', type: 'search', entity: 'coffee' })
+  })
+
+  test('and keeps its first copy, read from the day it is tracked from, under the key its search view keeps', async () => {
+    const copy = await keptCopy(tab, COFFEE_KEY)
+    assert.deepEqual(storedListIds(copy), ['101', '102'])
+    assert.equal(copy.descriptor.dateFilter, `work_search[date_from]=${isoDay(TODAY)}`)
+    assert.ok(askedFrom(tab).length > 0)
+    assert.ok(askedFrom(tab).every(day => day === isoDay(TODAY)), JSON.stringify(askedFrom(tab)))
   })
 
   test('the rebuilt pill says the page is tracked, and by what name', async () => {
@@ -253,6 +283,17 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
 
     assert.deepEqual((await savedOption(page)).lists.map(entry => entry.id), ['aut0'], 'no second list at its address')
     assert.deepEqual((await savedOption(page, 'savedLists')).lists, { aut0: { ...auto, title: 'Search: coffee' } })
+    await page.close()
+  })
+
+  test('an earlier day picked beside the title is the day the list is tracked from', async () => {
+    const page = await load(SEARCH_URL, SEARCH_PAGE)
+    await openPanel(page)
+    await pressPill(page, true)
+    await pickSince(page, 'new', isoDay(TODAY - 10))
+    await rerun(page, () => clickBoxAction(page, 'track'))
+    assert.equal((await savedOption(page)).lists[0].since, TODAY - 10)
+    assert.equal((await keptCopy(page, COFFEE_KEY)).descriptor.dateFilter, `work_search[date_from]=${isoDay(TODAY - 10)}`, 'and its first copy is read from it')
     await page.close()
   })
 

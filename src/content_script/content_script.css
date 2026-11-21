@@ -532,6 +532,30 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   font-size: 0.8125rem;
 }
 
+/* The day a list is tracked from: a label and a date field, on one line. */
+.AO3E--filter-toolbar--track--since {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 !important;
+  font-size: 0.75rem;
+}
+
+.AO3E--filter-toolbar--track--since > input {
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 0.25em 0.4em !important;
+  border: 1px solid var(--ao3e-field-border) !important;
+  border-radius: 0.4em !important;
+  background: var(--ao3e-field-bg) !important;
+  color: var(--ao3e-surface-fg) !important;
+  font-family: inherit;
+  font-size: 0.8125rem;
+}
+
 .AO3E--filter-toolbar--track--row {
   display: flex;
   flex-wrap: wrap;

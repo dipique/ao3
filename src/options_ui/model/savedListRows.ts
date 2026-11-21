@@ -6,8 +6,8 @@ import type { JobView } from './jobView.ts'
 
 import { hostPage, openLink } from '../../common/listLinks.ts'
 import { timeAgo } from '../../common/relativeTime.ts'
-import { defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
-import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, titleKey, TRACKED_TYPE_LABELS, trackedMeta } from '../../common/trackedLists.ts'
+import { copyDateFilterAt, defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
+import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, titleKey, TRACKED_TYPE_LABELS, trackedMeta, withDateFilter } from '../../common/trackedLists.ts'
 import { bucketBar, formatBytes } from './buckets.ts'
 import { isRunning, jobIsOn, jobVerb, listJob, removeOff } from './jobView.ts'
 import { sentence, titlesInWords, withReason } from './phrases.ts'
@@ -92,7 +92,8 @@ export interface SavedListRow {
   /**
    * The saved list's open URL ({@link openLink}), by its id: a path, for the
    * page to make absolute. What Copy URL copies, and, with no copy, where one
-   * is kept from.
+   * is kept from. A tracked list's opens between the dates its copy is read
+   * under ({@link copyDateFilterAt}).
    */
   open?: string
   status: 'tracked' | 'saved'
@@ -146,11 +147,15 @@ export function savedListRows(join: SavedListJoin, ctx: SavedListRowsContext): S
     return one ? (titleOf(one.list) || titlePlaceholder(one.list)) : ''
   }
 
+  const entries = join.lists.flatMap(one => (one.entry ? [one.entry] : []))
+
   const lists = join.lists.map((one): SavedListRow => {
     const { list, entry, address, copy } = one
     const pending = address === null ? 'not-archive' : null
     const ref = { kind: 'list', id: list.id } as const
-    const page = hostPage(ref, list)
+    // Between the dates a refresh from here reads its copy between, so opening it keeps the same copy.
+    const host = hostPage(ref, list)
+    const page = host && withDateFilter(host, copyDateFilterAt(entries, list.url))
     return defined({
       id: list.id,
       title: titleOf(list),
@@ -338,6 +343,29 @@ export function statusCell(row: SavedListRow): SavedListStatusCell {
   return tracked
     ? { word: STATUS_WORDS.tracked, detail: row.since === undefined ? '' : `since ${formatDay(row.since)}`, tip: STATUS_TIPS.tracked, toggle: { kind: 'switch', title: switchTitle } }
     : { word: STATUS_WORDS.saved, detail: STATUS_DETAILS.notTracked, tip: STATUS_TIPS.saved, toggle: { kind: 'switch', title: switchTitle } }
+}
+
+/**
+ * The day a row's tracked list is tracked from, where it can be changed here:
+ * a tracked list at an address on the archive, while Tracked lists is on, as
+ * its switch can be pressed. Null for any other row.
+ */
+export function sinceDay(row: SavedListRow): Day | null {
+  return row.status === 'tracked' && row.pending === null && !row.trackOff && row.since !== undefined ? row.since : null
+}
+
+/**
+ * What moving a list's day from `before` back to `after` can't do, when it
+ * can't: the days it brings in up to `reviewedThrough`, the last day marked
+ * reviewed, are behind the review, so their works reach the list's offline
+ * copy but not the review. Null when it brings in none of those.
+ */
+export function backfillNote(before: Day, after: Day, reviewedThrough: Day): string | null {
+  if (after >= before || after > reviewedThrough)
+    return null
+  const last = Math.min(before - 1, reviewedThrough)
+  const span = last > after ? `${formatDay(after)} to ${formatDay(last)}` : formatDay(after)
+  return `Your review is done through ${formatDay(reviewedThrough)}, so works updated ${span} won't reach it. The list's offline copy will hold them.`
 }
 
 /** A count and the noun it counts. */

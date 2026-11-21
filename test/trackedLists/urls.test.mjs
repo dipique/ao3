@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { dateFilterOf, dayOf, describeFilters, normalizeTrackedUrl, onListPage, pageUrl, sameReading, sameRoot, sourceLabel, tagSearchUrl, trackedKey, trackedRoot, withDateFilter } from '../../src/common/trackedLists.ts'
+import { copyDateFilter, dateFilterOf, dayOf, describeFilters, normalizeTrackedUrl, onListPage, pageUrl, sameReading, sameRoot, sourceLabel, tagSearchUrl, trackedKey, trackedRoot, withDateFilter, withoutDateBounds } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
 
@@ -368,6 +368,49 @@ describe('withDateFilter', () => {
   test('with no date filter, is the URL as it is', () => {
     for (const filter of [undefined, null, ''])
       assert.equal(withDateFilter(`${AO3}/tags/Bees/works`, filter), `${AO3}/tags/Bees/works`, String(filter))
+  })
+})
+
+describe('withoutDateBounds', () => {
+  test('takes a URL\'s Date Updated bounds off, in either spelling, and leaves the rest of the read', () => {
+    const href = `${AO3}/works?work_search[sort_column]=title&work_search%5Bdate_from%5D=2026-01-01&work_search[date_to]=2026-02-01&tag_id=Bees`
+    const whole = withoutDateBounds(href)
+    assert.equal(dateFilterOf(whole), null)
+    assert.equal(sameReading(whole, `${AO3}/works?work_search[sort_column]=title&tag_id=Bees`), true)
+    assert.equal(sameReading(withDateFilter(whole, dateFilterOf(href)), href), true, 'the dates put back are the read it was')
+  })
+
+  test('keeps the relative bound, which a list\'s URL keeps', () => {
+    const href = `${AO3}/works/search?work_search[query]=tea&work_search[revised_at]=%3C+2+weeks&work_search[date_from]=2026-01-01`
+    assert.equal(paramsOf(withoutDateBounds(href)).get('work_search[revised_at]'), '< 2 weeks')
+  })
+
+  test('a URL with no bounds is handed back as it is, path or whole', () => {
+    for (const href of [`${AO3}/tags/Bees/works`, '/works/search?work_search%5Bquery%5D=tea', `${AO3}/series/12?page=2`])
+      assert.equal(withoutDateBounds(href), href)
+  })
+})
+
+describe('copyDateFilter', () => {
+  const SINCE = dayOf('3 Nov 2026')
+  const FROM = 'work_search[date_from]=2026-11-03'
+
+  test('a filtered listing or a works search is copied from the day it is tracked from: the page\'s own date filter, spelt as one', () => {
+    for (const [kind, url] of [['works-filter', '/tags/Bees/works'], ['text-search', '/works/search?work_search[query]=tea']]) {
+      assert.equal(copyDateFilter({ kind, since: SINCE }), FROM, kind)
+      assert.equal(dateFilterOf(withDateFilter(`${AO3}${url}`, FROM)), FROM, `${kind}: read back off the page it opens`)
+    }
+  })
+
+  test('an uncommon tag\'s page and a series can\'t be filtered by date, so are copied whole', () => {
+    assert.equal(copyDateFilter({ kind: 'tag-works', since: SINCE }), null)
+    assert.equal(copyDateFilter({ kind: 'tag-works', since: SINCE, scan: true }), null)
+    assert.equal(copyDateFilter({ kind: 'series-works', since: SINCE }), null)
+  })
+
+  test('a tracking day that isn\'t a whole day gives none', () => {
+    for (const since of [undefined, null, 1.5, '2026-11-03'])
+      assert.equal(copyDateFilter({ kind: 'works-filter', since }), null, String(since))
   })
 })
 

@@ -3,12 +3,12 @@ import { describe, test } from 'node:test'
 
 import { timeAgo } from '../../src/common/relativeTime.ts'
 import { aliasOf, joinSavedLists } from '../../src/common/savedLists.ts'
-import { alreadyTracked, describeFilters, describeList, formatDay, titleRefusal, TRACKED_TYPE_LABELS } from '../../src/common/trackedLists.ts'
+import { alreadyTracked, describeFilters, describeList, formatDay, isoDay, titleRefusal, TRACKED_TYPE_LABELS } from '../../src/common/trackedLists.ts'
 import { bucketBar, formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { jobVerb, jobView, offReason } from '../../src/options_ui/model/jobView.ts'
 import { titlesInWords } from '../../src/options_ui/model/phrases.ts'
 import { REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
-import { blurbsOnRemove, cachingCell, COPY_REMOVAL, copyTitle, KIND_LABELS, LIST_REMOVAL, NEEDS_VISIT_NOTE, NO_COPY, NO_SWITCH, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, STATUS_DETAILS, STATUS_TIPS, STATUS_WORDS, statusCell, STOP_NOTE, TRACK_OFF, TRACKING_STATE, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
+import { backfillNote, blurbsOnRemove, cachingCell, COPY_REMOVAL, copyTitle, KIND_LABELS, LIST_REMOVAL, NEEDS_VISIT_NOTE, NO_COPY, NO_SWITCH, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, sinceDay, STATUS_DETAILS, STATUS_TIPS, STATUS_WORDS, statusCell, STOP_NOTE, TRACK_OFF, TRACKING_STATE, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
 import { figures, mentions } from '../facts.mjs'
 
 const AO3 = 'https://archiveofourown.org'
@@ -21,6 +21,9 @@ const HP = '/tags/Harry%20Potter/works'
 const BROKEN = 'https://example.com/tags/x'
 
 const SLOW_BURN = { text: 'slow burn' }
+
+/** A tracked list's date filter: works updated from `since` on. */
+const from = since => `work_search[date_from]=${isoDay(since)}`
 
 function state(entries, records) {
   return {
@@ -54,7 +57,7 @@ describe('savedListRows', () => {
   const tea = record('t3a', TEA, { title: 'Morning tea', type: 'search', entity: 'tea', filter: SLOW_BURN })
   const teaCopy = described('text-search:tea-kudos', 'text-search', TEA_BY_KUDOS, 'Works search: tea', { scrapedAt: 7_000 })
 
-  test('a tracked list with a copy: tracked since its day, figures from its copy, its links and what it is', () => {
+  test('a tracked list with a copy: tracked since its day, figures from its copy, its links, opening from that day, and what it is', () => {
     const got = rows(joinSavedLists(state([tracking(tea, DAY - 3)], [tea]), [teaCopy]))
     assert.deepEqual(got.t3a, {
       id: 't3a',
@@ -67,7 +70,7 @@ describe('savedListRows', () => {
       kind: KIND_LABELS['text-search'],
       filters: describeFilters(tea),
       viewEdit: `${TEA}#ao3e-list=t3a`,
-      open: `${TEA}#ao3e-open=t3a`,
+      open: `${TEA}&${from(DAY - 3)}#ao3e-open=t3a`,
       status: 'tracked',
       pending: null,
       since: DAY - 3,
@@ -115,11 +118,23 @@ describe('savedListRows', () => {
     assert.deepEqual(rows(joinSavedLists(state([], [hp]), [])).hp.caching, { kind: 'none' })
   })
 
-  test('every saved list opens on its own page by its id, its view filter left to the list', () => {
+  test('every saved list opens on its own page by its id, its view filter left to the list, a tracked one from its day', () => {
     const hp = record('hp', HP, { kind: 'works-filter', type: 'tag', entity: 'Harry Potter', filter: SLOW_BURN })
     const tag = record('m4rr', TAG, { kind: 'tag-works', scan: true })
     const got = rows(joinSavedLists(state([tracking(hp)], [hp, tag, tea]), [teaCopy]))
-    assert.deepEqual([got.hp.open, got.m4rr.open, got.t3a.open], [`${HP}#ao3e-open=hp`, `${TAG}#ao3e-open=m4rr`, `${TEA}#ao3e-open=t3a`])
+    assert.deepEqual([got.hp.open, got.m4rr.open, got.t3a.open], [`${HP}?${from(DAY)}#ao3e-open=hp`, `${TAG}#ao3e-open=m4rr`, `${TEA}#ao3e-open=t3a`])
+  })
+
+  test('a tracked series or uncommon tag opens whole, as its copy is read; two tracked lists at one address open from the earlier day, which their shared copy is read from', () => {
+    const series = record('s3r', '/series/9991', { kind: 'series-works' })
+    const tag = record('m4rr', TAG, { kind: 'tag-works' })
+    const hp = record('hp', HP, { kind: 'works-filter' })
+    const hpFiltered = record('hpf', HP, { kind: 'works-filter', filter: SLOW_BURN })
+    const got = rows(joinSavedLists(state([tracking(series), tracking(tag), tracking(hp, DAY - 2), tracking(hpFiltered, DAY - 6)], [series, tag, hp, hpFiltered]), []))
+    assert.equal(got.s3r.open, '/series/9991#ao3e-open=s3r')
+    assert.equal(got.m4rr.open, `${TAG}#ao3e-open=m4rr`)
+    assert.equal(got.hp.open, `${HP}?${from(DAY - 6)}#ao3e-open=hp`)
+    assert.equal(got.hpf.open, `${HP}?${from(DAY - 6)}#ao3e-open=hpf`)
   })
 
   test('a list at no address on the archive is pending, with no links; tracked, its toggle can stop it, but never start it again', () => {
@@ -350,6 +365,18 @@ describe('the row\'s cells', () => {
     })
   })
 
+  describe('sinceDay', () => {
+    test('a tracked list\'s day can be changed here', () => {
+      assert.equal(sinceDay(idle.t3a), DAY - 3)
+    })
+
+    test('nothing to change for a list that isn\'t tracked, one at no address on the archive, a copy, or any list while Tracked lists is off', () => {
+      for (const id of ['s3r', 'br0', 'copy:tag-works:Coffee%20Shop%20AU', 'copy:marked-for-later:them'])
+        assert.equal(sinceDay(idle[id]), null, id)
+      assert.equal(sinceDay(rows(join, { ...IDLE, review: false }).t3a), null)
+    })
+  })
+
   describe('cachingCell', () => {
     const { buckets } = holds(teaCopy.key)
     const age = timeAgo(7_000, NOW)
@@ -384,7 +411,7 @@ describe('the row\'s cells', () => {
       const search = record('s34rch', TEA)
       const got = rows(joinSavedLists(state([tracking(hp)], [hp, tag, search]), []))
       const series = cachingCell(idle.s3r, NO_JOB, NOW)
-      for (const [id, page] of [['hp', HP], ['m4rr', TAG], ['s34rch', TEA]]) {
+      for (const [id, page] of [['hp', `${HP}?${from(DAY)}`], ['m4rr', TAG], ['s34rch', TEA]]) {
         const cell = cachingCell(got[id], NO_JOB, NOW)
         assert.deepEqual(cell, { ...series, link: `${page}#ao3e-open=${id}` }, id)
         assert.equal(cell.link, got[id].open, 'the row\'s open URL')
@@ -422,6 +449,27 @@ describe('the row\'s cells', () => {
     test('a list with no copy has nothing to download', () => {
       assert.deepEqual(rowAction(idle.s3r, NO_JOB), { kind: 'none' })
     })
+  })
+})
+
+describe('backfillNote', () => {
+  const THROUGH = DAY - 2
+
+  test('moving a list\'s day back into days already reviewed says which of its works won\'t reach the review, and that its copy holds them', () => {
+    const note = backfillNote(DAY, DAY - 10, THROUGH)
+    for (const day of [THROUGH, DAY - 10])
+      assert.ok(mentions(note, formatDay(day)), `${note} names ${formatDay(day)}`)
+  })
+
+  test('only the days it brings in: back from a day already reviewed, they end the day before it', () => {
+    const note = backfillNote(DAY - 5, DAY - 9, THROUGH)
+    assert.ok(mentions(note, formatDay(DAY - 9)) && mentions(note, formatDay(DAY - 6)), note)
+  })
+
+  test('nothing to say for a day moved later, kept, or brought back only into days not yet reviewed', () => {
+    for (const [before, after] of [[DAY - 5, DAY - 1], [DAY - 5, DAY - 5], [DAY, DAY - 1]])
+      assert.equal(backfillNote(before, after, THROUGH), null, `${before - DAY} → ${after - DAY}`)
+    assert.equal(backfillNote(DAY, DAY - 10, 0), null, 'with nothing reviewed yet')
   })
 })
 

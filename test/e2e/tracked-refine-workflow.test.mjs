@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { SAVE_BACK_UNDO_TIMEOUT } from '../../src/common/constants.ts'
 import { addressOf, planSavedLists, savedListsWrite, storedListRefs } from '../../src/common/savedLists.ts'
-import { normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
+import { isoDay, normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
 import { mentions } from '../facts.mjs'
 import { ensureBuilt, findChrome, serveDist, storedLists } from './helpers.mjs'
 import { openOptions, until } from './optionsPage.mjs'
@@ -25,6 +25,7 @@ import {
   refiningMark,
   rerun,
   searchPage,
+  SINCE_INPUT,
   stored,
   storedOption,
   TITLE_INPUT,
@@ -173,6 +174,7 @@ describe('tracked lists: refining a list from its link', { skip }, () => {
     assert.ok(mentions(lines[0], 'Draco Malfoy'), lines[0])
     assert.deepEqual(await boxWarnings(tab), [], 'the list keeps its root, so there is nothing to warn about')
     assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Harry Potter', 'the list keeps its own title')
+    assert.equal(await tab.$eval(SINCE_INPUT('update'), el => el.value), isoDay(HP.since), 'and the day it is tracked from')
     assert.deepEqual(await boxActions(tab), ['update', 'track-new', 'stop-refining'])
   })
 
@@ -425,6 +427,7 @@ describe('saved lists: saving a refined search back', { skip }, () => {
     assert.deepEqual(more, [])
     assert.ok(mentions(words, 'latte macchiato'), words)
     assert.equal(await tab.$eval(TITLE_INPUT, el => el.value), 'Latte art')
+    assert.equal(await tab.$(`${TRACK_BOX} input[data-ao3e-since]`), null, 'a list nothing tracks has no day it is tracked from')
     assert.deepEqual(await boxActions(tab), ['update', 'track-new', 'stop-refining'])
   })
 

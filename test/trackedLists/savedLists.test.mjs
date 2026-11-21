@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { addressOf, aliasOf, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, moveKeys, planDateFilterSplit, planLetGo, planListingRefile, planRemoveList, planRetitle, planSaveBack, planSavedLists, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, splitDateFilter, storedListRefs } from '../../src/common/savedLists.ts'
+import { addressOf, aliasOf, copyDateFilterAt, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, moveKeys, planDateFilterSplit, planLetGo, planListingRefile, planRemoveList, planRetitle, planSaveBack, planSavedLists, planSetSince, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, splitDateFilter, storedListRefs } from '../../src/common/savedLists.ts'
 import { normalizeTrackedUrl, refineLink, sameReading, trackedKey, withDateFilter } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
@@ -487,6 +487,63 @@ describe('planTrack', () => {
     const before = current([tracked], [saved])
     assert.equal(planTrack(before, 's', TODAY).state, before)
   })
+
+  test('tracks from the day given: today or any day before it, never one yet to come', () => {
+    for (const [since, from] of [[TODAY - 14, TODAY - 14], [TODAY, TODAY], [TODAY + 3, TODAY]]) {
+      const plan = planTrack(current([], [saved]), 's', TODAY, since)
+      assert.equal(plan.state.tracked.lists[0].since, from, `asked for ${since - TODAY}`)
+    }
+  })
+})
+
+describe('planSetSince', () => {
+  const tracked = entry('t', HP, { alias: 'HP', since: TODAY - 2 })
+  const other = entry('o', COFFEE, { alias: 'Coffee', since: TODAY - 40 })
+  const saved = recordOf(entry('s', TEA, { alias: 'Tea' }))
+
+  test('moves a tracked list\'s day, earlier or later, on its entry alone, which syncs', () => {
+    const before = current([tracked, other], [recordOf(tracked), recordOf(other), saved])
+    for (const since of [TODAY - 14, TODAY - 1]) {
+      const next = planSetSince(before, 't', since, TODAY)
+      assert.deepEqual(next.tracked.lists, [{ ...tracked, since }, other])
+      assert.equal(next.saved, before.saved, 'no record holds a day')
+    }
+  })
+
+  test('a day yet to come is today', () => {
+    const next = planSetSince(current([tracked], [recordOf(tracked)]), 't', TODAY + 5, TODAY)
+    assert.equal(next.tracked.lists[0].since, TODAY)
+  })
+
+  test('changes nothing for a list that isn\'t tracked, or is gone, or for a day that isn\'t one, or is the day it has', () => {
+    const before = current([tracked], [recordOf(tracked), saved])
+    for (const [id, since] of [['s', TODAY - 3], ['gone', TODAY - 3], ['t', Number.NaN], ['t', '2026-11-01'], ['t', TODAY - 2]])
+      assert.equal(planSetSince(before, id, since, TODAY), before, `${id} ${since}`)
+  })
+})
+
+describe('copyDateFilterAt', () => {
+  const FROM = since => `work_search[date_from]=${new Date(since * 86_400_000).toISOString().slice(0, 10)}`
+  const hp = entry('h', HP, { since: TODAY - 3 })
+
+  test('a tracked list\'s copy is read from the day the list is tracked from, wherever its address is spelt', () => {
+    assert.equal(copyDateFilterAt([hp], `${AO3}${HP}`), FROM(TODAY - 3))
+    assert.equal(copyDateFilterAt([hp], `${AO3}/works?work_search[sort_column]=kudos_count&tag_id=Harry+Potter+-+J*d*+K*d*+Rowling`), FROM(TODAY - 3))
+    assert.equal(copyDateFilterAt([hp], `${AO3}${HP}?work_search[date_from]=2020-01-01`), FROM(TODAY - 3), 'whatever dates it was last read between')
+  })
+
+  test('two tracked lists at one address share its copy, which is read from the earlier of their days', () => {
+    const filtered = entry('f', HP, { since: TODAY - 9, filter: NO_DRACO })
+    assert.equal(copyDateFilterAt([hp, filtered], `${AO3}${HP}`), FROM(TODAY - 9))
+  })
+
+  test('none where no tracked list is at the address, or its listing can\'t be filtered by date', () => {
+    const series = entry('r', SERIES)
+    const tag = entry('g', TAG)
+    for (const listUrl of [`${AO3}${COFFEE}`, `${AO3}${SERIES}`, `${AO3}${TAG}`, BROKEN, undefined])
+      assert.equal(copyDateFilterAt([hp, series, tag], listUrl), null, String(listUrl))
+    assert.equal(copyDateFilterAt([{ ...hp, tracked: false }], `${AO3}${HP}`), null, 'an entry from an older build that isn\'t tracked')
+  })
 })
 
 describe('planStopTracking', () => {
@@ -664,6 +721,20 @@ describe('planSaveBack', () => {
     const plan = planSaveBack(current([tracked], [recordOf(tracked, { mirror: true })]), 'c', { url: TEA, kind: 'text-search', meta }, [])
     assert.deepEqual(plan.state.tracked.lists, [{ ...tracked, url: TEA, entity: 'tea' }])
     assert.deepEqual(plan.state.saved.lists.c, recordOf(plan.state.tracked.lists[0]), 'record and entry agree, and a save-back here ends the mirror')
+  })
+
+  test('a tracked list takes the tracking start given with the search, never one yet to come', () => {
+    const tracked = entry('c', COFFEE, { alias: 'Coffee', type: 'search', entity: 'coffee shop', since: DAY - 30 })
+    for (const [since, from] of [[DAY - 45, DAY - 45], [DAY + 2, DAY]]) {
+      const plan = planSaveBack(current([tracked], [recordOf(tracked)]), 'c', { url: TEA, kind: 'text-search', meta, since, today: DAY }, [])
+      assert.equal(plan.state.tracked.lists[0].since, from, `asked for ${since - DAY}`)
+    }
+  })
+
+  test('a saved list nothing tracks has no tracking start to take', () => {
+    const plan = planSaveBack(current([], [coffee]), 'c', { url: TEA, kind: 'text-search', meta, since: DAY - 45, today: DAY }, [])
+    assert.deepEqual(plan.state.tracked.lists, [])
+    assert.equal('since' in plan.state.saved.lists.c, false)
   })
 
   test('absorbs the record made for the new address: untracked, unfiltered, under its default title', () => {
@@ -1265,6 +1336,13 @@ describe('planTrackSearch', () => {
     const plan = planTrackSearch(current([], [saved]), query, 'Morning', TODAY)
     assert.equal(plan.ok, true)
     assert.equal(plan.state.tracked.lists[0].alias, 'Morning')
+  })
+
+  test('tracks from the day given, today when it is yet to come', () => {
+    for (const [since, from] of [[TODAY - 14, TODAY - 14], [TODAY + 1, TODAY]]) {
+      const plan = planTrackSearch(current([], []), query, 'Tea', TODAY, since)
+      assert.equal(plan.state.tracked.lists[0].since, from, `asked for ${since - TODAY}`)
+    }
   })
 })
 

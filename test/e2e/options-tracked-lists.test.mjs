@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { textSearchKey } from '../../src/common/listLinks.ts'
 import { timeAgo } from '../../src/common/relativeTime.ts'
-import { describeFilters, formatDay, TRACKED_TYPE_LABELS, utcToday } from '../../src/common/trackedLists.ts'
+import { describeFilters, formatDay, isoDay, TRACKED_TYPE_LABELS, utcToday } from '../../src/common/trackedLists.ts'
 import { formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { CONFIRM_MS } from '../../src/options_ui/model/confirmInPlace.ts'
 import { COPIED_MS, KIND_LABELS, LIST_REMOVAL, NOT_ARCHIVE_STOP_NOTE, TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { storedLists } from './helpers.mjs'
-import { figures, mentions, skip, startOptions, until } from './optionsPage.mjs'
+import { figures, mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 
 const ARCHIVE = 'https://archiveofourown.org'
 const TODAY = utcToday()
@@ -49,6 +50,16 @@ const blurb = id => `<li class="work blurb group" id="work_${id}" role="article"
     by <a rel="author" href="/users/someone/pseuds/someone">someone</a></h4></div>
   <dl class="stats"><dt class="words">Words:</dt><dd class="words">1,000</dd></dl>
 </li>`
+
+/** A page of works search results, signed in, counting what it holds as the archive does. */
+const searchResults = ids => `<!doctype html>
+<html><head><meta charset="utf-8"><title>Search Works</title></head>
+<body class="logged-in">
+  <div id="main" class="works-search region">
+    <h3 class="heading">${ids.length} Found</h3>
+    <ol class="work index group">${ids.map(blurb).join('')}</ol>
+  </div>
+</body></html>`
 
 /** A stored list read `hours` ago, from `listUrl`. */
 const storedCopy = (sourceId, label, hours, listUrl, id) => ({
@@ -120,10 +131,20 @@ const removalNote = (row, what) => row.$eval(`[data-saved-list-note="${what}"]`,
 describe('options UI — saved lists', { skip }, () => {
   let session
   let options
+  /** AO3, as far as a list tracked here asks it for its first copy. */
+  let archive
 
   before(async () => {
     session = await startOptions()
-    options = await session.open({ seed: SEED, hash: '#saved-lists', viewport: { width: 1440, height: 900 }, prepare: page => page.evaluateOnNewDocument(standInForClipboard) })
+    options = await session.open({
+      seed: SEED,
+      hash: '#saved-lists',
+      viewport: { width: 1440, height: 900 },
+      prepare: async (page) => {
+        await page.evaluateOnNewDocument(standInForClipboard)
+        archive = await stubArchive(page, () => ({ body: searchResults([701, 702]) }))
+      },
+    })
   }, { timeout: 180000 })
 
   after(() => session?.close())
@@ -160,8 +181,8 @@ describe('options UI — saved lists', { skip }, () => {
     assert.equal(await cached(coffee), 'none')
     assert.equal(
       await (await options.action(coffee, 'open')).evaluate(a => a.getAttribute('href')),
-      `${ARCHIVE}/works/search?work_search[query]=coffee#ao3e-open=c0ffee`,
-      'its open URL, which keeps a copy as it opens',
+      `${ARCHIVE}/works/search?work_search[query]=coffee&work_search[date_from]=${isoDay(TODAY - 5)}#ao3e-open=c0ffee`,
+      'its open URL, which keeps a copy, from the day it is tracked from, as it opens',
     )
     assert.deepEqual(await options.actions(coffee, 'download'), [], 'nothing to download with no copy')
 
@@ -264,6 +285,15 @@ describe('options UI — saved lists', { skip }, () => {
     // Tracking again doesn't pour back what went unreviewed in between.
     assert.deepEqual((await writtenEntries()).lists[0], { id: 'c0ffee', kind: 'text-search', url: COFFEE.url, alias: 'Caffeine', tracked: true, since: TODAY })
     await until('the row to say so', async () => (await standing(row)).status === 'tracked' && mentions(await part(row, 'status'), formatDay(TODAY)))
+  })
+
+  test('tracked with no copy, the list keeps its first one, read from the day it is tracked from', async () => {
+    const key = textSearchKey(new URL(COFFEE.url, ARCHIVE).search)
+    await until('the first copy to be kept', async () => (await options.stored('cache.searchLists'))?.[key])
+    assert.equal((await options.stored('cache.searchLists'))[key].descriptor.dateFilter, `work_search[date_from]=${isoDay(TODAY)}`)
+    assert.ok(archive.asked.length > 0)
+    assert.ok(archive.asked.every(url => new URL(url).searchParams.get('work_search[date_from]') === isoDay(TODAY)), JSON.stringify(archive.asked))
+    await until('its row to show the copy', async () => await cached(await options.savedList('c0ffee')) === 'copy')
   })
 
   test('Stop tracking, in its details, asks nothing and keeps the list; Track this list tracks it again', async () => {

@@ -13,7 +13,7 @@ import type { SnapshotDescriptor } from './cache.ts'
 import type { SavedList } from './savedLists.ts'
 import type { TrackedKind, TrackedList } from './trackedLists.ts'
 
-import { fragmentParam, fragmentText, isListId, listPage, onListPage, parseArchiveUrl, sourceLabel } from './trackedLists.ts'
+import { fragmentParam, fragmentText, isListId, listPage, normalizeTrackedUrl, onListPage, parseArchiveUrl, sourceLabel } from './trackedLists.ts'
 
 /** What an open URL names: a saved list, by its id, or a list that has no record. */
 export type ListRef = { kind: 'list', id: string } | { kind: 'marked-for-later' | 'read-works' | 'review' }
@@ -230,5 +230,49 @@ export function listUrlFor(key: string, descriptor?: Pick<SnapshotDescriptor, 'l
       return `/works/search?${rest}`
     default:
       return undefined
+  }
+}
+
+/**
+ * The key a works search's copy is stored under, from the page's query string
+ * (`location.search`, with or without its `?`): its fields in one order, less
+ * the page, the flag that re-renders the form, and the *Date Updated* bounds,
+ * so the same search on any page, between any dates, is one copy, and two
+ * searches never share one. Its sort stays, as another sort reaches other
+ * works under the works ceiling.
+ */
+export function textSearchKey(search: string): string {
+  const params = new URLSearchParams(search)
+  for (const name of ['page', 'edit_search', 'work_search[date_from]', 'work_search[date_to]'])
+    params.delete(name)
+  const entries = [...params.entries()].sort(([a], [b]) => a.localeCompare(b))
+  return `text-search:${new URLSearchParams(entries).toString()}`
+}
+
+/** The key an uncommon tag's copy is stored under, from its page's path: the tag's segment, as the path spells it. */
+export function tagWorksKey(pathname: string): string {
+  return `tag-works:${pathname.replace(/^\/tags\/|\/$/g, '')}`
+}
+
+/**
+ * The key a saved list's copy is stored under: the one its search view keys
+ * the copy of the list's own page by, so a copy kept from here and one kept
+ * on the page are the same copy. {@link listUrlFor} rebuilds the page from it.
+ * Null for a list whose address isn't an archive page of its kind.
+ */
+export function copyKeyOf(list: Pick<SavedList, 'kind' | 'url'>): string | null {
+  const normalized = normalizeTrackedUrl(list.url)
+  const url = parseArchiveUrl(list.url)
+  if (!normalized || normalized.kind !== list.kind || !url)
+    return null
+  switch (normalized.kind) {
+    case 'works-filter':
+      return normalized.key
+    case 'text-search':
+      return textSearchKey(url.search)
+    case 'tag-works':
+      return tagWorksKey(url.pathname)
+    case 'series-works':
+      return `series-works:${/^\/series\/(\d+)/.exec(url.pathname)?.[1]}`
   }
 }

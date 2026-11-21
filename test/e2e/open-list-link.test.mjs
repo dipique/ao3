@@ -165,6 +165,30 @@ describe('a list opened by its URL', { skip }, () => {
     })
   }
 
+  describe('between dates, as a tracked list\'s open URL opens it', () => {
+    const FROM = 'work_search[date_from]=2026-11-03'
+
+    for (const { list, key } of KINDS.filter(({ list }) => list.kind === 'works-filter' || list.kind === 'text-search')) {
+      test(`${list.kind}: its copy is read between them, and kept as the list's own, the dates beside it`, async () => {
+        const requests = []
+        const tab = await openTab(browser, { seed: SEED, route, requests })
+        try {
+          await visit(tab, `${ARCHIVE}${list.url}${list.url.includes('?') ? '&' : '?'}${FROM}#ao3e-open=${list.id}`)
+          await until('the copy to be kept', async () => storedListIds((await stored(tab, 'cache.searchLists'))?.[key]).length === IDS.length)
+          const lists = await stored(tab, 'cache.searchLists')
+          assert.deepEqual(Object.keys(lists), [key])
+          assert.equal(lists[key].descriptor.dateFilter, FROM)
+          assert.equal(new URL(lists[key].descriptor.listUrl).searchParams.has('work_search[date_from]'), false, 'its address is the whole list\'s')
+          assert.ok(walks(requests).length > 0)
+          assert.ok(walks(requests).every(url => new URL(url).searchParams.get('work_search[date_from]') === '2026-11-03'), 'every page read between the dates')
+        }
+        finally {
+          await tab.close()
+        }
+      })
+    }
+  })
+
   describe('once a view is up', () => {
     const { list } = KINDS.find(({ list }) => list.kind === 'series-works')
     let tab

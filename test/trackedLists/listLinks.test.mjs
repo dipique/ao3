@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { BUILTIN_TITLES, builtinOpens, hostPage, listUrlFor, openAsk, openLink, openTarget, ownPageLink } from '../../src/common/listLinks.ts'
-import { isListId, onListPage } from '../../src/common/trackedLists.ts'
+import { BUILTIN_TITLES, builtinOpens, copyKeyOf, hostPage, listUrlFor, openAsk, openLink, openTarget, ownPageLink, tagWorksKey, textSearchKey } from '../../src/common/listLinks.ts'
+import { isListId, normalizeTrackedUrl, onListPage } from '../../src/common/trackedLists.ts'
 import { mentions } from '../facts.mjs'
 
 const AO3 = 'https://archiveofourown.org'
@@ -141,6 +141,12 @@ describe('what an open URL asks of the page it opens', () => {
     assert.equal(at('s34rch', `${AO3}/works/search?work_search[complete]=T&work_search[query]=tea&page=2&commit=Search`), 's34rch')
     assert.equal(at('t4g', `${AO3}/tags/marriage%20problems?page=2`), 't4g')
     assert.equal(at('s3r', `${AO3}/series/9991/`), 's3r')
+  })
+
+  test('its own page between dates, as a tracked list\'s open URL names it', () => {
+    const at = (id, href) => openAsk({ kind: 'list', id }, LISTS, href)?.list.id ?? null
+    assert.equal(at('f1lt3r', `${AO3}/tags/Bees/works?work_search[date_from]=2026-11-03`), 'f1lt3r')
+    assert.equal(at('s34rch', `${AO3}/works/search?work_search[query]=tea&work_search[complete]=T&work_search[date_from]=2026-11-03`), 's34rch')
   })
 
   test('nothing on any other page: another list\'s, the same tag as a listing, or no list at all', () => {
@@ -332,5 +338,58 @@ describe('listUrlFor', () => {
   test('none for a key no page is rebuilt from, the works read and the review among them', () => {
     for (const key of ['read-works:me', 'tracked-review', 'tag-works:', 'tag-works', 'unknown:x', ''])
       assert.equal(listUrlFor(key), undefined, key)
+  })
+})
+
+describe('textSearchKey', () => {
+  const KEY = 'text-search:work_search%5Bcomplete%5D=T&work_search%5Bquery%5D=tea'
+
+  test('a works search is one copy whatever order its fields come in, on any page, between any dates', () => {
+    for (const search of [
+      '?work_search[query]=tea&work_search[complete]=T',
+      '?work_search%5Bcomplete%5D=T&work_search%5Bquery%5D=tea&page=3',
+      '?work_search[query]=tea&edit_search=true&work_search[complete]=T',
+      '?work_search[query]=tea&work_search[complete]=T&work_search[date_from]=2026-11-03&work_search[date_to]=2026-11-10',
+    ])
+      assert.equal(textSearchKey(search), KEY, search)
+  })
+
+  test('another sort is another copy', () => {
+    assert.notEqual(textSearchKey('?work_search[query]=tea&work_search[complete]=T&work_search[sort_column]=kudos_count'), KEY)
+  })
+})
+
+describe('tagWorksKey', () => {
+  test('an uncommon tag\'s page is keyed by its path\'s segment, as the path spells it', () => {
+    assert.equal(tagWorksKey('/tags/marriage%20problems'), 'tag-works:marriage%20problems')
+    assert.equal(tagWorksKey('/tags/marriage%20problems/'), 'tag-works:marriage%20problems')
+  })
+})
+
+describe('copyKeyOf', () => {
+  const LISTS = [
+    record('f1lt3r', 'works-filter', '/works?work_search[complete]=T&tag_id=Bees'),
+    record('s34rch', 'text-search', '/works/search?work_search[query]=tea&work_search[complete]=T'),
+    record('t4g', 'tag-works', '/tags/marriage%20problems'),
+    record('s3r', 'series-works', '/series/9991'),
+  ]
+
+  test('a saved list\'s copy is keyed as its search view keys the copy of its own page', () => {
+    assert.deepEqual(LISTS.map(copyKeyOf), [
+      normalizeTrackedUrl(`${AO3}${LISTS[0].url}`).key,
+      textSearchKey('?work_search[query]=tea&work_search[complete]=T'),
+      tagWorksKey('/tags/marriage%20problems'),
+      'series-works:9991',
+    ])
+  })
+
+  test('which keeps the address: the page rebuilt from the key is the list\'s own', () => {
+    for (const list of LISTS.slice(1))
+      assert.equal(onListPage(list, `${AO3}${listUrlFor(copyKeyOf(list))}`), true, list.kind)
+  })
+
+  test('none for a list at no address on the archive, or at one of another kind', () => {
+    assert.equal(copyKeyOf(record('x', 'tag-works', 'https://example.com/tags/x')), null)
+    assert.equal(copyKeyOf(record('x', 'series-works', '/tags/Bees/works')), null)
   })
 })

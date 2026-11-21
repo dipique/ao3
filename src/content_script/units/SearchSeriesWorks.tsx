@@ -4,7 +4,7 @@ import { ADDON_CLASS, getArchiveLink } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
 import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
-import { detectPageCount } from '#content_script/searchView/scrape.ts'
+import { detectPageCount, SERIES_BLURB_SELECTOR } from '#content_script/searchView/scrape.ts'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -20,7 +20,6 @@ const SOURCE_ID = 'series-works'
 
 /** Where a series page lists its works. A `ul`, unlike every other listing. */
 const LIST_SELECTOR = 'ul.series.work.index.group'
-const BLURB_SELECTOR = `${LIST_SELECTOR} > li.blurb`
 
 /** The series id in the current URL, or null if this isn't a series page. */
 function seriesId(): string | null {
@@ -120,14 +119,14 @@ export class SearchSeriesWorks extends Unit {
         listUrl: getArchiveLink(`/series/${id}`),
         // A series lists its works in a `ul`, not the `ol` every other listing
         // uses, so a refresh has to be scoped the same way this scrape is.
-        blurbSelector: BLURB_SELECTOR,
+        blurbSelector: SERIES_BLURB_SELECTOR,
       }),
       // Built from the id alone, so opening from page 3 still starts at page 1.
       pageUrl: page => getArchiveLink(`/series/${id}?page=${page}`),
       pageCount: () => detectPageCount(document),
       resultCount: seriesWorkCount,
       refreshInterval: () => refreshIntervalMs(this.options.searchListingsRefreshHours),
-      blurbSelector: BLURB_SELECTOR,
+      blurbSelector: SERIES_BLURB_SELECTOR,
       // The list and its pagination, plus the button that opened the view — the
       // view has its own "Back to list", and all three come back with the list.
       nativeElements: () => [list, ...paginations()],

@@ -310,6 +310,17 @@ export const TRACK_BOX = '.AO3E--filter-toolbar--track--box'
 export const TITLE_INPUT = `${TRACK_BOX} input.AO3E--filter-toolbar--track--alias`
 /** The box's chooser of which list to update, where there are several. */
 export const LIST_CHOOSER = `${TRACK_BOX} select.AO3E--filter-toolbar--track--chooser`
+/** The box's date a list is tracked from: `new` for a list it makes, `update` for the list it updates. */
+export const SINCE_INPUT = role => `${TRACK_BOX} input[data-ao3e-since="${role}"]`
+
+/** Put `iso` (`YYYY-MM-DD`) in the box's date field for `role` ({@link SINCE_INPUT}), as a date picker does. */
+export function pickSince(tab, role, iso) {
+  return tab.$eval(SINCE_INPUT(role), (input, value) => {
+    input.value = value
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  }, iso)
+}
 
 /** Open the toolbar, unless it is open, and wait for its pills to be in place. */
 export async function openToolbar(tab) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
-import { normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
+import { isoDay, normalizeTrackedUrl, utcToday } from '../../src/common/trackedLists.ts'
 import { mentions } from '../facts.mjs'
 import { ensureBuilt, findChrome, until } from './helpers.mjs'
 import {
@@ -17,11 +17,14 @@ import {
   openBox,
   openTab,
   openToolbar,
+  pickSince,
   pillRow,
   pillText,
   refiningMark,
   rerun,
   searchPage,
+  SINCE_INPUT,
+  stored,
   storedOption,
   TITLE_INPUT,
   toastNamed,
@@ -131,6 +134,15 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     assert.ok(mentions(await tab.$eval(`${TRACK_BOX} [data-ao3e-action="update"]`, el => el.textContent), 'Harry Potter, no Draco'), 'update names the list picked')
   })
 
+  test('beside Update, the day the list picked is tracked from; a new list\'s starts today, and neither goes later', async () => {
+    const since = role => tab.$eval(SINCE_INPUT(role), input => ({ value: input.value, max: input.max }))
+    assert.deepEqual(await since('update'), { value: isoDay(NO_DRACO.since), max: isoDay(TODAY) })
+    await tab.select(LIST_CHOOSER, 'hpdone')
+    assert.deepEqual(await since('update'), { value: isoDay(COMPLETE.since), max: isoDay(TODAY) })
+    await tab.select(LIST_CHOOSER, 'nodraco')
+    assert.deepEqual(await since('new'), { value: isoDay(TODAY), max: isoDay(TODAY) })
+  })
+
   test('Update rewrites that list in place, keeping its tracking start', async () => {
     await rerun(tab, () => clickBoxAction(tab, 'update'))
     const updated = await list('nodraco')
@@ -149,6 +161,13 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     // The page is that list now.
     await openToolbar(tab)
     await pillIs(tab, 'exact:nodraco', 'Harry Potter, no Draco')
+  })
+
+  test('the list keeps a first copy of the search it now is, read from the day it is tracked from', async () => {
+    const key = normalizeTrackedUrl(BOTH_OUT).key
+    await until('the first copy to be kept', async () => (await stored(tab, 'cache.searchLists'))?.[key])
+    const copy = (await stored(tab, 'cache.searchLists'))[key]
+    assert.equal(copy.descriptor.dateFilter, `work_search[date_from]=${isoDay(NO_DRACO.since)}`)
   })
 
   /**
@@ -211,6 +230,17 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
     assert.equal(added.type, 'fandom')
     assert.equal(added.url, `/works?work_search[complete]=F&${HP_QUERY}`)
     assert.equal(added.since, TODAY)
+  })
+
+  test('a day picked beside Update is the day the list is tracked from', async () => {
+    await visit(tab, `${ARCHIVE}${HP_PATH}?work_search%5Blanguage_id%5D=de`)
+    await openBox(tab)
+    await tab.select(LIST_CHOOSER, 'hpdone')
+    await pickSince(tab, 'update', isoDay(TODAY - 40))
+    await rerun(tab, () => clickBoxAction(tab, 'update'))
+    const updated = await list('hpdone')
+    assert.equal(updated.since, TODAY - 40)
+    assert.equal(updated.url, normalizeTrackedUrl(`${ARCHIVE}${HP_PATH}?work_search%5Blanguage_id%5D=de`).url)
   })
 })
 

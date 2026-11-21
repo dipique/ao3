@@ -22,7 +22,7 @@
 
 import type { Day, NormalizedTrackedUrl, TrackedFilter, TrackedKind, TrackedList, TrackedListsOption, TrackedMeta, TrackedQuery, TrackedType } from './trackedLists.ts'
 
-import { dateFilterOf, defaultTitle, entrySignature, fillMeta, isListId, newTrackedListId, normalizeTrackedUrl, parseArchiveUrl, queryOf, requery, sameTitle, titleAfterUpdate, titleTakenBy, trackedKey, trackedMeta, uniqueTitle, withQueryOf } from './trackedLists.ts'
+import { copyDateFilter, dateFilterOf, defaultTitle, entrySignature, fillMeta, isListId, newTrackedListId, normalizeTrackedUrl, parseArchiveUrl, queryOf, requery, sameTitle, startDay, titleAfterUpdate, titleTakenBy, trackedKey, trackedMeta, uniqueTitle, wholeNumber, withQueryOf } from './trackedLists.ts'
 
 /** One saved list: its identity, and what it searches. */
 export interface SavedList {
@@ -544,14 +544,15 @@ export function planRetitle(state: ListState, id: string, title: string): { ok: 
 
 /**
  * Track list `id`: an entry made from its record, under its title, tracked from
- * `today`, so nothing from before is backfilled. The record already holds
- * everything else; one with no title yet takes its default, as the entry does.
+ * `since` ({@link startDay}), today unless the reader picked an earlier day, so
+ * nothing from before it is backfilled. The record already holds everything
+ * else; one with no title yet takes its default, as the entry does.
  *
  * Refused, naming it, when another tracked list is the same search with the same
  * view filter: the review would read it twice. A list already tracked, or gone,
  * is left as it is.
  */
-export function planTrack(state: ListState, id: string, today: Day): { ok: true, state: ListState } | { ok: false, twin: TrackedList } {
+export function planTrack(state: ListState, id: string, today: Day, since: Day = today): { ok: true, state: ListState } | { ok: false, twin: TrackedList } {
   const record = own(recordsOf(state), id)
   const entries = entriesOf(state)
   if (!record || entries.some(entry => isEntry(entry) && entry.id === id))
@@ -561,7 +562,7 @@ export function planTrack(state: ListState, id: string, today: Day): { ok: true,
   if (twin)
     return { ok: false, twin }
   const titled = withDefaultTitle(record)
-  const entry: TrackedList = { id, ...queryOf(titled), alias: titled.title, tracked: true, since: today }
+  const entry: TrackedList = { id, ...queryOf(titled), alias: titled.title, tracked: true, since: startDay(since, today) }
   return {
     ok: true,
     state: {
@@ -584,11 +585,13 @@ export type TrackSearchPlan
  * new list, a record and its entry under one new id. Either way the record is
  * this browser's own.
  *
+ * Tracked from `since`, as {@link planTrack} tracks a list.
+ *
  * Refused when another tracked list is the same search (`twin`), and when the
  * title is a new one for the list and another list has it (`takenBy`): a list
  * keeps its own title as it is tracked, even one it shares.
  */
-export function planTrackSearch(state: ListState, query: TrackedQuery, title: string, today: Day): TrackSearchPlan {
+export function planTrackSearch(state: ListState, query: TrackedQuery, title: string, today: Day, since: Day = today): TrackSearchPlan {
   const existing = savedListAt(state, trackedKey(query))
   const id = existing?.id ?? newTrackedListId(allLists(state))
   const trimmed = (typeof title === 'string' ? title.trim() : '') || defaultTitleOf(query)
@@ -596,7 +599,7 @@ export function planTrackSearch(state: ListState, query: TrackedQuery, title: st
   if (taken)
     return { ok: false, takenBy: taken.list }
   const record: SavedList = withoutMirror({ ...withQueryOf(existing ?? {}, query), id, title: trimmed })
-  const plan = planTrack({ tracked: state.tracked, saved: withRecord(state, record) }, id, today)
+  const plan = planTrack({ tracked: state.tracked, saved: withRecord(state, record) }, id, today, since)
   return plan.ok ? { ok: true, state: plan.state, id } : plan
 }
 
@@ -622,6 +625,43 @@ export function planTrackCopy(state: ListState, copy: StoredListRef, today: Day)
   const title = (typeof existing?.title === 'string' ? existing.title.trim() : '')
     || uniqueTitle(defaultTitle(trackedMeta(query) ?? storedListMeta(normalized.url, copy.label ?? '')), titled(allLists(state)), existing?.id)
   return planTrackSearch(state, query, title, today)
+}
+
+/**
+ * Track list `id` from another day, `since` ({@link startDay}): earlier, to
+ * bring the days before it into the offline copy, and into the review where it
+ * hasn't yet passed them, or later, to leave them out. Only the entry holds
+ * the day, so it syncs. Nothing changes
+ * for a list that isn't tracked, or is gone, for a day that isn't one, or for
+ * the day it already has.
+ */
+export function planSetSince(state: ListState, id: string, since: Day, today: Day): ListState {
+  const entries = entriesOf(state)
+  const entry = entries.find(one => isEntry(one) && one.id === id)
+  if (!entry || wholeNumber(since) === null)
+    return state
+  const day = startDay(since, today)
+  if (entry.since === day)
+    return state
+  return { ...state, tracked: { ...state.tracked, lists: entries.map(one => (one === entry ? { ...one, since: day } : one)) } }
+}
+
+/**
+ * The date filter the offline copy at `listUrl`'s address is read under
+ * ({@link copyDateFilter}): from the day the tracked list there is tracked
+ * from, or the earliest such day where two tracked lists share the copy, so
+ * that it holds what each needs. Null where no tracked list is at the address,
+ * or its listing can't be filtered by date, so the copy is read whole.
+ */
+export function copyDateFilterAt(entries: readonly TrackedList[], listUrl: string | undefined): string | null {
+  const address = addressOf(listUrl)
+  if (address === null)
+    return null
+  const here = entries.filter(one => isEntry(one) && one.tracked && wholeNumber(one.since) !== null && addressOf(one.url) === address)
+  if (!here.length)
+    return null
+  const earliest = here.reduce((a, b) => (b.since < a.since ? b : a))
+  return copyDateFilter(earliest)
 }
 
 /**
@@ -691,6 +731,9 @@ export interface SaveBackPage {
   scan?: boolean
   /** A title typed for the list; blank means the new search's default. Absent, see {@link titleAfterUpdate}. */
   title?: string
+  /** The day a tracked list is to be tracked from ({@link startDay}), with `today` to hold it to. Absent, it keeps its own. */
+  since?: Day
+  today?: Day
 }
 
 /** A save-back that can be made, or why it can't, naming the list responsible. */
@@ -703,8 +746,9 @@ export type SaveBackPlan
 /**
  * Save a refined search back to list `id`: the same list, searching what the
  * page does. Its record is rewritten in place under the same id, and its entry
- * too while it is tracked, keeping its tracking start. Nothing syncs for a list
- * that isn't tracked. An entry with no record yet gets one.
+ * too while it is tracked, keeping its tracking start unless the page gives
+ * another ({@link SaveBackPage.since}). Nothing syncs for a list that isn't
+ * tracked. An entry with no record yet gets one.
  *
  * - **The title** stays, unless it was the default for a root the search has
  *   left ({@link titleAfterUpdate}), or the caller passes one.
@@ -767,7 +811,7 @@ export function planSaveBack(state: ListState, id: string, page: SaveBackPage, s
     delete lists[absorbed.id]
   const next: ListState = {
     tracked: entry
-      ? { ...state.tracked, lists: entries.map(one => (one === entry ? { ...withQueryOf(entry, query), alias: title } : one)) }
+      ? { ...state.tracked, lists: entries.map(one => (one === entry ? { ...withQueryOf(entry, query), alias: title, since: sinceOf(entry, page) } : one)) }
       : state.tracked,
     saved: { ...state.saved, lists },
   }
@@ -776,6 +820,11 @@ export function planSaveBack(state: ListState, id: string, page: SaveBackPage, s
     ? copiesAt(oldAddress, addressed(stored)).map(copy => copy.key)
     : []
   return { ok: true, state: next, dropCopies, absorbed }
+}
+
+/** The day a saved-back entry is tracked from: the page's, held to its `today`, else its own. */
+function sinceOf(entry: TrackedList, page: SaveBackPage): Day {
+  return page.since === undefined ? entry.since : startDay(page.since, page.today ?? entry.since)
 }
 
 /** What a save-back of list `id` changed: the lists as it found and left them, and the record it absorbed. */

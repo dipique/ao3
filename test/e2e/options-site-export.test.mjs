@@ -1977,7 +1977,7 @@ describe('options UI — site export, one job at a time', { skip }, () => {
     const railJob = await options.page.$eval('[data-rail] [data-rail-job]', el => ({ title: el.title, text: el.textContent.trim() }))
     assert.ok(mentions(railJob.title, HOLDER) && mentions(railJob.title, CACHING), railJob.title)
     assert.match(railJob.text, /\/2$/)
-    // Tracking asks AO3 for nothing, so no job turns it off.
+    // Tracking runs no job, so no job turns it off.
     const toggle = await options.control(await row(OTHER), 'switch')
     assert.equal(await toggle.evaluate(el => el.disabled), false)
 

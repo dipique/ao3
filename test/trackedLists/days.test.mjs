@@ -3,7 +3,7 @@ import { describe, test } from 'node:test'
 
 // Node strips the TS types on import; trackedLists.ts imports nothing at all,
 // so it loads without a build, a DOM, or the extension APIs.
-import { dayOf, formatDay, isoDay, utcToday } from '../../src/common/trackedLists.ts'
+import { dayOf, formatDay, isoDay, startDay, utcToday } from '../../src/common/trackedLists.ts'
 
 const MS_PER_DAY = 86_400_000
 
@@ -71,5 +71,20 @@ describe('isoDay / formatDay', () => {
   test('formatDay round-trips through dayOf', () => {
     for (let day = dayOf('1 Jan 2024'); day <= dayOf('31 Dec 2024'); day += 7)
       assert.equal(dayOf(formatDay(day)), day)
+  })
+})
+
+describe('startDay', () => {
+  const TODAY = dayOf('18 Nov 2026')
+
+  test('is the day given, today or any day before it', () => {
+    assert.equal(startDay(TODAY, TODAY), TODAY)
+    assert.equal(startDay(TODAY - 14, TODAY), TODAY - 14)
+    assert.equal(startDay(0, TODAY), 0)
+  })
+
+  test('is today for a day yet to come, or for anything that isn\'t a day', () => {
+    for (const since of [TODAY + 1, TODAY + 400, 1.5, Number.NaN, null, undefined, '2026-11-01'])
+      assert.equal(startDay(since, TODAY), TODAY, String(since))
   })
 })

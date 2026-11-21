@@ -1,6 +1,9 @@
-import type { ListState, SavedList, TrackedList } from '#common'
+import type { Day, ListState, SavedList, TrackedList } from '#common'
 
-import { deepToRaw, planRetitle, planStopTracking, planTrack, savedListsWrite, utcToday } from '#common'
+import { deepToRaw, planRetitle, planSetSince, planStopTracking, planTrack, savedListsWrite, utcToday } from '#common'
+import { keepFirstCopy } from '#content_script/tracked/firstCopy.ts'
+
+import { backfillNote } from '../model/savedListRows.ts'
 
 /**
  * The saved lists' two halves as this page holds them — the synced entries
@@ -51,7 +54,8 @@ export function useSavedLists() {
    * stretch spent untracked is the reader saying "not these for now", so
    * tracking again shouldn't pour back everything they chose to skip. Tracking
    * a search another tracked list is already is refused, and that list is
-   * returned; null once it is written.
+   * returned; null once it is written. A list tracked with no copy keeps its
+   * first one (`keepFirstCopy`), in the background.
    */
   function setTracked(id: string, on: boolean): TrackedList | null {
     const before = current()
@@ -63,8 +67,23 @@ export function useSavedLists() {
     if (!plan.ok)
       return plan.twin
     apply(before, plan.state)
+    void keepFirstCopy(plan.state.tracked.lists, id)
     return null
   }
 
-  return { entries: tracked.lists, records, current, apply, retitle, setTracked }
+  /**
+   * Track list `id` from `since`, today at the latest, on its entry alone. What
+   * moving it back can't do, where it brings in days already reviewed
+   * (`backfillNote`), or null.
+   */
+  function setSince(id: string, since: Day): string | null {
+    const before = current()
+    const was = before.tracked.lists.find(one => one.id === id)?.since
+    const next = planSetSince(before, id, since, utcToday())
+    apply(before, next)
+    const now = next.tracked.lists.find(one => one.id === id)?.since
+    return was === undefined || now === undefined ? null : backfillNote(was, now, before.tracked.reviewedThrough)
+  }
+
+  return { entries: tracked.lists, records, current, apply, retitle, setTracked, setSince }
 }

@@ -1,13 +1,13 @@
 import type { SnapshotDescriptor } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
-import { withPage } from '#common'
+import { withDateFilter, withoutDateBounds, withPage } from '#common'
 import { PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 
 import type { Recovered } from './workPageBlurb.tsx'
 
 import { readSnapshot, snapshotSize, writeSnapshot } from './cache.ts'
-import { detectPageCount, fetchPageDoc, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
+import { detectPageCount, detectResultCount, fetchPageDoc, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 
 /**
  * Re-scrape a stored listing from outside the page it came from — the options
@@ -35,6 +35,14 @@ export interface RefreshOptions {
   /** Snapshot to rewrite — the same key the search view stores under. */
   cacheKey: string
   descriptor: SnapshotDescriptor
+  /**
+   * The date filter to read the listing under, as a query: a tracked list's,
+   * from the day it is tracked from (`copyDateFilterAt`). The descriptor's
+   * `listUrl` is read with its own date bounds taken off and these put on, and
+   * the copy is written with them as its `dateFilter`. Absent, `listUrl` is read
+   * as it is, and the copy written with none.
+   */
+  dateFilter?: string | null
   /**
    * Ceiling on works kept, i.e. `options.searchMaxResults`. A listing with more
    * is loaded up to the ceiling and reported as {@link RefreshResult.truncated};
@@ -149,6 +157,11 @@ export interface RefreshResult {
  *   whether the results container was on the page at all, which it doesn't yet;
  *   until then this errs towards keeping a list, since a list kept by mistake is
  *   one the reader can delete and a list emptied by mistake is gone.
+ *
+ *   A read under a {@link RefreshOptions.dateFilter} whose page 1 counts no
+ *   works at all (`0 Works`, `0 Found`) is told apart, and stored: nothing
+ *   updated since a tracked list's day is an everyday answer, and the count is
+ *   the archive saying so, where a broken page has none.
  */
 export type NotWritten = 'blocked' | 'logged-out' | 'emptied'
 
@@ -160,12 +173,14 @@ export type NotWritten = 'blocked' | 'logged-out' | 'emptied'
  * that fail are skipped, and show up as `loadedPages < fetchedPages`.
  */
 export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResult> {
-  const { cacheKey, descriptor, limit, onProgress, signal, onPersist, select, satisfied, recover } = opts
+  const { cacheKey, descriptor, limit, onProgress, signal, onPersist, select, satisfied, recover, dateFilter } = opts
+  const listUrl = dateFilter ? withDateFilter(withoutDateBounds(descriptor.listUrl), dateFilter) : descriptor.listUrl
 
   // This is the job's refresh, run from the options page with nobody watching —
   // so it waits a rate limit out rather than failing back to a reader who isn't
   // there. The same scrape from a live AO3 page keeps the impatient default.
-  const firstPageDoc = await fetchPageDoc(withPage(descriptor.listUrl, 1), signal, PATIENCE.bulk)
+  const firstPageDoc = await fetchPageDoc(withPage(listUrl, 1), signal, PATIENCE.bulk)
+  const countsNone = !!dateFilter && detectResultCount(firstPageDoc) === 0
   const loggedIn = firstPageDoc.body?.classList.contains('logged-in') ?? false
   const totalPages = Math.max(1, detectPageCount(firstPageDoc))
 
@@ -179,7 +194,7 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
 
   const { works: scraped, loadedPages, blocked } = await scrapeListing({
     pageCount: fetchedPages,
-    pageUrl: page => withPage(descriptor.listUrl, page),
+    pageUrl: page => withPage(listUrl, page),
     blurbSelector: descriptor.blurbSelector,
     firstPageDoc,
     onProgress,
@@ -221,15 +236,15 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     ? 'blocked'
     : opts.requireLogin && !loggedIn
       ? 'logged-out'
-      : scraped.length === 0 && works.length === 0 && await snapshotSize(cacheKey) > 0
+      : scraped.length === 0 && works.length === 0 && !countsNone && await snapshotSize(cacheKey) > 0
         ? 'emptied'
         : undefined
 
   if (!notWritten) {
-    // Read from `listUrl` alone, so a read of the whole listing, whatever date
-    // filter the copy was last read under.
-    const { dateFilter, ...whole } = descriptor
-    await writeSnapshot(cacheKey, works, whole)
+    // The copy says which read it is: the whole listing's, whatever date filter
+    // it was last read under, or the one this read was under.
+    const { dateFilter: _lastRead, ...whole } = descriptor
+    await writeSnapshot(cacheKey, works, dateFilter ? { ...whole, listUrl: withoutDateBounds(whole.listUrl), dateFilter } : whole)
     await onPersist?.(works)
   }
 

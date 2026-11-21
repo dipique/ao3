@@ -4,7 +4,7 @@ import type { Work } from '#content_script/blurb.js'
 import { applyPage, dayOf, excludedTagNames, getArchiveLink, MAX_REQUEST_ATTEMPTS, nextRead, PAGE_SIZE, pageUrl, pruneReviewed, recordFor, sourceLabel, storedRecordOf, toShortId, unpackRows, utcToday } from '#common'
 import { archiveWaitRemaining, onArchiveWait, waitForArchive } from '#content_script/archiveFetch.js'
 import { storeWorks } from '#content_script/searchView/blurbStore.ts'
-import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy } from '#content_script/searchView/scrape.ts'
+import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy, SERIES_BLURB_SELECTOR } from '#content_script/searchView/scrape.ts'
 import { TAG_BLURB_SELECTOR } from '#content_script/tagPage.ts'
 
 import { readStoredRecords, writeReadRecord } from './readStore.ts'
@@ -46,9 +46,6 @@ const SCAN_PAGE_CAP = 5
  * hundreds of pages.
  */
 const MAX_REFUSED_ROUNDS = 6
-
-/** A series lists its works in a `ul`, unlike every other listing on the archive. */
-const SERIES_BLURB_SELECTOR = 'ul.series.work.index.group > li.blurb'
 
 /** Where a run has got, for whoever is showing it. */
 export interface ReadStatus {

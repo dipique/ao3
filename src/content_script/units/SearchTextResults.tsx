@@ -1,6 +1,6 @@
 import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
-import { ADDON_CLASS, getArchiveLink } from '#common'
+import { ADDON_CLASS, dateFilterOf, getArchiveLink, textSearchKey, withoutDateBounds } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
 import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
@@ -99,13 +99,18 @@ export class SearchTextResults extends Unit {
     return {
       id: SOURCE_ID,
       cacheKey: snapshotKey(),
-      descriptor: () => ({
-        sourceId: SOURCE_ID,
-        label: searchLabel(),
-        // `pageQuery` carries the whole search and drops `edit_search`; which
-        // page it names doesn't matter, since a refresh sets its own.
-        listUrl: getArchiveLink(`${location.pathname}?${pageQuery(1)}`),
-      }),
+      descriptor: () => {
+        const dateFilter = dateFilterOf(location.href)
+        return {
+          sourceId: SOURCE_ID,
+          label: searchLabel(),
+          // `pageQuery` carries the whole search and drops `edit_search`; which
+          // page it names doesn't matter, since a refresh sets its own. The
+          // dates it was read between are kept beside it, as the key leaves them out.
+          listUrl: withoutDateBounds(getArchiveLink(`${location.pathname}?${pageQuery(1)}`)),
+          ...(dateFilter ? { dateFilter } : {}),
+        }
+      },
       pageUrl: page => getArchiveLink(`${location.pathname}?${pageQuery(page)}`),
       pageCount: () => detectPageCount(document),
       resultCount: foundCount,
@@ -162,14 +167,11 @@ function pageQuery(page: number): string {
 }
 
 /**
- * Snapshot cache key for the search in the current URL. Built from the sorted
- * query (minus `page`) so the same search reached by different orderings of the
- * same fields shares one snapshot, and two different searches never do.
+ * Snapshot cache key for the search in the current URL ({@link textSearchKey}).
+ * The search between dates is the same search, as a filtered listing between
+ * dates is the same listing: its *Date Updated* bounds are kept beside the
+ * copy as its date filter.
  */
 function snapshotKey(): string {
-  const params = new URLSearchParams(location.search)
-  params.delete('page')
-  params.delete('edit_search')
-  const entries = [...params.entries()].sort(([a], [b]) => a.localeCompare(b))
-  return `${SOURCE_ID}:${new URLSearchParams(entries).toString()}`
+  return textSearchKey(location.search)
 }

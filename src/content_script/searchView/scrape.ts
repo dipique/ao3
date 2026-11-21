@@ -178,6 +178,9 @@ function roundController(parent?: AbortSignal): AbortController {
  */
 export const DEFAULT_BLURB_SELECTOR = 'ol.work.index.group > li.blurb'
 
+/** Where a series' own page lists its works: a `ul`, unlike every other listing. */
+export const SERIES_BLURB_SELECTOR = 'ul.series.work.index.group > li.blurb'
+
 export interface ScrapeOptions {
   /** Total number of pages to fetch (see {@link detectPageCount}). */
   pageCount: number

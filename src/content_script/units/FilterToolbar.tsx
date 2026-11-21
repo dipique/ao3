@@ -9,12 +9,12 @@ import MdiPlaylistEdit from '~icons/mdi/playlist-edit.jsx'
 import MdiPlaylistPlay from '~icons/mdi/playlist-play.jsx'
 import MdiPlaylistPlus from '~icons/mdi/playlist-plus.jsx'
 
-import type { ListState, ListTitle, SaveBackDone, SaveBackPage, SaveBackPlan, SaveBackUndoPlan, SavedList, TrackedFilter, TrackedList, TrackedMeta } from '#common'
+import type { Day, ListState, ListTitle, SaveBackDone, SaveBackPage, SaveBackPlan, SaveBackUndoPlan, SavedList, TrackedFilter, TrackedList, TrackedMeta } from '#common'
 import type { FloatingToolbar } from '#content_script/floatingToolbar.tsx'
 import type { DetachedSnapshot } from '#content_script/searchView/cache.ts'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, aliasOf, alreadyTracked, api, cache, defaultTitle, describeList, describeUpdate, fillMeta, filteredKey, getArchiveLink, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleRefusal, titleTakenBy, toast, trackedKey, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, aliasOf, alreadyTracked, api, cache, defaultTitle, describeList, describeUpdate, fillMeta, filteredKey, formatDay, getArchiveLink, isoDay, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleRefusal, titleTakenBy, toast, toEpochDays, trackedKey, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { BUTTON_CLASS, createFloatingToolbar, ICON_CLASS, toolbarButton } from '#content_script/floatingToolbar.tsx'
@@ -25,6 +25,7 @@ import { NATIVE_HIDDEN_CLASS, VIEW_HIDDEN_CLASS } from '#content_script/searchVi
 import { activeSearchFilter } from '#content_script/searchView/host.tsx'
 import { findWorkText } from '#content_script/textReplaceScope.ts'
 import { metaUnsettled, needsScan, pageQuery, resolveMeta, sidebarNameId, trackablePage } from '#content_script/tracked/createList.ts'
+import { keepFirstCopy } from '#content_script/tracked/firstCopy.ts'
 import { endRefining, openRefining, refiningList, startRefining, takeRefiningLink } from '#content_script/tracked/refining.ts'
 import { trackedFilterOf } from '#content_script/tracked/viewFilter.ts'
 import { Unit } from '#content_script/Unit.js'
@@ -42,6 +43,7 @@ const TRACK_WARN_CLASS = `${TRACK_CLASS}--warn`
 const TRACK_DIFF_CLASS = `${TRACK_CLASS}--diff`
 const TRACK_SUMMARY_CLASS = `${TRACK_CLASS}--summary`
 const TRACK_CHOOSER_CLASS = `${TRACK_CLASS}--chooser`
+const TRACK_SINCE_CLASS = `${TRACK_CLASS}--since`
 /** Set on a title box once the reader has typed in it: what they typed is theirs, and outlives a rebuilt pill. */
 const TYPED_KEY = 'ao3eTyped'
 
@@ -635,6 +637,7 @@ export class FilterToolbar extends Unit {
         return
       }
       await writeListState(before, plan.state)
+      void keepFirstCopy(plan.state.tracked.lists, id)
       toast(`Tracking “${label}”. Works added or updated from today on will turn up in your review.`, { type: 'success', name: 'tracking' })
     }
     catch (err) {
@@ -690,12 +693,12 @@ export class FilterToolbar extends Unit {
   }
 
   /**
-   * The title box and **Track** for a page about to become a new list. The title
-   * starts as the page's default — "Type: entity", made unique among every saved
-   * list's — which the reader edits there or later on the options page. A tag's
-   * category that only the tag's own page can supply is asked for when the box
-   * first opens, and put into the title unless the reader has typed over it by
-   * then.
+   * The title box, the day the list is tracked from, and **Track**, for a page
+   * about to become a new list. The title starts as the page's default — "Type:
+   * entity", made unique among every saved list's — which the reader edits
+   * there or later on the options page; the day starts today. A tag's category
+   * that only the tag's own page can supply is asked for when the box first
+   * opens, and put into the title unless the reader has typed over it by then.
    */
   private newListSection(page: TrackablePage, titles: readonly ListTitle[], close: () => void): NewListSection {
     const nodes: Node[] = []
@@ -706,9 +709,10 @@ export class FilterToolbar extends Unit {
       nodes.push(relativeDateNote(page))
 
     const title = titleField(uniqueTitle(defaultTitle(page.meta), titles))
+    const since = sinceField('new', utcToday())
     const track = minorButton('track', 'Track')
     const cancel = minorButton('cancel', 'Cancel')
-    const save = (): void => void this.createList(page, title.input.value, track)
+    const save = (): void => void this.createList(page, title.input.value, track, false, since.day())
     track.addEventListener('click', save)
     cancel.addEventListener('click', close)
     title.input.addEventListener('keydown', (e) => {
@@ -727,7 +731,7 @@ export class FilterToolbar extends Unit {
         {cancel}
       </div>
     )
-    nodes.push(title.input, row)
+    nodes.push(title.input, since.node, row)
 
     return {
       nodes,
@@ -767,6 +771,8 @@ export class FilterToolbar extends Unit {
 
     const offered = (): string => titleAfterUpdate(aliasOf(list), page.normalized.url, meta, titles)
     const title = titleField(offered())
+    // Only a tracked list has a day it is tracked from.
+    const since = entry ? sinceField('update', entry.since) : null
     const update = minorButton('update', `Update “${label}”`, `Change “${label}” to search what this page does.${entry ? ' It keeps its place in your review.' : ''}`)
     // A title the reader hasn't touched is the one the update would offer, and
     // the update works it out again against the lists as they stand when it is
@@ -774,6 +780,7 @@ export class FilterToolbar extends Unit {
     update.addEventListener('click', () => void this.saveBack(page, list.id, label, update, {
       title: TYPED_KEY in title.input.dataset ? title.input.value : undefined,
       refining: true,
+      since: since?.picked(),
     }))
     const asNew = this.options.trackedLists.enabled
       ? minorButton('track-new', 'Track as a new list instead', `Leave “${label}” as it is, and track this page as a list of its own.`)
@@ -782,9 +789,10 @@ export class FilterToolbar extends Unit {
       asNew.addEventListener('click', () => {
         // The box holds the list's own title, which a new list can't share:
         // unless the reader has typed another, the new one takes the page's
-        // default.
+        // default. Its day is the list's too: unless the reader has picked
+        // another, the new one is tracked from today.
         const typed = sameTitle(title.input.value, list.title) ? '' : title.input.value
-        void this.createList(page, typed, asNew, true)
+        void this.createList(page, typed, asNew, true, since?.picked())
       })
     }
     title.input.addEventListener('keydown', (e) => {
@@ -806,8 +814,10 @@ export class FilterToolbar extends Unit {
     box.append(summary)
     if (page.normalized.relativeDate)
       box.append(relativeDateNote(page))
+    box.append(title.input)
+    if (since)
+      box.append(since.node)
     box.append(
-      title.input,
       <div class={TRACK_ROW_CLASS}>{update}</div>,
       <div class={TRACK_ROW_CLASS}>
         {asNew}
@@ -854,6 +864,7 @@ export class FilterToolbar extends Unit {
         ) as HTMLElement as HTMLSelectElement
       : null
     const summary: HTMLElement = <div class={TRACK_SUMMARY_CLASS} />
+    const since = sinceField('update', chosen.since)
     const update = minorButton('update', '')
     const refine = minorButton('refine', '')
     const draw = (): void => {
@@ -870,9 +881,10 @@ export class FilterToolbar extends Unit {
 
     chooser?.addEventListener('change', () => {
       chosen = sorted.find(one => one.id === chooser.value) ?? chosen
+      since.set(chosen.since)
       draw()
     })
-    update.addEventListener('click', () => void this.saveBack(page, chosen.id, sourceLabel(chosen, lists), update, { refining: false }))
+    update.addEventListener('click', () => void this.saveBack(page, chosen.id, sourceLabel(chosen, lists), update, { refining: false, since: since.picked() }))
     refine.addEventListener('click', () => {
       if (!extensionAlive())
         return
@@ -895,6 +907,7 @@ export class FilterToolbar extends Unit {
       <p class={TRACK_HEAD_CLASS}>Update a list</p>,
       chooser ?? name,
       summary,
+      since.node,
       <div class={TRACK_ROW_CLASS}>
         {update}
         {refine}
@@ -945,9 +958,10 @@ export class FilterToolbar extends Unit {
    * list tracks, and says which. `button` shows the work while it's done, and
    * stays disabled once it has worked: the write rebuilds the toolbar around
    * it. `endsRefining` is the refining box's **Track as a new list instead**,
-   * which is the end of refining the list it was for.
+   * which is the end of refining the list it was for. Tracked from `since`,
+   * today unless the reader picked an earlier day.
    */
-  private async createList(page: TrackablePage, typed: string, button: HTMLButtonElement, endsRefining = false): Promise<void> {
+  private async createList(page: TrackablePage, typed: string, button: HTMLButtonElement, endsRefining = false, since?: Day): Promise<void> {
     if (button.disabled || !extensionAlive())
       return
     const text = button.textContent
@@ -973,13 +987,16 @@ export class FilterToolbar extends Unit {
         // are what it joins.
         const filter = liveFilter(page)
         const before = await readListState()
-        const plan = planTrackSearch(before, pageQuery(page, scan, meta, filter), title, utcToday())
+        const today = utcToday()
+        const plan = planTrackSearch(before, pageQuery(page, scan, meta, filter), title, today, since)
         if (plan.ok) {
           if (endsRefining)
             endRefining()
           await writeListState(before, plan.state)
+          void keepFirstCopy(plan.state.tracked.lists, plan.id)
+          const from = plan.state.tracked.lists.find(one => one.id === plan.id)?.since ?? today
           toast(
-            `Tracking “${title}”. Works added or updated from today on will turn up in your review.${
+            `Tracking “${title}”. Works added or updated from ${fromDay(from, today)} on will turn up in your review.${
               scan ? ' This tag is read from its own page, so an update to an older work may be missed.' : ''}`,
             { type: 'success', name: 'tracking' },
           )
@@ -1013,14 +1030,14 @@ export class FilterToolbar extends Unit {
    * tab's mark: the list it was for has become what the reader made of it. A
    * list that is gone ends it too, since there is nothing left to refine.
    */
-  private async saveBack(page: TrackablePage, id: string, label: string, button: HTMLButtonElement, opts: { title?: string, refining: boolean }): Promise<void> {
+  private async saveBack(page: TrackablePage, id: string, label: string, button: HTMLButtonElement, opts: { title?: string, refining: boolean, since?: Day }): Promise<void> {
     if (button.disabled || !extensionAlive())
       return
     const text = button.textContent
     button.disabled = true
     try {
       const meta = await resolveMeta(page)
-      const asked = (scan?: boolean): SaveBackPage => ({ url: page.normalized.url, kind: page.normalized.kind, meta, filter: liveFilter(page), scan, title: opts.title })
+      const asked = (scan?: boolean): SaveBackPage => ({ url: page.normalized.url, kind: page.normalized.kind, meta, filter: liveFilter(page), scan, title: opts.title, since: opts.since, today: utcToday() })
       const known = await readListState()
       let plan: SaveBackPlan = planSaveBack(known, id, asked(), [])
       let before = known
@@ -1047,6 +1064,8 @@ export class FilterToolbar extends Unit {
         }
         if (opts.refining)
           endRefining()
+        // A tracked list now searching what nothing has a copy of yet.
+        void keepFirstCopy(plan.state.tracked.lists, id)
         trackWritten?.(plan.state)
         offerUndo({ id, before, after: plan.state, absorbed: plan.absorbed }, detached, opts.refining)
         return
@@ -1301,6 +1320,41 @@ function titleField(initial: string): { input: HTMLInputElement, offer: (title: 
       offered = title
     },
   }
+}
+
+/**
+ * The day a list is tracked from, as a date field: `role` is `new` for a list
+ * the box makes, `update` for the one it updates. It starts on `initial` and
+ * goes no later than today, in the archive's UTC days, as every day a review
+ * reads is. `day` is what it holds, `initial` while it holds no whole date;
+ * `picked` the day the reader put in, undefined while it is the one offered;
+ * `set` offers another.
+ */
+function sinceField(role: 'new' | 'update', initial: Day): { node: HTMLElement, day: () => Day, picked: () => Day | undefined, set: (day: Day) => void } {
+  let offered = initial
+  const input = (
+    <input type="date" data-ao3e-since={role} value={isoDay(initial)} max={isoDay(utcToday())} title="Works added or updated from this day on turn up in your review, and in the list's offline copy" />
+  ) as HTMLElement as HTMLInputElement
+  const day = (): Day => toEpochDays(input.value) ?? offered
+  return {
+    node: (
+      <label class={TRACK_SINCE_CLASS}>
+        <span>Tracked from</span>
+        {input}
+      </label>
+    ),
+    day,
+    picked: () => (day() === offered ? undefined : day()),
+    set: (next) => {
+      offered = next
+      input.value = isoDay(next)
+    },
+  }
+}
+
+/** A day a list is tracked from, as a toast says it: today, or the date. */
+function fromDay(day: Day, today: Day): string {
+  return day === today ? 'today' : formatDay(day)
 }
 
 /** Why the relative date bound on this page won't be part of the list. */

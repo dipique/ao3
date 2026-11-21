@@ -1,6 +1,6 @@
 import type { OpenOptions, SearchSource } from '#content_script/searchView/host.tsx'
 
-import { ADDON_CLASS, getArchiveLink } from '#common'
+import { ADDON_CLASS, getArchiveLink, tagWorksKey } from '#common'
 import { linkedTo, resumeView } from '#content_script/lists/openLink.ts'
 import { refreshIntervalMs } from '#content_script/searchView/freshness.ts'
 import { openSearchView, suspendSearchView } from '#content_script/searchView/host.tsx'
@@ -132,9 +132,10 @@ export class SearchTagWorks extends Unit {
 }
 
 /**
- * Snapshot cache key for the tag in the current URL. The raw path segment, so it
- * stays stable however AO3 chooses to escape the tag's name.
+ * Snapshot cache key for the tag in the current URL ({@link tagWorksKey}). The
+ * raw path segment, so it stays stable however AO3 chooses to escape the tag's
+ * name.
  */
 function snapshotKey(): string {
-  return `${SOURCE_ID}:${location.pathname.replace(/^\/tags\/|\/$/g, '')}`
+  return tagWorksKey(location.pathname)
 }

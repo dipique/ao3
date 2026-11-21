@@ -5,7 +5,7 @@ import type { FollowState, ListRefresh, RefreshOutcome } from '#content_script/s
 import type { RefreshOptions, RefreshResult } from '#content_script/searchView/refresh.js'
 import type { Hold } from '#content_script/searchView/refreshClaim.ts'
 
-import { createLogger, options, READING_ELSEWHERE, readWorkIds, REVIEW_SOURCE_ID, reviewStart, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
+import { copyDateFilterAt, createLogger, options, READING_ELSEWHERE, readWorkIds, REVIEW_SOURCE_ID, reviewStart, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
 import { onArchiveWait, PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
@@ -553,9 +553,12 @@ async function fetchList(job: ExportJob, signal: AbortSignal, hold: Hold | null)
   publish()
 
   const limit = await options.get('searchMaxResults')
+  // Asked as the refresh starts, so a resumed job reads from the day the list is tracked from now.
+  const { lists } = await options.get('trackedLists')
   return refreshSnapshot({
     cacheKey: job.cacheKey,
     descriptor: job.descriptor,
+    dateFilter: copyDateFilterAt(lists, job.descriptor.listUrl),
     limit,
     signal,
     onPersist: sideTableWriter(job.descriptor),
