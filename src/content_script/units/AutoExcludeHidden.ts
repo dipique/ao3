@@ -1,6 +1,6 @@
 import type { Tag } from '#common'
 
-import { TagType } from '#common'
+import { excludesFromSearch, TagType } from '#common'
 import { getBlurb } from '#content_script/blurb.js'
 import { hasFilterSidebar, loadFandomIdLookup, resolveFandomIdSync } from '#content_script/filterSidebar.js'
 import { nativeTargetForTag } from '#content_script/filterTarget.js'
@@ -51,6 +51,9 @@ const handled = new Set<string>()
  * - Only rules count. Marks and the crossover filter are the reader's own
  *   bookkeeping, not something to ask AO3 about. A work they hid can still be
  *   excluded by a rule that hid it as well.
+ * - Only rules at or above the reader's minimum priority count (see
+ *   {@link excludesFromSearch}). A weaker one still hides the work here, and
+ *   a work whose value it matched is still covered once that value is excluded.
  * - A value still carried by a work left on screen is never excluded. That is
  *   what an "always show" rule looks like from here: the work is in the listing
  *   because the reader overruled the hide, and an archive-side exclusion would
@@ -104,11 +107,11 @@ export class AutoExcludeHidden extends Unit {
         continue
       }
       const candidates: Candidate[] = []
-      for (const { target, rule } of excludes) {
+      for (const { target, rule, priority } of excludes) {
         if (target && rule)
-          candidates.push({ key: valueKey(target), target })
+          candidates.push({ key: valueKey(target), target, excludable: excludesFromSearch(priority, this.options.autoExcludeMinPriority) })
       }
-      if (candidates.length > 0)
+      if (candidates.some(({ excludable }) => excludable))
         hidden.push(candidates)
     }
     if (hidden.length === 0)
@@ -121,7 +124,7 @@ export class AutoExcludeHidden extends Unit {
 
     let applied = 0
     for (const candidates of hidden) {
-      const open = candidates.filter(({ key }) => !kept.has(key))
+      const open = candidates.filter(({ key, excludable }) => excludable && !kept.has(key))
       // Already on its way out: one of its values is excluded — by an earlier
       // work on this page, or by the reader — or was weighed on an earlier run.
       if (open.some(({ key }) => handled.has(key)) || candidates.some(isExcluded))
@@ -155,10 +158,14 @@ export class AutoExcludeHidden extends Unit {
   }
 }
 
-/** One value a rule hid a work by, and its {@link valueKey}. */
+/**
+ * One value a rule hid a work by, its {@link valueKey}, and whether that rule is
+ * strong enough to be excluded from the search.
+ */
 interface Candidate {
   key: string
   target: ExcludeTarget
+  excludable: boolean
 }
 
 /** Whether the sidebar already excludes this value. */

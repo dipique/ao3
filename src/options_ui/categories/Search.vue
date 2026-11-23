@@ -33,13 +33,7 @@
       subtitle="Choose what shows up in your listings and how it looks — hide or collapse works, make others stand out, or remove individual tags from work blurbs. Applies anywhere works are listed."
     >
       <OptionRowRules />
-      <OptionRow
-        anchor="auto-exclude-hidden"
-        title="Exclude hidden works from the search"
-        subtitle="When a rule hides a work outright, add what hid it to the search itself — ticked in AO3's own Sort &amp; Filter exclusions, or typed in when it isn't listed — so a page of twenty stops arriving with one work left on it. Nothing is submitted for you; press Sort and Filter when you're ready. Anything still carried by a work you always-show is left alone."
-      >
-        <OptionSwitch option-id="autoExcludeHidden" />
-      </OptionRow>
+      <OptionRowAutoExcludeHidden />
       <OptionRowHideCrossovers />
       <OptionRow
         anchor="hide-marked-for-later"

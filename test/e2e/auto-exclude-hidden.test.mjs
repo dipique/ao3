@@ -344,3 +344,70 @@ describe('auto-excluding a fandom AO3 merged into Original Work', { skip }, () =
     assert.equal(value, MERGED_FANDOM)
   })
 })
+
+/**
+ * A rule below the minimum priority still hides its work, but is never handed to
+ * the search: another page may hold a work an "always show" of higher priority
+ * keeps, which a weak exclusion would take out of the results unseen.
+ */
+const MIN_PRIORITY_SEED = {
+  'option.autoExcludeHidden': true,
+  'option.autoExcludeMinPriority': 2,
+  'option.rules': {
+    enabled: true,
+    colors: {},
+    filters: [
+      { target: 'F', value: 'Weak', matcher: 'exact', behavior: 'hide' },
+      { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'hide', priority: 1 },
+      { target: 'F', value: 'Strong', matcher: 'exact', behavior: 'hide', priority: 2 },
+    ],
+  },
+}
+
+const MIN_PRIORITY_PAGE = `
+<div id="main">
+  <ol class="work index group">
+    ${blurb(1, 'A weakly hidden one', ['Weak'])}
+    ${blurb(2, 'A fluffy one', ['Fluff'])}
+    ${blurb(3, 'A weak and strong one', ['Weak', 'Strong'])}
+  </ol>
+
+  <form id="work-filters" action="/tags/x/works">
+    <dd>
+      <input id="work_search_other_tag_names" name="work_search[other_tag_names]" type="text" value="">
+    </dd>
+    <dd>
+      <input id="work_search_excluded_tag_names" name="work_search[excluded_tag_names]" type="text" value="">
+    </dd>
+    <dd id="exclude_freeform_tags" class="expandable freeform tags">
+      <ul>
+        <li><label for="ex_f_110"><input type="checkbox" name="exclude_work_search[freeform_ids][]" id="ex_f_110" value="110"><span class="indicator"></span><span>Fluff (6385)</span></label></li>
+      </ul>
+    </dd>
+  </form>
+</div>
+`
+
+describe('auto-excluding only rules at or above the minimum priority', { skip }, () => {
+  let browser
+  let page
+
+  before(async () => {
+    ({ browser, page } = await openListing(MIN_PRIORITY_SEED, MIN_PRIORITY_PAGE))
+  }, { timeout: 180000 })
+
+  after(async () => {
+    await browser?.close()
+  })
+
+  test('hands over the strong rule\'s tag and holds back the weaker ones', async () => {
+    const value = await page.evaluate(() => document.getElementById('work_search_excluded_tag_names').value)
+    assert.deepEqual(value.split(',').map(name => name.trim()).filter(Boolean), ['Strong'])
+    assert.equal(await page.evaluate(() => document.getElementById('ex_f_110').checked), false, 'Fluff, at priority 1, stays unticked')
+  })
+
+  test('the weakly hidden works are still hidden on the page', async () => {
+    const hidden = await page.evaluate(() => ['work_1', 'work_2'].map(id => document.getElementById(id).dataset.ao3eHiddenBy ?? null))
+    assert.deepEqual(hidden, ['tags', 'tags'])
+  })
+})

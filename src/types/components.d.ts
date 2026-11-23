@@ -45,6 +45,7 @@ declare module 'vue' {
     OptionHideReason: typeof import('./../options_ui/components/options/OptionHideReason.vue')['default']
     OptionMasterGroup: typeof import('./../options_ui/components/OptionMasterGroup.vue')['default']
     OptionRow: typeof import('./../options_ui/components/option_rows/OptionRow.vue')['default']
+    OptionRowAutoExcludeHidden: typeof import('./../options_ui/components/option_rows/OptionRowAutoExcludeHidden.vue')['default']
     OptionRowCollapsable: typeof import('./../options_ui/components/option_rows/OptionRowCollapsable.vue')['default']
     OptionRowFandomExport: typeof import('./../options_ui/components/option_rows/OptionRowFandomExport.vue')['default']
     OptionRowHideCrossovers: typeof import('./../options_ui/components/option_rows/OptionRowHideCrossovers.vue')['default']

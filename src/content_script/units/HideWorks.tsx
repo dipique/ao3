@@ -119,11 +119,13 @@ interface HideCandidate {
  * handed to the filter" from "some of it could". `rule` is absent for the hides
  * that aren't rules (marks, crossovers, Marked for Later), which are never handed over:
  * they are the reader's own bookkeeping, not a property of the works AO3 would
- * be asked to leave out.
+ * be asked to leave out. `priority` is the reason's weight in the contest, which
+ * decides whether the option may hand it over at all (`excludesFromSearch`).
  */
 export interface HideExclusion {
   target: ExcludeTarget | null
   rule?: Rule
+  priority: number
 }
 
 /**
@@ -563,7 +565,7 @@ export class HideWorks extends Unit {
     for (const candidate of survivors) {
       kinds.add(candidate.kind)
       if (candidate.mode === 'hide')
-        excludes.push({ target: candidate.item.exclude ?? null, rule: candidate.rule })
+        excludes.push({ target: candidate.item.exclude ?? null, rule: candidate.rule, priority: candidate.priority })
       if (candidate.priority > winner || (candidate.priority === winner && candidate.mode === 'hide')) {
         winner = candidate.priority
         mode = candidate.mode

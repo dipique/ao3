@@ -141,6 +141,21 @@ export function rulePriority(rule: { behavior?: FilterBehavior, priority?: numbe
   return clampPriority(rule.priority) ?? defaultRulePriority(rule.behavior ?? 'hide', defaults)
 }
 
+/**
+ * Whether a hide rule at `priority` is strong enough for "Exclude hidden works
+ * from the search" to hand to a search filter: at least `minPriority`
+ * ({@link Options.autoExcludeMinPriority}), brought onto the scale, with
+ * anything that isn't a number counting as {@link MIN_PRIORITY}.
+ *
+ * A rule below it still hides the works it matches; it just isn't asked of the
+ * archive. The filter reaches every page of results, not only the one whose
+ * works were weighed, so a weak hide rule excluded there would also take out
+ * works on other pages that a stronger "always show" would have kept.
+ */
+export function excludesFromSearch(priority: number, minPriority: unknown): boolean {
+  return priority >= (clampPriority(minPriority) ?? MIN_PRIORITY)
+}
+
 // ---------------------------------------------------------------------------
 // Rules — one list, one shape, for tags, fandoms, authors, works and series.
 // ---------------------------------------------------------------------------

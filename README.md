@@ -57,7 +57,7 @@ Some features are on out of the box: the statistics, a narrower reading column, 
 - **Works already Marked for Later** takes the works on your Marked for Later list out of AO3's own listings (needs you logged in). It goes by the list as your Marked for Later search view last loaded it, plus what you've saved or removed since. Instant search views leave this to their Status filter, and your History and Marked for Later pages are left alone.
 - **Collapse or hide** decides whether the works those two take out shrink to a line saying why, with a button to show them, or disappear entirely. Rules and marks decide this for themselves.
 - **Show what matched** names the tag, fandom or author behind a collapsed work, with a button to exclude it in the sidebar.
-- **Exclude hidden works from the search** adds whatever hid a work to AO3's own Sort & Filter exclusions, so the next page of results isn't mostly hidden works. Nothing is submitted for you.
+- **Exclude hidden works from the search** adds whatever hid a work to AO3's own Sort & Filter exclusions, so the next page of results isn't mostly hidden works. Nothing is submitted for you. A minimum priority (0 by default) keeps weaker rules out of the search: they still hide works, but aren't excluded.
 
 ### Marks and progress
 

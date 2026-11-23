@@ -1,6 +1,6 @@
 import type { Options } from './options.ts'
 
-import { DEFAULT_ALWAYS_SHOW_PRIORITY } from './rules.ts'
+import { DEFAULT_ALWAYS_SHOW_PRIORITY, MIN_PRIORITY } from './rules.ts'
 import { DEFAULT_WORD_COUNT_RANGES } from './wordCount.ts'
 import { createDefaultMarks, DEFAULT_MARK_HIDE_MODE, DEFAULT_MARK_HIDE_PRIORITY, MARKS_VERSION } from './workMarks.ts'
 
@@ -29,6 +29,7 @@ export const OPTION_DEFAULTS: Options = {
   hideMarkedForLater: false,
   rules: { enabled: false, filters: [], colors: {}, alwaysShowPriority: DEFAULT_ALWAYS_SHOW_PRIORITY },
   autoExcludeHidden: false,
+  autoExcludeMinPriority: MIN_PRIORITY,
   workMarks: {
     enabled: false,
     marks: createDefaultMarks(),

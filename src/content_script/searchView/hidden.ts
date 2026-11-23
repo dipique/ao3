@@ -2,6 +2,7 @@ import type { Options, RuleTimingSample } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { HideVerdict } from '#content_script/units/HideWorks.tsx'
 
+import { excludesFromSearch } from '#common'
 import { blurbOf, hasNode } from '#content_script/blurb.js'
 import { FACET_TAG_TYPES, facetForTagType } from '#content_script/filterTarget.js'
 import { describeRemoval } from '#content_script/removalLog.js'
@@ -43,8 +44,9 @@ function facetKey(key: FacetKey, value: string): string {
  * reason is now *on screen* — a row in the facet sidebar, with its count, that
  * can be lifted — which is the same bargain the option strikes with AO3's own
  * sidebar on a native listing. It only happens when **every** reason the work is
- * gone can be put that way (an author or work rule, a mark, a crossover cannot),
- * so a work is never quietly let back in.
+ * gone can be put that way (an author or work rule, a mark, a crossover, a rule
+ * below {@link Options.autoExcludeMinPriority} cannot), so a work is never
+ * quietly let back in.
  *
  * A post-pass over the whole set rather than something the per-blurb decoration
  * works out, because that decoration only runs on the page being *shown*: the
@@ -105,7 +107,7 @@ export function applyHidden(
   works.forEach((work, index) => {
     const verdict = verdicts[index]!
     const handed = handOver && verdict.mode === 'hide'
-      ? asExclusions(verdict, kept, muted)
+      ? asExclusions(verdict, options.autoExcludeMinPriority, kept, muted)
       : null
     stamp(work, verdict.mode === 'hide' && !handed, !!handed)
     if (verdict.mode === 'hide')
@@ -148,14 +150,15 @@ function stamp(work: Work, hidden: boolean, filtered: boolean): void {
  */
 function asExclusions(
   verdict: HideVerdict,
+  minPriority: number,
   kept: Set<string>,
   muted: ((key: FacetKey, value: string) => boolean) | undefined,
 ): FacetValueRef[] | null {
   const refs: FacetValueRef[] = []
-  for (const { target, rule } of verdict.excludes) {
+  for (const { target, rule, priority } of verdict.excludes) {
     // No rule means a mark or a crossover — the reader's own
     // bookkeeping, which is not a property of the work for a filter to act on.
-    if (!target || !rule)
+    if (!target || !rule || !excludesFromSearch(priority, minPriority))
       return null
     const key = facetForTagType(target.type)
     if (!key || kept.has(facetKey(key, target.name)) || muted?.(key, target.name))

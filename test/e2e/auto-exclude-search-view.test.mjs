@@ -14,11 +14,13 @@ const TAG_URL = 'https://archiveofourown.org/tags/marriage%20problems'
 /**
  * A hide rule on one Additional Tag, plus a crossover filter that no filter can
  * speak for — the two halves of what "exclude hidden works from the search"
- * has to tell apart inside a view.
+ * has to tell apart inside a view. The rules sit at the minimum priority the
+ * option hands over, except `Weak`, which sits below it.
  */
 const SEED = {
   'option.searchTagWorks': true,
   'option.autoExcludeHidden': true,
+  'option.autoExcludeMinPriority': 1,
   // The crossover filter hides outright rather than collapsing, so it is the
   // same kind of decision as the rule and differs only in being unfilterable.
   'option.hideShowReason': false,
@@ -27,9 +29,10 @@ const SEED = {
     enabled: true,
     colors: {},
     filters: [
-      { target: 'F', value: 'Gone', matcher: 'exact', behavior: 'hide' },
-      { target: 'f', value: 'Hide This Fandom', matcher: 'exact', behavior: 'hide' },
-      { target: 'C', value: 'Hide This Character', matcher: 'exact', behavior: 'hide' },
+      { target: 'F', value: 'Gone', matcher: 'exact', behavior: 'hide', priority: 1 },
+      { target: 'f', value: 'Hide This Fandom', matcher: 'exact', behavior: 'hide', priority: 1 },
+      { target: 'C', value: 'Hide This Character', matcher: 'exact', behavior: 'hide', priority: 1 },
+      { target: 'F', value: 'Weak', matcher: 'exact', behavior: 'hide' },
     ],
   },
 }
@@ -68,6 +71,7 @@ const WORKS = {
     blurb(4, 'A sprawling one', [], { fandoms: ['A Fandom', 'Second Fandom', 'Third Fandom', 'Fourth Fandom'] }),
     blurb(5, 'A crossover', [], { fandoms: ['Other Fandom', 'Hide This Fandom'] }),
     blurb(6, 'An ensemble', [], { characters: ['Other Character', 'Hide This Character'] }),
+    blurb(7, 'A weakly hidden one', ['Weak']),
   ],
 }
 
@@ -212,6 +216,12 @@ describe('auto-excluding what the rules hide, in a search view', { skip }, () =>
     // Nothing carries its fandoms into the facets: the work never became a
     // result, so there is no row for the reader to lift.
     assert.equal(await facetRow('Fourth Fandom'), null)
+  })
+
+  test('a rule below the minimum priority takes the work away without excluding its tag', async () => {
+    const titles = await visibleTitles()
+    assert.ok(!titles.includes('A weakly hidden one'), `got ${JSON.stringify(titles)}`)
+    assert.equal(await facetRow('Weak'), null)
   })
 
   test('lifting the exclusion brings the work back collapsed, not as a blank slot', async () => {

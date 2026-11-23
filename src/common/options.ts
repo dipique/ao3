@@ -75,6 +75,14 @@ export interface Options {
    */
   autoExcludeHidden: boolean
   /**
+   * The weakest rule priority {@link autoExcludeHidden} hands to a search filter.
+   * A hide rule below it still hides its works, but is left out of the search:
+   * the filter reaches every page of results, where an "always show" stronger
+   * than that rule may be keeping works the reader hasn't seen yet. See
+   * `excludesFromSearch`.
+   */
+  autoExcludeMinPriority: number
+  /**
    * Per-work marks (read, favorite, and the finer dispositions), plus how each
    * one behaves. Unlike the rules these grow one entry per work you finish, so
    * the id sets are stored delta-packed — see {@link file://./workMarks.ts}.

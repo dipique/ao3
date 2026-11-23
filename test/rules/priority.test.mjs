@@ -11,6 +11,7 @@ import {
   DEFAULT_AUTHOR_HIGHLIGHT_COLOR,
   DEFAULT_HIGHLIGHT_COLOR,
   defaultRulePriority,
+  excludesFromSearch,
   isTagTarget,
   MAX_PRIORITY,
   MIN_PRIORITY,
@@ -313,5 +314,33 @@ describe('ruleHideMode', () => {
     // A rule written before collapsing existed carries no behavior at all, and
     // means the same thing "Hide fully" used to: the work leaves the listing.
     assert.equal(ruleHideMode(rule({})), 'hide')
+  })
+})
+
+describe('excludesFromSearch', () => {
+  test('at the shipped minimum, a hide rule of any priority is handed to the search', () => {
+    for (const priority of SCALE)
+      assert.equal(excludesFromSearch(priority, OPTION_DEFAULTS.autoExcludeMinPriority), true, `priority ${priority}`)
+  })
+
+  test('a minimum of 2 holds back rules of 0 and 1, and hands over 2 and up', () => {
+    for (const priority of SCALE)
+      assert.equal(excludesFromSearch(priority, 2), priority >= 2, `priority ${priority}`)
+  })
+
+  test('the minimum itself is enough', () => {
+    assert.equal(excludesFromSearch(MAX_PRIORITY, MAX_PRIORITY), true)
+    assert.equal(excludesFromSearch(MAX_PRIORITY - 1, MAX_PRIORITY), false)
+  })
+
+  test('a minimum that isn\'t a number counts as the lowest, so nothing is held back', () => {
+    for (const min of [undefined, null, 'x', Number.NaN])
+      assert.equal(excludesFromSearch(MIN_PRIORITY, min), true, `min ${String(min)}`)
+  })
+
+  test('a minimum off the scale is brought onto it', () => {
+    assert.equal(excludesFromSearch(MAX_PRIORITY, MAX_PRIORITY + 5), true, 'above the top still lets the strongest rule through')
+    assert.equal(excludesFromSearch(MIN_PRIORITY, -3), true)
+    assert.equal(excludesFromSearch(1, 1.9), true, 'a fraction is cut to its whole part')
   })
 })
