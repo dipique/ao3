@@ -5,7 +5,7 @@ import MdiMinusCircle from '~icons/mdi/minus-circle.jsx'
 import type { HideMode, MarkId, Options, ProgressSource, Rule } from '#common'
 import type { FilterTarget } from '#content_script/filterTarget.js'
 
-import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, markHideMode, markHidePriority, markHidesResults, markLabel, marksHideAnything, progressSources, readiness, ruleAffectsWorks, ruleDescription, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleSubject, TagType, todayEpochDays } from '#common'
+import { ADDON_CLASS, describeProgress, findProgress, hiddenByMarks, hiddenLabel, hidesMarkedForLaterOn, markHideMode, markHidePriority, markHidesResults, markLabel, marksHideAnything, parseUser, progressSources, readiness, ruleAffectsWorks, ruleDescription, ruleHideMode, ruleMatchesAuthor, ruleMatchesEntity, ruleMatchesTag, rulePriority, ruleSubject, SAVED_MARK, TagType, todayEpochDays } from '#common'
 import { type Blurb, type BlurbTag, getBlurb, knownBlurb } from '#content_script/blurb.js'
 import { attachPopoverTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import {
@@ -18,6 +18,7 @@ import {
   nativeTargetForTag,
   onFilterTargetChange,
 } from '#content_script/filterTarget.js'
+import { loadMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { markIcon } from '#content_script/markIcons.js'
 import { forgetOverruled, type OverruledRule, recordOverruled } from '#content_script/overruled.ts'
 import { describeRemoval } from '#content_script/removalLog.js'
@@ -75,7 +76,7 @@ type HideReasons = Record<string, ReasonItem[]>
  * (as `data-ao3e-hidden-by`) so the floating filter toolbar can reveal just the
  * works hidden by, say, tag rules.
  */
-type HideKind = 'tags' | 'authors' | 'crossovers' | 'works' | 'series' | 'marks'
+type HideKind = 'tags' | 'authors' | 'crossovers' | 'works' | 'series' | 'marks' | 'later'
 
 /**
  * One reason a work might be hidden, before the priority contest is settled.
@@ -88,15 +89,15 @@ interface HideCandidate {
   kind: HideKind
   /**
    * The rule that asked for this, when a rule did. Absent for the hides that are
-   * not rules at all (crossover, marks), which is how
+   * not rules at all (crossover, marks, Marked for Later), which is how
    * {@link HideVerdict.excludes} tells a reason it can hand to a search filter
    * from one it can only apply itself.
    */
   rule?: Rule
   /**
    * The rule's effective priority. The hides that aren't rules sit at 0 — the
-   * crossover filter, a setting about the listing rather than a claim about the
-   * work — except mark-hiding, which carries
+   * crossover filter and Marked for Later, settings about the listing rather
+   * than claims about the work — except mark-hiding, which carries
    * {@link WorkMarks.hidePriority} so it can be weighed against the rules.
    */
   priority: number
@@ -116,7 +117,7 @@ interface HideCandidate {
  * `target` is null for a reason no filter can express — an author, work or
  * series rule — so a caller can tell "every reason this work is gone could be
  * handed to the filter" from "some of it could". `rule` is absent for the hides
- * that aren't rules (marks, crossovers), which are never handed over:
+ * that aren't rules (marks, crossovers, Marked for Later), which are never handed over:
  * they are the reader's own bookkeeping, not a property of the works AO3 would
  * be asked to leave out.
  */
@@ -221,6 +222,17 @@ interface RunState {
 
 const runStates = new WeakMap<Options, RunState>()
 
+/** Whether anything in `options` can take a work out of a listing. */
+export function hidesAnyWork(options: Options): boolean {
+  const { rules, hideCrossovers, hideMarkedForLater, workMarks } = options
+  return rules.enabled
+    || hideCrossovers.enabled
+    || hideMarkedForLater
+    // Not `hiddenByMarks`, which leaves out progress marks: a reader whose only
+    // hiding mark is the ongoing one would otherwise have nothing hidden.
+    || (workMarks.enabled && marksHideAnything(workMarks.marks))
+}
+
 function runState(options: Options): RunState {
   const cached = runStates.get(options)
   if (cached)
@@ -259,22 +271,23 @@ export class HideWorks extends Unit {
   }
 
   override get enabled() {
-    return (
-      this.options.rules.enabled
-      || this.options.hideCrossovers.enabled
-      || this.marksCanHide
-    )
+    return hidesAnyWork(this.options)
   }
 
   /**
-   * Whether any mark is set to collapse the works carrying it. Goes through
-   * {@link marksHideAnything} rather than `hiddenByMarks`, which excludes
-   * progress marks — a reader whose only hiding mark is the ongoing one would
-   * otherwise have this unit filtered out before `ready()` ever ran.
+   * The works on the reader's Marked for Later list, when
+   * {@link Options.hideMarkedForLater} applies to this run; null otherwise.
+   * Only a run over the whole of an AO3 listing has it: a search view weighs its
+   * works through {@link hideVerdict} and decorates them one blurb at a time, and
+   * neither is given the list.
    */
-  private get marksCanHide(): boolean {
-    const { workMarks } = this.options
-    return workMarks.enabled && marksHideAnything(workMarks.marks)
+  private savedForLater: ReadonlySet<string> | null = null
+
+  private async loadSavedForLater(): Promise<ReadonlySet<string> | null> {
+    if (!this.options.hideMarkedForLater || this.root !== document || !hidesMarkedForLaterOn(location.pathname))
+      return null
+    const userId = parseUser(document)?.userId
+    return userId ? loadMarkedForLaterIndex(userId) : null
   }
 
   static override async clean(): Promise<void> {
@@ -320,7 +333,10 @@ export class HideWorks extends Unit {
     if (this.root === document)
       excludeButtons.length = 0
 
+    // Collected before the list is read, so a search view mounting meanwhile
+    // brings none of its own blurbs into this run.
     const blurbElements = this.rootBlurbs()
+    this.savedForLater = await this.loadSavedForLater()
 
     const started = performance.now()
     let works = 0
@@ -370,8 +386,8 @@ export class HideWorks extends Unit {
    * at 0), while leaving a hide rule above that able to win, and a force-show
    * dropped below it able to lose.
    *
-   * Crossover hiding isn't a rule at all and weighs 0, so an "always show" still
-   * overrules it. Mark-hiding is weighed too, but at
+   * Crossover and Marked for Later hiding aren't rules at all and weigh 0, so an
+   * "always show" still overrules them. Mark-hiding is weighed too, but at
    * {@link WorkMarks.hidePriority} (9 by default): having read a work already
    * isn't an opinion about it, so a rule saying the work is worth reading has to
    * outrank the mark before it puts one back on the page.
@@ -381,14 +397,14 @@ export class HideWorks extends Unit {
    * tie goes to hiding — the reader who wrote a hide rule that strong asked for
    * the work gone, and a collapse rule of merely equal strength shouldn't quietly
    * put it back on the page. Mark-hiding says so with {@link WorkMarks.hideMode};
-   * crossover hiding with {@link Options.hideShowReason}.
+   * crossover and Marked for Later hiding with {@link Options.hideShowReason}.
    */
   processBlurb(blurb: Blurb): HideVerdict {
     const { options: { hideCrossovers, workMarks, hideShowReason, rules: defaults } } = this
     const { hiddenMarks, progress, today, rules, markMode, markPriority } = this.run
     const reasons: HideReasons = {}
     const kinds = new Set<HideKind>()
-    /** What the crossover hide asks for; a rule always says for itself. */
+    /** What the crossover and Marked for Later hides ask for; a rule always says for itself. */
     const plainMode: HideMode = hideShowReason ? 'collapse' : 'hide'
 
     const hides: HideCandidate[] = []
@@ -476,6 +492,21 @@ export class HideWorks extends Unit {
           },
         })
       }
+    }
+
+    if (blurb.work && this.savedForLater?.has(blurb.work.id)) {
+      const label = markLabel(workMarks.marks, SAVED_MARK)
+      hides.push({
+        label,
+        kind: 'later',
+        priority: 0,
+        mode: plainMode,
+        item: {
+          value: blurb.work.name,
+          rule: `On your ${label} list`,
+          icon: markIcon(workMarks.marks[SAVED_MARK]?.icon),
+        },
+      })
     }
 
     if (

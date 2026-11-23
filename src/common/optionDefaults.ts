@@ -26,6 +26,7 @@ export const OPTION_DEFAULTS: Options = {
   hideShowReason: true,
   hideShowMatchedValues: true,
   hideCrossovers: { enabled: true, maxFandoms: 7 },
+  hideMarkedForLater: false,
   rules: { enabled: false, filters: [], colors: {}, alwaysShowPriority: DEFAULT_ALWAYS_SHOW_PRIORITY },
   autoExcludeHidden: false,
   workMarks: {

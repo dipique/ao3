@@ -24,18 +24,24 @@ export interface Options {
   showKudosHitsRatio: boolean
 
   /**
-   * How the crossover filter takes a work out of a listing:
-   * `true` collapses it to a reason line with a "Show" button, `false` hides it
-   * outright.
+   * How the crossover filter and {@link hideMarkedForLater} take a work out of
+   * a listing: `true` collapses it to a reason line with a "Show" button,
+   * `false` hides it outright.
    *
    * Rules answer this for themselves, through their `'collapse'` / `'hide'`
-   * {@link Rule.behavior}, and work marks through their own `hideMode`; this
-   * switch used to speak for all of them, which is why it reads as a general
-   * "collapse or hide" rather than naming the one filter it still covers.
+   * {@link Rule.behavior}, and work marks through their own `hideMode`.
    */
   hideShowReason: boolean
   hideShowMatchedValues: boolean
   hideCrossovers: { enabled: boolean, maxFandoms: number }
+  /**
+   * Take the works on the reader's Marked for Later list out of AO3's own
+   * listings, the way {@link hideShowReason} says. Read from the cached list
+   * index, so it knows the list as the Marked for Later view last loaded it,
+   * plus the saves and removals made since. Never inside a search view, whose
+   * Status filter covers it, nor on the reader's own readings pages.
+   */
+  hideMarkedForLater: boolean
   /**
    * The Rules list — one list covering tags, fandoms, authors, works and series
    * (it replaces the four separate `hideTags`/`hideAuthors`/`hideWorks`/

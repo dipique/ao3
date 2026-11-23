@@ -39,6 +39,15 @@ export const NO_ARCHIVE_TAB = {
 export const ARCHIVE_UNAVAILABLE = 'AO3 is down or could not be reached — your next import once it is back will send it'
 
 /**
+ * Whether Works already Marked for Later applies to the AO3 page at `pathname`:
+ * every listing but the reader's readings pages, History and Marked for Later
+ * both, where a work being on the list is what the page is there to show.
+ */
+export function hidesMarkedForLaterOn(pathname: string): boolean {
+  return !/^\/users\/[^/]+\/readings\/?$/.test(pathname)
+}
+
+/**
  * Whether a work's title offers the one-click Mark for later: it isn't on the
  * list, and the reader isn't done with it. Every mark in the read group counts,
  * the progress marks included — an ongoing work is kept on the list by the mark

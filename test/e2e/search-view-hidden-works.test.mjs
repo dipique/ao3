@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { packIds } from '../../src/common/workMarks.ts'
 import { figures } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { rerun, settled, viewDrawn } from './trackedPages.mjs'
@@ -24,6 +25,11 @@ const SEED = {
       { target: 'tag', value: 'Gone', matcher: 'exact', behavior: 'hide' },
     ],
   },
+  // Works already Marked for Later is for AO3's own listings: a work on the
+  // list stays in the view, which has its Status filter for that. Only page 2
+  // carries it, so the native page behind the view has nothing to hide.
+  'option.hideMarkedForLater': true,
+  'cache.markedForLater': { userId: 'me', updatedAt: Date.now(), ids: packIds(['6']) },
 }
 
 const PAGES = 2
@@ -82,8 +88,8 @@ function pagination(current) {
 function tagPage(page) {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>marriage problems</title></head>
-<body>
-  <div id="header"></div>
+<body class="logged-in">
+  <div id="header"><ul class="user navigation actions"><li><a href="/users/me/preferences">Preferences</a></li></ul></div>
   <div id="main" class="tags-show region">
     <div class="tag home profile">
       <div class="primary header module"><h2 class="heading">marriage problems</h2></div>

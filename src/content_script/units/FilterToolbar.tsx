@@ -14,7 +14,7 @@ import type { FloatingToolbar } from '#content_script/floatingToolbar.tsx'
 import type { DetachedSnapshot } from '#content_script/searchView/cache.ts'
 import type { TrackablePage } from '#content_script/tracked/createList.ts'
 
-import { ADDON_CLASS, aliasOf, alreadyTracked, api, cache, defaultTitle, describeList, describeUpdate, fillMeta, filteredKey, formatDay, getArchiveLink, isoDay, marksHideAnything, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleRefusal, titleTakenBy, toast, toEpochDays, trackedKey, trackedRoot, uniqueTitle, utcToday } from '#common'
+import { ADDON_CLASS, aliasOf, alreadyTracked, api, cache, defaultTitle, describeList, describeUpdate, fillMeta, filteredKey, formatDay, getArchiveLink, isoDay, normalizeTrackedUrl, options, parseUser, planLetGo, planSaveBack, planStopTracking, planTrack, planTrackSearch, planUndoSaveBack, sameRoot, sameTitle, SAVE_BACK_UNDO_TIMEOUT, savedListAt, savedListsOf, savedListsWrite, sourceLabel, storedListRefs, titleAfterUpdate, titleRefusal, titleTakenBy, toast, toEpochDays, trackedKey, trackedRoot, uniqueTitle, utcToday } from '#common'
 import { getMenusEnabled, setMenusEnabled } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { BUTTON_CLASS, createFloatingToolbar, ICON_CLASS, toolbarButton } from '#content_script/floatingToolbar.tsx'
@@ -29,6 +29,7 @@ import { keepFirstCopy } from '#content_script/tracked/firstCopy.ts'
 import { endRefining, openRefining, refiningList, startRefining, takeRefiningLink } from '#content_script/tracked/refining.ts'
 import { trackedFilterOf } from '#content_script/tracked/viewFilter.ts'
 import { Unit } from '#content_script/Unit.js'
+import { hidesAnyWork } from '#content_script/units/HideWorks.tsx'
 import React from '#dom'
 
 /** The tracking pill and the box it grows — see {@link FilterToolbar.buildTrackButton}. */
@@ -201,12 +202,7 @@ export class FilterToolbar extends Unit {
    * hide feature or a page whose `muted` selector finds the works AO3 hides.
    */
   private peekAvailable(muted: string | null): boolean {
-    const { filterToolbar, rules, hideCrossovers, workMarks } = this.options
-    return filterToolbar && (
-      muted !== null
-      || rules.enabled || hideCrossovers.enabled
-      || (workMarks.enabled && marksHideAnything(workMarks.marks))
-    )
+    return this.options.filterToolbar && (muted !== null || hidesAnyWork(this.options))
   }
 
   // Every other pill comes and goes with the page and the reader's settings, but

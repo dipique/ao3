@@ -42,9 +42,17 @@
       </OptionRow>
       <OptionRowHideCrossovers />
       <OptionRow
+        anchor="hide-marked-for-later"
+        title="Works already Marked for Later"
+        subtitle="Collapses or hides, as Collapse or hide says, the works on your Marked for Later list in AO3's own listings. Goes by the list as your Marked for Later view last loaded it. Instant search views leave this to their Status filter, and your History and Marked for Later pages show every work."
+        :badges="['needs-login']"
+      >
+        <OptionSwitch option-id="hideMarkedForLater" />
+      </OptionRow>
+      <OptionRow
         anchor="hide-reason"
         title="Collapse or hide"
-        subtitle="What to do with a work hidden by the crossover filter, or by a mark set to hide it. Collapsing leaves a line saying why, with a button to show the work anyway. Rules choose this for themselves, per rule."
+        subtitle="What to do with a work hidden by the crossover filter or by Works already Marked for Later. Collapsing leaves a line saying why, with a button to show the work anyway. Rules and marks choose this for themselves."
       >
         <OptionHideReason />
       </OptionRow>
