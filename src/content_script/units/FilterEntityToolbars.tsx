@@ -7,11 +7,12 @@ import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, entityIdFromURL, entityKey, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markItems, markLabel, markRoot, markTracksProgress, offeredMarkIds, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, entityIdFromURL, entityKey, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markItems, markLabel, markRoot, markTracksProgress, offeredMarkIds, offersMarkForLater, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
   attachMenuTrigger,
+  borrowMenuTrigger,
   buildIndicators,
   clearMenuTriggers,
   existingIndicator,
@@ -23,6 +24,7 @@ import { linkedTo } from '#content_script/lists/openLink.ts'
 import { ownMarkedForLaterPage, putOnMarkedForLater } from '#content_script/markedForLaterCopy.ts'
 import { loadMarkedForLaterIndex, noteMarkedForLater, onSavedChange } from '#content_script/markedForLaterIndex.js'
 import { submitMark } from '#content_script/markForLater.js'
+import { buildMarkForLaterButton } from '#content_script/markForLaterButton.tsx'
 import { retireMarkGridHost, setMarkGridHost } from '#content_script/markGrid.tsx'
 import { markIcon } from '#content_script/markIcons.js'
 import { openProgressEditor } from '#content_script/progressEditor.js'
@@ -47,6 +49,8 @@ interface EntityEntry {
    * element. The menu is still `link`'s, and `link` isn't made a trigger again.
    */
   after?: HTMLElement
+  /** The one-click Mark for later button beside the title, while one is offered. */
+  button?: HTMLButtonElement | null
 }
 
 /** One entity to decorate, as {@link FilterEntityToolbar.links} finds it. */
@@ -97,6 +101,9 @@ interface MarkState {
   listed?: boolean
 }
 const savedState = new Map<string, MarkState>()
+
+/** Works whose title button is checking the archive before saving them, so a second press waits. */
+const laterChecks = new Set<string>()
 
 /** Options for {@link seedMarkedForLater}. */
 interface SeedOptions {
@@ -210,6 +217,18 @@ function carriesMark(workId: string, markId: MarkId): boolean {
 }
 
 /**
+ * The Mark for later button an earlier run left beside `link`: after its
+ * indicator when it has one, otherwise where the indicator would go. A search
+ * view meets blurbs it has decorated before, as {@link existingIndicator} says.
+ */
+function existingLaterButton(link: HTMLElement, indicator: HTMLElement | null): HTMLButtonElement | null {
+  const candidate = indicator
+    ? indicator.nextElementSibling
+    : link instanceof HTMLAnchorElement ? link.nextElementSibling : link.lastElementChild
+  return candidate instanceof HTMLButtonElement && candidate.dataset.ao3eAction === 'mark-for-later' ? candidate : null
+}
+
+/**
  * Mirror one mark write in the cached sets, so indicators can update without
  * waiting for the options round-trip. Reads the same {@link markClears} the
  * stored table does, so the two can't disagree about what a click just did:
@@ -314,6 +333,8 @@ abstract class FilterEntityToolbar extends Unit {
   protected markShown(_id: string): boolean { return this.markEnabled() }
   /** Works fold in the per-work marks; series don't. */
   protected marksEnabled(): boolean { return false }
+  /** Whether this entry's title offers the one-click Mark for later button. */
+  protected laterButtonShown(_entry: EntityEntry): boolean { return false }
 
   /** Highlight colour shown on the star indicator when a highlight has no colour of its own. */
   protected get defaultColor(): string { return ruleTargetColor(this.noun, this.options.rules.colors) }
@@ -341,7 +362,7 @@ abstract class FilterEntityToolbar extends Unit {
 
     for (const { id, link, clickToOpen, after } of this.links()) {
       const indicator = after ? existingIndicator(after, { after: true }) : existingIndicator(link)
-      const entry: EntityEntry = { link, id, indicator, after }
+      const entry: EntityEntry = { link, id, indicator, after, button: after ? null : existingLaterButton(link, indicator) }
       this.entries.push(entry)
       if (!after)
         attachMenuTrigger(link, () => this.buildMenu(id, link), { clickToOpen })
@@ -827,6 +848,65 @@ abstract class FilterEntityToolbar extends Unit {
       this.insertIndicator(entry, next)
 
     entry.indicator = next
+    this.syncLaterButton(entry)
+  }
+
+  /**
+   * Draw, redraw or take away the entry's Mark for later button. Drawn afresh
+   * each time, as the indicator is, so the one on screen is always this run's.
+   * It goes after the indicator, where the filled icon appears once the work is
+   * saved; right-click or a long press opens the work's menu, as on the icons.
+   */
+  private syncLaterButton(entry: EntityEntry): void {
+    if (!this.laterButtonShown(entry)) {
+      entry.button?.remove()
+      entry.button = null
+      return
+    }
+    const { id, link } = entry
+    const next = buildMarkForLaterButton(this.options.workMarks.marks[SAVED_MARK], {
+      busy: !!savedState.get(id)?.busy || laterChecks.has(id),
+      onPress: () => void this.onPressLater(id),
+    })
+    borrowMenuTrigger(next, () => link)
+    entry.button?.remove()
+    if (entry.indicator)
+      entry.indicator.after(next)
+    else
+      this.insertIndicator(entry, next)
+    entry.button = next
+  }
+
+  /**
+   * Save a work for later from its title button. A state we only have from the
+   * cached index, or none at all, is checked against the archive first, as
+   * {@link ensureSaved} does: saving a work that is already on the list moves it
+   * to the top, reordering a list the reader may be working through.
+   */
+  private async onPressLater(id: string): Promise<void> {
+    const state = savedState.get(id)
+    if (state?.busy || laterChecks.has(id))
+      return
+    if (!state?.known || state.cached) {
+      laterChecks.add(id)
+      this.syncEntriesFor(id)
+      let saved: boolean | null
+      try {
+        saved = await this.checkMarked(id)
+      }
+      finally {
+        laterChecks.delete(id)
+      }
+      if (saved !== false) {
+        this.syncEntriesFor(id)
+        if (saved)
+          toast('Already on your Marked for Later list.', { type: 'success' })
+        else
+          toast('Could not update your Marked for Later list.', { type: 'error' })
+        return
+      }
+    }
+    await this.onMark(id)
   }
 
   /**
@@ -938,6 +1018,14 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
 
   // The per-work marks are ours alone — no AO3 session needed.
   protected override marksEnabled(): boolean { return this.options.workMarks.enabled }
+
+  /** Beside a title, not the work page's foot, and only for a work neither read nor saved. */
+  protected override laterButtonShown(entry: EntityEntry): boolean {
+    if (entry.after || !this.markEnabled() || !this.options.markForLaterButton)
+      return false
+    const carries = this.marksEnabled() ? (markId: MarkId) => carriesMark(entry.id, markId) : () => false
+    return offersMarkForLater(this.options.workMarks.marks, carries, savedState.get(entry.id)?.saved ?? false)
+  }
 
   override async ready(): Promise<void> {
     loadMarkSets(this.options.workMarks)

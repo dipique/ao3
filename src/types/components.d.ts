@@ -50,6 +50,7 @@ declare module 'vue' {
     OptionRowHideCrossovers: typeof import('./../options_ui/components/option_rows/OptionRowHideCrossovers.vue')['default']
     OptionRowImportExport: typeof import('./../options_ui/components/option_rows/OptionRowImportExport.vue')['default']
     OptionRowInset: typeof import('./../options_ui/components/option_rows/OptionRowInset.vue')['default']
+    OptionRowMarkForLater: typeof import('./../options_ui/components/option_rows/OptionRowMarkForLater.vue')['default']
     OptionRowNumberSlider: typeof import('./../options_ui/components/option_rows/OptionRowNumberSlider.vue')['default']
     OptionRowRuleColors: typeof import('./../options_ui/components/option_rows/OptionRowRuleColors.vue')['default']
     OptionRowRules: typeof import('./../options_ui/components/option_rows/OptionRowRules.vue')['default']

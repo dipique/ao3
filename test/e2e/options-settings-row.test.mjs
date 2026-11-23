@@ -157,6 +157,24 @@ describe('options UI — the settings row', { skip }, () => {
     })
   })
 
+  describe('Mark a work for later', () => {
+    test('opens onto the title button\'s switch, which stores its own option', async () => {
+      const options = await session.open({ hash: '#link-menus', viewport: WIDE, seed: SEEDED })
+      try {
+        const row = await options.row(MARK_FOR_LATER)
+        const button = await options.action(row, 'mark-for-later-button')
+        assert.equal(await button.evaluate(el => el.checkVisibility()), true)
+        await options.press(button)
+        await options.saved()
+        assert.equal(await options.stored('option.markForLaterButton'), true)
+        assert.equal(await options.stored('option.markForLaterToolbar'), true)
+      }
+      finally {
+        await options.close()
+      }
+    })
+  })
+
   describe('badges', () => {
     const BADGES = {
       'open-menu-on-click': ['every-click'],

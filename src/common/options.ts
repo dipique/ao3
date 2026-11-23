@@ -101,6 +101,12 @@ export interface Options {
   fandomToolbar: boolean
   markForLaterToolbar: boolean
   /**
+   * An outlined Marked for Later icon beside the title of each work that is
+   * neither read nor saved, which saves it in one click. Only while
+   * {@link markForLaterToolbar} is on.
+   */
+  markForLaterButton: boolean
+  /**
    * Add the "Show N filtered works" pill to the floating toolbar, which
    * temporarily reveals works any filter hid, and the works AO3 hides because
    * the reader muted their author. Only that pill: the toolbar itself is always

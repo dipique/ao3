@@ -44,6 +44,7 @@ export const OPTION_DEFAULTS: Options = {
   tagToolbar: false,
   fandomToolbar: false,
   markForLaterToolbar: false,
+  markForLaterButton: false,
   filterToolbar: false,
   hideAuthorToolbar: false,
   subscribeAuthorToolbar: false,

@@ -1315,6 +1315,54 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   color: var(--ao3e-indicator-color, #6b7280);
 }
 
+/* The one-click Mark for later button beside a title: Marked for Later's icon,
+   outlined, sized like the indicators. The padding widens the tap target and the
+   negative margin keeps it from widening the line. `!important` against AO3's
+   own button styles. */
+.AO3E--mark-for-later {
+  display: inline-flex !important;
+  align-items: center;
+  padding: 0.25em !important;
+  margin: -0.25em -0.25em -0.25em calc(0.15em - 0.25em) !important;
+  border: none !important;
+  border-radius: 0.25em !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--ao3e-indicator-color, #2f8f4e) !important;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.AO3E--mark-for-later:hover,
+.AO3E--mark-for-later:focus-visible {
+  opacity: 1;
+}
+
+.AO3E--mark-for-later:focus-visible {
+  outline: 2px solid currentColor !important;
+  outline-offset: -2px;
+}
+
+.AO3E--mark-for-later:disabled {
+  opacity: 0.3;
+  cursor: progress;
+}
+
+.AO3E--mark-for-later > svg {
+  width: max(0.75em, 1rem) !important;
+  height: max(0.75em, 1rem) !important;
+  top: 0 !important;
+}
+
+/* An icon with no drawn outline, traced from its filled shape. */
+.AO3E--mark-for-later--traced path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
 /* ---------------------------------------------------------------------------
    Favourite / highlighted tags. Applied to native tag links that match a
    highlight filter; the colour comes from a per-filter CSS variable so each

@@ -17,6 +17,7 @@ import MdiButterfly from '~icons/mdi/butterfly.jsx'
 import MdiCalendarClock from '~icons/mdi/calendar-clock.jsx'
 import MdiCat from '~icons/mdi/cat.jsx'
 import MdiChiliHot from '~icons/mdi/chili-hot.jsx'
+import MdiClockCheckOutline from '~icons/mdi/clock-check-outline.jsx'
 import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiCloseCircle from '~icons/mdi/close-circle.jsx'
 import MdiCloud from '~icons/mdi/cloud.jsx'
@@ -133,4 +134,18 @@ const MARK_ICONS: Record<string, () => Node> = {
 /** The icon factory for a mark's `icon` field, falling back to a generic bookmark. */
 export function markIcon(icon: string | undefined): () => Node {
   return MARK_ICONS[resolveMarkIcon(icon)] ?? MARK_ICONS[FALLBACK_MARK_ICON]!
+}
+
+/**
+ * Outlined versions of the mark icons, drawn as such, for a control that offers
+ * a mark rather than showing one. Only Marked for Later's default has a place
+ * that needs it; any other icon is traced from its filled shape instead.
+ */
+const MARK_OUTLINES: Record<string, () => Node> = {
+  'mdi/clock-check': () => <MdiClockCheckOutline />,
+}
+
+/** The drawn outline of a mark's icon, or null where there is none and the filled icon has to be traced. */
+export function markOutlineIcon(icon: string | undefined): (() => Node) | null {
+  return MARK_OUTLINES[resolveMarkIcon(icon)] ?? null
 }
