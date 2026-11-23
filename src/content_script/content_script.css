@@ -1839,6 +1839,28 @@ body.AO3E--peek-hidden li[data-ao3e-hidden-by] > .AO3E--hide-works--wrapper[data
   float: none;
 }
 
+/* A work AO3 has deleted, kept on the list: a pill after its title. In the
+   danger colour, which the theme tokens set for both skins. */
+.AO3E--deleted {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  margin-left: 0.5em;
+  padding: 0.05em 0.5em;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--ao3e-surface-danger);
+  font-size: 0.85em;
+  font-weight: bold;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.AO3E--deleted svg {
+  width: 1.15em;
+  height: 1.15em;
+}
+
 /* Sticky so the filters stay reachable while the results scroll past them —
    which only makes sense while it is *beside* the results. See the
    single-column override below. */

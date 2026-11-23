@@ -85,6 +85,8 @@ export interface SiteManifestWork {
   size?: number
   /** Epoch ms the text was fetched from AO3. */
   fetchedAt?: number
+  /** AO3 has deleted the work, and the list kept it: when that was noticed, in epoch ms. */
+  deletedAt?: number
 }
 
 export interface SiteManifest {

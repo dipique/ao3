@@ -292,8 +292,11 @@ export async function startSite(ctx: SiteContext): Promise<void> {
     applyStatus(works, current)
     const autoExcludes = applyHidden(works, current, { hidesNothing })
     for (const work of works) {
+      const entry = listed.get(work.workId)
       work.offline = texts.has(work.workId) ? CACHED : NOT_CACHED
-      noteIfAbsent(work, listed.get(work.workId))
+      if (entry?.deletedAt !== undefined)
+        work.deleted = { at: entry.deletedAt }
+      noteIfAbsent(work, entry)
     }
     return autoExcludes
   }

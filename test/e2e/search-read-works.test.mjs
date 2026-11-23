@@ -588,4 +588,21 @@ describe('read list auto-reload', { skip }, () => {
     assert.deepEqual(await shownTitles(tab), ['Work number 1', 'Work number 3'], 'fresh blurbs, not the stored ones')
     await tab.close()
   })
+
+  test('a read work whose own page says it doesn’t exist keeps its stored blurb, badged deleted', async () => {
+    // Work 99 is in no history, and its page is a 404: AO3 deleted it.
+    const tab = await open({ seed: SEED_WITH_ABSENT, stored: storedReadList(['1', '3', '99'], 2 * HOUR) })
+    await tab.click('.AO3E--search-view--refresh')
+    await viewDrawn(tab)
+    await until('the refreshed list to be stored', async () => storedListIds((await lastWrite(tab, 'cache.searchLists'))?.['read-works:me']).includes('1'))
+    assert.deepEqual(workRequests, ['99'])
+    assert.deepEqual(storedListIds((await lastWrite(tab, 'cache.searchLists'))['read-works:me']).sort(), ['1', '3', '99'], 'still on the stored list')
+    assert.deepEqual(Object.keys(await lastWrite(tab, 'cache.deletedWorks')), ['2r'], 'recorded as deleted')
+    const badged = await tab.evaluate(() =>
+      Array.from(document.querySelectorAll('.AO3E--search-view--results > li.blurb'))
+        .filter(li => li.querySelector('[data-ao3e-deleted]'))
+        .map(li => li.querySelector('.header h4.heading a')?.textContent?.trim()))
+    assert.deepEqual(badged, ['Stored work 99'])
+    await tab.close()
+  })
 })

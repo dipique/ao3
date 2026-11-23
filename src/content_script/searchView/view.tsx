@@ -20,6 +20,7 @@ import type { TextSearchPhase, WorkTextSearcher } from './textSearch.ts'
 
 import { planChildren } from './childOrder.ts'
 import { VIEW_HIDDEN_CLASS, VIEW_ROOT } from './classes.ts'
+import { syncDeletedBadge } from './deletedBadge.tsx'
 import {
   buildFacets,
   cloneFilterState,
@@ -1621,6 +1622,7 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
     // Decorate the page's blurbs the first time they're shown (kudos ratio, etc.)
     // and attach the optional per-blurb action.
     for (const work of page) {
+      syncDeletedBadge(work)
       if (decorated.has(work.el))
         continue
       decorated.add(work.el)

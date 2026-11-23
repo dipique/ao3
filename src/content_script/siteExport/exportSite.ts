@@ -4,6 +4,7 @@ import type { SearchViewPrefs } from '#content_script/searchView/prefs.js'
 import { cache, getArchiveLink, LOCAL_ONLY, options, textReplacementActive } from '#common'
 import { readRecords, worksFromRecords } from '#content_script/searchView/blurbStore.js'
 import { readSnapshot } from '#content_script/searchView/cache.js'
+import { readDeletedWorks } from '#content_script/searchView/deletedWorks.js'
 import { loadPrefs } from '#content_script/searchView/prefs.js'
 import { blurbFromWorkPage } from '#content_script/searchView/workPageBlurb.js'
 
@@ -92,11 +93,12 @@ interface ExportSource {
 }
 
 export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<SiteExportResult> {
-  const [index, textSettings, optionsPayload, applied] = await Promise.all([
+  const [index, textSettings, optionsPayload, applied, deleted] = await Promise.all([
     readWorkTextIndex(),
     options.get('textReplacements'),
     siteOptionsPayload(),
     cache.get('appliedChangeOps'),
+    readDeletedWorks(),
   ])
   const { source, works, scrapedAt, listCount, layout } = opts.cacheKey === ALL_CACHED
     ? await allCachedSource(index)
@@ -141,9 +143,11 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
       if (!blurbHtml)
         continue
       blurbsHtml.push(blurbHtml)
+      const deletedAt = deleted.get(work.workId)?.at
+      const gone = deletedAt === undefined ? {} : { deletedAt }
 
       if (!html) {
-        manifestWorks.push({ id: work.workId, status: statusFor(entry, false) })
+        manifestWorks.push({ id: work.workId, status: statusFor(entry, false), ...gone })
         continue
       }
 
@@ -152,6 +156,7 @@ export async function buildSiteExport(opts: BuildSiteExportOptions): Promise<Sit
         status: 'cached',
         size: entry?.size,
         fetchedAt: entry?.fetchedAt,
+        ...gone,
       })
 
       const body = rewriteWorkLinks(bakeTextReplacements(html, textSettings), localIds)

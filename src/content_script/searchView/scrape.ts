@@ -1,3 +1,4 @@
+import { deletedEntryFacts } from '#common'
 import { archiveNow, archiveWaitRemaining, fetchWithRetry, PATIENCE, WAIT_BUDGET, waitForArchive } from '#content_script/archiveFetch.js'
 import { parseWork, type Work } from '#content_script/blurb.js'
 
@@ -275,6 +276,9 @@ function parsePage(doc: Document, blurbSelector: string, seenAt: number): Work[]
     document.adoptNode(li)
     const work = parseWork(li, works.length)
     work.seenAt = seenAt
+    // A readings page's "Deleted work" entry, kept in its place to be matched.
+    if (li.classList.contains('deleted'))
+      work.deletedEntry = deletedEntryFacts(li.outerHTML)
     works.push(work)
   }
   return works

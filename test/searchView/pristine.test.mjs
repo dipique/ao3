@@ -51,6 +51,21 @@ describe('pristineBlurb', { skip: skipWithoutChrome }, () => {
     assert.equal(out, '<li class="work blurb" data-id="7"> <a class="tag" style="color: blue;" href="/tags/T">T</a> <h4>heading</h4> <p style="margin: 0">kept</p> </li>')
   })
 
+  test('the readings block a list keeps loses its form and keeps the history entry\'s id', async () => {
+    const out = await page.evaluate(() => {
+      const t = document.createElement('template')
+      t.innerHTML = `<li id="work_5" class="reading work blurb group"><div class="header module"></div><div class="user module group">
+        <h4 class="viewed heading"><span>Last visited:</span> 17 Nov 2026</h4>
+        <ul class="actions"><li><form class="ajax-remove" action="/users/me/readings/4242" method="post"><input type="hidden" name="authenticity_token" value="SECRET"><input type="hidden" name="reading" value="4242"></form></li></ul>
+      </div></li>`
+      const li = t.content.firstElementChild
+      return { ctx: window.Pristine.normalizeBlurb(li), li: li.outerHTML }
+    })
+    assert.match(out.ctx, /^<div class="user module group" data-reading="4242">/)
+    assert.doesNotMatch(out.ctx, /SECRET|<form/)
+    assert.doesNotMatch(out.li, /user module/)
+  })
+
   test('a copy is stripped, and the blurb it was taken from is left as it was', async () => {
     const out = await page.evaluate(() => {
       const t = document.createElement('template')

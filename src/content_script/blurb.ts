@@ -1,4 +1,4 @@
-import type { BlurbSource, Tag, TagType } from '#common'
+import type { BlurbSource, DeletedEntry, DeletedWork, Tag, TagType } from '#common'
 
 import { authorFromURL, entityIdFromURL } from '#common'
 import { getTagFromElement } from '#content_script/utils.js'
@@ -200,6 +200,18 @@ export interface Work {
    * {@link Work.sources}.
    */
   offline?: string
+  /**
+   * AO3 has deleted this work, and the list keeps it (see `common/deletedWorks.ts`):
+   * the view draws it with a "Deleted" badge. Stamped from the deleted-works
+   * record wherever stored works are read, never by {@link parseWork}.
+   */
+  deleted?: DeletedWork
+  /**
+   * Not a work: a readings page's "Deleted work" entry, standing where a deleted
+   * work was. Set by the scrape, which keeps it in place so the entry can be
+   * matched to the work it stands for; nothing stores or shows it.
+   */
+  deletedEntry?: DeletedEntry
   /**
    * The reader's rules take this work out of the listing outright (as opposed to
    * collapsing it, which the view leaves to HideWorks to draw on the blurb). Such

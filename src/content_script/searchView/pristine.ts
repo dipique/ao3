@@ -91,7 +91,8 @@ const READING_MODULE_SELECTOR = ':scope > div.user.module.group'
  * are shared by every list holding their work, so the block can't stay in the
  * shared copy: a tag search refreshing it would take "Last visited" off the read
  * list, and a readings scrape would put it on the tag search. The token goes
- * altogether — it has no business in storage, or in an exported file.
+ * altogether — it has no business in storage, or in an exported file — and the
+ * history entry's id stays, as the block's `data-reading`.
  *
  * The same split, done on a string where there is no DOM, is
  * `splitReadingModule` in {@link file://../../common/blurbRecord.ts}.
@@ -102,6 +103,11 @@ export function normalizeBlurb(li: HTMLLIElement): string | undefined {
   if (!block)
     return undefined
   block.remove()
+  // The history entry's id goes with the form, and is what a "Deleted work"
+  // entry standing for this work will name (`common/deletedWorks.ts`).
+  const reading = block.querySelector<HTMLInputElement>('form input[name="reading"]')?.value
+  if (reading)
+    block.setAttribute('data-reading', reading)
   block.querySelectorAll('form').forEach(form => form.remove())
   return block.outerHTML
 }

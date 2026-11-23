@@ -1,3 +1,4 @@
+import type { DeletedWork } from './deletedWorks.ts'
 import type { RuleTiming } from './ruleTiming.ts'
 import type { ReviewBasis } from './trackedLists.ts'
 import type { ReadClaim } from './trackedReads.ts'
@@ -200,6 +201,11 @@ export interface Cache {
   /** Which works are on your Marked for Later list (see {@link MarkedForLaterIndex}). */
   markedForLater: MarkedForLaterIndex
   /**
+   * Works AO3 has deleted that a stored list keeps, by short work id (see
+   * {@link file://./deletedWorks.ts}). Local: what this browser's reads found.
+   */
+  deletedWorks: { [sid: string]: DeletedWork }
+  /**
    * Op ids from change files imported out of a site export, oldest first.
    *
    * The idempotency ledger for that round trip: an op named here has its mark
@@ -234,6 +240,7 @@ export const cache = createStorage<Cache>({
     searchViewPrefs: {},
     searchMisses: {},
     markedForLater: { userId: '', updatedAt: 0, ids: '' },
+    deletedWorks: {},
     appliedChangeOps: [],
     owedArchiveActs: [],
     // An empty range nothing was computed for: `computedAt: 0` and a start past

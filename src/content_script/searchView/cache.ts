@@ -24,6 +24,7 @@ import { readRecordWorkIds } from '#content_script/tracked/readStore.ts'
 import type { ParsedWork } from './blurbStore.ts'
 
 import { pruneBlurbs, readBlurbIndex, readParsed, readRecords, rewriteStale, storedContext, storeWorks, worksFromRecords } from './blurbStore.ts'
+import { readDeletedWorks, stampDeleted } from './deletedWorks.ts'
 import { pristineBlurb } from './pristine.ts'
 
 export { normalizeBlurb, pristineBlurb } from './pristine.ts'
@@ -139,7 +140,9 @@ export async function readSnapshot(key: string): Promise<CachedSnapshot | null> 
   if (!readable(list))
     return null
   const ids = unpackOrderedIds(list.ids)
-  const { works, missing, stale } = worksFromRecords(ids, await readRecords(ids), list.ctx)
+  const [records, deleted] = await Promise.all([readRecords(ids), readDeletedWorks()])
+  const { works, missing, stale } = worksFromRecords(ids, records, list.ctx)
+  stampDeleted(works, deleted)
   if (stale.length)
     void rewriteStale(stale).catch(err => console.error('[searchView] could not rewrite stored blurbs', err))
   return { scrapedAt: list.scrapedAt, works, descriptor: list.descriptor, missing: missing.length }

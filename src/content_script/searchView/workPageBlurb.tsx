@@ -212,6 +212,8 @@ export interface WorkBlurbs {
    * reader, or no work page at all. Nothing further will get them.
    */
   failed: string[]
+  /** Of {@link failed}, the works AO3 says don't exist: deleted. */
+  gone: string[]
   /**
    * AO3 was still asking us to wait when patience ran out, so the fetch stopped.
    * The works not reached are neither built nor failed — they were not tried.
@@ -242,6 +244,7 @@ export async function fetchWorkBlurbs(ids: readonly string[], opts: WorkBlurbOpt
   const startedAt = Date.now()
   const built = new Map<string, HTMLLIElement>()
   const failed: string[] = []
+  const gone: string[] = []
   let next = 0
   let done = 0
   let blocked = false
@@ -286,6 +289,8 @@ export async function fetchWorkBlurbs(ids: readonly string[], opts: WorkBlurbOpt
         built.set(id, blurb)
       else
         failed.push(id)
+      if (res.status === 404)
+        gone.push(id)
       settle()
     }
   }
@@ -303,7 +308,7 @@ export async function fetchWorkBlurbs(ids: readonly string[], opts: WorkBlurbOpt
       work.seenAt = startedAt
       return work
     })
-  return { works, failed, blocked }
+  return { works, failed, gone, blocked }
 }
 
 /** How a list's source fetches the works its listing didn't have. See `SearchSource.recover`. */

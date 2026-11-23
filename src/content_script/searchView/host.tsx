@@ -24,6 +24,7 @@ import type { Recovered, RecoverOptions } from './workPageBlurb.tsx'
 import { pristineBlurb, readSnapshot, snapshotSize, takeFromSnapshot, writeSnapshot } from './cache.ts'
 import { cx, HOST, NATIVE_HIDDEN_CLASS } from './classes.ts'
 import { collapseWork, decorateBlurb, decorateContainer, makeFacetHider } from './decorate.ts'
+import { isDeletedEntry, keepDeletedWorks } from './deletedWorks.ts'
 import { isFresh } from './freshness.ts'
 import { onClaim, onClose, onOpen, onRelease, onRunEnd, onSuspend } from './handover.ts'
 import { applyHidden } from './hidden.ts'
@@ -410,8 +411,28 @@ async function budgetFor(source: SearchSource, options: Options): Promise<Budget
  * reader's marks move on between visits.
  */
 function selected(source: SearchSource, works: Work[]): Work[] {
-  const chosen = source.select ? source.select(works) : works
+  const listed = works.some(isDeletedEntry) ? works.filter(work => !isDeletedEntry(work)) : works
+  const chosen = source.select ? source.select(listed) : listed
   return source.belongs ? chosen.filter(source.belongs) : chosen
+}
+
+/**
+ * The works a read stores, with the deleted works the list keeps put back
+ * ({@link keepDeletedWorks}). `held` is the copy the read replaces.
+ */
+function withDeleted(source: SearchSource, works: Work[], listing: Work[], held: () => readonly Work[] | Promise<readonly Work[]>): Promise<Work[]> {
+  return keepDeletedWorks({
+    listUrl: source.descriptor().listUrl,
+    works,
+    listing,
+    held,
+    keep: work => selected(source, [work]).length > 0,
+  })
+}
+
+/** What is stored under `cacheKey`, for {@link withDeleted}. */
+async function storedWorks(cacheKey: string): Promise<Work[]> {
+  return (await readSnapshot(cacheKey))?.works ?? []
 }
 
 /**
@@ -1300,7 +1321,9 @@ async function finishWalk(job: LoadJob, walked: Walk): Promise<void> {
     const { result, completed } = outcome
     // As the view now on screen was opened: a re-run may have marked works
     // since, or brought a new ceiling.
-    const works = applyLimit(renumber(belonging(job.source, completed.works)), limitFor(job.options))
+    let works = applyLimit(renumber(belonging(job.source, completed.works)), limitFor(job.options))
+    if (!result.blocked)
+      works = await withDeleted(job.source, works, result.works, () => storedWorks(job.cacheKey))
     await persistWalk(job.source, works, result)
     if (!current() || closedEmpty(job.source, works, result))
       return
@@ -1526,15 +1549,17 @@ async function refresh(
     if (own.signal.aborted)
       return
     // The ceiling as the view now on screen was opened with: a re-run may have
-    // brought a new one.
-    const works = applyLimit(renumber(completed.works), limitFor(job.options))
+    // brought a new one. Works AO3 deleted stay, where they stood.
+    const works = await withDeleted(job.source, applyLimit(renumber(completed.works), limitFor(job.options)), result.works, stored)
+    if (own.signal.aborted)
+      return
     // The same refusal the options-page refresh makes — see `NotWritten` in
     // {@link file://./refresh.ts} for the reasoning and for why it is the
     // *listing* being empty that counts, not the finished list. Writing an
     // empty scrape over a stored list would take the list, its side table, and
     // the blurbs and cached text of every work in it; keeping the stored copy on
     // screen is always recoverable.
-    if (result.works.length === 0 && works.length === 0 && await snapshotSize(source.cacheKey) > 0) {
+    if (works.length === 0 && result.works.every(isDeletedEntry) && await snapshotSize(source.cacheKey) > 0) {
       outcome = 'refused'
       toast(`AO3 returned this list with no works in it, so it wasn't refreshed. It is still showing what was stored.`, { type: 'error' })
       return
@@ -2022,7 +2047,9 @@ export async function openSearchView(source: SearchSource, options: Options, opt
         return
       }
       const { budget, result, completed } = outcome
-      const works = applyLimit(renumber(completed.works), budget.limit)
+      let works = applyLimit(renumber(completed.works), budget.limit)
+      if (!result.blocked)
+        works = await withDeleted(source, works, result.works, () => storedWorks(source.cacheKey))
       await persistWalk(source, works, result)
       if (stale() || closedEmpty(source, works, result))
         return

@@ -7,6 +7,7 @@ import { PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 import type { Recovered } from './workPageBlurb.tsx'
 
 import { readSnapshot, snapshotSize, writeSnapshot } from './cache.ts'
+import { isDeletedEntry, keepDeletedWorks } from './deletedWorks.ts'
 import { detectPageCount, detectResultCount, fetchPageDoc, MAX_SCANNED_PAGES, scrapeListing } from './scrape.ts'
 
 /**
@@ -18,7 +19,7 @@ import { detectPageCount, detectResultCount, fetchPageDoc, MAX_SCANNED_PAGES, sc
  * from a fetched page 1 rather than the pagination on screen.
  *
  * **Import discipline.** This module deliberately imports only `scrape.ts`,
- * `cache.ts` and `blurb.ts`, never `host.tsx` — the host pulls in `decorate.ts`,
+ * `cache.ts`, `deletedWorks.ts` and `blurb.ts`, never `host.tsx` — the host pulls in `decorate.ts`,
  * and with it very nearly every Unit, which is a great deal of content script to
  * drag into the options bundle for a function that only fetches and stores.
  *
@@ -206,7 +207,8 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     waitBudget: WAIT_BUDGET.bulk,
   })
 
-  let works = select ? select(scraped) : scraped
+  const listed = scraped.filter(work => !isDeletedEntry(work))
+  let works = select ? select(listed) : listed
   let recoveryBlocked = false
   if (recover && !blocked) {
     const recovered = await recover(works, signal)
@@ -226,6 +228,16 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
   // The pages fetched can hold more than the ceiling; the hard trim keeps it exact.
   if (works.length > ceiling)
     works.length = ceiling
+  // Works AO3 deleted stay on the list, where they stood.
+  if (!blocked) {
+    works = await keepDeletedWorks({
+      listUrl,
+      works,
+      listing: scraped,
+      held: async () => (await readSnapshot(cacheKey))?.works ?? [],
+      keep: work => !select || select([work]).length > 0,
+    })
+  }
 
   // Three ways what we have is not the list, and so does not become the stored
   // one (see `NotWritten`). Checked before the write rather than reported after
@@ -236,7 +248,7 @@ export async function refreshSnapshot(opts: RefreshOptions): Promise<RefreshResu
     ? 'blocked'
     : opts.requireLogin && !loggedIn
       ? 'logged-out'
-      : scraped.length === 0 && works.length === 0 && !countsNone && await snapshotSize(cacheKey) > 0
+      : listed.length === 0 && works.length === 0 && !countsNone && await snapshotSize(cacheKey) > 0
         ? 'emptied'
         : undefined
 
