@@ -4,10 +4,10 @@ import MdiClockCheck from '~icons/mdi/clock-check.jsx'
 import MdiClockPlusOutline from '~icons/mdi/clock-plus-outline.jsx'
 import MdiFastForward from '~icons/mdi/fast-forward.jsx'
 
-import type { MarkId, WorkMarks, WorkProgress } from '#common'
+import type { MarkGridChange, MarkId, WorkMarks, WorkProgress } from '#common'
 import type { MenuItem } from '#content_script/contextMenu.js'
 
-import { describeProgress, entityIdFromURL, entityKey, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markClears, markDescription, markGroup, markItems, markLabel, markRoot, markTracksProgress, offeredMarkIds, offersMarkForLater, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
+import { describeProgress, entityIdFromURL, entityKey, fetchAndParseDocument, findExactRule, getArchiveLink, localMarkIds, markChangesMessage, markClears, markDescription, markGroup, markItems, markLabel, markRoot, markTracksProgress, offeredMarkIds, offersMarkForLater, options, parseUser, progressFor, progressMarkIds, READ_MARK, readiness, readinessColor, ruleBehavior, ruleIndicatorBehavior, ruleTargetColor, SAVED_MARK, toast, todayEpochDays } from '#common'
 import { readChapterCounts } from '#content_script/blurb.js'
 import { lastFloatingPoint } from '#content_script/contextMenu.js'
 import {
@@ -31,7 +31,7 @@ import { openProgressEditor } from '#content_script/progressEditor.js'
 import { ruleBehaviorItems } from '#content_script/ruleMenuItems.js'
 import { Unit } from '#content_script/Unit.js'
 import { pressToUnsaveOnly } from '#content_script/units/CaptureMarkButtons.ts'
-import { applyMark, applyMarkGroup, applyMarkProgress } from '#content_script/workMarks.js'
+import { applyMark, applyMarkGroup, applyMarkMove, applyMarkProgress } from '#content_script/workMarks.js'
 import { workPageId, workPageTitle } from '#content_script/workPage.ts'
 import React from '#dom'
 
@@ -592,20 +592,32 @@ abstract class FilterEntityToolbar extends Unit {
    * session); an unknown state is left alone rather than paying for a page fetch.
    */
   protected async onToggleMark(id: string, markId: MarkId, on: boolean): Promise<void> {
-    const noun = markLabel(this.options.workMarks.marks, markId).toLowerCase()
-    this.setMarkLocally(id, markId, on)
+    await this.onToggleMarks(id, [{ markId, on }])
+  }
+
+  /**
+   * Toggle several marks on a work at once, as a pinned rating grid writes them
+   * when it is dismissed: every mark is written before the work comes off the
+   * Marked for Later list, which on a work page reloads it, and it comes off
+   * once however many of the marks would take it off.
+   */
+  protected async onToggleMarks(id: string, changes: readonly MarkGridChange[]): Promise<void> {
+    if (!changes.length)
+      return
+    for (const { markId, on } of changes)
+      this.setMarkLocally(id, markId, on)
 
     const state = savedState.get(id)
     const { marks } = this.options.workMarks
     // A progress mark sits in the read group without meaning what the group
     // means — an ongoing work is precisely one you're *not* done with — so it
     // must not take the work off the list the way its neighbours do.
-    const done = on && markRoot(marks, markId) === READ_MARK && !markTracksProgress(marks, markId)
+    const done = changes.some(({ markId, on }) => on && markRoot(marks, markId) === READ_MARK && !markTracksProgress(marks, markId))
     if (done && this.markShown(id) && state?.saved && !state.busy) {
-      await this.onMark(id, `Marked as ${noun} — removed from your Marked for Later list.`)
+      await this.onMark(id, markChangesMessage(marks, changes, true))
       return
     }
-    toast(on ? `Marked as ${noun}.` : `Unmarked as ${noun}.`, { type: 'success' })
+    toast(markChangesMessage(marks, changes, false), { type: 'success' })
   }
 
   /**
@@ -1062,6 +1074,10 @@ export class FilterWorkToolbar extends FilterEntityToolbar {
         else
           void this.onToggleMark(id, markId, on)
       },
+      chooseAll: changes => void this.onToggleMarks(id, changes),
+      pinned: this.options.markGridPinned,
+      setPinned: on => void options.set({ markGridPinned: on }),
+      move: (markId, target, side) => applyMarkMove(this.options.workMarks, markId, target, side),
     })
   }
 

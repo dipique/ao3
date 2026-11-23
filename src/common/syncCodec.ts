@@ -73,9 +73,10 @@ export const CHUNK_PREFIX = 'o'
  * only while they are tracked, as `trackedLists` entries,
  * `impersonateUserRequests` risks the reader's AO3 account, so it is turned on
  * one browser at a time, knowingly, and `bookmarkedSettings` are shortcuts on
- * this browser's options page.
+ * this browser's options page. `markGridPinned` is how the rating grid behaves
+ * in this browser.
  */
-export const LOCAL_ONLY = new Set<keyof Options>(['user', 'verbose', 'savedLists', 'impersonateUserRequests', 'bookmarkedSettings'])
+export const LOCAL_ONLY = new Set<keyof Options>(['user', 'verbose', 'savedLists', 'impersonateUserRequests', 'bookmarkedSettings', 'markGridPinned'])
 
 export interface Manifest {
   /** schema version */

@@ -1,6 +1,6 @@
 import type { MarkId, WorkMarks, WorkProgress } from '#common'
 
-import { options, READ_MARK, setMark, setMarkGroup, setMarkProgress } from '#common'
+import { moveMarkBeside, options, READ_MARK, setMark, setMarkGroup, setMarkProgress } from '#common'
 
 import { extensionAlive } from './extensionAlive.ts'
 
@@ -122,4 +122,13 @@ export function applyMarkProgress(marks: WorkMarks, workId: string, markId: Mark
   if (wrote)
     report({ workId, markId, on: true, via: 'progress', progress: entry })
   return wrote
+}
+
+/**
+ * Move a mark to just before or after another in the mark order (see
+ * {@link moveMarkBeside}). Not one of the doors above: it marks no work, so
+ * there is nothing to report.
+ */
+export function applyMarkMove(marks: WorkMarks, markId: MarkId, target: MarkId, side: 'before' | 'after'): boolean {
+  return commit(marks, moveMarkBeside(marks.marks, markId, target, side))
 }

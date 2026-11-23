@@ -80,6 +80,11 @@ export interface Options {
    * {@link file://./markGrid.ts}). Only while {@link workMarks} is on.
    */
   markGrid: boolean
+  /**
+   * The rating grid stays open as marks are chosen, and writes them all when it
+   * is dismissed. Toggled from the grid itself; this browser only.
+   */
+  markGridPinned: boolean
 
   /**
    * Discard a stored blurb as soon as no stored list holds it — when a refresh

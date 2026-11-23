@@ -36,6 +36,7 @@ export const OPTION_DEFAULTS: Options = {
     version: MARKS_VERSION,
   },
   markGrid: false,
+  markGridPinned: false,
 
   pruneOrphanedBlurbs: false,
   cacheComments: false,

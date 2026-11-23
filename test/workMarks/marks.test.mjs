@@ -26,6 +26,7 @@ import {
   markRoot,
   marksForWork,
   moveMark,
+  moveMarkBeside,
   normalizeMarkOrder,
   packIds,
   READ_MARK,
@@ -166,6 +167,39 @@ describe('the mark order', () => {
     assert.equal(moveMark(marks, SAVED_MARK, -1), marks)
     assert.equal(moveMark(marks, 'nonesuch', 1), marks)
     assert.equal(moveMark(marks, 'read', 0), marks)
+  })
+
+  test('a mark dropped beside another takes that side of it', () => {
+    const marks = createDefaultMarks()
+    assert.deepEqual(
+      reorderableMarkIds(moveMarkBeside(marks, 'favorite', 'no', 'before')),
+      ['read', 'favorite', 'no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'abandoned'],
+    )
+    assert.deepEqual(
+      reorderableMarkIds(moveMarkBeside(marks, 'no', 'hot', 'after')),
+      ['read', 'bad', 'boring', 'gross', 'good', 'hot', 'no', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned'],
+    )
+    assert.deepEqual(
+      reorderableMarkIds(moveMarkBeside(marks, 'read', 'abandoned', 'after')),
+      ['no', 'bad', 'boring', 'gross', 'good', 'hot', 'dark', 'feelsy', 'fluff', 'favorite', 'abandoned', 'read'],
+    )
+  })
+
+  test('a drop that leaves the order as it was is a no-op', () => {
+    const marks = createDefaultMarks()
+    assert.equal(moveMarkBeside(marks, 'hot', 'hot', 'before'), marks)
+    assert.equal(moveMarkBeside(marks, 'hot', 'hot', 'after'), marks)
+    assert.equal(moveMarkBeside(marks, 'hot', 'good', 'after'), marks, 'already just after it')
+    assert.equal(moveMarkBeside(marks, 'hot', 'dark', 'before'), marks, 'already just before it')
+  })
+
+  test('a drop onto or of a mark outside the run is refused', () => {
+    const marks = createDefaultMarks()
+    assert.equal(moveMarkBeside(marks, 'continue', 'read', 'before'), marks, 'the ongoing mark does not move')
+    assert.equal(moveMarkBeside(marks, 'read', 'continue', 'after'), marks, 'nothing goes past the ongoing mark')
+    assert.equal(moveMarkBeside(marks, 'read', 'continue', 'before'), marks)
+    assert.equal(moveMarkBeside(marks, SAVED_MARK, 'read', 'before'), marks)
+    assert.equal(moveMarkBeside(marks, 'nonesuch', 'read', 'before'), marks)
   })
 
   test('a move leaves the marks themselves alone', () => {

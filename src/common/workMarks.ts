@@ -532,6 +532,27 @@ export function moveMark(
 }
 
 /**
+ * Move one mark to just before or after another, as dropping it there does —
+ * {@link moveMark}, measured to a mark rather than in places. A mark outside the
+ * reorderable run can be neither moved nor dropped beside, so a drop on the
+ * ongoing mark returns the original table like any other refused move.
+ */
+export function moveMarkBeside(
+  marks: Record<MarkId, MarkConfig>,
+  id: MarkId,
+  target: MarkId,
+  side: 'before' | 'after',
+): Record<MarkId, MarkConfig> {
+  const movable = reorderableMarkIds(marks)
+  const from = movable.indexOf(id)
+  const at = movable.indexOf(target)
+  if (from === -1 || at === -1 || id === target)
+    return marks
+  const to = at - (at > from ? 1 : 0) + (side === 'after' ? 1 : 0)
+  return moveMark(marks, id, to - from)
+}
+
+/**
  * Renumber a table into canonical form: the order it already reads as, but with
  * every mark holding an explicit slot, no two marks claiming the same one, and
  * the pinned marks after the verdicts. Returns the original (identity-equal)
