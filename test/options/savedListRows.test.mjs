@@ -8,7 +8,7 @@ import { bucketBar, formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { jobVerb, jobView, offReason } from '../../src/options_ui/model/jobView.ts'
 import { titlesInWords } from '../../src/options_ui/model/phrases.ts'
 import { REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
-import { backfillNote, blurbsOnRemove, cachingCell, COPY_REMOVAL, copyTitle, KIND_LABELS, LIST_REMOVAL, NEEDS_VISIT_NOTE, NO_COPY, NO_SWITCH, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, sinceDay, STATUS_DETAILS, STATUS_TIPS, STATUS_WORDS, statusCell, STOP_NOTE, TRACK_OFF, TRACKING_STATE, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
+import { backfillNote, blurbsOnRemove, cachingCell, COPY_RESET, copyTitle, KIND_LABELS, LIST_REMOVAL, NEEDS_VISIT_NOTE, NO_COPY, NO_SWITCH, NOT_ARCHIVE_NOTE, NOT_ARCHIVE_STOP_NOTE, OFFLINE_OFF, offlineDetails, rowAction, rowJob, sameSearchNote, savedListRows, SCAN_REFRESH_TIP, settledWords, sinceDay, STATUS_DETAILS, STATUS_TIPS, STATUS_WORDS, statusCell, STOP_NOTE, TRACK_OFF, TRACKING_STATE, trackingDetails } from '../../src/options_ui/model/savedListRows.ts'
 import { figures, mentions } from '../facts.mjs'
 
 const AO3 = 'https://archiveofourown.org'
@@ -483,11 +483,10 @@ describe('the row\'s details', () => {
   const size = formatBytes(buckets.bytes)
   const age = timeAgo(7_000, NOW)
 
-  /** What Remove offline copy says of a copy with cached works: what goes of its blurbs, that its 6 cached works stay, and how to get it back. */
-  function removesCopy(note, prune) {
-    assert.ok(mentions(note, blurbsOnRemove(prune)), note)
-    assert.deepEqual(figures(note, size), [6], 'the cached works that stay')
-    assert.ok(mentions(note, COPY_REMOVAL.reopens), note)
+  /** What Reset list data says: what goes and what stays, and when the list is read again — for a tracked list, from its tracking day. */
+  function removesCopy(note, tracked) {
+    assert.ok(mentions(note, COPY_RESET.what), note)
+    assert.ok(mentions(note, tracked ? COPY_RESET.nextTracked : COPY_RESET.next), note)
   }
 
   describe('offlineDetails', () => {
@@ -503,21 +502,21 @@ describe('the row\'s details', () => {
         retry: 3,
         cached: 6,
         remove: null,
+        full: true,
+        refreshTip: null,
+        refreshable: true,
       })
       // Its works, cached, uncached, failed, and needing a refresh.
       assert.deepEqual(figures(got.summary, age, size), [1, 4, 5, 6, 10])
       assert.equal(got.remove.off, null)
-      removesCopy(got.remove.note, false)
-      assert.ok(!mentions(got.remove.note, COPY_REMOVAL.discardsJob), 'no job to discard')
+      removesCopy(got.remove.note, true)
+      assert.ok(!mentions(got.remove.note, COPY_RESET.discardsJob), 'no job to discard')
+      assert.ok(!mentions(got.remove.note, blurbsOnRemove(false)), 'nothing about blurbs')
     })
 
     test('uncached is said only while some works were never fetched; the failed ones are counted on their own', () => {
       const failedOnly = rowsWith(join, NO_JOB, { copy: () => ({ buckets: { total: 10, cached: 8, failed: 2, unfetched: 0, bytes: 50, staleFailures: 0 }, unstored: 0 }) })
       assert.deepEqual(figures(offlineDetails(failedOnly.t3a, NO_JOB, NOW, false).summary, age, formatBytes(50)), [2, 8, 10])
-    })
-
-    test('with blurbs discarded automatically, removing says they go now', () => {
-      removesCopy(offlineDetails(idle.t3a, NO_JOB, NOW, true).remove.note, true)
     })
 
     test('another list\'s job turns the actions off, and says so where the reader is looking; removing stays on', () => {
@@ -541,8 +540,8 @@ describe('the row\'s details', () => {
       const got = offlineDetails(rowsWith(join, job).t3a, job, NOW, false)
       assert.equal(got.off, null)
       assert.equal(got.remove.off, null)
-      removesCopy(got.remove.note, false)
-      assert.ok(mentions(got.remove.note, COPY_REMOVAL.discardsJob), got.remove.note)
+      removesCopy(got.remove.note, true)
+      assert.ok(mentions(got.remove.note, COPY_RESET.discardsJob), got.remove.note)
     })
 
     test('a copy two lists share: removing it from one takes it from both, and says so', () => {
@@ -560,8 +559,7 @@ describe('the row\'s details', () => {
       assert.deepEqual(figures(got.summary, timeAgo(1_000, NOW), formatBytes(0)), [0, 94, 94], 'its works, none cached, all uncached')
       assert.deepEqual(got.note, { severity: 'warning', text: NEEDS_VISIT_NOTE })
       assert.equal(got.off, OFFLINE_OFF.undescribed)
-      assert.ok(mentions(got.remove.note, blurbsOnRemove(false)))
-      assert.ok(mentions(got.remove.note, COPY_REMOVAL.reopens))
+      removesCopy(got.remove.note, false)
       assert.deepEqual(figures(got.remove.note), [], 'no cached works to say stay')
     })
 
@@ -570,6 +568,43 @@ describe('the row\'s details', () => {
       assert.equal(got.summary, null)
       assert.equal(got.empty, NO_COPY.opens)
       assert.equal(got.remove, null)
+      assert.equal(got.refreshable, false, 'an untracked list is refreshed once it has a copy')
+    })
+
+    test('a tracked list with no copy can be refreshed, which keeps one', () => {
+      const got = offlineDetails(rowsWith(joinSavedLists(state([tracking(tea)], [tea]), []), NO_JOB).t3a, NO_JOB, NOW)
+      assert.equal(got.summary, null)
+      assert.equal(got.refreshable, true)
+      assert.equal(got.full, true)
+    })
+
+    test('a tracked list with no copy has its refresh off while a job runs', () => {
+      const busy = rows(joinSavedLists(state([tracking(tea)], [tea]), []), { ...IDLE, jobOff: () => 'a job is running' }).t3a
+      assert.equal(offlineDetails(busy, NO_JOB, NOW).refreshOff, 'a job is running')
+    })
+
+    test('a tracked copy says how far it is complete, and when it was last read by date', () => {
+      const settled = { from: DAY - 3, through: DAY - 1, readAt: NOW - 60_000 }
+      const join = joinSavedLists(state([tracking(tea, DAY - 3)], [tea]), [{ ...teaCopy, settled }])
+      const got = offlineDetails(rowsWith(join, NO_JOB).t3a, NO_JOB, NOW)
+      assert.ok(got.summary.includes(settledWords(settled, NOW)), got.summary)
+      assert.notEqual(settledWords({ ...settled, through: DAY - 4 }, NOW), settledWords(settled, NOW), 'nothing complete yet is said otherwise')
+      assert.notEqual(settledWords({ ...settled, readAt: 0 }, NOW), settledWords(settled, NOW), 'never read by date is said otherwise')
+    })
+
+    test('a tracked series is read whole: no Full refresh, and its Refresh says why', () => {
+      const parts = record('s3r', '/series/9991', { kind: 'series-works', title: 'Long haul' })
+      const got = offlineDetails(rowsWith(joinSavedLists(state([tracking(parts)], [parts]), []), NO_JOB).s3r, NO_JOB, NOW)
+      assert.equal(got.full, false)
+      assert.equal(got.refreshTip, SCAN_REFRESH_TIP)
+    })
+
+    test('an uncommon tag marked to scan is read whole too; one read by date is not', () => {
+      const tag = record('rare', '/tags/Rare%20Thing', { kind: 'tag-works', title: 'Rare' })
+      const scanned = offlineDetails(rowsWith(joinSavedLists(state([{ ...tracking(tag), scan: true }], [tag]), []), NO_JOB).rare, NO_JOB, NOW)
+      assert.equal(scanned.refreshTip, SCAN_REFRESH_TIP)
+      const dated = offlineDetails(rowsWith(joinSavedLists(state([tracking(tag)], [tag]), []), NO_JOB).rare, NO_JOB, NOW)
+      assert.deepEqual([dated.full, dated.refreshTip], [true, null])
     })
 
     test('a filtered listing with no copy: one comes from the same place', () => {
@@ -716,7 +751,7 @@ describe('a job on an older sort order of a list\'s search', () => {
     const row = rowsWith(join, stopped).t3a
     assert.deepEqual(rowJob(row, stopped), { actions: 'resume', off: null, here: true })
     assert.deepEqual(rowAction(row, stopped), { kind: 'none' })
-    assert.ok(mentions(offlineDetails(row, stopped, NOW, false).remove.note, COPY_REMOVAL.discardsJob))
+    assert.ok(mentions(offlineDetails(row, stopped, NOW, false).remove.note, COPY_RESET.discardsJob))
     assert.equal(offlineDetails(row, stopped, NOW, false).remove.off, null)
   })
 

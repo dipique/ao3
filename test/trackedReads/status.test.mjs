@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { dayOf } from '../../src/common/trackedLists.ts'
-import { formatRange, reviewStatus } from '../../src/common/trackedReads.ts'
+import { failureNotes, failureSentence, formatRange, reviewStatus } from '../../src/common/trackedReads.ts'
 import { figures, mentions } from '../facts.mjs'
 
 const START = dayOf('30 Sep 2026')
@@ -70,5 +70,28 @@ describe('reviewStatus', () => {
     const both = status({ failed: ['a', 'b'] })
     assert.deepEqual(both.lists, ['Alpha', 'Beta'])
     assert.ok(mentions(both.text, 'Alpha') && mentions(both.text, 'Beta'), both.text)
+  })
+})
+
+describe('why a list couldn\'t be loaded', () => {
+  const signedOut = { reason: 'signed-out', at: 1 }
+  const broken = { reason: 'request', error: 'Request failed with status 503', at: 1 }
+
+  test('the status line says why, for each list it knows a reason for', () => {
+    const one = status({ failed: ['b'] }, { reasons: new Map([['b', signedOut]]) })
+    assert.ok(one.text.includes(failureSentence('signed-out')), one.text)
+    const two = status({ failed: ['a', 'b'] }, { reasons: new Map([['a', broken], ['b', signedOut]]) })
+    assert.ok(two.text.includes(failureSentence('request', broken.error)), two.text)
+    assert.ok(two.text.includes(failureSentence('signed-out')), two.text)
+  })
+
+  test('with no reason known, the line says only that it couldn\'t be', () => {
+    assert.equal(status({ failed: ['b'] }, { reasons: new Map() }).text, status({ failed: ['b'] }).text)
+  })
+
+  test('failureNotes names each list with its reason, and nothing for a list with none', () => {
+    const notes = failureNotes(['a', 'b', 'c'], labels, new Map([['a', broken], ['c', signedOut]]))
+    assert.ok(notes.includes('Alpha') && notes.includes('Gamma') && !notes.includes('Beta'), notes)
+    assert.equal(failureNotes(['b'], labels, new Map()), '')
   })
 })

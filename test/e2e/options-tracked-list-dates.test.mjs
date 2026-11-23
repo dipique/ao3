@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
 import { isoDay, utcToday } from '../../src/common/trackedLists.ts'
+import { unpackRows } from '../../src/common/trackedReads.ts'
 import { backfillNote } from '../../src/options_ui/model/savedListRows.ts'
 import { storedListIds, storedLists } from './helpers.mjs'
 import { mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
@@ -120,21 +121,22 @@ describe('options UI — the day a tracked list is tracked from', { skip }, () =
     return row
   }
 
-  test('Refresh list reads a tracked list from its day, and keeps the date filter with its copy', async () => {
+  test('Refresh list reads a tracked list by date from its day, keeping what its copy held', async () => {
     await refresh(BEES.id, 'Bees')
     assert.ok(askedOf('Bees').length > 0)
     assert.deepEqual(askedOf('Bees').map(askedFrom), askedOf('Bees').map(() => isoDay(BEES.since)))
     const copy = await copyOf('Bees')
-    assert.deepEqual(storedListIds(copy), ['11', '12'])
-    assert.equal(copy.descriptor.dateFilter, `work_search[date_from]=${isoDay(BEES.since)}`)
+    assert.deepEqual(storedListIds(copy), ['11', '12', '1', '2', '3'], 'what it read, newest first, then what the whole read before it held')
+    assert.equal(copy.dated.from, BEES.since)
+    assert.equal(copy.dated.through, TODAY - 1)
     assert.equal(askedFrom(copy.descriptor.listUrl), null, 'the copy\'s address stays the whole listing\'s')
   })
 
   test('nothing updated since its day is an empty copy, not a refusal', async () => {
     await refresh(MOTHS.id, 'Moths')
     const copy = await copyOf('Moths')
-    assert.deepEqual(storedListIds(copy), [])
-    assert.equal(copy.descriptor.dateFilter, `work_search[date_from]=${isoDay(MOTHS.since)}`)
+    assert.deepEqual(unpackRows(copy.dated.rows), [])
+    assert.equal(copy.dated.through, TODAY - 1, 'complete through yesterday, with nothing in it')
   })
 
   test('a saved list nothing tracks is read whole', async () => {

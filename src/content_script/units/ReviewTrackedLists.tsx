@@ -3,37 +3,38 @@ import MdiChevronLeft from '~icons/mdi/chevron-left.jsx'
 import MdiChevronRight from '~icons/mdi/chevron-right.jsx'
 import MdiLoading from '~icons/mdi/loading.jsx'
 
-import type { Day, Options, SnapshotDescriptor, TrackedList, TrackedListsOption, TrackedRead, TrackedReviewCache } from '#common'
+import type { CopyFailure, Day, ListView, Options, SnapshotDescriptor, TrackedList, TrackedReviewCache } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { ReadingsView } from '#content_script/readingsNav.tsx'
 import type { LoadResult, SearchHeaderControl, SearchSource } from '#content_script/searchView/host.tsx'
 import type { ViewState } from '#content_script/searchView/view.tsx'
-import type { ReadStatus } from '#content_script/tracked/readLists.ts'
 import type { ReviewWindow } from '#content_script/tracked/reviewWindow.ts'
+import type { ReadStatus } from '#content_script/tracked/updateCopies.ts'
 
 import {
   ADDON_CLASS,
   builtinOpens,
   cache,
   CLAIM_TTL_MS,
+  copyKeyOf,
+  copyWanted,
+  datedFor,
+  failureNotes,
   formatDay,
   formatRange,
   fromShortId,
   getArchiveLink,
+  listsAtCopy,
   markedWorkIds,
   options,
   packIds,
   parseUser,
-  pruneReviewed,
   readWorkIds,
-  recordFor,
-  recordsBehind,
   reviewBasis,
   reviewStart,
   reviewStatus,
   sameReviewBasis,
   sourceLabel,
-  storedRecordOf,
   toast,
   toShortId,
   unpackIds,
@@ -46,13 +47,12 @@ import { loadMarkedForLaterIndex, markedForLaterIds } from '#content_script/mark
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { anchorItem, hideClearHistory, listChrome, onHistoryPage, readingsUser, showClearHistory, showListChrome } from '#content_script/readingsNav.tsx'
 import { pruneBlurbs } from '#content_script/searchView/blurbStore.ts'
-import { snapshotWorkIds } from '#content_script/searchView/cache.ts'
+import { onStoredListsChanged, readStoredLists, snapshotWorkIds } from '#content_script/searchView/cache.ts'
 import { closeSearchView, isSearchViewOpen, openSearchView, resumeSearchView, suspendSearchView, undecorated } from '#content_script/searchView/host.tsx'
 import { applyStatus } from '#content_script/searchView/status.ts'
 import { claimReads } from '#content_script/tracked/readClaim.ts'
-import { readTrackedLists } from '#content_script/tracked/readLists.ts'
-import { onReadRecordsChanged, readStoredRecords, writeReadRecords } from '#content_script/tracked/readStore.ts'
 import { computeWindow } from '#content_script/tracked/reviewWindow.ts'
+import { updateTrackedCopies } from '#content_script/tracked/updateCopies.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
 
@@ -139,11 +139,11 @@ let control: SearchHeaderControl | null = null
 let emptyWindow: QuietWindow | null = null
 /** The reading this page is doing, if any. */
 let reading: { controller: AbortController, status: ReadStatus | null } | null = null
-/** Another page holds the read claim: this one follows the records it writes. */
+/** Another page holds the read claim, or a copy's own: this one follows the copies it writes. */
 let readingElsewhere = false
 /** Retries the claim once another page's could have lapsed. */
 let claimRetry: ReturnType<typeof setTimeout> | undefined
-/** Stops hearing record writes: one listener per page run. */
+/** Stops hearing copy writes: one listener per page run. */
 let stopFollowing: (() => void) | null = null
 /** Stops the last toolbar's countdown of a pause in reading. */
 let stopWaitLine: (() => void) | null = null
@@ -160,8 +160,6 @@ let readingStopped = false
  * is done by this one, under the options as they are now.
  */
 const run: { latest: ReviewTrackedLists | null } = { latest: null }
-/** Works the records let go of when a range was marked reviewed, for the next write to retire. */
-const retireLater = new Set<string>()
 
 interface QuietWindow {
   start: Day
@@ -200,14 +198,16 @@ interface ReviewedSet {
  * state is one day number, so finishing a window is one click and there is no
  * per-item bookkeeping to keep in step, to sync, or to lose.
  *
- * **Where the works come from.** Each list keeps a read record — the works its
- * query turned up, by day ({@link file://../../common/trackedReads.ts}) — and
- * the window is computed from those without asking the archive
- * ({@link file://../tracked/reviewWindow.ts}), so it draws at once. A reader
- * ({@link file://../tracked/readLists.ts}) brings the records up to date in the
- * background, one page at a time, in whichever page holds the read claim; every
- * page with the review open hears the records land and merges the works they
- * bring in place, without moving anything on a page the reader has passed.
+ * **Where the works come from.** Each list's offline copy holds the works its
+ * query turned up, by day, and how far that is complete
+ * ({@link file://../../common/trackedReads.ts}); the window is computed from
+ * the copies without asking the archive
+ * ({@link file://../tracked/reviewWindow.ts}), so it draws at once. The
+ * updater ({@link file://../tracked/updateCopies.ts}) brings the copies up to
+ * date in the background, one page at a time, in whichever page holds the read
+ * claim; every page with the review open hears the copies land and merges the
+ * works they bring in place, without moving anything on a page the reader has
+ * passed.
  *
  * **What it stands on.** The window is shown in the same search view the reader
  * already knows from Marked for Later and the read list — through the source
@@ -332,7 +332,7 @@ export class ReviewTrackedLists extends Unit {
       load: () => this.load(userId),
       header: ctl => this.header(ctl),
       belongs: work => belongsToWindow(work),
-      // The records are read in the background, and land in the view as they
+      // The copies are read in the background, and land in the view as they
       // do; the Refresh button only starts that reading again if it stopped.
       reread: () => this.reread(),
       // Kept open while lists are still being read, which is what will fill it.
@@ -346,7 +346,7 @@ export class ReviewTrackedLists extends Unit {
       // works came from.
       hidesNothing: false,
       // A stored window is drawn as it is while it answers to the reader's
-      // options, and the records' own reading brings it up to date; one that
+      // options, and the copies' own reading brings it up to date; one that
       // doesn't answer to them is computed again at once.
       refreshInterval: () => (factsStale ? 0 : Number.POSITIVE_INFINITY),
       nativeElements: () => [
@@ -381,7 +381,7 @@ export class ReviewTrackedLists extends Unit {
     }
   }
 
-  /** Compute the window from the records, and write down what it is. */
+  /** Compute the window from the copies, and write down what it is. */
   private async load(userId: string): Promise<LoadResult> {
     // A load is a fresh look at the window, so the already-reviewed set is taken
     // again here — and only here. The reopens a mark click causes reuse it, which
@@ -395,7 +395,7 @@ export class ReviewTrackedLists extends Unit {
     return { works: undecorated(next.works), blocked: false }
   }
 
-  /** The window the records make now, under the reader's options. */
+  /** The window the copies make now, under the reader's options. */
   private async compute(): Promise<ReviewWindow> {
     const option = this.options.trackedLists
     const start = reviewStart(option)
@@ -407,7 +407,7 @@ export class ReviewTrackedLists extends Unit {
       endOverride: endOverride ?? held,
       works: parsed,
     })
-    // A window the records say is whole keeps its end for the visit.
+    // A window the copies say is whole keeps its end for the visit.
     if (endOverride === undefined && !next.window.pending.length && !next.window.failed.length)
       heldEnd = { start, end: next.window.end }
     current = next
@@ -461,7 +461,7 @@ export class ReviewTrackedLists extends Unit {
     for (const [day, count] of window.days)
       days[String(day)] = count
 
-    const retired = await this.retire(previous, sources, next.pruned, this.options)
+    const retired = await this.retire(previous, sources, this.options)
     const stored: TrackedReviewCache = {
       start: window.start,
       end: window.end,
@@ -489,18 +489,15 @@ export class ReviewTrackedLists extends Unit {
    * whatever the reader's orphan setting says, which governs the lists they
    * chose to keep rather than a window that exists to be thrown away.
    *
-   * Four kinds of work are kept even so: one another stored list still holds,
-   * one a read record still holds (the store's own rule), one carrying a mark,
-   * and one saved for later. The read list rebuilds a work from a stored blurb
+   * Three kinds of work are kept even so: one a stored list still holds — a
+   * tracked list's copy keeps its reviewed works, and lets them go when it is
+   * reset — one carrying a mark, and one saved for later. The read list rebuilds a work from a stored blurb
    * rather than fetching its page, so a work marked during a review is exactly
    * the one worth keeping.
    */
-  private async retire(previous: TrackedReviewCache | null, incoming: { [sid: string]: string }, pruned: readonly string[], opts: Options): Promise<Set<string>> {
+  private async retire(previous: TrackedReviewCache | null, incoming: { [sid: string]: string }, opts: Options): Promise<Set<string>> {
     const waiting = unpackIds(previous?.retired ?? '')
-    for (const id of retireLater)
-      waiting.add(id)
-    retireLater.clear()
-    for (const sid of [...Object.keys(previous?.sources ?? {}), ...pruned]) {
+    for (const sid of Object.keys(previous?.sources ?? {})) {
       if (sid in incoming)
         continue
       const id = fromShortId(sid)
@@ -525,6 +522,12 @@ export class ReviewTrackedLists extends Unit {
         waiting.delete(id)
         parsed.delete(id)
       }
+      // A work another stored list holds is that list's to keep: a tracked
+      // list's copy keeps its reviewed works, and lets them go only when it is
+      // reset. The window's own stored list holds its works only until it is
+      // written again.
+      for (const id of await snapshotWorkIds(CACHE_KEY))
+        waiting.delete(id)
     }
     catch (err) {
       // Nothing was lost: the ids stay in `retired` and the next window tries
@@ -554,21 +557,25 @@ export class ReviewTrackedLists extends Unit {
   }
 
   // -------------------------------------------------------------------------
-  // Following the records.
+  // Following the copies.
   // -------------------------------------------------------------------------
 
   /**
-   * Keep the view in step with the records for as long as it is up: hear every
-   * record write, from this page's reading or another's, and merge what it
-   * changes; and start reading here if the records are behind and nobody else
-   * is reading them.
+   * Keep the view in step with the tracked lists' copies for as long as it is
+   * up: hear every write to one, from this page's reading or another's, and
+   * merge what it changes; and start reading here if the copies are behind and
+   * nobody else is reading them.
    */
   private follow(ctl: SearchHeaderControl): void {
     control = ctl
     run.latest = this
     stopFollowing?.()
-    stopFollowing = onReadRecordsChanged(() => void this.recompute())
-    // The records may have moved on since the stored window was written.
+    stopFollowing = onStoredListsChanged((keys) => {
+      const tracked = this.options.trackedLists.lists.filter(list => list.tracked).map(copyKeyOf)
+      if (tracked.some(key => key !== null && keys.has(key)))
+        void this.recompute()
+    })
+    // The copies may have moved on since the stored window was written.
     void this.recompute()
     void this.startReading()
   }
@@ -576,7 +583,7 @@ export class ReviewTrackedLists extends Unit {
   /**
    * Compute the window again and merge the difference, one at a time, by the
    * latest run's unit. Settles once the window on screen is the one the
-   * records make.
+   * copies make.
    */
   private recompute(): Promise<void> {
     if (recomputing) {
@@ -601,7 +608,7 @@ export class ReviewTrackedLists extends Unit {
   }
 
   /**
-   * Put the window the records make now on screen, in place: works new to it
+   * Put the window the copies make now on screen, in place: works new to it
    * merged where they belong, works that left it collapsed in their slots as
    * the next review's.
    */
@@ -654,14 +661,15 @@ export class ReviewTrackedLists extends Unit {
     this.offerEmptyRange(quiet)
   }
 
-  /** Start reading the records here, unless they are up to date or another page is reading them. */
+  /** Start reading the copies here, unless they are up to date or another page is reading them. */
   private async startReading(): Promise<void> {
     if (reading || !extensionAlive())
       return
     const option = this.options.trackedLists
-    const lists = option.lists.filter(list => list.tracked)
-    const records = current?.records ?? await recordsOf(lists, reviewStart(option))
-    if (!recordsBehind(records, lists, utcToday()))
+    const start = reviewStart(option)
+    const today = utcToday()
+    const through = readThrough(start, today)
+    if (!await copiesWanted(option.lists, start, through, today))
       return
     const claim = await claimReads(PAGE_RUN)
     clearTimeout(claimRetry)
@@ -680,12 +688,13 @@ export class ReviewTrackedLists extends Unit {
     reading = { controller, status: null }
     control?.setUpdating(true)
     redrawBar?.()
-    let outcome: Awaited<ReturnType<typeof readTrackedLists>> | null = null
+    let outcome: Awaited<ReturnType<typeof updateTrackedCopies>> | null = null
     try {
-      outcome = await readTrackedLists({
-        lists,
-        start: reviewStart(option),
-        currentStart: async () => reviewStart(await options.get('trackedLists')),
+      outcome = await updateTrackedCopies({
+        entries: option.lists,
+        through,
+        askFrom: start,
+        holder: 'page',
         patience: PATIENCE.interactive,
         waitBudget: WAIT_BUDGET.interactive,
         signal: controller.signal,
@@ -710,20 +719,29 @@ export class ReviewTrackedLists extends Unit {
     await this.recompute()
     // A list tracked, or read afresh, while this run went on is still behind:
     // the next run reads it, under the options as they are now. One this run
-    // gave up on waits for the next open, or Refresh.
+    // gave up on waits for the next open, or Refresh; one another page is
+    // reading is that page's.
+    if (outcome?.elsewhere.length) {
+      readingElsewhere = true
+      redrawBar?.()
+      clearTimeout(claimRetry)
+      claimRetry = setTimeout(() => void (run.latest ?? this).startReading(), CLAIM_TTL_MS)
+    }
     if (outcome && !outcome.blocked)
-      await (run.latest ?? this).readAgainIfBehind(outcome.failed)
+      await (run.latest ?? this).readAgainIfBehind([...outcome.failed, ...outcome.elsewhere])
   }
 
-  /** Start another reading if a list the last one didn't give up on still wants reading. */
-  private async readAgainIfBehind(failed: readonly string[]): Promise<void> {
+  /** Start another reading if a list the last one didn't give up on, or leave to another page, still wants reading. */
+  private async readAgainIfBehind(passed: readonly string[]): Promise<void> {
     const option = this.options.trackedLists
-    const lists = option.lists.filter(list => list.tracked && !failed.includes(list.id))
-    if (lists.length && recordsBehind(await recordsOf(lists, reviewStart(option)), lists, utcToday()))
+    const lists = option.lists.filter(list => list.tracked && !passed.includes(list.id))
+    const today = utcToday()
+    const start = reviewStart(option)
+    if (lists.length && await copiesWanted(lists, start, readThrough(start, today), today))
       await this.startReading()
   }
 
-  /** The view's Refresh: read the records again if no page is reading them. */
+  /** The view's Refresh: read the copies again if no page is reading them. */
   private reread(): void {
     void this.recompute()
     void this.startReading()
@@ -845,6 +863,7 @@ export class ReviewTrackedLists extends Unit {
         elsewhere: readingElsewhere && !reading,
         stopped: readingStopped && !reading,
         readAt: lastReadAt(current?.records),
+        reasons: failuresOf(current?.records),
       })
       status.textContent = line.text
       status.title = line.lists.join(', ')
@@ -899,7 +918,7 @@ export class ReviewTrackedLists extends Unit {
       // work, so it always asks. A list still being read doesn't: the status
       // line has said so, and missing a work then is accepted.
       prompt.replaceChildren(confirmRow(
-        skipWarning(failed, stored),
+        skipWarning(failed, stored, failureNotes(stored.failed, new Map(this.options.trackedLists.lists.map(list => [list.id, sourceLabel(list, this.options.trackedLists.lists)])), failuresOf(current?.records))),
         'Mark reviewed anyway',
         () => {
           prompt.replaceChildren()
@@ -925,11 +944,12 @@ export class ReviewTrackedLists extends Unit {
   }
 
   /**
-   * Finish the range: move the watermark, then take the reviewed days off the
-   * records. The next window isn't read here: the option's broadcast re-runs
-   * the page, the reopen finds the stored window answering to a watermark that
-   * has moved ({@link readFacts}), and the host computes the next one from the
-   * records — which the reading has usually filled already.
+   * Finish the range: move the watermark. The copies keep the reviewed days —
+   * they are their lists' — and the next window starts after them. It isn't
+   * read here: the option's broadcast re-runs the page, the reopen finds the
+   * stored window answering to a watermark that has moved ({@link readFacts}),
+   * and the host computes the next one from the copies — which the reading has
+   * usually filled already.
    *
    * The watermark is read fresh and never lowered, so a tab that has been
    * sitting open can't rewind another tab's progress.
@@ -946,8 +966,6 @@ export class ReviewTrackedLists extends Unit {
       heldEnd = null
       advanced = true
       await options.set({ trackedLists: moved })
-      await pruneRecords(moved).catch(err => this.logger.error('Could not take the reviewed days off the records', err))
-      // The reading here sees the watermark move, and keeps those days off as it goes.
       toast(`Marked ${formatRange(range.start, range.end)} reviewed.`, {
         type: 'success',
         name: 'marked-reviewed',
@@ -1015,50 +1033,38 @@ async function takeReviewed(userId: string, opts: Options): Promise<ReviewedSet>
   return { ids, savedKnown }
 }
 
-/** The tracked lists' records as stored, each as the window starting on `start` takes it. */
-async function recordsOf(lists: readonly TrackedList[], start: Day): Promise<Map<string, TrackedRead>> {
-  const stored = await readStoredRecords(lists.map(list => list.id))
-  return new Map(lists.map(list => [list.id, recordFor(list, stored.get(list.id), start)]))
+/**
+ * How far the review asks the copies to be read: through yesterday, or, for a
+ * reader reviewed through yesterday who is shown today's works so far, today.
+ */
+function readThrough(start: Day, today: Day): Day {
+  return start > today - 1 ? today : today - 1
 }
 
-/**
- * Take every day `option`'s watermark covers off the tracked lists' records,
- * and keep the works that only those days held for the next write to retire.
- *
- * Only while no page is reading them, under the read claim for as long as it
- * takes: a prune written beside a reading could put back a record from before
- * the page it just added. A reading, here or elsewhere, keeps the reviewed days
- * off as it goes instead.
- */
-async function pruneRecords(option: TrackedListsOption): Promise<void> {
-  if (reading)
-    return
-  const claim = await claimReads(PAGE_RUN)
-  if (!claim)
-    return
-  try {
-    const lists = option.lists.filter(list => list.tracked)
-    const stored = await readStoredRecords(lists.map(list => list.id))
-    const writes = new Map<string, TrackedRead>()
-    for (const list of lists) {
-      const record = storedRecordOf(list, stored.get(list.id))
-      if (!record)
-        continue
-      const after = pruneReviewed(record, option.reviewedThrough)
-      if (after.record === record)
-        continue
-      writes.set(list.id, after.record)
-      for (const sid of after.dropped) {
-        const id = fromShortId(sid)
-        if (id)
-          retireLater.add(id)
-      }
-    }
-    await writeReadRecords(writes)
+/** Whether any of `lists`' copies wants reading for a review starting on `start`, through `through`. */
+async function copiesWanted(lists: readonly TrackedList[], start: Day, through: Day, today: Day): Promise<boolean> {
+  const tracked = lists.filter(list => list.tracked)
+  const stored = await readStoredLists()
+  return tracked.some((list) => {
+    const key = copyKeyOf(list)
+    if (key === null)
+      return false
+    const sharing = listsAtCopy(tracked, key)
+    const copy = stored[key]
+    // Prepared as the reading prepares it, so a copy that doesn't reach back
+    // to the review's start is one to read again from its tracking day.
+    return !copy || copyWanted(datedFor(copy, sharing, today, { askFrom: start }), sharing, through, today)
+  })
+}
+
+/** Why each list whose copy last failed to be read failed, by list id. */
+function failuresOf(records: ReadonlyMap<string, ListView> | undefined): Map<string, CopyFailure> {
+  const out = new Map<string, CopyFailure>()
+  for (const [id, view] of records ?? []) {
+    if (view.failed)
+      out.set(id, view.failed)
   }
-  finally {
-    await claim.release()
-  }
+  return out
 }
 
 /** The empty range a window stands for, for its toast. */
@@ -1066,8 +1072,8 @@ function quietOf(next: ReviewWindow): QuietWindow {
   return { start: next.window.start, end: next.window.end, reviewable: next.window.reviewable }
 }
 
-/** When the records were last written, as the status line says it: `14:02`. Null when none has been. */
-function lastReadAt(records: ReadonlyMap<string, TrackedRead> | undefined): string | null {
+/** When the copies were last read by date, as the status line says it: `14:02`. Null when none has been. */
+function lastReadAt(records: ReadonlyMap<string, ListView> | undefined): string | null {
   let at = 0
   for (const record of records?.values() ?? [])
     at = Math.max(at, record.readAt)
@@ -1193,10 +1199,10 @@ function warning(kind: string, text: string): HTMLElement {
   return (<div class={`${BAR_CLASS}--warning`} data-ao3e-warning={kind}>{text}</div>) as HTMLElement
 }
 
-/** What the reader is agreeing to when they mark a range whose lists couldn't all be read. */
-function skipWarning(failed: readonly string[], window: TrackedReviewCache): string {
+/** What the reader is agreeing to when they mark a range whose lists couldn't all be read, and `why`, where it is known ({@link failureNotes}). */
+function skipWarning(failed: readonly string[], window: TrackedReviewCache, why: string): string {
   const where = formatRange(window.start, window.end)
-  return `${failed.map(label => `“${label}”`).join(', ')} couldn’t be loaded; ${failed.length === 1 ? 'its' : 'their'} works for ${where} will be skipped.`
+  return `${failed.map(label => `“${label}”`).join(', ')} couldn’t be loaded; ${failed.length === 1 ? 'its' : 'their'} works for ${where} will be skipped.${why ? ` ${why}` : ''}`
 }
 
 /** A line of explanation with one or two buttons under it. */

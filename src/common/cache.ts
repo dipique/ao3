@@ -1,7 +1,7 @@
 import type { DeletedWork } from './deletedWorks.ts'
 import type { RuleTiming } from './ruleTiming.ts'
 import type { ReviewBasis } from './trackedLists.ts'
-import type { ReadClaim } from './trackedReads.ts'
+import type { DatedCopy, ReadClaim } from './trackedReads.ts'
 
 import { createStorage } from './storage.ts'
 
@@ -86,6 +86,12 @@ export interface StoredList {
    * readings scrape put it on a tag search.
    */
   ctx?: { [sid: string]: string }
+  /**
+   * A tracked list's copy, as far as it has been read by date: each work's
+   * day, and the stretch of days it is complete for. Absent on an untracked
+   * list's copy, and on one never read by date.
+   */
+  dated?: DatedCopy
 }
 
 /**
@@ -127,9 +133,9 @@ export interface MarkedForLaterIndex {
  *
  * It exists because the works alone don't say what range they are, which lists
  * they came from, or whether the window can still be trusted. The window is
- * computed from the tracked lists' read records again whenever the reader's
+ * computed from the tracked lists' copies again whenever the reader's
  * watermark, their set of tracked lists or their target has moved since
- * ({@link ReviewBasis}), and whenever a record changes while it is open.
+ * ({@link ReviewBasis}), and whenever a copy changes while it is open.
  *
  * Local, never synced: it's a cache of what the archive said, and every browser
  * works it out for itself from the synced option.

@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
-import { formatRange } from '../../src/common/trackedReads.ts'
+import { copyKeyOf } from '../../src/common/listLinks.ts'
+import { failureSentence, formatRange } from '../../src/common/trackedReads.ts'
 import { figures, mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { pressFacet, pressToast, rerun, runs, settled } from './trackedPages.mjs'
@@ -61,11 +62,14 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     'cache.markedForLater': { userId: 'me', updatedAt: CLOCK_BASE, ids: '' },
   }
 
+  /** Every list request any tab here made, in order. */
+  const fetched = []
+
   const open = async ({ fixtures = [solo], seed = SEED, drawn = true } = {}) => {
     const page = await browser.newPage()
     await page.setViewport({ width: 1280, height: 900 })
     await page.setRequestInterception(true)
-    page.on('request', archiveRoutes({ fixtures }))
+    page.on('request', archiveRoutes({ fixtures, fetched }))
     await page.evaluateOnNewDocument(installClock, CLOCK_BASE)
     await page.evaluateOnNewDocument(installMock, seed)
     await page.goto(REVIEW_URL, { waitUntil: 'domcontentloaded' })
@@ -131,15 +135,17 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
     assert.equal((await shownIds()).length, 2, 'still narrowed to the Fluff works of the new range')
   })
 
-  test('Undo puts the watermark back, and reads again the days the records let go of', async () => {
+  test('Undo puts the watermark back, and the range comes back from the copy, which kept it', async () => {
     const before = await runs(tab)
+    const asked = fetched.length
     assert.equal(await pressToast(tab, 'marked-reviewed'), true, 'the Undo offer should still be up')
     await settled(tab, before)
     await reviewDrawn(tab)
     assert.equal(await watermark(), since - 1)
     assert.ok(mentions(await barText('--range'), formatRange(since, since + 1)))
-    const record = await tab.evaluate(async () => (await browser.storage.local.get('trackedRead.solo'))['trackedRead.solo'])
-    assert.equal(record.from, since, 'read again from the watermark put back')
+    const copy = await tab.evaluate(async key => (await browser.storage.local.get('cache.searchLists'))['cache.searchLists'][key], copyKeyOf(solo.entry))
+    assert.equal(copy.dated.from, since, 'the copy still holds the range')
+    assert.deepEqual(fetched.slice(asked).filter(path => path.startsWith('/tags/')), [], 'and nothing is asked of AO3 to bring it back')
     await tab.close()
     tab = null
   })
@@ -153,11 +159,15 @@ describe('tracked review: marking a range reviewed', { skip }, () => {
 
     assert.equal(await tab.$eval('.AO3E--tracked-review--bar--status', el => el.dataset.kind), 'failed')
     assert.ok(mentions(await barText('--status'), 'Hurt/comfort'), 'the status line names the list')
+    const failure = await tab.evaluate(async key => (await browser.storage.local.get('cache.searchLists'))['cache.searchLists'][key].dated.failed, copyKeyOf(broken.entry))
+    const why = failureSentence(failure.reason, failure.error)
+    assert.ok((await barText('--status')).includes(why), 'and says why it couldn’t be loaded')
 
     await tab.click('.AO3E--tracked-review--bar--mark')
     await tab.waitForSelector('.AO3E--tracked-review--bar--prompt .AO3E--tracked-review--bar--confirm')
     assert.equal(await watermark(), since - 1, 'nothing has moved yet')
     assert.ok(mentions(await barText('--prompt'), 'Hurt/comfort'), 'the confirmation names the list whose works would be skipped')
+    assert.ok((await barText('--prompt')).includes(why), 'and why')
   })
 
   test('and goes ahead once the reader says so', async () => {

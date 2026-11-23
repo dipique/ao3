@@ -175,7 +175,7 @@ export function reviewBlock({ enabled, tracking, window, userId, job, now }: Rev
 }
 /**
  * The records line under This review: how far the tracked lists have been
- * read from AO3, as `readSummary` sums the read records up — the day every
+ * read from AO3, as `viewSummary` sums their copies up — the day every
  * list read is read through, and how many lists haven't been read at all.
  * Null with no list tracked.
  */

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { copyKeyOf } from '../../src/common/listLinks.ts'
 import { formatDay, isoDay, utcToday } from '../../src/common/trackedLists.ts'
 import { READING_ELSEWHERE } from '../../src/common/trackedReads.ts'
 import { FAILED_LINE, failedNote } from '../../src/options_ui/model/preload.ts'
@@ -597,9 +598,9 @@ describe('options UI — Pre-load', { skip }, () => {
   })
 
   const cell = () => page.$('[data-review-cell="this-review"]')
-  const records = () => page.evaluate(async () => (await window.browser.storage.local.get('trackedRead.alpha'))['trackedRead.alpha'] ?? null)
+  const records = () => page.evaluate(async key => (await window.browser.storage.local.get('cache.searchLists'))['cache.searchLists']?.[key]?.dated ?? null, copyKeyOf(alpha.entry))
 
-  test('Pre-load reads the tracked lists into their records, and the records line says how far', async () => {
+  test('Pre-load reads the tracked lists into their copies, and the records line says how far', async () => {
     options = await openWith(SEED)
     page = options.page
     assert.equal(await options.text(await page.$('[data-review-records]')), recordsLine({ through: null, behind: 1 }))

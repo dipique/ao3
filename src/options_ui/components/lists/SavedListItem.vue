@@ -50,6 +50,7 @@ const {
   view,
   reads,
   refreshList,
+  refreshTracked,
   cacheWorks,
   refreshAndCache,
   downloadSite,
@@ -84,7 +85,7 @@ const job = computed(() => rowJob(props.row, view.value))
 const read = computed(() => (job.value?.here ? null : listReadView(reads.value?.[props.row.id], view.value)))
 
 const open = ref(false)
-const offline = computed(() => offlineDetails(props.row, view.value, props.now, prune.value))
+const offline = computed(() => offlineDetails(props.row, view.value, props.now))
 const tracking = computed(() => trackingDetails(props.row, view.value, prune.value))
 
 const viewEdit = computed(() => (props.row.viewEdit ? getArchiveLink(props.row.viewEdit) : null))
@@ -235,6 +236,15 @@ onBeforeUnmount(() => clearTimeout(copiedTimer))
 const refreshLabel = computed(() => `Refresh the list of works in ${name.value}`)
 const cacheLabel = computed(() => (offline.value.cached ? 'Update the cached works' : 'Cache this list\'s works'))
 const DOWNLOAD_LABEL = 'Refresh, cache, then save this list as one HTML file'
+const FULL_REFRESH_LABEL = 'Read the whole list again from the day it is tracked from, keeping every work already saved'
+
+/** Refresh the list: a tracked one by date, from the first day its copy isn't complete for, or, `full`, from the day it is tracked from. */
+function refresh(full = false): void {
+  if (props.row.status === 'tracked')
+    void refreshTracked(props.row.id, { full })
+  else
+    run(refreshList)
+}
 
 /** Run one of the copy's jobs. */
 function run(start: (row: SiteExportListRow) => unknown): void {
@@ -511,14 +521,27 @@ function removeTheList(): void {
             <button
               type="button"
               class="saved-list__btn outline-btn"
-              :title="withReason(refreshLabel, offline.refreshOff)"
+              :title="withReason(offline.refreshTip ?? refreshLabel, offline.refreshOff)"
               :disabled="!!offline.refreshOff"
               :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
               data-action="refresh"
-              @click="run(refreshList)"
+              @click="refresh()"
             >
               <span class="i-tabler-refresh" aria-hidden="true" />
               Refresh list
+            </button>
+            <button
+              v-if="offline.full"
+              type="button"
+              class="saved-list__btn outline-btn"
+              :title="withReason(FULL_REFRESH_LABEL, offline.refreshOff)"
+              :disabled="!!offline.refreshOff"
+              :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
+              data-action="full-refresh"
+              @click="refresh(true)"
+            >
+              <span class="i-tabler-refresh-dot" aria-hidden="true" />
+              Full refresh
             </button>
             <button
               type="button"
@@ -587,7 +610,7 @@ function removeTheList(): void {
               type="button"
               class="saved-list__btn"
               :class="confirm.armed(removeCopyId) ? 'armed-btn' : 'outline-btn'"
-              :title="offline.remove.off ? withReason('Remove offline copy', offline.remove.off) : undefined"
+              :title="offline.remove.off ? withReason('Reset list data', offline.remove.off) : undefined"
               :disabled="!!offline.remove.off"
               :aria-describedby="offline.remove.off ? ids.removeCopyOff : undefined"
               data-action="remove-copy"
@@ -595,15 +618,44 @@ function removeTheList(): void {
               @click="removeCopy"
             >
               <span class="saved-list__remove-glyph i-tabler-trash" aria-hidden="true" />
-              {{ confirm.armed(removeCopyId) ? 'Remove it?' : 'Remove offline copy' }}
+              {{ confirm.armed(removeCopyId) ? 'Reset it?' : 'Reset list data' }}
             </button>
             <span class="saved-list__why" data-saved-list-note="remove-copy">{{ offline.remove.note }}</span>
             <span v-if="offline.remove.off" :id="ids.removeCopyOff" hidden>{{ sentence(offline.remove.off) }}.</span>
           </div>
         </template>
-        <p v-else class="saved-list__dd saved-list__muted">
-          {{ offline.empty }}
-        </p>
+        <template v-else>
+          <p class="saved-list__dd saved-list__muted">
+            {{ offline.empty }}
+          </p>
+          <div v-if="offline.refreshable" class="saved-list__buttons">
+            <button
+              type="button"
+              class="saved-list__btn outline-btn"
+              :title="withReason(offline.refreshTip ?? refreshLabel, offline.refreshOff)"
+              :disabled="!!offline.refreshOff"
+              :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
+              data-action="refresh"
+              @click="refresh()"
+            >
+              <span class="i-tabler-refresh" aria-hidden="true" />
+              Refresh list
+            </button>
+            <button
+              v-if="offline.full"
+              type="button"
+              class="saved-list__btn outline-btn"
+              :title="withReason(FULL_REFRESH_LABEL, offline.refreshOff)"
+              :disabled="!!offline.refreshOff"
+              :aria-describedby="offline.refreshOff ? ids.refreshOff : undefined"
+              data-action="full-refresh"
+              @click="refresh(true)"
+            >
+              <span class="i-tabler-refresh-dot" aria-hidden="true" />
+              Full refresh
+            </button>
+          </div>
+        </template>
       </section>
 
       <section :aria-label="`Tracking for ${name}`" class="saved-list__half">

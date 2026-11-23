@@ -1,10 +1,10 @@
-import type { SavedList, SavedListJoin, StoredListRef } from '../../common/savedLists.ts'
+import type { CopySettled, SavedList, SavedListJoin, StoredListRef } from '../../common/savedLists.ts'
 import type { Day, TrackedFilterSummary, TrackedKind, TrackedMeta } from '../../common/trackedLists.ts'
 import type { CachingBuckets } from '../../content_script/siteExport/workText.ts'
 import type { BucketBar } from './buckets.ts'
 import type { JobView } from './jobView.ts'
 
-import { hostPage, openLink } from '../../common/listLinks.ts'
+import { copyKeyOf, hostPage, openLink } from '../../common/listLinks.ts'
 import { timeAgo } from '../../common/relativeTime.ts'
 import { copyDateFilterAt, defaultTitleOf, SAVED_LIST_SOURCE_IDS, storedListMeta } from '../../common/savedLists.ts'
 import { defaultTitle, describeFilters, formatDay, normalizeTrackedUrl, refineLink, sourceLabel, titleKey, TRACKED_TYPE_LABELS, trackedMeta, withDateFilter } from '../../common/trackedLists.ts'
@@ -54,9 +54,9 @@ export type SavedListCaching
   /**
    * The stored list at its address, by its key, and `keys`: every copy at the
    * address, newest first, `key` first. A job on any of them is the row's, and
-   * removing the offline copy takes them all.
+   * Reset list data takes them all.
    */
-  = | { kind: 'copy', key: string, keys: string[], buckets: CachingBuckets, scrapedAt: number, unstored: number }
+  = | { kind: 'copy', key: string, keys: string[], buckets: CachingBuckets, scrapedAt: number, unstored: number, settled?: CopySettled }
     /** Not cached: nothing is stored at the list's address. */
     | { kind: 'none' }
 
@@ -112,6 +112,8 @@ export interface SavedListRow {
   offlineOff?: string
   /** Why its copy can't be refreshed whatever any job does ({@link refreshNeeds}): another account's Read works, with Work marks off. */
   refreshNeeds?: string
+  /** A tracked list AO3 can't be asked for by date — a series, or an uncommon tag marked to scan — so every refresh reads it whole. */
+  readWhole?: boolean
 }
 
 /** The filter line of a list that filters by nothing it can name. */
@@ -173,7 +175,8 @@ export function savedListRows(join: SavedListJoin, ctx: SavedListRowsContext): S
       sameAddressAs: one.sameAddress.map(nameOf),
       caching: copy ? cachingOf(copy, one.copyKeys, ctx) : { kind: 'none' },
       trackOff: trackOff(pending, true, ctx.review, !!entry),
-      offlineOff: copy ? ctx.jobOff(one.copyKeys) ?? undefined : undefined,
+      offlineOff: (copy ? ctx.jobOff(one.copyKeys) : entry ? ctx.jobOff(copyKeysOf(list)) : null) ?? undefined,
+      readWhole: entry && (entry.kind === 'series-works' || (entry.kind === 'tag-works' && entry.scan)) ? true : undefined,
     })
   })
 
@@ -238,9 +241,15 @@ function trackOff(pending: SavedListRow['pending'], search: boolean, review: boo
   return review ? undefined : TRACK_OFF.review
 }
 
+/** The key a tracked list with no copy yet keeps its first one under, as a job on it is keyed. */
+function copyKeysOf(list: SavedList): string[] {
+  const key = copyKeyOf(list)
+  return key === null ? [] : [key]
+}
+
 function cachingOf(copy: StoredListRef, keys: string[], ctx: SavedListRowsContext): SavedListCaching {
   const { buckets, unstored } = ctx.copy(copy.key)
-  return { kind: 'copy', key: copy.key, keys, buckets, scrapedAt: copy.scrapedAt, unstored }
+  return { kind: 'copy', key: copy.key, keys, buckets, scrapedAt: copy.scrapedAt, unstored, ...(copy.settled ? { settled: copy.settled } : {}) }
 }
 
 /** The row without the fields it has no value for. */
@@ -457,7 +466,7 @@ export interface SavedListRemove {
  * The Offline copy half of a row's details: the copy's figures, or why there
  * is none; why its actions are off, said where the reader is looking; how
  * many works a retry asks for again and how many are cached (with none, there
- * is no retry, or download without refreshing); and Remove offline copy.
+ * is no retry, or download without refreshing); and Reset list data.
  */
 export interface SavedListOfflineDetails {
   summary: string | null
@@ -475,6 +484,21 @@ export interface SavedListOfflineDetails {
   retry: number
   cached: number
   remove: SavedListRemove | null
+  /** A tracked list read by date: its Refresh reads only the days not yet complete, and *Full refresh* reads it again from the day it is tracked from. */
+  full: boolean
+  /** What Refresh says of a tracked list that every refresh reads whole ({@link SCAN_REFRESH_TIP}), or null. */
+  refreshTip: string | null
+  /** A tracked list can be refreshed from here with no copy kept yet: its first refresh keeps one. */
+  refreshable: boolean
+}
+
+/** What a tracked list's Refresh says when AO3 can't be asked for its works by date. */
+export const SCAN_REFRESH_TIP = 'This list type cannot be queried by date and requires a full refresh for every update.'
+
+/** How far a tracked list's copy is complete, for its summary. */
+export function settledWords(settled: CopySettled, now: number): string {
+  const complete = settled.through >= settled.from ? `complete through ${formatDay(settled.through)}` : 'no day complete yet'
+  return `${complete} · ${settled.readAt ? `read ${timeAgo(settled.readAt, now)}` : 'not read by date yet'}`
 }
 
 /**
@@ -486,9 +510,14 @@ export const NO_COPY = {
   elsewhere: 'None yet. Open the list on AO3 and press the search button there: a copy is kept from then on, and refreshes from here.',
 } as const
 
-/** What Remove offline copy says, beyond what it does to the blurbs and the cached works. */
-export const COPY_REMOVAL = {
-  reopens: 'Opening the list on AO3 again brings it straight back.',
+/** What Reset list data says it does. */
+export const COPY_RESET = {
+  what: 'Deletes the works saved for this list. The list, its title and its tracking stay, and so does any cached work text.',
+  next: 'The list is read again from AO3 the next time it’s opened or refreshed.',
+  nextTracked: 'The list is read again from AO3, from the day it’s tracked from, the next time it’s opened, refreshed or reviewed.',
+  /** For a list with no title or tracking of its own: Marked for Later, the read list, the review's range. */
+  whatAny: 'Deletes the works saved for this list. Any cached work text stays.',
+  nextAny: 'It’s gathered again the next time it’s opened or refreshed.',
   discardsJob: 'Its stopped job is discarded with it.',
 } as const
 
@@ -510,15 +539,20 @@ export const TRACKING_STATE = {
   notSearch: 'Can\'t be tracked: only a search, an uncommon tag or a series can be.',
 } as const
 
-export function offlineDetails(row: SavedListRow, view: JobView, now: number, prune: boolean): SavedListOfflineDetails {
+export function offlineDetails(row: SavedListRow, view: JobView, now: number): SavedListOfflineDetails {
   const { caching } = row
+  const tracked = row.status === 'tracked' && !row.pending
+  const byDate = { full: tracked && !row.readWhole, refreshTip: tracked && row.readWhole ? SCAN_REFRESH_TIP : null }
   if (caching.kind !== 'copy') {
     const empty = row.open ? NO_COPY.opens : NO_COPY.elsewhere
-    return { summary: null, empty, note: null, off: null, refreshOff: null, refreshNote: null, retry: 0, cached: 0, remove: null }
+    return { summary: null, empty, note: null, off: null, refreshOff: tracked ? row.offlineOff ?? null : null, refreshNote: null, retry: 0, cached: 0, remove: null, ...byDate, refreshable: tracked }
   }
 
   const { total, cached, failed, unfetched, bytes, staleFailures } = caching.buckets
-  const summary = [`${counted(total, 'work', 'works')} as of ${timeAgo(caching.scrapedAt, now)}`, `${cached.toLocaleString()} cached (${formatBytes(bytes)})`]
+  const works = tracked && caching.settled
+    ? `${counted(total, 'work', 'works')} · ${settledWords(caching.settled, now)}`
+    : `${counted(total, 'work', 'works')} as of ${timeAgo(caching.scrapedAt, now)}`
+  const summary = [works, `${cached.toLocaleString()} cached (${formatBytes(bytes)})`]
   if (unfetched)
     summary.push(`${(failed + unfetched).toLocaleString()} uncached`)
   if (failed)
@@ -532,14 +566,11 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
     : off ? { severity: 'neutral' as const, text: `${sentence(off)}.` } : null
 
   const others = row.sameAddressAs
-  const removing = [blurbsOnRemove(prune)]
-  if (cached)
-    removing.push(`The ${counted(cached, 'cached work', 'cached works')} (${formatBytes(bytes)}) ${cached === 1 ? 'stays' : 'stay'}, since another list may be reading the same copies.`)
-  removing.push(COPY_REMOVAL.reopens)
+  const removing: string[] = [COPY_RESET.what, row.status === 'tracked' ? COPY_RESET.nextTracked : COPY_RESET.next]
   if (others.length)
-    removing.push(`${titlesInWords(others)} ${others.length === 1 ? 'shares this copy, and loses' : 'share this copy, and lose'} it too.`)
+    removing.push(`${titlesInWords(others)} ${others.length === 1 ? 'shares this data, and loses' : 'share this data, and lose'} it too.`)
   if (jobHere(row, view) && view.state === 'stopped')
-    removing.push(COPY_REMOVAL.discardsJob)
+    removing.push(COPY_RESET.discardsJob)
 
   return {
     summary: summary.join(' · '),
@@ -551,6 +582,8 @@ export function offlineDetails(row: SavedListRow, view: JobView, now: number, pr
     retry: failed + staleFailures,
     cached,
     remove: { off: removeOff(view, caching.keys), note: removing.join(' ') },
+    ...byDate,
+    refreshable: tracked,
   }
 }
 

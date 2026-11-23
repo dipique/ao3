@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { copyDateFilter, dateFilterOf, dayOf, describeFilters, normalizeTrackedUrl, onListPage, pageUrl, sameReading, sameRoot, sourceLabel, tagSearchUrl, trackedKey, trackedRoot, withDateFilter, withoutDateBounds } from '../../src/common/trackedLists.ts'
+import { copyDateFilter, dateFilterOf, dateFilterSpan, dayOf, describeFilters, normalizeTrackedUrl, onListPage, pageUrl, sameReading, sameRoot, sourceLabel, tagSearchUrl, trackedKey, trackedRoot, withDateFilter, withoutDateBounds } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
 
@@ -658,5 +658,17 @@ describe('pageUrl — tag names the archive leaves out', () => {
     pageUrl(entry, FROM, 1, { exclude: ['Fluff'] })
     assert.equal(entry.url, '/works/search?work_search[query]=coffee')
     assert.equal(trackedKey(entry), normalizeTrackedUrl('/works/search?work_search[query]=coffee').key)
+  })
+})
+
+describe('dateFilterSpan', () => {
+  test('the days a date filter starts and ends on, in either spelling of the query', () => {
+    assert.deepEqual(dateFilterSpan('work_search[date_from]=2026-10-18'), { from: dayOf('18 Oct 2026'), to: null })
+    assert.deepEqual(dateFilterSpan('work_search%5Bdate_from%5D=2026-10-18&work_search%5Bdate_to%5D=2026-11-01'), { from: dayOf('18 Oct 2026'), to: dayOf('1 Nov 2026') })
+  })
+
+  test('no filter, or one with no readable day, bounds nothing', () => {
+    assert.deepEqual(dateFilterSpan(undefined), { from: null, to: null })
+    assert.deepEqual(dateFilterSpan('work_search[date_from]=soon'), { from: null, to: null })
   })
 })

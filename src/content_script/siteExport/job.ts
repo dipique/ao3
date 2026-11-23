@@ -5,17 +5,17 @@ import type { FollowState, ListRefresh, RefreshOutcome } from '#content_script/s
 import type { RefreshOptions, RefreshResult } from '#content_script/searchView/refresh.js'
 import type { Hold } from '#content_script/searchView/refreshClaim.ts'
 
-import { copyDateFilterAt, createLogger, options, READING_ELSEWHERE, readWorkIds, REVIEW_SOURCE_ID, reviewStart, saveAs, SITE_EXPORT_JOB_KEY } from '#common'
+import { copyDateFilterAt, createLogger, failureSentence, listsAtCopy, options, READING_ELSEWHERE, readWorkIds, REVIEW_SOURCE_ID, reviewStart, saveAs, SITE_EXPORT_JOB_KEY, utcToday } from '#common'
 import { onArchiveWait, PATIENCE, WAIT_BUDGET } from '#content_script/archiveFetch.js'
 import { saveMarkedForLaterIndex } from '#content_script/markedForLaterIndex.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { recoverReadWorks } from '#content_script/readWorks.ts'
-import { readSnapshotData } from '#content_script/searchView/cache.js'
+import { readSnapshotData, readStoredLists } from '#content_script/searchView/cache.js'
 import { followState, loadingLine, refreshStep, sharesRefresh } from '#content_script/searchView/listRefresh.ts'
 import { refreshSnapshot } from '#content_script/searchView/refresh.js'
 import { acquireRefresh, awaitRefresh, readRefresh, requestCancel } from '#content_script/searchView/refreshClaim.ts'
 import { claimReads } from '#content_script/tracked/readClaim.ts'
-import { readTrackedLists } from '#content_script/tracked/readLists.ts'
+import { updateTrackedCopies } from '#content_script/tracked/updateCopies.ts'
 
 import type { WorkFreshness } from './workText.ts'
 
@@ -101,6 +101,8 @@ export interface ExportJob {
   errorCount: number
   /** Set when the job stopped waiting on something — today only a 429 backoff. */
   blocked?: 'rate-limited'
+  /** A tracked list's refresh reads its copy again from the day it is tracked from: Full refresh. */
+  full?: boolean
 }
 
 /** What the options page renders. Rebuilt on every change; the UI never mutates it. */
@@ -228,6 +230,8 @@ export interface StartJobOptions {
   steps: ExportJobPhase[]
   /** Retry works whose last attempt failed, without waiting out their backoff. */
   retryNow?: boolean
+  /** Refresh a tracked list from the day it is tracked from: Full refresh. */
+  full?: boolean
 }
 
 /**
@@ -251,6 +255,7 @@ export async function startJob(opts: StartJobOptions): Promise<void> {
     startedAt: now,
     updatedAt: now,
     retryNow: opts.retryNow,
+    ...(opts.full ? { full: true } : {}),
     errors: [],
     errorCount: 0,
   }
@@ -401,6 +406,11 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
     await readReview(job, signal)
     return
   }
+  const tracked = listsAtCopy((await options.get('trackedLists')).lists, job.cacheKey)
+  if (tracked.length) {
+    await refreshTracked(job, signal, tracked.map(list => list.id))
+    return
+  }
   if (!sharesRefresh(job.descriptor.sourceId)) {
     await refreshHere(job, signal, null)
     return
@@ -424,11 +434,12 @@ async function runRefresh(job: ExportJob, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * The review's refresh: its window is computed from the tracked lists' read
- * records, so refreshing it is reading those up to date — what the review does
- * in the background, here at bulk patience, for nobody watching. Like the
- * review, it reads under the read claim, and refuses to while another page
- * holds it. The window's own works change the next time the review is opened.
+ * The review's refresh: its window is computed from the tracked lists'
+ * copies, so refreshing it is reading those up to date through yesterday —
+ * what the review does in the background, here at bulk patience, for nobody
+ * watching. Like the review, it reads under the read claim, and refuses to
+ * while another page holds it. The window's own works change the next time the
+ * review is opened.
  */
 async function readReview(job: ExportJob, signal: AbortSignal): Promise<void> {
   const claim = await claimReads(PAGE_RUN)
@@ -444,10 +455,11 @@ async function readReview(job: ExportJob, signal: AbortSignal): Promise<void> {
     const option = await options.get('trackedLists')
     message = 'Reading your tracked lists…'
     publish()
-    const outcome = await readTrackedLists({
-      lists: option.lists,
-      start: reviewStart(option),
-      currentStart: async () => reviewStart(await options.get('trackedLists')),
+    const outcome = await updateTrackedCopies({
+      entries: option.lists,
+      through: utcToday() - 1,
+      askFrom: reviewStart(option),
+      holder: 'options',
       patience: PATIENCE.bulk,
       waitBudget: WAIT_BUDGET.bulk,
       signal: either.signal,
@@ -471,6 +483,62 @@ async function readReview(job: ExportJob, signal: AbortSignal): Promise<void> {
   finally {
     signal.removeEventListener('abort', stop)
     await claim.release()
+  }
+}
+
+/**
+ * A tracked list's refresh: its copy read by date, from the first day it
+ * isn't complete for through today, or from the day it is tracked from for a
+ * Full refresh. The copy's own claim keeps another page from reading it at
+ * the same time: one another page is reading stops the job, saying so, rather
+ * than counting a read nobody made. A list that can't be read stops the job,
+ * saying why.
+ *
+ * A Full refresh puts the copy back to its tracking day once; the job stops
+ * asking for that as soon as it is written, so a job stopped partway and
+ * continued reads on from where it got to.
+ */
+async function refreshTracked(job: ExportJob, signal: AbortSignal, ids: readonly string[]): Promise<void> {
+  message = loadingLine(0, 0)
+  publish()
+  const { lists } = await options.get('trackedLists')
+  const outcome = await updateTrackedCopies({
+    entries: lists,
+    only: ids,
+    through: utcToday(),
+    refresh: true,
+    full: job.full,
+    holder: 'options',
+    patience: PATIENCE.bulk,
+    waitBudget: WAIT_BUDGET.bulk,
+    signal,
+    onProgress: (status) => {
+      const read = status.byList[ids[0]!]
+      job.done = read?.page ?? 0
+      job.total = read?.of ?? 0
+      message = loadingLine(job.done, job.total)
+      publish()
+    },
+    onReady: () => {
+      if (!job.full)
+        return
+      delete job.full
+      void persist(job)
+    },
+  })
+  job.done = 0
+  job.total = 0
+  if (outcome.blocked) {
+    job.blocked = 'rate-limited'
+    await persist(job)
+    publish()
+    return
+  }
+  if (outcome.elsewhere.length)
+    throw new Error(READING_ELSEWHERE)
+  if (outcome.failed.length) {
+    const failure = (await readStoredLists())[job.cacheKey]?.dated?.failed
+    throw new Error(failure ? failureSentence(failure.reason, failure.error) : 'This list couldn’t be read.')
   }
 }
 

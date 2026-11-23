@@ -165,9 +165,9 @@ describe('tracked lists: updating a list the page shares a root with', { skip },
 
   test('the list keeps a first copy of the search it now is, read from the day it is tracked from', async () => {
     const key = normalizeTrackedUrl(BOTH_OUT).key
-    await until('the first copy to be kept', async () => (await stored(tab, 'cache.searchLists'))?.[key])
+    await until('the first copy to be kept', async () => (await stored(tab, 'cache.searchLists'))?.[key]?.dated)
     const copy = (await stored(tab, 'cache.searchLists'))[key]
-    assert.equal(copy.descriptor.dateFilter, `work_search[date_from]=${isoDay(NO_DRACO.since)}`)
+    assert.equal(copy.dated.from, NO_DRACO.since)
   })
 
   /**

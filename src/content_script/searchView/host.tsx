@@ -953,10 +953,11 @@ function prepare(source: SearchSource, works: Work[], options: Options, fresh: b
 /**
  * Write the blurb snapshot of a read just made, plus whatever else the source
  * keeps in step with it. `readAt` dates the copy instead of now, for a read
- * that fell short of the whole list.
+ * that fell short of the whole list; `whole` says it took in all of it
+ * ({@link wholeRead}).
  */
-async function persist(source: SearchSource, works: Work[], opts: { listing?: Work[], readAt?: number } = {}): Promise<void> {
-  await writeSnapshot(source.cacheKey, works, source.descriptor(), { scrapedAt: opts.readAt })
+async function persist(source: SearchSource, works: Work[], opts: { listing?: Work[], readAt?: number, whole?: boolean } = {}): Promise<void> {
+  await writeSnapshot(source.cacheKey, works, source.descriptor(), { scrapedAt: opts.readAt, whole: opts.whole })
   // A pruned list says nothing about what the listing holds; see `belongs`.
   if (!source.belongs || opts.listing)
     await source.onPersist?.(opts.listing ?? works)
@@ -1265,13 +1266,21 @@ function failLoad(source: SearchSource, err: unknown): void {
   closeSearchView()
 }
 
+/**
+ * Whether a read took in the whole listing: every page it has, none refused,
+ * failed or left unread, and no more works than the reader's ceiling keeps.
+ */
+function wholeRead(result: ScrapeResult, budget: Budget): boolean {
+  return !result.blocked && !result.satisfied && result.loadedPages >= budget.totalPages && result.works.length <= budget.limit
+}
+
 /** Store the list a first walk read, with the side records the source keeps in step with its listing. */
-async function persistWalk(source: SearchSource, works: Work[], result: ScrapeResult): Promise<void> {
+async function persistWalk(source: SearchSource, works: Work[], result: ScrapeResult, budget: Budget): Promise<void> {
   // Not persisted when the archive refused us outright: an empty scrape
   // would otherwise overwrite a perfectly good stored list with nothing,
   // and "AO3 said no" is not news about what is on the reader's list.
   if (!result.blocked || works.length)
-    await persist(source, works, { listing: result.works })
+    await persist(source, works, { listing: result.works, whole: wholeRead(result, budget) })
 }
 
 /** Whether a first walk came back with nothing to show, in which case it says why and closes the view. */
@@ -1318,13 +1327,13 @@ async function finishWalk(job: LoadJob, walked: Walk): Promise<void> {
         closeSearchView()
       return
     }
-    const { result, completed } = outcome
+    const { budget, result, completed } = outcome
     // As the view now on screen was opened: a re-run may have marked works
     // since, or brought a new ceiling.
     let works = applyLimit(renumber(belonging(job.source, completed.works)), limitFor(job.options))
     if (!result.blocked)
       works = await withDeleted(job.source, works, result.works, () => storedWorks(job.cacheKey))
-    await persistWalk(job.source, works, result)
+    await persistWalk(job.source, works, result, budget)
     if (!current() || closedEmpty(job.source, works, result))
       return
     land(job, works, { grow: true })
@@ -1564,7 +1573,7 @@ async function refresh(
       toast(`AO3 returned this list with no works in it, so it wasn't refreshed. It is still showing what was stored.`, { type: 'error' })
       return
     }
-    await persist(job.source, works, { listing: topUp ? undefined : result.works })
+    await persist(job.source, works, { listing: topUp ? undefined : result.works, whole: !topUp && wholeRead(result, budget) })
     outcome = 'written'
     putBack = null
     land(job, works, { grow: true })
@@ -2050,7 +2059,7 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       let works = applyLimit(renumber(completed.works), budget.limit)
       if (!result.blocked)
         works = await withDeleted(source, works, result.works, () => storedWorks(source.cacheKey))
-      await persistWalk(source, works, result)
+      await persistWalk(source, works, result, budget)
       if (stale() || closedEmpty(source, works, result))
         return
       fresh = true

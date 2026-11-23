@@ -1,6 +1,7 @@
 import type { StoredList } from './cache.ts'
 
 import { hash } from './syncCodec.ts'
+import { packRows, unpackRows } from './trackedReads.ts'
 import { fromShortId, packOrderedIds, toShortId, unpackOrderedIds } from './workId.ts'
 
 /**
@@ -272,6 +273,12 @@ export function takeFromList(list: StoredList, ids: Iterable<string>): StoredLis
     return null
   const { ctx, ...rest } = list
   const next: StoredList = { ...rest, ids: packOrderedIds(kept) }
+  // A tracked copy names its works by day too, and the next read rebuilds
+  // its ids from those: a work taken off goes from both.
+  if (list.dated) {
+    const takenSids = new Set([...taken].map(toShortId))
+    next.dated = { ...list.dated, rows: packRows(unpackRows(list.dated.rows).filter(row => !takenSids.has(row.sid))) }
+  }
   const keptCtx = Object.entries(ctx ?? {}).filter(([sid]) => !taken.has(fromShortId(sid) ?? ''))
   if (keptCtx.length)
     next.ctx = Object.fromEntries(keptCtx)

@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { copyKeyOf } from '../../src/common/listLinks.ts'
+import { unpackIds } from '../../src/common/workMarks.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch, storedLists, until } from './helpers.mjs'
 import { pickRow, rerun, settled } from './trackedPages.mjs'
 import { advanceClock, archiveRoutes, blurbHtml, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, TODAY, trackedOption, works } from './trackedReview.mjs'
@@ -138,6 +140,15 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
   })
 
   test('the first Mark reviewed discards nothing — the blurbs are minutes old', async () => {
+    // The list's copy lets go of one work of the range, as it does of a work
+    // taken off its view; every other work stays in it.
+    await tab.evaluate(async ([key, sid]) => {
+      const all = (await browser.storage.local.get('cache.searchLists'))['cache.searchLists']
+      const copy = all[key]
+      copy.ids = copy.ids.split(',').filter(one => one !== sid).join(',')
+      copy.dated.rows = copy.dated.rows.split(',').filter(row => !row.startsWith(`${sid}.`)).join(',')
+      await browser.storage.local.set({ 'cache.searchLists': all })
+    }, [copyKeyOf(solo.entry), shortId(plain.id)])
     await markReviewed()
     assert.deepEqual((await shownIds()).sort(), second.map(work => work.id).sort())
     assert.deepEqual(
@@ -147,7 +158,7 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
     )
   })
 
-  test('the next one discards the work nothing is keeping, and only that one', async () => {
+  test('the next one discards the work nothing keeps any more, and only that one', async () => {
     await advanceClock(tab, PAST_GRACE_MS)
     await markReviewed()
     assert.deepEqual((await shownIds()).sort(), third.map(work => work.id).sort())
@@ -156,8 +167,8 @@ describe('tracked review: retiring a reviewed window’s blurbs', { skip }, () =
     assert.deepEqual(await stored([marked.id]), [`blurb.${shortId(marked.id)}`], 'it carries a mark')
     assert.deepEqual(await stored([saved.id]), [`blurb.${shortId(saved.id)}`], 'the reader saved it for later')
     assert.deepEqual(await stored([elsewhere.id]), [`blurb.${shortId(elsewhere.id)}`], 'another stored list holds it')
-    // The wound-on clock ages every stored blurb, so the window just cleared is
-    // past its grace as well and goes in the same pass.
-    assert.deepEqual(await stored(second.map(work => work.id)), [])
+    assert.equal((await stored(second.map(work => work.id))).length, second.length, 'the list’s copy holds the reviewed works it read')
+    const retired = await tab.evaluate(async () => (await browser.storage.local.get('cache.trackedReview'))['cache.trackedReview'].retired)
+    assert.deepEqual(unpackIds(retired), new Set(), 'nothing is left waiting: what a copy holds is the copy\x27s to keep')
   })
 })

@@ -15,7 +15,7 @@ import { formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { CONFIRM_MS } from '../../src/options_ui/model/confirmInPlace.ts'
 import { jobVerb } from '../../src/options_ui/model/jobView.ts'
 import { PROFILE_LISTS } from '../../src/options_ui/model/profileLists.ts'
-import { blurbsOnRemove, COPY_REMOVAL, NEEDS_VISIT_NOTE, OFFLINE_OFF } from '../../src/options_ui/model/savedListRows.ts'
+import { COPY_RESET, NEEDS_VISIT_NOTE, OFFLINE_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { liveElements, serveDir, storedListIds, storedLists } from './helpers.mjs'
 import { captureDownloads, figures, mentions, skip, stubArchive as standInForArchive, startOptions, until } from './optionsPage.mjs'
 import { menuRows, openMenu, pickRow } from './trackedPages.mjs'
@@ -31,7 +31,6 @@ const TILE = 'marked-for-later'
 /** The one row that isn't about a list: the way changes made in a file get back. */
 const CHANGES_ROW = 'export-changes'
 const CACHE_ROW = 'cached-work-text'
-const PRUNE_ROW = 'prune-orphaned-blurbs'
 /** What a caching job is said to be doing. */
 const CACHING = jobVerb({ phase: 'caching' })
 
@@ -1857,15 +1856,14 @@ describe('options UI — site export', { skip }, () => {
    *
    * The work text is the expensive half — hours of requests against AO3, and
    * keyed by work rather than by list, so another list may be reading the same
-   * copies. Removing a copy must leave every one of them alone. Its blurbs go
-   * at once only while *Discard unneeded blurbs automatically* is on, and the
-   * row says which beside its Remove, and the tile in its menu.
+   * copies. Removing a copy must leave every one of them alone, and the row
+   * says what Reset list data does beside it, and the tile in its menu.
    */
-  test('removing asks first, says what becomes of the blurbs, and keeps the work text', async () => {
+  test('removing asks first, says what it does, and keeps the work text', async () => {
     const old = await options.savedListDetails(copyRow(OLD_KEY))
     const removeOld = await options.action(old, 'remove-copy')
     const says = async () => options.text(old)
-    assert.ok(mentions(await says(), blurbsOnRemove(false)), 'the blurbs wait for Discard orphans')
+    assert.ok(mentions(await says(), COPY_RESET.what), 'it says what it does')
 
     // An armed Remove that isn't pressed again goes back to asking nothing.
     await options.press(removeOld)
@@ -1873,20 +1871,12 @@ describe('options UI — site export', { skip }, () => {
     await until('it to stop asking', async () => !(await armed(removeOld)), CONFIRM_MS * 4)
     assert.ok(OLD_KEY in await options.stored('cache.searchLists'), 'asking must not remove anything')
 
-    // With Discard unneeded blurbs automatically on, it says they go now.
-    const prune = async () => options.control(await options.row(PRUNE_ROW), 'switch')
-    await options.press(await prune())
-    await until('blurbs to be discarded automatically', async () => await lastWrite('option.pruneOrphanedBlurbs') === true)
-    await until('the row to say the blurbs go now', async () => mentions(await says(), blurbsOnRemove(true)))
-    await options.press(await prune())
-    await until('blurbs to wait for Discard orphans again', async () => await lastWrite('option.pruneOrphanedBlurbs') === false)
-
     // The tile's first press arms Remove, which says what it keeps, and
     // removes nothing; the second removes the copy, and only the copy.
     await pressInMore('remove')
     const remove = await options.menuItem('remove')
     await until('the first press to arm it', () => armed(remove))
-    assert.ok(mentions(await options.name(remove), blurbsOnRemove(false)), 'the blurbs wait for Discard orphans')
+    assert.ok(mentions(await options.name(remove), COPY_RESET.whatAny), 'it says what it does')
     assert.ok(CACHE_KEY in await options.stored('cache.searchLists'), 'arming must not remove anything')
 
     const textBefore = await options.stored('workTextIndex')
@@ -2215,7 +2205,7 @@ describe('options UI — site export, one job at a time', { skip }, () => {
     await until('the stopped job to be written', async () => await jobWrites() > before && await jobState(OTHER) === 'stopped')
 
     const remove = await button(OTHER, 'remove-copy')
-    assert.ok(mentions(await options.text(await row(OTHER)), COPY_REMOVAL.discardsJob), 'it says the job goes with it')
+    assert.ok(mentions(await options.text(await row(OTHER)), COPY_RESET.discardsJob), 'it says the job goes with it')
     await options.press(remove)
     await until('it to ask', () => armed(remove))
     await options.press(remove)
@@ -2298,7 +2288,7 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
     assert.ok(await options.action(await row(), 'resume'))
     assert.ok(await options.action(await row(), 'discard'))
     assert.deepEqual(await options.actions(await besideRow(), 'download'), [], 'its Download waits on the job')
-    assert.ok(mentions(await options.text(await details()), COPY_REMOVAL.discardsJob), 'removing its copy says the job goes too')
+    assert.ok(mentions(await options.text(await details()), COPY_RESET.discardsJob), 'removing its copy says the job goes too')
   })
 
   test('running, the row is busy itself: Pause, caching now, and neither removal can take a copy from under it', async () => {
@@ -2323,7 +2313,7 @@ describe('options UI — a job on an older sort order of a saved list\'s search'
     assert.equal(await jobState(), 'running')
   })
 
-  test('stopped again, Remove offline copy takes both copies and the job on the older', async () => {
+  test('stopped again, Reset list data takes both copies and the job on the older', async () => {
     await options.press(await options.action(await besideRow(), 'pause'))
     await until('the job to stop', async () => await jobState() === 'stopped')
     const remove = await options.action(await details(), 'remove-copy')

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { dayOf, utcToday } from '../../src/common/trackedLists.ts'
+import { copyQuery, packRows, unpackRows } from '../../src/common/trackedReads.ts'
+import { toShortId } from '../../src/common/workId.ts'
 import { refreshIntervalMs } from '../../src/content_script/searchView/freshness.ts'
 import { ensureBuilt, findChrome, storedListIds, storedLists } from './helpers.mjs'
 import { startOptions, until } from './optionsPage.mjs'
@@ -142,6 +145,49 @@ describe('search views of listings, and how long they trust their copy', { skip 
         assert.deepEqual(await shownIds(tab), KEPT)
         assert.equal(await updating(tab), false, 'no read is under way')
         assert.deepEqual(walks(requests), [])
+      }
+      finally {
+        await tab.close()
+      }
+    })
+
+    /** A tracked list of the listing from `since`, its copy holding {@link KEPT}, read by date through `through`, failed once. */
+    const trackedSeed = (since, through) => {
+      const entry = { id: 'bees', kind: 'works-filter', url: '/tags/Bees/works', alias: 'Bees', tracked: true, since }
+      const seed = { ...ON, ...kept(LISTING, PAST), 'option.trackedLists': { enabled: true, target: 40, reviewedThrough: 0, lists: [entry] } }
+      const rows = KEPT.map(id => ({ sid: toShortId(id), day: since + 1 }))
+      seed['cache.searchLists'][KEY].dated = { query: copyQuery([entry]), from: since, through, readAt: Date.now() - PAST, rows: packRows(rows), failed: { reason: 'request', at: 1 } }
+      return seed
+    }
+    const readStored = async (tab, seed) => {
+      await until('the read to be stored', async () => (await stored(tab, 'cache.searchLists'))[KEY].scrapedAt > seed['cache.searchLists'][KEY].scrapedAt)
+      return (await stored(tab, 'cache.searchLists'))[KEY]
+    }
+
+    test('a whole read of a tracked list\'s page merges in, taking nothing off, and counts it complete through yesterday', async () => {
+      const since = dayOf('1 Sep 2026')
+      const seed = trackedSeed(since, since + 5)
+      const { tab } = await openView(LISTING, BUTTON, seed)
+      try {
+        await until('the listing to be read again', async () => (await shownIds(tab)).join() === LIVE.join())
+        const copy = await readStored(tab, seed)
+        assert.deepEqual(storedListIds(copy).sort(), [...LIVE, ...KEPT].sort(), 'the page\'s works join the copy\'s')
+        assert.deepEqual(unpackRows(copy.dated.rows).find(row => row.sid === toShortId('101')), { sid: toShortId('101'), day: dayOf('14 Sep 2026') })
+        assert.equal(copy.dated.through, utcToday() - 1, 'every page was read')
+        assert.equal('failed' in copy.dated, false, 'and the copy no longer says it couldn’t be loaded')
+      }
+      finally {
+        await tab.close()
+      }
+    })
+
+    test('a read of the page from a later day than the copy\'s stretch counts nothing complete', async () => {
+      const since = dayOf('1 Dec 2025')
+      const seed = trackedSeed(since, since + 5)
+      const { tab } = await openView(BOUNDED, BUTTON, seed)
+      try {
+        const copy = await readStored(tab, seed)
+        assert.equal(copy.dated.through, since + 5, 'the days before the page\'s first day weren\'t read')
       }
       finally {
         await tab.close()

@@ -220,7 +220,7 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
   test('and keeps its first copy, read from the day it is tracked from, under the key its search view keeps', async () => {
     const copy = await keptCopy(tab, COFFEE_KEY)
     assert.deepEqual(storedListIds(copy), ['101', '102'])
-    assert.equal(copy.descriptor.dateFilter, `work_search[date_from]=${isoDay(TODAY)}`)
+    assert.equal(copy.dated.from, TODAY, 'read by date from the day it is tracked from')
     assert.ok(askedFrom(tab).length > 0)
     assert.ok(askedFrom(tab).every(day => day === isoDay(TODAY)), JSON.stringify(askedFrom(tab)))
   })
@@ -293,7 +293,8 @@ describe('the toolbar\'s tracked-list pill', { skip }, () => {
     await pickSince(page, 'new', isoDay(TODAY - 10))
     await rerun(page, () => clickBoxAction(page, 'track'))
     assert.equal((await savedOption(page)).lists[0].since, TODAY - 10)
-    assert.equal((await keptCopy(page, COFFEE_KEY)).descriptor.dateFilter, `work_search[date_from]=${isoDay(TODAY - 10)}`, 'and its first copy is read from it')
+    await until('the first copy to be kept', async () => (await keptCopy(page, COFFEE_KEY))?.dated)
+    assert.equal((await keptCopy(page, COFFEE_KEY)).dated.from, TODAY - 10, 'and its first copy is read from it')
     await page.close()
   })
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { dayOf } from '../../src/common/trackedLists.ts'
-import { applyPage, nextRead, packRows, pruneReviewed, readQuery, readSummary, recordFor, recordsBehind, unpackRows } from '../../src/common/trackedReads.ts'
+import { applyPage, nextRead, packRows, readQuery, unpackRows } from '../../src/common/trackedReads.ts'
 
 const TODAY = dayOf('20 Sep 2026')
 const START = dayOf('10 Sep 2026')
@@ -12,9 +12,15 @@ function list(id, extra = {}) {
   return { id, kind: 'works-filter', url: `/tags/${id}/works`, alias: id, tracked: true, since: START - 30, ...extra }
 }
 
-/** A record of `entry` as `recordFor` makes it, with fields over it. */
+/** A record of `entry` read for nothing yet, from the later of its tracking day and `start`. */
+function fresh(entry, start = START) {
+  const from = Math.max(entry.since ?? start, start)
+  return { v: 1, query: readQuery(entry), from, through: from - 1, readAt: 0, rows: '' }
+}
+
+/** A record of `entry` read for nothing yet, with fields over it. */
 function record(entry, extra = {}) {
-  return { ...recordFor(entry, undefined, START), ...extra }
+  return { ...fresh(entry), ...extra }
 }
 
 const rowsOf = rec => unpackRows(rec.rows)
@@ -53,50 +59,6 @@ describe('readQuery', () => {
   test('a view filter that sends no exclusions asks the same thing', () => {
     const including = { facets: { freeforms: { in: ['Fluff'] } }, text: 'x', words: [1000, null] }
     assert.equal(readQuery(list('a', { filter: including })), readQuery(list('a')))
-  })
-})
-
-describe('recordFor', () => {
-  test('a list never read starts at the window, with nothing read', () => {
-    const fresh = recordFor(list('a'), undefined, START)
-    assert.deepEqual(fresh, { v: 1, query: readQuery(list('a')), from: START, through: START - 1, readAt: 0, rows: '' })
-  })
-
-  test('a list tracked inside the window starts on its tracking day', () => {
-    const fresh = recordFor(list('a', { since: START + 4 }), undefined, START)
-    assert.equal(fresh.from, START + 4)
-    assert.equal(fresh.through, START + 3)
-  })
-
-  test('a stored record of the same query is kept', () => {
-    const stored = record(list('a'), { through: START + 5, readAt: AT, rows: packRows([{ sid: 'x', day: START + 2 }]) })
-    assert.equal(recordFor(list('a'), stored, START), stored)
-  })
-
-  test('a record of another query is dropped and read again', () => {
-    const stored = record(list('a'), { through: START + 5, readAt: AT })
-    const changed = list('a', { filter: { facets: { freeforms: { ex: ['Angst'] } } } })
-    assert.deepEqual(recordFor(changed, stored, START), recordFor(changed, undefined, START))
-  })
-
-  test('a record that starts after the window no longer covers it, and is dropped', () => {
-    const stored = record(list('a'), { from: START + 3, through: START + 5, readAt: AT })
-    assert.equal(recordFor(list('a'), stored, START).through, START - 1)
-  })
-
-  test('a record from before the list was tracked again is dropped', () => {
-    const stored = record(list('a'), { through: START + 5, readAt: AT })
-    assert.equal(recordFor(list('a', { since: START + 2 }), stored, START).from, START + 2)
-  })
-
-  test('a record whose window moved on is kept: pruning catches it up', () => {
-    const stored = record(list('a'), { through: START + 5, readAt: AT })
-    assert.equal(recordFor(list('a'), stored, START + 3), stored)
-  })
-
-  test('anything malformed is a fresh record', () => {
-    for (const junk of [null, 'x', {}, { ...record(list('a')), v: 2 }, { ...record(list('a')), through: 'x' }, { ...record(list('a')), rows: 3 }])
-      assert.deepEqual(recordFor(list('a'), junk, START), recordFor(list('a'), undefined, START))
   })
 })
 
@@ -265,95 +227,5 @@ describe('nextRead', () => {
 
   test('never asks from a day after today', () => {
     assert.equal(nextRead([state(list('a'), { through: TODAY + 3 })], TODAY).from, TODAY)
-  })
-})
-
-describe('pruneReviewed', () => {
-  const rows = [{ sid: 'a', day: START }, { sid: 'b', day: START + 2 }, { sid: 'c', day: START + 3 }, { sid: 'd', day: START + 1 }]
-
-  test('drops the rows on reviewed days, and names their works', () => {
-    const { record: next, dropped } = pruneReviewed(record(list('a'), { through: START + 5, rows: packRows(rows) }), START + 2)
-    assert.deepEqual(rowsOf(next), [{ sid: 'c', day: START + 3 }])
-    assert.deepEqual(dropped, ['a', 'b', 'd'])
-  })
-
-  test('the record then starts after the reviewed days', () => {
-    const { record: next } = pruneReviewed(record(list('a'), { through: START + 5, rows: packRows(rows) }), START + 2)
-    assert.equal(next.from, START + 3)
-    assert.equal(next.through, START + 5)
-  })
-
-  test('days reviewed before they were read are not read any more', () => {
-    const { record: next } = pruneReviewed(record(list('a'), { through: START, rows: packRows(rows) }), START + 2)
-    assert.equal(next.through, START + 2)
-  })
-
-  test('nothing to drop hands the same record back', () => {
-    const rec = record(list('a'), { through: START + 5, rows: packRows(rows) })
-    const { record: next, dropped } = pruneReviewed(rec, START - 1)
-    assert.equal(next, rec)
-    assert.deepEqual(dropped, [])
-  })
-
-  test('a watermark put back after a prune finds the record no longer covers the window', () => {
-    const { record: pruned } = pruneReviewed(record(list('a'), { through: START + 5, rows: packRows(rows) }), START + 2)
-    const fresh = recordFor(list('a'), pruned, START)
-    assert.equal(fresh.from, START)
-    assert.equal(fresh.through, START - 1)
-    assert.equal(fresh.rows, '')
-  })
-
-  test('a list tracked after the reviewed days keeps its start', () => {
-    const rec = record(list('a', { since: START + 5 }))
-    assert.equal(pruneReviewed(rec, START + 2).record.from, START + 5)
-  })
-})
-
-describe('readSummary', () => {
-  test('the lists read least far, and the lists not yet read', () => {
-    const lists = [list('a'), list('b'), list('c'), list('d', { tracked: false })]
-    const records = new Map([
-      ['a', record(lists[0], { through: START + 4, readAt: AT })],
-      ['b', record(lists[1], { through: START + 2, readAt: AT })],
-    ])
-    assert.deepEqual(readSummary(lists, records, START), { through: START + 2, behind: ['c'] })
-  })
-
-  test('a record of another query, or never read, is not read', () => {
-    const lists = [list('a'), list('b')]
-    const records = new Map([
-      ['a', record(list('a', { url: '/tags/other/works' }), { through: START + 4, readAt: AT })],
-      ['b', record(lists[1])],
-    ])
-    assert.deepEqual(readSummary(lists, records, START), { through: null, behind: ['a', 'b'] })
-  })
-
-  test('a record the next read starts afresh, since it begins after the window, is not read', () => {
-    const lists = [list('a'), list('b')]
-    const records = new Map([
-      ['a', record(lists[0], { from: START + 3, through: START + 6, readAt: AT })],
-      ['b', record(lists[1], { through: START + 4, readAt: AT })],
-    ])
-    assert.deepEqual(readSummary(lists, records, START), { through: START + 4, behind: ['a'] })
-  })
-})
-
-describe('recordsBehind', () => {
-  const read = (entry, through, readAt) => ({ ...record(entry), through, readAt })
-
-  test('records read through yesterday today want nothing', () => {
-    const lists = [list('a'), list('b')]
-    assert.equal(recordsBehind(new Map([['a', read(lists[0], TODAY - 1, AT)], ['b', read(lists[1], TODAY - 1, AT)]]), lists, TODAY), false)
-  })
-
-  test('a list with no record, one short of yesterday, or one not written today wants reading', () => {
-    const a = list('a')
-    assert.equal(recordsBehind(new Map(), [a], TODAY), true)
-    assert.equal(recordsBehind(new Map([['a', read(a, TODAY - 2, AT)]]), [a], TODAY), true)
-    assert.equal(recordsBehind(new Map([['a', read(a, TODAY - 1, AT - 86_400_000)]]), [a], TODAY), true)
-  })
-
-  test('a list that isn’t tracked wants nothing', () => {
-    assert.equal(recordsBehind(new Map(), [list('a', { tracked: false })], TODAY), false)
   })
 })

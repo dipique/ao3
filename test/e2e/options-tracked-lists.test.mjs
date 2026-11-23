@@ -290,7 +290,8 @@ describe('options UI — saved lists', { skip }, () => {
   test('tracked with no copy, the list keeps its first one, read from the day it is tracked from', async () => {
     const key = textSearchKey(new URL(COFFEE.url, ARCHIVE).search)
     await until('the first copy to be kept', async () => (await options.stored('cache.searchLists'))?.[key])
-    assert.equal((await options.stored('cache.searchLists'))[key].descriptor.dateFilter, `work_search[date_from]=${isoDay(TODAY)}`)
+    await until('the first copy to be read', async () => (await options.stored('cache.searchLists'))[key].dated?.through === TODAY - 1)
+    assert.equal((await options.stored('cache.searchLists'))[key].dated.from, TODAY)
     assert.ok(archive.asked.length > 0)
     assert.ok(archive.asked.every(url => new URL(url).searchParams.get('work_search[date_from]') === isoDay(TODAY)), JSON.stringify(archive.asked))
     await until('its row to show the copy', async () => await cached(await options.savedList('c0ffee')) === 'copy')
@@ -815,7 +816,7 @@ describe('options UI — the saved lists\' frame', { skip }, () => {
     await until('the filter to empty', async () => await (await filterBox()).evaluate(el => el.value) === '')
   })
 
-  test('Remove offline copy takes every copy of the list\'s search, an older sort order too, so the list is no longer cached', async () => {
+  test('Reset list data takes every copy of the list\'s search, an older sort order too, so the list is no longer cached', async () => {
     const row = await options.savedListDetails('l4tte')
     const remove = await options.action(row, 'remove-copy')
     await options.press(remove)
@@ -830,7 +831,7 @@ describe('options UI — the saved lists\' frame', { skip }, () => {
     assert.ok(TEA_KEY in await options.stored('cache.searchLists'), 'and only its copies go')
   })
 
-  test('Remove offline copy asks a second time, takes the copy from both lists at its address, and keeps both lists', async () => {
+  test('Reset list data asks a second time, takes the copy from both lists at its address, and keeps both lists', async () => {
     const row = await options.savedListDetails('m1ne')
     assert.ok(mentions(await removalNote(row, 'remove-copy'), 'Theirs'), 'it says the other list loses the copy too')
     const remove = await options.action(row, 'remove-copy')
@@ -1056,7 +1057,7 @@ describe('options UI — where focus goes when a saved list\'s control goes', { 
     assert.deepEqual(await focused(), { what: 'stop-tracking', list: 't3a' })
   })
 
-  test('Remove offline copy, with the list staying, hands focus to the row\'s details', async () => {
+  test('Reset list data, with the list staying, hands focus to the row\'s details', async () => {
     const remove = await options.action(await options.savedListDetails('t3a'), 'remove-copy')
     await pressKey(remove)
     await until('it to ask', async () => armed(remove))

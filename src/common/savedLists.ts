@@ -74,6 +74,15 @@ export interface StoredListRef {
   listUrl?: string
   label?: string
   scrapedAt: number
+  /** A tracked list's copy: the stretch of days it is complete for, and when it was last read by date. */
+  settled?: CopySettled
+}
+
+/** How far a tracked list's copy is read by date: `from`..`through` complete, last read at `readAt` (epoch ms, 0 for never). */
+export interface CopySettled {
+  from: Day
+  through: Day
+  readAt: number
 }
 
 /** The `v` a migrated {@link SavedListsOption} carries. */
@@ -213,6 +222,14 @@ export function storedListRefs(searchLists: unknown): StoredListRef[] {
     if (!isObject(list))
       continue
     const ref: StoredListRef = { key, scrapedAt: typeof list.scrapedAt === 'number' ? list.scrapedAt : 0 }
+    const dated = list.dated
+    if (isObject(dated)) {
+      const from = wholeNumber(dated.from)
+      const through = wholeNumber(dated.through)
+      const readAt = wholeNumber(dated.readAt)
+      if (from !== null && through !== null && readAt !== null)
+        ref.settled = { from, through, readAt }
+    }
     const descriptor = list.descriptor
     if (isObject(descriptor)) {
       for (const field of ['sourceId', 'listUrl', 'label'] as const) {

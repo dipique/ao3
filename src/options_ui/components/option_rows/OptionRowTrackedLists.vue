@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { Day } from '#common'
 
-import { getArchiveLink, isoDay, readSummary, reviewStart, utcToday } from '#common'
-import { onReadRecordsChanged, readStoredRecords } from '#content_script/tracked/readStore.ts'
+import { copyViews, getArchiveLink, isoDay, utcToday, viewSummary } from '#common'
+import { onStoredListsChanged, readStoredLists } from '#content_script/searchView/cache.ts'
 
 import { sentence, withReason } from '../../model/phrases.ts'
 import { latestReviewable, recordsLine, REVIEW_NAME, reviewBlock, reviewedThroughFrom, reviewedThroughLabel, WORKS_PER_REVIEW } from '../../model/review.ts'
@@ -117,21 +117,20 @@ function preload(): void {
   void preloadReview()
 }
 
-/** What the tracked lists' read records say: refreshed whenever one is written, here or on AO3. */
+/** What the tracked lists' copies say: refreshed whenever a stored list is written, here or on AO3. */
 const records = ref<{ through: Day | null, behind: number }>({ through: null, behind: 0 })
 const recordsText = computed(() => recordsLine(records.value))
 
 async function readRecordsLine(): Promise<void> {
   const tracked = lists.value.filter(list => list.tracked)
-  const start = reviewStart({ reviewedThrough: reviewedThrough.value, lists: lists.value })
-  const summary = readSummary(tracked, await readStoredRecords(tracked.map(list => list.id)), start)
+  const summary = viewSummary(tracked, copyViews(tracked, await readStoredLists()))
   records.value = { through: summary.through, behind: summary.behind.length }
 }
 
 let stopRecords: (() => void) | null = null
 onMounted(() => {
   void readRecordsLine()
-  stopRecords = onReadRecordsChanged(() => void readRecordsLine())
+  stopRecords = onStoredListsChanged(() => void readRecordsLine())
 })
 onBeforeUnmount(() => stopRecords?.())
 watch([lists, reviewedThrough], () => void readRecordsLine(), { deep: true })

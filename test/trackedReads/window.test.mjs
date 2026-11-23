@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { dayOf } from '../../src/common/trackedLists.ts'
-import { packRows, recordFor, windowFromRecords } from '../../src/common/trackedReads.ts'
+import { packRows, readQuery, windowFromRecords } from '../../src/common/trackedReads.ts'
 
 const TODAY = dayOf('20 Sep 2026')
 const START = dayOf('10 Sep 2026')
@@ -12,8 +12,14 @@ function list(id, extra = {}) {
 }
 
 /** A record of `entry` read through `through`, holding `rows`: `[sid, day]` pairs. */
+/** A record of `entry` read for nothing yet, from the later of its tracking day and `start`. */
+function fresh(entry, start = START) {
+  const from = Math.max(entry.since ?? start, start)
+  return { v: 1, query: readQuery(entry), from, through: from - 1, readAt: 0, rows: '' }
+}
+
 function read(entry, through, rows, extra = {}) {
-  return { ...recordFor(entry, undefined, START), through, readAt: 1, rows: packRows(rows.map(([sid, day]) => ({ sid, day }))), ...extra }
+  return { ...fresh(entry), through, readAt: 1, rows: packRows(rows.map(([sid, day]) => ({ sid, day }))), ...extra }
 }
 
 /** `[sid, day]` pairs from `[day, n]` rows, making `n` works a day with ids from `prefix`. */
@@ -216,7 +222,7 @@ describe('windowFromRecords', () => {
       const b = list('b', { since: START + 3 })
       const window = compute([a, b], [
         ['a', read(a, TODAY - 1, many('w', [[START, 30], [START + 1, 30]]))],
-        ['b', recordFor(b, undefined, START)],
+        ['b', fresh(b)],
       ])
       assert.deepEqual(window.complete, ['a', 'b'])
     })
@@ -251,10 +257,10 @@ describe('windowFromRecords', () => {
 
   test('a list tracked today is pending in the preview of today until it has been read', () => {
     const a = list('a', { since: TODAY })
-    const fresh = compute([a], [['a', recordFor(a, undefined, TODAY)]], { start: TODAY })
-    assert.deepEqual(fresh.pending, ['a'])
-    const read = compute([a], [['a', { ...recordFor(a, undefined, TODAY), readAt: 1 }]], { start: TODAY })
-    assert.deepEqual(read.complete, ['a'])
+    const unread = compute([a], [['a', fresh(a, TODAY)]], { start: TODAY })
+    assert.deepEqual(unread.pending, ['a'])
+    const done = compute([a], [['a', { ...fresh(a, TODAY), readAt: 1 }]], { start: TODAY })
+    assert.deepEqual(done.complete, ['a'])
   })
 
   test('caught up, endOverride has nothing to move', () => {

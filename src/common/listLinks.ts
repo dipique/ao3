@@ -13,7 +13,7 @@ import type { SnapshotDescriptor } from './cache.ts'
 import type { SavedList } from './savedLists.ts'
 import type { TrackedKind, TrackedList } from './trackedLists.ts'
 
-import { fragmentParam, fragmentText, isListId, listPage, normalizeTrackedUrl, onListPage, parseArchiveUrl, sourceLabel } from './trackedLists.ts'
+import { defaultTitle, fragmentParam, fragmentText, isListId, listPage, normalizeTrackedUrl, onListPage, parseArchiveUrl, sourceLabel, trackedMeta } from './trackedLists.ts'
 
 /** What an open URL names: a saved list, by its id, or a list that has no record. */
 export type ListRef = { kind: 'list', id: string } | { kind: 'marked-for-later' | 'read-works' | 'review' }
@@ -275,4 +275,15 @@ export function copyKeyOf(list: Pick<SavedList, 'kind' | 'url'>): string | null 
     case 'series-works':
       return `series-works:${/^\/series\/(\d+)/.exec(url.pathname)?.[1]}`
   }
+}
+
+/** What a tracked list's copy is labelled with when it is first kept: the list's default title, or its own where it has none. */
+export function copyLabel(list: TrackedList): string {
+  const meta = trackedMeta(list)
+  return meta ? defaultTitle(meta) : list.alias
+}
+
+/** The tracked lists of `entries` whose offline copy is the one stored under `key`. */
+export function listsAtCopy(entries: readonly TrackedList[], key: string): TrackedList[] {
+  return entries.filter(list => list.tracked && copyKeyOf(list) === key)
 }

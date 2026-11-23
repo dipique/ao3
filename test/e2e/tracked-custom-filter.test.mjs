@@ -321,6 +321,16 @@ describe('tracked lists: a custom search view’s own filters', { skip }, () => 
   })
 
   test('the review leaves out the works the filter rejects, and asks the archive to', async () => {
+    // The tag's page, read whole above, counted its copy as read today: put
+    // that back, so the review has today's works to ask the archive for.
+    await tab.evaluate(async () => {
+      const lists = (await browser.storage.local.get('cache.searchLists'))['cache.searchLists']
+      for (const copy of Object.values(lists)) {
+        if (copy.dated)
+          copy.dated.readAt = 0
+      }
+      await browser.storage.local.set({ 'cache.searchLists': lists })
+    })
     fetched.length = 0
     await visit(tab, REVIEW_URL)
     const expected = idsWithout('Draco Malfoy', 'Ron Weasley').sort()

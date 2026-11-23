@@ -17,6 +17,7 @@ import {
   takeFromList,
   TOUCH_MS,
 } from '../../src/common/blurbRecord.ts'
+import { packRows, unpackRows } from '../../src/common/trackedReads.ts'
 import { packOrderedIds, toShortId, unpackOrderedIds } from '../../src/common/workId.ts'
 
 const NOW = Date.UTC(2026, 8, 15)
@@ -137,6 +138,14 @@ describe('takeFromList', () => {
     const ctx = { [toShortId('1')]: '<div>one</div>', [toShortId('2')]: '<div>two</div>' }
     assert.deepEqual(takeFromList(list(['1', '2'], { ctx }), ['1']).ctx, { [toShortId('2')]: '<div>two</div>' })
     assert.equal('ctx' in takeFromList(list(['1', '2'], { ctx }), ['1', '2']), false)
+  })
+
+  test('a tracked copy\'s dated rows lose the works too, so a later read doesn\'t bring them back', () => {
+    const rows = [{ sid: toShortId('1'), day: 100 }, { sid: toShortId('2'), day: 101 }]
+    const dated = { query: 'q', from: 90, through: 101, readAt: NOW, rows: packRows(rows) }
+    const next = takeFromList(list(['1', '2'], { dated }), ['1'])
+    assert.deepEqual(unpackRows(next.dated.rows), [rows[1]])
+    assert.equal(next.dated.through, 101)
   })
 
   test('nothing to take, or a list this build can\'t read, is nothing to write', () => {

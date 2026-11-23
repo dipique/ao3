@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
+import { copyKeyOf } from '../../src/common/listLinks.ts'
+import { unpackRows } from '../../src/common/trackedReads.ts'
 import { DIST, ensureBuilt, findChrome, launch, openWindow } from './helpers.mjs'
 import { linkWrites, persistentMock, relayWrites, rerun, settled, stored } from './trackedPages.mjs'
 import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, resetWorkIds, reviewDrawn, reviewStatus, statusIs, TODAY, trackedOption, works } from './trackedReview.mjs'
@@ -173,15 +175,15 @@ describe('tracked review: from the records', { skip }, () => {
       assert.deepEqual(await shownIds(tab), ids(since + 2, since + 3))
       assert.equal(listRequests(fetched).length, before, 'nothing asked of AO3')
       assert.equal((await stored(tab, 'option.trackedLists')).reviewedThrough, since + 1)
-      const record = await tab.evaluate(async () => (await browser.storage.local.get('trackedRead.solo'))['trackedRead.solo'])
-      assert.equal(record.from, since + 2, 'the reviewed days are off the record')
+      const copy = (await stored(tab, 'cache.searchLists'))[copyKeyOf(solo.entry)]
+      assert.ok(unpackRows(copy.dated.rows).some(row => row.day === since), 'the copy keeps the reviewed days: they are its list\'s')
     }
     finally {
       await tab.close()
     }
   })
 
-  test('Mark reviewed on a window still being read stores the watermark, asking nothing; the reading then keeps the reviewed days off', async () => {
+  test('Mark reviewed on a window still being read stores the watermark, asking nothing; the reading then finishes the copy', async () => {
     // A target that takes in every day, and the list's second page held back:
     // the window runs to yesterday, and is still being read.
     const store = { ...seed, 'option.trackedLists': trackedOption(fixtures, { target: 100, reviewedThrough: since - 1 }) }
@@ -196,10 +198,10 @@ describe('tracked review: from the records', { skip }, () => {
       assert.equal((await stored(tab, 'option.trackedLists')).reviewedThrough, end)
 
       release()
-      await tab.waitForFunction(async after => (await browser.storage.local.get('trackedRead.solo'))['trackedRead.solo']?.through >= after, {}, TODAY - 1)
-      const record = await tab.evaluate(async () => (await browser.storage.local.get('trackedRead.solo'))['trackedRead.solo'])
-      assert.equal(record.from, end + 1, 'the page that landed after was added to the record as pruned')
-      assert.equal(record.rows, '')
+      const key = copyKeyOf(solo.entry)
+      await tab.waitForFunction(async ([k, after]) => (await browser.storage.local.get('cache.searchLists'))['cache.searchLists'][k]?.dated?.through >= after, {}, [key, TODAY - 1])
+      const copy = (await stored(tab, 'cache.searchLists'))[key]
+      assert.equal(unpackRows(copy.dated.rows).length, solo.works.length, 'every work the list turned up, reviewed days and all')
     }
     finally {
       await tab.close()

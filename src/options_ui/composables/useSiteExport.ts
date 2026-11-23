@@ -4,7 +4,7 @@ import type { ChangeImportProgress, ChangeImportReport } from '#content_script/s
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
 import type { CachingBuckets, WorkTextUsage } from '#content_script/siteExport/workText.js'
 
-import { alreadyTracked, cache, copyOwner, getArchiveLink, joinSavedLists, listCopies, listUrlFor, planRemoveList, planTrackCopy, REVIEW_SOURCE_ID, storedListRefs, timeAgo, toast, utcToday } from '#common'
+import { alreadyTracked, cache, copyKeyOf, copyOwner, getArchiveLink, joinSavedLists, listCopies, listUrlFor, planRemoveList, planTrackCopy, REVIEW_SOURCE_ID, storedListRefs, timeAgo, toast, utcToday } from '#common'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { blurbOrphans, discardOrphanedBlurbs } from '#content_script/searchView/blurbStore.js'
 import { deleteSnapshot, listSnapshots, snapshotWorkIds } from '#content_script/searchView/cache.js'
@@ -15,6 +15,7 @@ import { cancelJob, discardJob, jobStatus, loadJob, resumeJob, startJob, stopJob
 import { ALL_CACHED, ALL_CACHED_LABEL } from '#content_script/siteExport/payload.js'
 import { cachingBuckets, planOrphanDiscard, summarizeWorkText } from '#content_script/siteExport/workText.js'
 import { discardOrphanedWorkText, purgeWorkText, readWorkTextIndex } from '#content_script/siteExport/workTextCache.js'
+import { copyDescriptor } from '#content_script/tracked/updateCopies.ts'
 
 import type { JobView } from '../model/jobView.ts'
 import type { ProfileList, ProfileListId } from '../model/profileLists.ts'
@@ -440,6 +441,21 @@ export function useSiteExport() {
     },
 
     /**
+     * Refresh tracked list `id`'s copy by date: from the first day it isn't
+     * complete for, or, `full`, from the day the list is tracked from. A
+     * tracked list can be refreshed with no copy kept yet; its first refresh
+     * keeps one.
+     */
+    refreshTracked(id: string, opts: { full?: boolean } = {}) {
+      const list = useOption('trackedLists').lists.value.find(one => one.id === id && one.tracked)
+      const cacheKey = list && copyKeyOf(list)
+      if (!list || !cacheKey)
+        return Promise.resolve()
+      const descriptor = rowFor(cacheKey)?.descriptor ?? copyDescriptor(list)
+      return run('start the job', () => startJob({ cacheKey, descriptor, steps: ['refreshing'], full: opts.full }))
+    },
+
+    /**
      * Fetch the work text this list is missing, judged against the stored list
      * as it stands. An accurate answer wants a fresh list first — which is
      * why the row says how old this one is, and why "Download site" will refresh
@@ -520,7 +536,7 @@ export function useSiteExport() {
     async deleteList(row: SiteExportListRow) {
       const name = listName(row)
       await forget([row.key])
-      toast(`Removed the offline copy of “${name}”. Its cached work text is still here.`, { type: 'success' })
+      toast(`Reset the data of “${name}”. Its cached work text is still here.`, { type: 'success' })
     },
 
     /**
@@ -534,7 +550,7 @@ export function useSiteExport() {
       const row = savedRows.value.find(one => one.id === id)
       const name = row?.title || row?.placeholder || ''
       await forget(keys)
-      toast(`Removed the offline copy of “${name}”. Its cached work text is still here.`, { type: 'success' })
+      toast(`Reset the data of “${name}”. Its cached work text is still here.`, { type: 'success' })
     },
 
     /**

@@ -7,7 +7,7 @@ import { loadingLine } from '../../src/content_script/searchView/listRefresh.ts'
 import { REFRESH_REFUSED } from '../../src/content_script/siteExport/refreshRefusals.ts'
 import { bucketBar, formatBytes } from '../../src/options_ui/model/buckets.ts'
 import { KEEP_BY_VIEW, PROFILE_LISTS, REFRESH_OFF } from '../../src/options_ui/model/profileLists.ts'
-import { blurbsOnRemove } from '../../src/options_ui/model/savedListRows.ts'
+import { COPY_RESET } from '../../src/options_ui/model/savedListRows.ts'
 import { storedListIds, storedLists } from './helpers.mjs'
 import { ARCHIVE, captureDownloads, mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 
@@ -310,10 +310,10 @@ describe('options UI — User profile lists', { skip }, () => {
     await until('the job to be discarded', async () => await options.stored('siteExportJob') === null)
   })
 
-  test('Remove offline copy asks a second time in its place, and the tile then says how a copy is kept', async () => {
+  test('Reset list data asks a second time in its place, and the tile then says how a copy is kept', async () => {
     await openMore('read-works')
     const item = await options.menuItem('remove')
-    assert.ok(mentions(await options.name(item), blurbsOnRemove(false)), 'it says what becomes of the blurbs')
+    assert.ok(mentions(await options.name(item), COPY_RESET.whatAny), 'it says what it does')
     await options.press(item)
     await until('the first press to arm it', () => item.evaluate(el => el.hasAttribute('data-armed')))
     const armed = await options.menuItem('remove')

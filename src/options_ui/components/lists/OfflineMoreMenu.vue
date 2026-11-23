@@ -4,7 +4,7 @@ import type { MoreItem, MoreItemKind } from '../../model/moreMenu.ts'
 
 import { moreMenu } from '../../model/moreMenu.ts'
 import { withReason } from '../../model/phrases.ts'
-import { blurbsOnRemove } from '../../model/savedListRows.ts'
+import { COPY_RESET } from '../../model/savedListRows.ts'
 
 /**
  * A stored list's More menu ({@link moreMenu}): what its offline copy offers
@@ -56,9 +56,6 @@ const JOBS: Record<JobItem, { name: string, start: (row: SiteExportListRow) => u
   'download-cached': { name: 'Download without refreshing', start: downloadCached },
 }
 
-/** Whether removing the copy takes its blurbs now, which the menu says. */
-const prune = useOption('pruneOrphanedBlurbs')
-
 /** Removing the copy asks a second time in its own place, with the menu left open between the two. */
 const confirm = useConfirmInPlace()
 const removeId = computed(() => `remove-copy:${props.row?.key ?? props.name}`)
@@ -106,9 +103,9 @@ const ARMED = '!bg-armed !text-armed-fg [&>*]:!text-armed-fg'
           :class="[ITEM, confirm.armed(removeId) ? ARMED : '']"
           @select="remove"
         >
-          <span :class="NAME">{{ confirm.armed(removeId) ? 'Remove offline copy?' : 'Remove offline copy' }}</span>
+          <span :class="NAME">{{ confirm.armed(removeId) ? 'Reset list data?' : 'Reset list data' }}</span>
           <span :class="NOTE">
-            Opening the list on AO3 keeps a copy again. Its cached work text stays. {{ blurbsOnRemove(prune) }}
+            {{ COPY_RESET.whatAny }} {{ COPY_RESET.nextAny }}
           </span>
         </DropdownMenuItem>
         <DropdownMenuItem

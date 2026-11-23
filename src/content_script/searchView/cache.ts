@@ -3,12 +3,16 @@ import type { Work } from '#content_script/blurb.js'
 
 import {
   cache,
+  dateFilterSpan,
+  dayOf,
   droppedIds,
   isContextInvalidatedError,
   isExtensionContextValid,
   LEGACY_SNAPSHOTS_KEY,
   LIST_VERSION,
   listedIds,
+  listsAtCopy,
+  mergeWalk,
   options,
   packIds,
   packOrderedIds,
@@ -17,9 +21,9 @@ import {
   toShortId,
   unpackIds,
   unpackOrderedIds,
+  utcToday,
 } from '#common'
 import { parseWork } from '#content_script/blurb.js'
-import { readRecordWorkIds } from '#content_script/tracked/readStore.ts'
 
 import type { ParsedWork } from './blurbStore.ts'
 
@@ -203,22 +207,15 @@ export async function listSnapshots(): Promise<SnapshotSummary[]> {
  * it"; this asks "does any stored list still hold this work", which is what
  * decides whether its blurb and its cached text are orphans. A list written by a
  * newer build is one the reader kept, and discarding what it holds because this
- * build cannot draw it would be the worst kind of tidying.
+ * build cannot draw it would be the worst kind of tidying. A tracked list's
+ * copy holds every work its list turned up, reviewed or not.
  *
- * The tracked lists' read records count too: the review draws their works from
- * the store, so a work a record holds is referenced as long as it does.
+ * `except` leaves one stored list out: what else holds a work it holds.
  */
-export async function snapshotWorkIds(): Promise<Set<string>> {
-  const [lists, legacy] = await Promise.all([cache.get('searchLists'), readLegacy()])
-  return withRecorded(listedIds(lists, legacy))
-}
-
-/** `ids`, and every work a tracked list's read record holds. */
-async function withRecorded(ids: Set<string>): Promise<Set<string>> {
-  const tracked = (await options.get('trackedLists')).lists.map(list => list.id)
-  for (const id of await readRecordWorkIds(tracked))
-    ids.add(id)
-  return ids
+export async function snapshotWorkIds(except?: string): Promise<Set<string>> {
+  const [all, legacy] = await Promise.all([cache.get('searchLists'), readLegacy()])
+  const lists = except === undefined ? all : Object.fromEntries(Object.entries(all).filter(([key]) => key !== except))
+  return listedIds(lists, legacy)
 }
 
 /**
@@ -255,9 +252,15 @@ export async function snapshotSize(key: string): Promise<number> {
  *
  * `scrapedAt` dates the read otherwise than now: a read cut short, whose list
  * still holds works it never reached, is trusted no longer than the copy it
- * was read over.
+ * was read over. `whole` says the read took in every page of the listing, none
+ * failed or cut short: for a tracked list's copy, that settles the days it read
+ * ({@link mergeWalk}).
  */
-export async function writeSnapshot(key: string, works: Work[], descriptor: SnapshotDescriptor, opts: { scrapedAt?: number } = {}): Promise<void> {
+export async function writeSnapshot(key: string, works: Work[], descriptor: SnapshotDescriptor, opts: { scrapedAt?: number, whole?: boolean } = {}): Promise<void> {
+  // A tracked list's copy is read by date, and a whole read merges into it
+  // rather than replacing what it has read. Asked first, so nothing waits
+  // between reading the stored lists and writing them back.
+  const tracked = listsAtCopy((await options.get('trackedLists')).lists, key)
   await storeWorks(works)
 
   // Read after the blurbs are down, so a list another tab wrote meanwhile is kept.
@@ -272,7 +275,7 @@ export async function writeSnapshot(key: string, works: Work[], descriptor: Snap
     if (block && sid)
       ctx[sid] = block
   }
-  const list: StoredList = {
+  let list: StoredList = {
     v: LIST_VERSION,
     scrapedAt: opts.scrapedAt ?? Date.now(),
     ids: packOrderedIds(ids),
@@ -280,12 +283,99 @@ export async function writeSnapshot(key: string, works: Work[], descriptor: Snap
   }
   if (Object.keys(ctx).length)
     list.ctx = ctx
+  if (tracked.length) {
+    const base: StoredList = previous && readable(previous) ? { ...previous, descriptor } : { ...list, ids: '' }
+    const rows = works.flatMap((work) => {
+      const sid = toShortId(work.workId)
+      return sid ? [{ sid, blurbDay: dayOf(work.dateText) ?? Number.NaN }] : []
+    })
+    // A read between dates is whole only from its first day on, and only with
+    // no last day: works updated since would be missing.
+    const span = dateFilterSpan(descriptor.dateFilter)
+    list = mergeWalk(base, rows, tracked, utcToday(), list.scrapedAt, { whole: !!opts.whole && span.to === null, from: span.from })
+  }
   lists[key] = list
   await cache.set({ searchLists: lists })
   await forgetLegacy(key)
 
   if (previous && typeof previous.ids === 'string')
-    await pruneIfWanted(key, unpackOrderedIds(previous.ids), ids, lists)
+    await pruneIfWanted(key, unpackOrderedIds(previous.ids), unpackOrderedIds(list.ids), lists)
+}
+
+/**
+ * What tells one write of a stored list from another, cheaply: every write a
+ * list gets moves its stamp, its length, or how far it is read by date. A
+ * whole comparison would read every work id of every list on every write.
+ */
+function listSignature(value: unknown): string {
+  if (typeof value !== 'object' || value === null)
+    return String(value)
+  const list = value as Partial<StoredList>
+  const dated = list.dated
+  return [list.scrapedAt, list.ids?.length, dated?.from, dated?.through, dated?.readAt, dated?.rows.length, dated?.failed?.at].join('|')
+}
+
+/**
+ * Hear every write to the stored lists, from any page: the keys whose list it
+ * changed. Returns the way to stop.
+ */
+export function onStoredListsChanged(listener: (keys: Set<string>) => void): () => void {
+  const storageKey = 'cache.searchLists'
+  const handle = (changes: Record<string, { oldValue?: unknown, newValue?: unknown }>, area: string): void => {
+    const change = changes[storageKey]
+    if (area !== 'local' || !change)
+      return
+    const before = (change.oldValue ?? {}) as Record<string, unknown>
+    const after = (change.newValue ?? {}) as Record<string, unknown>
+    const keys = new Set<string>()
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (listSignature(before[key]) !== listSignature(after[key]))
+        keys.add(key)
+    }
+    if (keys.size)
+      listener(keys)
+  }
+  // A page the extension was reloaded under has no storage to hear.
+  if (!isExtensionContextValid())
+    return () => {}
+  try {
+    browser.storage.onChanged.addListener(handle)
+  }
+  catch (error) {
+    if (isContextInvalidatedError(error))
+      return () => {}
+    throw error
+  }
+  return () => {
+    try {
+      browser.storage.onChanged.removeListener(handle)
+    }
+    catch {}
+  }
+}
+
+/** Every stored list, as stored, by key. */
+export async function readStoredLists(): Promise<{ [key: string]: StoredList }> {
+  return cache.get('searchLists')
+}
+
+/**
+ * Write the list under `key` as `next` makes it from the one stored now, read
+ * just before the write so a list another tab wrote meanwhile is kept. Nothing
+ * is written when `next` hands back null. The blurbs the list names must be
+ * stored already. Hands back the list written, or null.
+ */
+export async function writeStoredList(key: string, next: (current: StoredList | undefined) => StoredList | null): Promise<StoredList | null> {
+  const lists = { ...await cache.get('searchLists') }
+  const previous = lists[key]
+  const list = next(previous)
+  if (!list)
+    return null
+  lists[key] = list
+  await cache.set({ searchLists: lists })
+  if (previous && typeof previous.ids === 'string')
+    await pruneIfWanted(key, unpackOrderedIds(previous.ids), unpackOrderedIds(list.ids), lists)
+  return list
 }
 
 /**
@@ -434,7 +524,7 @@ async function pruneIfWanted(key: string, before: string[], after: string[], lis
   const candidates = droppedIds(before, after, others)
   if (!candidates.length)
     return
-  const referenced = await withRecorded(listedIds(lists, await readLegacy()))
+  const referenced = listedIds(lists, await readLegacy())
   await pruneBlurbs(candidates, referenced)
 }
 

@@ -1,20 +1,21 @@
-import type { ComputedWindow, Day, Options, TrackedListsOption, TrackedRead } from '#common'
+import type { ComputedWindow, Day, ListView, Options, TrackedListsOption } from '#common'
 import type { Work } from '#content_script/blurb.js'
 import type { FilterState } from '#content_script/searchView/engine.ts'
 
-import { fromShortId, pruneReviewed, recordFor, reviewStart, toShortId, unpackRows, utcToday, windowFromRecords } from '#common'
+import { copyViews, fromShortId, reviewStart, toShortId, unpackRows, utcToday, windowFromRecords } from '#common'
 import { recordRuleTiming } from '#content_script/ruleTiming.ts'
 import { readRecords, rewriteStale, worksFromRecords } from '#content_script/searchView/blurbStore.ts'
+import { readStoredLists } from '#content_script/searchView/cache.ts'
 import { matches } from '#content_script/searchView/engine.ts'
 import { applyHidden } from '#content_script/searchView/hidden.ts'
-import { readStoredRecords } from '#content_script/tracked/readStore.ts'
 import { filterStateOf } from '#content_script/tracked/viewFilter.ts'
 
 /**
- * The review window, computed from the tracked lists' read records without
+ * The review window, computed from the tracked lists' offline copies without
  * asking the archive: the half of the review that loads what the pure
- * `windowFromRecords` needs — the records, and the blurbs whose hide verdicts
- * and view filters decide which works count — and hands back the works to draw.
+ * `windowFromRecords` needs — each list's view of its copy, and the blurbs
+ * whose hide verdicts and view filters decide which works count — and hands
+ * back the works to draw.
  */
 
 /** What {@link computeWindow} is given. */
@@ -34,22 +35,16 @@ export interface ReviewWindow {
   window: ComputedWindow
   /** The window's works to draw, in review order, `markedOrder` numbered to match. */
   works: Work[]
-  /** Each tracked list's record as the window was computed from it. */
-  records: Map<string, TrackedRead>
-  /** Short ids of works on days now reviewed, which the window no longer takes from the records. */
-  pruned: string[]
-  /** Works in the records on days after the window: what is still to review, roughly. */
+  /** Each tracked list's view of its copy as the window was computed from it; a list whose copy hasn't been read by date has none. */
+  records: Map<string, ListView>
+  /** Works in the copies on days after the window: what is still to review, roughly. */
   later: number
 }
 
 /**
- * Compute the review window `option` asks for from the records as stored.
- *
- * Records still holding days the watermark has passed — it moved on another
- * device, or here while a list was being read — are pruned for the window
- * only. Writing a record is the reading's: a prune written beside it could put
- * back a record from before the page it just added, so the reader prunes as it
- * goes ({@link file://./readLists.ts}).
+ * Compute the review window `option` asks for from the copies as stored. A
+ * copy keeps the days before the window — they are its list's — and the
+ * window simply starts after them.
  *
  * Blurbs are loaded only for the days the window is sized over: a pass counts
  * every work it hasn't loaded as wanted and counting, which can only end the
@@ -63,14 +58,7 @@ export async function computeWindow(request: WindowRequest): Promise<ReviewWindo
   const start = reviewStart(option)
   const today = utcToday()
 
-  const stored = await readStoredRecords(lists.map(list => list.id))
-  const records = new Map<string, TrackedRead>()
-  const pruned: string[] = []
-  for (const list of lists) {
-    const after = pruneReviewed(recordFor(list, stored.get(list.id), start), start - 1)
-    pruned.push(...after.dropped)
-    records.set(list.id, after.record)
-  }
+  const records = copyViews(lists, await readStoredLists(), start)
 
   const wants = new Map<string, FilterState | null>(lists.map(list => [list.id, filterStateOf(list.filter)]))
   const missing = new Set<string>()
@@ -127,7 +115,7 @@ export async function computeWindow(request: WindowRequest): Promise<ReviewWindo
   for (const work of window.works)
     after.delete(work.sid)
 
-  return { window, works: drawn, records, pruned, later: after.size }
+  return { window, works: drawn, records, later: after.size }
 }
 
 /**

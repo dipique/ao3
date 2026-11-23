@@ -1,7 +1,7 @@
 import type { ListRead } from '../../common/trackedReads.ts'
 import type { JobView } from './jobView.ts'
 
-import { MAX_REQUEST_ATTEMPTS } from '../../common/trackedReads.ts'
+import { failureWords, MAX_REQUEST_ATTEMPTS, requestTrouble } from '../../common/trackedReads.ts'
 import { isRunning, JOB_LINE } from './jobView.ts'
 import { sentence, titlesInWords } from './phrases.ts'
 
@@ -25,17 +25,9 @@ export function readingLine(read: ListRead): string {
   return `Reading page ${read.page + 1}${read.of ? ` of ${read.of}` : ''}…`
 }
 
-/** What went wrong with a request, for a reader: AO3's status where it gave one, else the error less the address it asked. */
-function trouble(error: string | undefined): string {
-  if (!error)
-    return ''
-  const status = /\bstatus (\d{3})\b/i.exec(error)?.[1]
-  return status ? `AO3 answered with error ${status}` : error.replace(/:?\s*https?:\/\/\S+/g, '').trim()
-}
-
 /** A try of a page that failed, and what went wrong; without a countdown to say when, that it is tried again. */
 export function retryLine(read: ListRead, counting: boolean): string {
-  const why = trouble(read.error)
+  const why = requestTrouble(read.error)
   const failed = `Page ${read.page + 1} didn’t load (try ${read.attempt ?? 1} of ${MAX_REQUEST_ATTEMPTS})${why ? `: ${why}` : ''}`
   return counting ? failed : `${failed} — trying again…`
 }
@@ -51,15 +43,14 @@ export const FAILED_LINE = 'Couldn’t read this list'
 
 /** Why a list was given up on. */
 export function readFailure(read: ListRead): string {
+  const words = sentence(failureWords(read.failure ?? 'request', read.error))
   switch (read.failure) {
     case 'signed-out':
-      return 'AO3 answered as though you were signed out, so nothing was kept. Sign in to AO3, then pre-load again.'
+      return `${words}, so nothing was kept. Sign in to AO3, then pre-load again.`
     case 'not-archive':
-      return 'Its address isn’t a page on AO3, so it can’t be read.'
-    default: {
-      const why = trouble(read.error)
-      return `All ${MAX_REQUEST_ATTEMPTS} tries failed${why ? ` (${why})` : ''}. The next Pre-load tries it again.`
-    }
+      return `${words}, so it can’t be read.`
+    default:
+      return `${words}. The next Pre-load tries it again.`
   }
 }
 

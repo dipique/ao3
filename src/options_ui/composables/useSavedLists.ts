@@ -67,7 +67,7 @@ export function useSavedLists() {
     if (!plan.ok)
       return plan.twin
     apply(before, plan.state)
-    void keepFirstCopy(plan.state.tracked.lists, id)
+    void keepFirstCopy(plan.state.tracked.lists, id, 'options')
     return null
   }
 

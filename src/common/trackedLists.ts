@@ -207,7 +207,7 @@ export interface TrackedList {
    * The day tracking last started: set whenever the entry is made, so a
    * stretch the list spent untracked is never backfilled. It's only ever a
    * **floor** on this list's reading ({@link reviewStart}, and the first day
-   * its read record covers) — never a second review cursor.
+   * its copy is read from) — never a second review cursor.
    */
   since: Day
   /**
@@ -489,6 +489,21 @@ export function withoutDateBounds(url: string): string {
     return url
   const kept = [...params].filter(([name]) => !DATE_BOUND_PARAMS.has(name))
   return withQuery(url.slice(0, at), kept.map(serializeParam))
+}
+
+/**
+ * The days a date filter ({@link dateFilterOf}) starts and ends on, in either
+ * spelling of its query: null for a bound it doesn't set, or one that isn't
+ * a day.
+ */
+export function dateFilterSpan(dateFilter: string | null | undefined): { from: Day | null, to: Day | null } {
+  const params = new URLSearchParams(dateFilter ?? '')
+  const day = (name: string): Day | null => {
+    const iso = params.get(name) ?? ''
+    const ms = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? Date.parse(`${iso}T00:00:00Z`) : Number.NaN
+    return Number.isNaN(ms) ? null : Math.floor(ms / 86_400_000)
+  }
+  return { from: day('work_search[date_from]'), to: day('work_search[date_to]') }
 }
 
 /**
