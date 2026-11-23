@@ -1,5 +1,6 @@
 import Ao3eMarkCringe from '~icons/ao3e/mark-cringe.jsx'
 import Ao3eMarkDeadDove from '~icons/ao3e/mark-dead-dove.jsx'
+import Ao3eMarkMinusP from '~icons/ao3e/mark-minus-p.jsx'
 import Ao3eMarkPlusP from '~icons/ao3e/mark-plus-p.jsx'
 import Ao3eMarkRatingG from '~icons/ao3e/mark-rating-g.jsx'
 import Ao3eMarkRatingPg13 from '~icons/ao3e/mark-rating-pg13.jsx'
@@ -123,6 +124,7 @@ const MARK_ICONS: Record<string, () => Node> = {
   'ao3e/mark-rating-pg13': () => <Ao3eMarkRatingPg13 />,
   'ao3e/mark-rating-r': () => <Ao3eMarkRatingR />,
   'ao3e/mark-plus-p': () => <Ao3eMarkPlusP />,
+  'ao3e/mark-minus-p': () => <Ao3eMarkMinusP />,
   'ao3e/mark-dead-dove': () => <Ao3eMarkDeadDove />,
   'mdi/hand-okay': () => <MdiHandOkay />,
   'ao3e/mark-warding-fingers': () => <Ao3eMarkWardingFingers />,

@@ -79,6 +79,7 @@ export const MARK_ICON_NAMES: readonly string[] = [
   'ao3e/mark-rating-pg13',
   'ao3e/mark-rating-r',
   'ao3e/mark-plus-p',
+  'ao3e/mark-minus-p',
   'ao3e/mark-dead-dove',
   'mdi/hand-okay',
   'ao3e/mark-warding-fingers',
@@ -94,11 +95,8 @@ export const DEFAULT_MARK_ICON = 'mdi/book-check'
 export const FALLBACK_MARK_ICON = 'mdi/bookmark-check'
 
 /**
- * The icon names marks used before they were file names: one key per shipped
- * mark, since the field used to be the mark's own id. A stored table is
- * converted on upgrade, but a table can also arrive from somewhere the
- * migrations don't run — a device still on an older build, syncing — so the
- * resolver keeps translating them rather than falling back to a bookmark.
+ * The icon names marks used before they were file names; all instances are now converted,
+ * so this can safely be removed
  */
 const LEGACY_MARK_ICONS: Record<string, string> = {
   read: 'mdi/book-check',

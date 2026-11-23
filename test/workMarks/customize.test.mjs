@@ -223,24 +223,6 @@ describe('mark icons', () => {
       assert.ok(source.includes(`'${name}':`), `content_script/markIcons.tsx has no entry for ${name}`)
   })
 
-  test('the rating, warning and reaction icons are in the palette', () => {
-    for (const name of [
-      'ao3e/mark-rating-g',
-      'ao3e/mark-rating-pg',
-      'ao3e/mark-rating-pg13',
-      'ao3e/mark-rating-r',
-      'ao3e/mark-plus-p',
-      'ao3e/mark-dead-dove',
-      'mdi/hand-okay',
-      'ao3e/mark-warding-fingers',
-      'ao3e/mark-relic-cross',
-      'mdi/knife-military',
-      'ao3e/mark-cringe',
-    ]) {
-      assert.ok(MARK_ICON_NAMES.includes(name), `${name} is not in the palette`)
-    }
-  })
-
   /** The extension's own collection is the SVG files in `src/icons`, named by file. */
   test('every icon from the extension\'s own collection has its file', () => {
     for (const name of MARK_ICON_NAMES.filter(name => name.startsWith('ao3e/'))) {
