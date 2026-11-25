@@ -567,27 +567,27 @@ export function storedPriority(behavior: FilterBehavior, priority: number | unde
 }
 
 /**
- * `rules` with the key's exact rule replaced by one doing `behavior`, moved to
- * the end of the list, or removed when `behavior` is null.
+ * `rules` with the key's exact rule replaced by one doing `behavior` at
+ * `priority`, moved to the end of the list, or removed when `behavior` is null.
  *
- * A priority the old rule set for itself is kept, so switching a hide raised to
- * 7 over to a collapse leaves a collapse at 7. A rule at its behaviour's default
- * takes the new behaviour's default instead: it never asked for a strength of
- * its own.
+ * Without a `priority`, one the old rule set for itself is kept, so switching a
+ * hide raised to 7 over to a collapse leaves a collapse at 7. A rule at its
+ * behaviour's default takes the new behaviour's default instead: it never asked
+ * for a strength of its own.
  */
-export function replaceExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior | null, defaults: RulePriorityDefaults): Rule[] {
+export function replaceExactRule(rules: Rule[], key: RuleKey, behavior: FilterBehavior | null, defaults: RulePriorityDefaults, priority?: number): Rule[] {
   const old = findExactRule(rules, key)
   const next = rules.filter(rule => rule !== old)
   if (behavior === null)
     return next
-  const priority = storedPriority(behavior, old?.priority, defaults)
+  const stored = storedPriority(behavior, priority ?? old?.priority, defaults)
   next.push({
     target: key.target,
     value: key.value,
     ...key.pseud !== undefined ? { pseud: key.pseud } : {},
     matcher: 'exact',
     behavior,
-    ...priority !== undefined ? { priority } : {},
+    ...stored !== undefined ? { priority: stored } : {},
   })
   return next
 }

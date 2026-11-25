@@ -12,9 +12,15 @@ const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome
 
 /** The priority an "always show" rule takes when it sets none of its own. */
 const ALWAYS_SHOW = OPTION_DEFAULTS.rules.alwaysShowPriority
+/** The priority every other rule takes when it sets none of its own. */
+const DEFAULT = 0
+
+/** Every priority a rule can take, as the submenu rows' values. */
+const PRIORITIES = Array.from({ length: 10 }, (_, i) => String(i))
 
 /**
- * A collapse rule raised to 6, a highlight, and a tag with no rule at all; and
+ * A collapse rule raised to 6, a collapse at its default, a highlight, a
+ * disabled rule that kept a priority of 4, and a tag with no rule at all; and
  * for the works an "always show" keeps on the page, two fandom collapses (at 0
  * and one above the "always show" default) and two force-shows (at that
  * default, and at 9).
@@ -26,7 +32,9 @@ const SEED = {
     colors: {},
     filters: [
       { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'collapse', priority: 6 },
+      { target: 'F', value: 'Meh', matcher: 'exact', behavior: 'collapse' },
       { target: 'F', value: 'Waff', matcher: 'exact', behavior: 'highlight' },
+      { target: 'F', value: 'Paused', matcher: 'exact', behavior: 'none', priority: 4 },
       { target: 'f', value: 'Soft Fandom', matcher: 'exact', behavior: 'collapse' },
       { target: 'f', value: 'Hard Fandom', matcher: 'exact', behavior: 'collapse', priority: ALWAYS_SHOW + 1 },
       { target: 'F', value: 'Keeper', matcher: 'exact', behavior: 'invert' },
@@ -58,7 +66,9 @@ const PAGE = `
       </div>
       <ul class="tags commas">
         <li class="freeforms"><a class="tag" href="/tags/Fluff/works">Fluff</a></li>
+        <li class="freeforms"><a class="tag" href="/tags/Meh/works">Meh</a></li>
         <li class="freeforms"><a class="tag" href="/tags/Waff/works">Waff</a></li>
+        <li class="freeforms"><a class="tag" href="/tags/Paused/works">Paused</a></li>
         <li class="freeforms"><a class="tag" href="/tags/Angst/works">Angst</a></li>
       </ul>
     </li>
@@ -70,9 +80,10 @@ const PAGE = `
 `
 
 /**
- * A tag's menu offers its rule's priority as an "Update Priority" submenu, once
- * there is a rule whose priority decides anything; and switching the rule to
- * another behaviour keeps the priority it was given.
+ * Hide, collapse and always show each open a submenu of priorities. On the
+ * behaviour the tag's rule has, it changes that rule's priority and offers
+ * "Clear"; on any other it gives the tag that behaviour at the priority picked.
+ * Highlight and hiding the tag itself have no priority, and are toggles.
  */
 describe('rule priority from the tag menu', { skip }, () => {
   let browser
@@ -114,37 +125,117 @@ describe('rule priority from the tag menu', { skip }, () => {
   const actions = rows => rows.map(row => row.action)
   /** The values of the rows that do `action`. */
   const valuesOf = (rows, action) => rows.filter(row => row.action === action).map(row => row.value)
+  const rowFor = (rows, action) => rows.find(row => row.action === action)
 
   /** Click the row that does `action` — to `value`, when given — in the menu or its open submenu. */
   const click = async (action, value) => {
     assert.ok(await pickRow(page, action, value), `no ${action} row ${value ?? ''}`)
   }
 
-  /** The open submenu's rows: the priority each sets, and whether each is current and offered. */
+  /** The open submenu's rows. */
   const submenuRows = async () => (await menuRows(page)).filter(row => row.submenu)
+  /** The priorities the open submenu marks, and those it doesn't offer. */
+  const marked = rows => rows.filter(r => r.active).map(r => r.value)
+  const off = rows => rows.filter(r => r.disabled).map(r => r.value)
 
   const storedRule = value => page.evaluate(async (want) => {
     const { 'option.rules': rules } = await window.browser.storage.local.get('option.rules')
     return rules.filters.find(r => r.value === want)
   }, value)
 
-  test('is offered only for a rule whose priority decides anything', async () => {
-    assert.ok(actions(await openMenuOn('Fluff')).includes('priority'))
-    assert.ok(!actions(await openMenuOn('Waff')).includes('priority'), 'a highlight never enters the contest')
-    assert.ok(!actions(await openMenuOn('Angst')).includes('priority'), 'no rule, nothing to weigh')
+  test('the behaviour a tag\'s rule has is marked and offered, with no separate priority row', async () => {
+    const rows = await openMenuOn('Fluff')
+    assert.equal(rowFor(rows, 'collapse').active, true)
+    assert.equal(rowFor(rows, 'collapse').disabled, false)
+    assert.ok(!actions(rows).includes('priority'))
+    assert.ok(!actions(rows).includes('clear'), 'clearing the rule lives in its own submenu')
   })
 
-  test('lists every priority, the current one marked and not offered, and sets the one picked', async () => {
+  test('the rule\'s own behaviour lists every priority, the current one marked and not offered, and sets the one picked', async () => {
     await openMenuOn('Fluff')
-    await click('priority')
+    await click('collapse')
     const rows = await submenuRows()
-    assert.deepEqual(valuesOf(rows, 'set-priority'), Array.from({ length: 10 }, (_, i) => String(i)))
-    assert.deepEqual(rows.filter(r => r.active).map(r => r.value), ['6'])
-    assert.deepEqual(rows.filter(r => r.disabled).map(r => r.value), ['6'])
+    assert.deepEqual(valuesOf(rows, 'set-priority'), PRIORITIES)
+    assert.deepEqual(marked(rows), ['6'])
+    assert.deepEqual(off(rows), ['6'])
 
     await click('set-priority', '2')
     await menuClosed(page)
     assert.deepEqual(await storedRule('Fluff'), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'collapse', priority: 2 })
+  })
+
+  test('the rule\'s own behaviour offers "Clear", which removes the rule', async () => {
+    await openMenuOn('Fluff')
+    await click('collapse')
+    assert.ok(actions(await submenuRows()).includes('clear'))
+    await click('clear')
+    await menuClosed(page)
+    assert.equal(await storedRule('Fluff'), undefined)
+  })
+
+  test('another behaviour marks its default and the rule\'s current priority, offers every priority, and switches the rule to the one picked', async () => {
+    await openMenuOn('Fluff')
+    await click('hide')
+    const rows = await submenuRows()
+    assert.deepEqual(valuesOf(rows, 'set-priority'), PRIORITIES)
+    assert.deepEqual(marked(rows), [String(DEFAULT), '6'])
+    assert.deepEqual(off(rows), [])
+    assert.ok(!actions(rows).includes('clear'))
+
+    await click('set-priority', '6')
+    await menuClosed(page)
+    assert.deepEqual(await storedRule('Fluff'), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'hide', priority: 6 })
+  })
+
+  test('a current priority that is also the default is marked once', async () => {
+    await openMenuOn('Meh')
+    await click('hide')
+    assert.deepEqual(marked(await submenuRows()), [String(DEFAULT)])
+  })
+
+  test('a tag with no rule gets one at the priority picked, the default marked', async () => {
+    const rows = await openMenuOn('Angst')
+    assert.ok(!rows.some(row => row.active))
+    await click('always-show')
+    const sub = await submenuRows()
+    assert.deepEqual(valuesOf(sub, 'set-priority'), PRIORITIES)
+    assert.deepEqual(marked(sub), [String(ALWAYS_SHOW)])
+    assert.deepEqual(off(sub), [])
+    assert.ok(!actions(sub).includes('clear'))
+
+    await click('set-priority', '9')
+    await menuClosed(page)
+    assert.deepEqual(await storedRule('Angst'), { target: 'F', value: 'Angst', matcher: 'exact', behavior: 'invert', priority: 9 })
+  })
+
+  test('a highlight is a toggle: chosen again, it goes', async () => {
+    const rows = await openMenuOn('Waff')
+    assert.equal(rowFor(rows, 'highlight').active, true)
+    await click('highlight')
+    await menuClosed(page)
+    assert.equal(await storedRule('Waff'), undefined)
+
+    await openMenuOn('Angst')
+    await click('highlight')
+    await menuClosed(page)
+    assert.deepEqual(await storedRule('Angst'), { target: 'F', value: 'Angst', matcher: 'exact', behavior: 'highlight' })
+  })
+
+  test('a highlight has no priority to mark as current when another behaviour replaces it', async () => {
+    await openMenuOn('Waff')
+    await click('collapse')
+    assert.deepEqual(marked(await submenuRows()), [String(DEFAULT)])
+    await click('set-priority', '4')
+    await menuClosed(page)
+    assert.deepEqual(await storedRule('Waff'), { target: 'F', value: 'Waff', matcher: 'exact', behavior: 'collapse', priority: 4 })
+  })
+
+  test('a disabled rule, which no behaviour stands for, is cleared from the menu itself', async () => {
+    const rows = await openMenuOn('Paused')
+    assert.ok(!rows.some(row => row.active))
+    await click('clear')
+    await menuClosed(page)
+    assert.equal(await storedRule('Paused'), undefined)
   })
 
   test('opens beside the menu when pointed at, and goes when another row is', async () => {
@@ -155,22 +246,15 @@ describe('rule priority from the tag menu', { skip }, () => {
       return { x: x + width / 2, y: y + height / 2 }
     }, action)
 
-    const parent = await rowAt('priority')
+    const parent = await rowAt('collapse')
     await page.mouse.move(parent.x, parent.y)
     await page.waitForSelector('.AO3E--menu--submenu')
-    assert.equal((await submenuRows()).length, 10)
+    assert.deepEqual(valuesOf(await submenuRows(), 'set-priority'), PRIORITIES)
 
-    const other = await rowAt('clear')
+    const other = await rowAt('highlight')
     await page.mouse.move(other.x, other.y)
     await page.waitForFunction(() => !document.querySelector('.AO3E--menu--submenu'))
     assert.ok(await page.$('.AO3E--menu'), 'the menu itself stays open')
-  })
-
-  test('switching the rule to another behaviour keeps its priority', async () => {
-    await openMenuOn('Fluff')
-    await click('hide')
-    await menuClosed(page)
-    assert.deepEqual(await storedRule('Fluff'), { target: 'F', value: 'Fluff', matcher: 'exact', behavior: 'hide', priority: 6 })
   })
 
   test('an "always show" offers the hide it overrides on this work, at that rule’s own priority', async () => {
@@ -178,7 +262,7 @@ describe('rule priority from the tag menu', { skip }, () => {
     assert.deepEqual(valuesOf(rows, 'overriding'), ['Soft Fandom'])
 
     await click('overriding', 'Soft Fandom')
-    assert.deepEqual((await submenuRows()).filter(r => r.active).map(r => r.value), ['0'])
+    assert.deepEqual(marked(await submenuRows()), ['0'])
     // One above "Keeper" at its default is enough to beat it.
     const above = ALWAYS_SHOW + 1
     await click('set-priority', String(above))
@@ -197,7 +281,7 @@ describe('rule priority from the tag menu', { skip }, () => {
 
   test('a force-show overriding nothing on this work offers nothing', async () => {
     const rows = await openMenuOn('Keeper', 'work_4')
-    assert.ok(actions(rows).includes('priority'), 'the menu is the force-show’s own')
+    assert.equal(rowFor(rows, 'always-show').active, true, 'the menu is the force-show’s own')
     assert.deepEqual(valuesOf(rows, 'overriding'), [])
   })
 })

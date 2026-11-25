@@ -3,26 +3,25 @@ import MdiCloseCircleOutline from '~icons/mdi/close-circle-outline.jsx'
 import MdiEyeCheck from '~icons/mdi/eye-check.jsx'
 import MdiEyeOffOutline from '~icons/mdi/eye-off-outline.jsx'
 import MdiEyeOff from '~icons/mdi/eye-off.jsx'
-import MdiFormatListNumbered from '~icons/mdi/format-list-numbered.jsx'
 import MdiStar from '~icons/mdi/star.jsx'
 import MdiTagOff from '~icons/mdi/tag-off.jsx'
 
 import type { FilterBehavior, Rule, RuleKey, RulePriorityDefaults } from '#common'
 
-import { behaviorOf, isTagTarget, MAX_PRIORITY, MIN_PRIORITY, ruleAffectsWorks, rulePriority, ruleSubject } from '#common'
+import { behaviorOf, defaultRulePriority, isTagTarget, MAX_PRIORITY, MIN_PRIORITY, ruleAffectsWorks, rulePriority, ruleSubject } from '#common'
 import React from '#dom'
 
 import type { MenuItem } from './contextMenu.tsx'
 
 import { FILTER_LABELS } from './contextTrigger.tsx'
 import { overruledOn } from './overruled.ts'
-import { clearRule, setPriorityOf, setRulePriority, toggleRuleBehavior } from './persistentFilters.js'
+import { clearRule, setPriorityOf, setRuleBehavior, setRulePriority, toggleRuleBehavior } from './persistentFilters.js'
 
 /**
  * The rows every menu that can write a rule offers — hide, collapse, always
- * show, highlight, and (for tags) hide the tag itself, plus the "Update
- * Priority" and "Clear" rows that appear once one of them is in force, and on
- * an "always show" a row for each hide it is holding off on the work at hand.
+ * show, highlight, and (for tags) hide the tag itself, the first three with a
+ * submenu of priorities — and on an "always show" a row for each hide it is
+ * holding off on the work at hand.
  *
  * The companion to `persistentFilters.ts`, which owns the other half of the same
  * concern: that module reads and writes the rule, this one draws it. Every
@@ -90,8 +89,12 @@ export interface RuleMenuOptions {
  * than these rows usually needs the rules list anyway, and reading it twice on
  * one menu open could show two different answers.
  *
- * The active behaviour is shown disabled (it's the current state, not an action);
- * "Clear" is how you get back to no rule at all.
+ * The behaviour the rule has is marked. Hide, collapse and always show each open
+ * a submenu of priorities: on the rule's own behaviour it changes the rule's
+ * priority, which the row shows, and offers "Clear"; on any other it gives the
+ * key that behaviour at the priority picked, replacing the rule. Highlighting
+ * and hiding the tag have no priority, so their rows toggle the behaviour. A
+ * disabled rule has no row of its own, so it gets a "Clear" in the menu itself.
  */
 export function ruleBehaviorItems(
   key: RuleKey,
@@ -99,61 +102,78 @@ export function ruleBehaviorItems(
   { noun, icons, at, defaults }: RuleMenuOptions,
 ): MenuItem[] {
   const behavior = behaviorOf(rule)
+  /** The rule's priority, when it has one that decides anything. */
+  const current = rule && ruleAffectsWorks(rule) ? rulePriority(rule, defaults) : undefined
   const items: MenuItem[] = []
   for (const row of BEHAVIOR_ROWS) {
     if (row.applies && !row.applies(key))
       continue
-    items.push({
+    const own = behavior === row.behavior
+    const label = row.label(noun)
+    const item: MenuItem = {
       icon: icons?.[row.behavior] ?? row.icon,
-      label: row.label(noun),
+      label,
       action: row.action,
       scope: 'settings',
       danger: row.danger,
-      active: behavior === row.behavior,
-      disabled: behavior === row.behavior,
-      onSelect: () => toggleRuleBehavior(key, row.behavior),
-    })
+      active: own,
+    }
+    if (!ruleAffectsWorks({ behavior: row.behavior }))
+      items.push({ ...item, onSelect: () => toggleRuleBehavior(key, row.behavior) })
+    else if (own && current !== undefined)
+      items.push({ ...item, label: `${label} (${current})`, submenu: [...priorityRows(current, priority => setRulePriority(key, priority)), clearRow(key)] })
+    else
+      items.push({ ...item, submenu: newRulePriorityRows(defaultRulePriority(row.behavior, defaults), current, priority => setRuleBehavior(key, row.behavior, priority)) })
   }
-  // Priority only weighs in the contest over whether a work shows, which
-  // highlighting, hiding the tag and a disabled rule never enter.
-  if (rule && ruleAffectsWorks(rule)) {
-    items.push({
-      icon: () => <MdiFormatListNumbered />,
-      label: 'Update Priority',
-      action: 'priority',
-      scope: 'settings',
-      submenu: priorityRows(rulePriority(rule, defaults), priority => setRulePriority(key, priority)),
-    })
-  }
-  if (rule?.behavior === 'invert' && at)
-    items.push(...overridingItems(rulePriority(rule, defaults), at))
-  if (behavior) {
-    items.push({
-      icon: () => <MdiCloseCircleOutline />,
-      label: 'Clear',
-      action: 'clear',
-      scope: 'settings',
-      onSelect: () => clearRule(key),
-    })
-  }
+  if (rule?.behavior === 'invert' && at && current !== undefined)
+    items.push(...overridingItems(current, at))
+  if (behavior === 'none')
+    items.push(clearRow(key))
   return items
+}
+
+function clearRow(key: RuleKey): MenuItem {
+  return {
+    icon: () => <MdiCloseCircleOutline />,
+    label: 'Clear',
+    action: 'clear',
+    scope: 'settings',
+    onSelect: () => clearRule(key),
+  }
+}
+
+/** The submenu row choosing `priority`. */
+function priorityRow(priority: number, pick: (priority: number) => Promise<void>, marks: Pick<MenuItem, 'active' | 'disabled'> & { note?: string }): MenuItem {
+  return {
+    label: marks.note ? `Priority ${priority} (${marks.note})` : `Priority ${priority}`,
+    action: 'set-priority',
+    value: String(priority),
+    scope: 'settings',
+    active: marks.active,
+    disabled: marks.disabled,
+    onSelect: () => pick(priority),
+  }
+}
+
+function everyPriority(): number[] {
+  return Array.from({ length: MAX_PRIORITY - MIN_PRIORITY + 1 }, (_, i) => MIN_PRIORITY + i)
 }
 
 /** A submenu of every priority, the current one marked and not offered. */
 function priorityRows(current: number, pick: (priority: number) => Promise<void>): MenuItem[] {
-  const rows: MenuItem[] = []
-  for (let priority = MIN_PRIORITY; priority <= MAX_PRIORITY; priority++) {
-    rows.push({
-      label: `Priority ${priority}`,
-      action: 'set-priority',
-      value: String(priority),
-      scope: 'settings',
-      active: priority === current,
-      disabled: priority === current,
-      onSelect: () => pick(priority),
-    })
-  }
-  return rows
+  return everyPriority().map(priority => priorityRow(priority, pick, { active: priority === current, disabled: priority === current }))
+}
+
+/**
+ * A submenu of every priority for a rule not yet made, each offered: the new
+ * behaviour's default marked, and so is the `current` priority of the rule it
+ * would replace.
+ */
+function newRulePriorityRows(byDefault: number, current: number | undefined, pick: (priority: number) => Promise<void>): MenuItem[] {
+  return everyPriority().map((priority) => {
+    const note = priority === current ? 'current' : priority === byDefault ? 'default' : undefined
+    return priorityRow(priority, pick, { active: note !== undefined, note })
+  })
 }
 
 /** A row naming another rule, which opens that rule's priorities. */

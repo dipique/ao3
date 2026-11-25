@@ -1,6 +1,6 @@
 import type { FilterBehavior, Rule, RuleKey, RulePriorityDefaults } from '#common'
 
-import { options, ruleHasKey, setExactRulePriority, setRulePriorityOf, toggleExactRule } from '#common'
+import { options, replaceExactRule, ruleHasKey, setExactRulePriority, setRulePriorityOf, toggleExactRule } from '#common'
 
 import { extensionAlive } from './extensionAlive.ts'
 
@@ -36,6 +36,11 @@ async function changeRules(change: (filters: Rule[], defaults: RulePriorityDefau
 /** Toggle `behavior` for an exact key in the rules list (re-selecting clears it). */
 export function toggleRuleBehavior(key: RuleKey, behavior: FilterBehavior): Promise<void> {
   return changeRules((filters, defaults) => toggleExactRule(filters, key, behavior, defaults), true)
+}
+
+/** Give an exact key `behavior` at `priority`, in place of any rule it has. */
+export function setRuleBehavior(key: RuleKey, behavior: FilterBehavior, priority: number): Promise<void> {
+  return changeRules((filters, defaults) => replaceExactRule(filters, key, behavior, defaults, priority), true)
 }
 
 /** Set the priority of the exact rule on this key; nothing happens when it has none. */

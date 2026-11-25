@@ -86,6 +86,20 @@ describe('replaceExactRule', () => {
     const key = { target: 'author', value: 'someone', pseud: 'alt' }
     assert.deepEqual(replaceExactRule([], key, 'hide', SETTINGS), [{ ...key, matcher: 'exact', behavior: 'hide' }])
   })
+
+  test('a priority given takes the place of the old rule\'s', () => {
+    assert.deepEqual(replaceExactRule([rule({ behavior: 'hide', priority: 7 })], fandom, 'collapse', SETTINGS, 2), [rule({ behavior: 'collapse', priority: 2 })])
+    assert.deepEqual(replaceExactRule([], fandom, 'invert', SETTINGS, 9), [rule({ behavior: 'invert', priority: 9 })])
+  })
+
+  test('a priority given that is the new behaviour\'s default is not stored', () => {
+    assert.deepEqual(replaceExactRule([rule({ behavior: 'hide', priority: 7 })], fandom, 'invert', SETTINGS, ALWAYS_SHOW), [rule({ behavior: 'invert' })])
+    assert.deepEqual(replaceExactRule([rule({ behavior: 'invert' })], fandom, 'hide', SETTINGS, 0), [rule({ behavior: 'hide' })])
+  })
+
+  test('a priority given is clamped to the 0-9 range', () => {
+    assert.deepEqual(replaceExactRule([], fandom, 'hide', SETTINGS, 12), [rule({ behavior: 'hide', priority: 9 })])
+  })
 })
 
 describe('toggleExactRule', () => {
