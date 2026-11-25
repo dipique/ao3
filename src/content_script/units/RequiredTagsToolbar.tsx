@@ -9,6 +9,7 @@ import { openPopover } from '#content_script/contextMenu.js'
 import { attachMenuTrigger, clearMenuTriggers } from '#content_script/contextTrigger.js'
 import { resetFilterSidebarCaches } from '#content_script/filterSidebar.js'
 import { filterMenuItems, filterTargetFor, nativeCheckboxTarget } from '#content_script/filterTarget.js'
+import { WIP_VALUE } from '#content_script/searchView/engine.ts'
 import { findFacetBridge } from '#content_script/searchView/facetBridge.ts'
 import { Unit } from '#content_script/Unit.js'
 import React from '#dom'
@@ -52,12 +53,10 @@ function classifySymbol(span: Element): SymbolInfo | null {
     return { facet: 'warnings', group: 'archive_warning', values: split }
   if (span.classList.contains('category'))
     return { facet: 'categories', group: 'category', values: split }
-  if (span.classList.contains('iswip')) {
-    // The engine's status values are "Complete" / "Work in Progress" (not the
-    // symbol's "Complete Work" title); read the state from the class instead.
-    const complete = span.classList.contains('complete-yes')
-    return { facet: 'completion', group: null, values: [complete ? 'Complete' : 'Work in Progress'] }
-  }
+  // The Status facet has one value for this, "Work in Progress", whichever way
+  // the symbol says it: excluding it is how complete works alone are asked for.
+  if (span.classList.contains('iswip'))
+    return { facet: 'status', group: null, values: [WIP_VALUE] }
   return null
 }
 

@@ -8,6 +8,7 @@ import { pruneDetachedTriggers } from '#content_script/contextTrigger.js'
 import { extensionAlive } from '#content_script/extensionAlive.js'
 import { PAGE_RUN } from '#content_script/pageRun.ts'
 import { recordRuleTiming } from '#content_script/ruleTiming.ts'
+import { loadCachedTextIds } from '#content_script/siteExport/cachedTextIds.js'
 import { refreshFilterToolbar } from '#content_script/units/FilterToolbar.tsx'
 import React from '#dom'
 
@@ -1755,8 +1756,12 @@ export async function openSearchView(source: SearchSource, options: Options, opt
       controller = opening.walk.controller
     // Local (never-synced) layout prefs for this application of the view. A
     // reopen has the ones it was showing — and nothing on its way back to the
-    // screen may wait on storage, or the page is drawn without it.
+    // screen may wait on storage, or the page is drawn without it. The works
+    // whose text is cached, for their Status, are read alongside: a reopen has
+    // them from the open it carries on.
+    const cachedText = carried ? null : loadCachedTextIds().catch(err => log.error('Could not read the cached work text index', err))
     let prefs = carried ? carried.prefs : await loadPrefs(source.id)
+    await cachedText
     if (stale())
       return
     /**

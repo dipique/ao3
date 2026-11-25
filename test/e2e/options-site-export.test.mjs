@@ -7,7 +7,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { markItems } from '../../src/common/workMarks.ts'
 import { WAIT_WORDS } from '../../src/content_script/archiveFetch.ts'
-import { CACHED, NOT_CACHED } from '../../src/content_script/searchView/engine.ts'
+import { CACHED } from '../../src/content_script/searchView/engine.ts'
 import { describeTextSearch } from '../../src/content_script/searchView/textSearch.ts'
 import { ALL_CACHED, scriptJson, SITE_DATA_ID, SITE_SHELL_ID, workHash } from '../../src/content_script/siteExport/payload.ts'
 import { WORK_TEXT_INDEX_KEY, WORK_TEXT_PREFIX, WORK_TEXT_VERSION } from '../../src/content_script/siteExport/workText.ts'
@@ -150,7 +150,7 @@ const SEED = {
   'cache.searchViewPrefs': {
     'marked-for-later': {
       collapsed: ['freeforms'],
-      order: ['fandoms', 'status', 'source', 'offline', 'rating', 'warnings', 'categories', 'relationships', 'characters', 'freeforms', 'language', 'completion'],
+      order: ['fandoms', 'status', 'source', 'rating', 'warnings', 'categories', 'relationships', 'characters', 'freeforms', 'language'],
     },
   },
   // The export bakes the reader's find/replace rules into every work on the way
@@ -821,8 +821,8 @@ describe('options UI — site export', { skip }, () => {
     }
   })
 
-  /** Which works the file carries text for is a facet of its own, as a filter. */
-  test('whether a work was cached is a facet', async () => {
+  /** Which works the file carries text for is a Status value, as a filter. */
+  test('whether a work was cached is a status', async () => {
     const { html } = await lastDownload()
     const dir = writeExport(withData(html, (data) => {
       data.works = data.works.filter(work => work.id !== '13')
@@ -833,17 +833,18 @@ describe('options UI — site export', { skip }, () => {
       await openFresh(reader, fileUrl(dir, 'library.html'))
       await reader.waitForSelector(RESULTS, { timeout: 15000 })
 
-      const rows = await reader.$$eval('.AO3E--search-view--group[data-ao3e-facet="offline"] .AO3E--search-view--row', els => els.map(el => [
+      const STATUS_ROWS = '.AO3E--search-view--group[data-ao3e-facet="status"] .AO3E--search-view--row'
+      const rows = await reader.$$eval(STATUS_ROWS, els => els.map(el => [
         el.querySelector('.AO3E--search-view--row-name').textContent,
         el.querySelector('.AO3E--search-view--row-count').textContent.replace(/\D/g, ''),
       ]))
-      assert.deepEqual(rows.sort(), [[CACHED, '2'], [NOT_CACHED, '1']])
+      assert.deepEqual(rows.filter(([name]) => name === CACHED), [[CACHED, '2']])
 
-      await reader.evaluate((value) => {
-        const row = [...document.querySelectorAll('.AO3E--search-view--group[data-ao3e-facet="offline"] .AO3E--search-view--row')]
+      await reader.evaluate((sel, value) => {
+        const row = [...document.querySelectorAll(sel)]
           .find(el => el.querySelector('.AO3E--search-view--row-name').textContent === value)
-        row.querySelector('.AO3E--search-view--toggle-include').click()
-      }, NOT_CACHED)
+        row.querySelector('.AO3E--search-view--toggle-exclude').click()
+      }, STATUS_ROWS, CACHED)
       await reader.waitForFunction(sel => document.querySelectorAll(sel).length === 1, {}, VISIBLE)
       assert.deepEqual(await reader.$$eval(VISIBLE, els => els.map(el => el.id)), ['work_13'])
     }

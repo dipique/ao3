@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import { filteredKey } from '../../src/common/trackedLists.ts'
-import { emptyFilterState, matches } from '../../src/content_script/searchView/engine.ts'
+import { emptyFilterState, matches, WIP_VALUE } from '../../src/content_script/searchView/engine.ts'
 import { excludedTagNames, filterStateOf, trackedFilterOf } from '../../src/content_script/tracked/viewFilter.ts'
 
 /**
@@ -63,6 +63,26 @@ describe('trackedFilterOf', () => {
     assert.equal(trackedFilterOf(state), undefined)
   })
 
+  test('the status facet’s completion choice is kept, as the completion a list has always stored', () => {
+    const complete = emptyFilterState()
+    complete.facets.status.exclude.add(WIP_VALUE)
+    complete.facets.status.include.add('Unread')
+    assert.deepEqual(trackedFilterOf(complete), { facets: { completion: { in: ['Complete'] } } })
+
+    for (const dir of ['include', 'require']) {
+      const wip = emptyFilterState()
+      wip.facets.status[dir].add(WIP_VALUE)
+      assert.deepEqual(trackedFilterOf(wip), { facets: { completion: { in: [WIP_VALUE] } } }, dir)
+    }
+  })
+
+  test('works in progress included beside another status narrows nothing a list can keep', () => {
+    const state = emptyFilterState()
+    state.facets.status.include.add(WIP_VALUE)
+    state.facets.status.include.add('Unread')
+    assert.equal(trackedFilterOf(state), undefined)
+  })
+
   test('a view that narrows nothing is no filter at all', () => {
     assert.equal(trackedFilterOf(emptyFilterState()), undefined)
   })
@@ -113,6 +133,27 @@ describe('filterStateOf', () => {
     assert.ok(matches(work(), state))
     assert.equal(state.facets.status.include.size, 0)
     assert.equal(state.facets.source.include.size, 0)
+  })
+
+  test('a stored completion is read into the status facet', () => {
+    const complete = filterStateOf({ facets: { completion: { in: ['Complete'] } } })
+    assert.deepEqual([...complete.facets.status.exclude], [WIP_VALUE])
+    assert.equal(matches(work(), complete), true)
+    assert.equal(matches(work({ complete: false }), complete), false)
+
+    // Every spelling an older build may have stored for one side counts.
+    for (const spelling of [{ in: [WIP_VALUE] }, { req: [WIP_VALUE] }, { ex: ['Complete'] }]) {
+      const wip = filterStateOf({ facets: { completion: spelling } })
+      assert.equal(matches(work(), wip), false, JSON.stringify(spelling))
+      assert.equal(matches(work({ complete: false }), wip), true, JSON.stringify(spelling))
+    }
+  })
+
+  test('a stored completion goes there and back unchanged', () => {
+    for (const value of ['Complete', WIP_VALUE]) {
+      const filter = { facets: { completion: { in: [value] }, characters: { ex: ['Draco Malfoy'] } } }
+      assert.deepEqual(trackedFilterOf(filterStateOf(filter)), filter)
+    }
   })
 
   test('what it rejects is what the view rejected', () => {

@@ -25,7 +25,6 @@ import {
   buildFacets,
   cloneFilterState,
   completionOf,
-  completionValue,
   computeView,
   emptyFilterState,
   FACET_KEYS,
@@ -35,8 +34,10 @@ import {
   layoutStablePages,
   orderFacetKeys,
   readerFilter,
+  selectCompletion,
   SORT_LABELS,
   sortWorks,
+  WIP_VALUE,
 } from './engine.ts'
 import { notifyFacetChange, registerFacetBridge } from './facetBridge.ts'
 import { groupCountText, layoutFacetRows, leftOutNote, nameRanks } from './facetRows.ts'
@@ -1922,20 +1923,14 @@ export function createSearchView(initialWorks: Work[], handlers: SearchViewHandl
       maxInput.value = state.wordsMax != null ? String(state.wordsMax) : ''
       filterChanged()
     },
-    getCompletion: () => completionOf(state.facets.completion),
+    getCompletion: () => completionOf(state.facets.status),
     setCompletion: (completion) => {
       // AO3's filter is one choice of three, so the pick replaces whatever the
-      // group held rather than adding to it — the facet rows then show it as
-      // one included value.
-      const sel = state.facets.completion
-      for (const value of sel.exclude) {
-        if (autoKeys.has(`completion:${value}`))
-          released.add(`completion:${value}`)
-      }
-      for (const dir of FACET_DIRS)
-        sel[dir].clear()
-      if (completion)
-        sel.include.add(completionValue(completion))
+      // status group said of works in progress, and nothing else in it.
+      const key = facetValueKey('status', WIP_VALUE)
+      if (state.facets.status.exclude.has(WIP_VALUE) && autoKeys.has(key))
+        released.add(key)
+      selectCompletion(state.facets.status, completion)
       filterChanged()
       notifyFacetChange()
     },

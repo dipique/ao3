@@ -16,7 +16,6 @@ import { foldText, parseTextQuery, queryMatches } from './textQuery.ts'
 export type FacetKey
   = | 'status'
     | 'source'
-    | 'offline'
     | 'rating'
     | 'warnings'
     | 'categories'
@@ -25,13 +24,11 @@ export type FacetKey
     | 'characters'
     | 'freeforms'
     | 'language'
-    | 'completion'
 
 /** Facet groups in sidebar display order. */
 export const FACET_KEYS: FacetKey[] = [
   'status',
   'source',
-  'offline',
   'rating',
   'warnings',
   'categories',
@@ -40,13 +37,11 @@ export const FACET_KEYS: FacetKey[] = [
   'characters',
   'freeforms',
   'language',
-  'completion',
 ]
 
 export const FACET_LABELS: Record<FacetKey, string> = {
   status: 'Status',
   source: 'List source',
-  offline: 'Offline copy',
   rating: TagType.toPluralString(TagType.Rating),
   warnings: TagType.toPluralString(TagType.ArchiveWarning),
   categories: TagType.toPluralString(TagType.Category),
@@ -55,7 +50,6 @@ export const FACET_LABELS: Record<FacetKey, string> = {
   characters: TagType.toPluralString(TagType.Character),
   freeforms: TagType.toPluralString(TagType.Freeform),
   language: 'Language',
-  completion: 'Completion Status',
 }
 
 /**
@@ -121,8 +115,7 @@ export const SORT_LABELS: Record<SortKey, string> = {
   bookmarks: 'Bookmarks',
 }
 
-/** The two values of the `completion` facet group. */
-export const COMPLETE_VALUE = 'Complete'
+/** The `status` facet's value for a work its author hasn't marked complete. */
 export const WIP_VALUE = 'Work in Progress'
 
 /**
@@ -133,25 +126,41 @@ export const WIP_VALUE = 'Work in Progress'
  */
 export const UNREAD = 'Unread'
 
-/** The two values of the `offline` facet group: whether a site export carries the work's text. */
+/** The `status` facet's value for a work whose text is in the cache. */
 export const CACHED = 'Cached'
-export const NOT_CACHED = 'Not cached'
+
+/** The `status` facet's value for a work AO3 has deleted that the list keeps ({@link Work.deleted}). */
+export const DELETED = 'Deleted'
+
+/**
+ * The `status` facet's values that say what state the work itself is in, rather
+ * than what the reader has done with it: in progress, its text cached, deleted
+ * from AO3.
+ */
+export function ownStatuses(work: Pick<Work, 'complete' | 'deleted'>, cached: boolean): string[] {
+  const values: string[] = []
+  if (!work.complete)
+    values.push(WIP_VALUE)
+  if (cached)
+    values.push(CACHED)
+  if (work.deleted)
+    values.push(DELETED)
+  return values
+}
 
 export function facetValues(work: Work, key: FacetKey): string[] {
   switch (key) {
     // Precomputed by the host, not derived here: a work's statuses depend on the
     // mark table, on the Marked for Later index and on what day it is, none of
     // which belongs in a pure engine. A work the host never stamped falls back
-    // to Ready — an untracked work on your to-read list is exactly that, with
-    // nothing standing between you and reading it.
-    case 'status': return work.statuses ?? ['Ready']
+    // to Ready when it is complete — an untracked work on your to-read list is
+    // exactly that, with nothing standing between you and reading it — beside
+    // what the work says of itself.
+    case 'status': return work.statuses ?? [...(work.complete ? ['Ready'] : []), ...ownStatuses(work, false)]
     // Which of the reader's own lists turned this work up — stamped by the host
     // for a view assembled from several queries at once, and absent everywhere
     // else, so the group has no values and the sidebar leaves it out.
     case 'source': return work.sources ?? []
-    // Stamped by a site export, which alone knows what it carries; empty, and
-    // so no group, everywhere else.
-    case 'offline': return work.offline ? [work.offline] : []
     case 'rating': return work.rating ? [work.rating] : []
     case 'warnings': return work.warnings
     case 'categories': return work.categories
@@ -160,37 +169,39 @@ export function facetValues(work: Work, key: FacetKey): string[] {
     case 'characters': return work.characters
     case 'freeforms': return work.freeforms
     case 'language': return work.language ? [work.language] : []
-    case 'completion': return [work.complete ? COMPLETE_VALUE : WIP_VALUE]
   }
 }
 
-/** Whether a completion selection lets works carrying `value` through. */
-function completionAdmits(sel: FacetSelection, value: string): boolean {
-  if (sel.exclude.has(value))
-    return false
-  if (sel.include.size > 0 && !sel.include.has(value))
-    return false
-  // A work carries exactly one completion value, so requiring any other
-  // shuts it out.
-  return [...sel.require].every(required => required === value)
+/**
+ * Read the `status` facet's selection of {@link WIP_VALUE} as the one choice
+ * AO3's own Completion Status filter offers: complete works only (works in
+ * progress excluded), works in progress only (required, or the one value
+ * included), or (null) either. Works in progress included beside other values
+ * is "these or those", which narrows to neither side.
+ */
+export function completionOf(sel: FacetSelection): Completion | null {
+  const excluded = sel.exclude.has(WIP_VALUE)
+  const required = sel.require.has(WIP_VALUE)
+  if (excluded)
+    return required ? null : 'complete'
+  if (required || (sel.include.size === 1 && sel.include.has(WIP_VALUE)))
+    return 'incomplete'
+  return null
 }
 
 /**
- * Read a `completion` facet selection as the one choice AO3's own filter offers:
- * complete works only, works in progress only, or (null) either. Any spelling
- * that narrows to one side counts — including one, or excluding the other.
+ * Write `completion` into a `status` selection, replacing whatever it said of
+ * {@link WIP_VALUE} and leaving its other values alone: complete only excludes
+ * works in progress, in progress only requires them, and null lets both through.
  */
-export function completionOf(sel: FacetSelection): Completion | null {
-  const complete = completionAdmits(sel, COMPLETE_VALUE)
-  const wip = completionAdmits(sel, WIP_VALUE)
-  if (complete === wip)
-    return null
-  return complete ? 'complete' : 'incomplete'
-}
-
-/** The facet value that stands for `completion`, for writing it into the group. */
-export function completionValue(completion: Completion): string {
-  return completion === 'complete' ? COMPLETE_VALUE : WIP_VALUE
+export function selectCompletion(sel: FacetSelection, completion: Completion | null): void {
+  sel.include.delete(WIP_VALUE)
+  sel.exclude.delete(WIP_VALUE)
+  sel.require.delete(WIP_VALUE)
+  if (completion === 'complete')
+    sel.exclude.add(WIP_VALUE)
+  else if (completion === 'incomplete')
+    sel.require.add(WIP_VALUE)
 }
 
 /**
@@ -250,11 +261,11 @@ export function cloneFilterState(f: FilterState): FilterState {
  * beyond it (a tracked list's):
  *
  * - **Status** depends on the reader's marks and on what day it is, and a list's
- *   review already leaves out the works the reader has dealt with;
- * - **List source** only exists in the review, which is assembled *from* lists;
- * - **Offline copy** only exists in a site export, and says what that file holds.
+ *   review already leaves out the works the reader has dealt with — all but its
+ *   completion choice ({@link completionOf}), which says what the works are;
+ * - **List source** only exists in the review, which is assembled *from* lists.
  */
-export const VIEW_ONLY_KEYS: readonly FacetKey[] = ['status', 'source', 'offline']
+export const VIEW_ONLY_KEYS: readonly FacetKey[] = ['status', 'source']
 
 /** How a view names one selected value in its bookkeeping: `key:value`. */
 export function facetValueKey(key: FacetKey, value: string): string {
@@ -273,14 +284,15 @@ export function facetValueKey(key: FacetKey, value: string): string {
  * exclusion the reader lifted and then put back by hand (`released` names every
  * one they lifted): what is excluded now is their doing, not the rule's.
  *
- * The {@link VIEW_ONLY_KEYS} groups come back empty. Sort and direction are
- * carried over untouched; they are layout, and nothing that reads a filter as a
- * filter looks at them.
+ * The {@link VIEW_ONLY_KEYS} groups come back empty but for the status group's
+ * completion choice. Sort and direction are carried over untouched; they are
+ * layout, and nothing that reads a filter as a filter looks at them.
  */
 export function readerFilter(f: FilterState, auto: ReadonlySet<string>, released: ReadonlySet<string>): FilterState {
   const out = cloneFilterState(f)
   for (const key of VIEW_ONLY_KEYS)
     out.facets[key] = { include: new Set(), exclude: new Set(), require: new Set() }
+  selectCompletion(out.facets.status, completionOf(f.facets.status))
   for (const key of FACET_KEYS) {
     const excluded = out.facets[key].exclude
     for (const value of [...excluded]) {

@@ -20,7 +20,7 @@ import React from '#dom'
  * works only or incomplete works only, plus a row clearing whichever is on.
  *
  * Where the pick lands follows {@link file://./WordCountToolbar.tsx}: inside one
- * of our in-memory search views it drives that view's Completion Status facet
+ * of our in-memory search views it drives that view's Status facet ("Work in Progress")
  * (via {@link findFacetBridge}), filtering at once; on a native listing it ticks
  * AO3's own Completion Status radio and stops there, leaving the search to the
  * reader (the pending-search prompt offers to run it, see

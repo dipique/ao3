@@ -18,7 +18,6 @@ import { createFloatingToolbar, toolbarButton } from '#content_script/floatingTo
 import { attachReaderSizing } from '#content_script/readerSizing.ts'
 import { worksFromHtml } from '#content_script/searchView/cache.js'
 import { decorateBlurb, decorateContainer, decorateWorkTitle, makeFacetHider } from '#content_script/searchView/decorate.js'
-import { CACHED, NOT_CACHED } from '#content_script/searchView/engine.js'
 import { applyHidden } from '#content_script/searchView/hidden.js'
 import { loadPrefs, savePrefs } from '#content_script/searchView/prefs.js'
 import { applyStatus } from '#content_script/searchView/status.js'
@@ -111,6 +110,8 @@ export async function startSite(ctx: SiteContext): Promise<void> {
    */
   let blurbsHtml: Promise<string[]> | null = null
   const texts = new Map(data.works.map(work => [work.id, work]))
+  /** The works this export carries the text of: its Status facet's "Cached". */
+  const textIds = new Set(texts.keys())
   const listed = new Map(data.manifest.works.map(work => [work.id, work]))
   const listTitle = document.title
   // A work's menu asks whether the work is on the list, built or not.
@@ -285,19 +286,19 @@ export async function startSite(ctx: SiteContext): Promise<void> {
 
   /**
    * Everything the works need before the view sees them — the two passes the
-   * shared host runs on a live listing, plus the one thing only an export has
-   * to say: which of these works it does not actually carry.
+   * shared host runs on a live listing, plus what only an export has to say:
+   * which of these works it carries, and which AO3 had deleted.
    */
   function prepare(works: Work[], current: Options): FacetValueRef[] {
-    applyStatus(works, current)
-    const autoExcludes = applyHidden(works, current, { hidesNothing })
     for (const work of works) {
-      const entry = listed.get(work.workId)
-      work.offline = texts.has(work.workId) ? CACHED : NOT_CACHED
-      if (entry?.deletedAt !== undefined)
-        work.deleted = { at: entry.deletedAt }
-      noteIfAbsent(work, entry)
+      const deletedAt = listed.get(work.workId)?.deletedAt
+      if (deletedAt !== undefined)
+        work.deleted = { at: deletedAt }
     }
+    applyStatus(works, current, textIds)
+    const autoExcludes = applyHidden(works, current, { hidesNothing })
+    for (const work of works)
+      noteIfAbsent(work, listed.get(work.workId))
     return autoExcludes
   }
 

@@ -1,48 +1,17 @@
-import type { Options, WorkProgress } from '#common'
+import type { Options } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
-import {
-  localMarkIds,
-  markGroup,
-  markItems,
-  markLabel,
-  markProgress,
-  markTracksProgress,
-  READ_MARK,
-  readiness,
-  READINESS_LABELS,
-  SAVED_MARK,
-  todayEpochDays,
-} from '#common'
+import { todayEpochDays } from '#common'
 import { markedForLaterIds } from '#content_script/markedForLaterIndex.js'
+import { cachedTextIds } from '#content_script/siteExport/cachedTextIds.js'
 
-import { UNREAD } from './engine.ts'
+import { stampStatuses } from './statusValues.ts'
 
 /**
- * Stamp each work with its Status facet values — everything the reader has (or
- * hasn't) done with it, as opposed to anything the blurb says about the work
- * itself. Four kinds of value, all in one group because they're all answers to
- * the same question, "where am I with this one?":
- *
- * - **every mark it carries**, by the mark's own label ("Read", "Favorite",
- *   "Ongoing", …), so a renamed or added mark needs nothing here;
- * - **Unread**, when it carries no mark from the `read` trigger group at all —
- *   the complement of the above, and the one value you can't get by excluding,
- *   since "not Favorite" includes every other verdict;
- * - **Ready / Waiting / Caught up**, how ready it is to be read *on*
- *   ({@link file://../../common/workProgress.ts});
- * - **Marked for later**, when the cached index says it's on that list.
- *
- * Readiness is only stamped where it means something: on an ongoing work, which
- * is what the states are about, and on a work with no verdict yet, which is
- * ready by definition. A work already read is neither ready nor caught up — it's
- * done, and the mark that says so is the value it carries instead.
- *
- * Every mark is a Status value rather than a group of its own on purpose. A
- * separate Marks group would repeat the marks with nothing beside them — and
- * what sits beside them here is the point: on the read list, where every work
- * has a verdict, a "Marked for later" value showing up among them is a work the
- * extension calls read and AO3 still has saved, which is a desync worth seeing.
+ * Stamp each work with its Status facet values ({@link stampStatuses} says
+ * which), from the saved-work index and the cached-text index as this page last
+ * read them — or from `cached`, for a host that knows better which works it
+ * holds the text of (a site export).
  *
  * A post-pass rather than something `parseWork` does, for two reasons that both
  * come down to the same thing — none of this is a property of the blurb. The
@@ -52,51 +21,6 @@ import { UNREAD } from './engine.ts'
  * (cached or fresh), which also re-reads today's date — a background refresh can
  * outlive midnight on a tab left open.
  */
-export function applyStatus(works: Work[], options: Options): void {
-  const { workMarks } = options
-  // With marks off there is nothing to say: the facet simply doesn't appear.
-  if (!workMarks.enabled)
-    return
-  const { marks } = workMarks
-
-  // Unpack each mark's id set (and the progress payload of the one that has one)
-  // once for the whole run, rather than per work.
-  const carriers = localMarkIds(marks).map(id => ({
-    id,
-    label: markLabel(marks, id),
-    items: markItems(marks, id),
-    progress: markTracksProgress(marks, id) ? markProgress(marks, id) : null,
-  }))
-  // "Done with it" is the trigger group, not the `read` mark alone — a work
-  // called `gross` has a verdict just as much as one called `read`.
-  const readGroup = new Set(markGroup(marks, READ_MARK))
-  const savedLabel = marks[SAVED_MARK]?.label
-  // A cache, and one that only says who *is* saved — a work missing from it is
-  // unknown, never "not saved" — so it contributes a value and never withholds
-  // one. Null until some unit has read it this run (see the module's own notes).
-  const saved = savedLabel ? markedForLaterIds() : null
-  const today = todayEpochDays()
-
-  for (const work of works) {
-    const values: string[] = []
-    let verdict = false
-    let progress: WorkProgress | undefined
-    for (const mark of carriers) {
-      if (!mark.items.has(work.workId))
-        continue
-      values.push(mark.label)
-      if (readGroup.has(mark.id))
-        verdict = true
-      progress ??= mark.progress?.get(work.workId)
-    }
-    if (!verdict)
-      values.push(UNREAD)
-    if (savedLabel && saved?.has(work.workId))
-      values.push(savedLabel)
-    // No work on AO3 has zero chapters, so a zero here means the count wasn't
-    // there to read — which readiness() takes as null and fails open on.
-    if (progress || !verdict)
-      values.push(READINESS_LABELS[readiness(progress, work.chapters.written || null, today)])
-    work.statuses = values
-  }
+export function applyStatus(works: Work[], options: Options, cached: ReadonlySet<string> | null = cachedTextIds()): void {
+  stampStatuses(works, options.workMarks, { saved: markedForLaterIds(), cached, today: todayEpochDays() })
 }

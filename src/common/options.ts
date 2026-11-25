@@ -263,8 +263,8 @@ export interface Options {
   /**
    * Click a work's chapter total (or the "Chapters:" label) on a listing for a
    * menu narrowing it to complete works or works in progress. Drives AO3's own
-   * Completion Status filter on native listings, and the in-memory Completion
-   * Status facet inside our search views — the same split as
+   * Completion Status filter on native listings, and the in-memory Status
+   * facet's "Work in Progress" inside our search views — the same split as
    * {@link Options.wordCountToolbar}.
    */
   completionToolbar: boolean

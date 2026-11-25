@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { READINESS_LABELS } from '../../src/common/workProgress.ts'
-import { UNREAD } from '../../src/content_script/searchView/engine.ts'
+import { UNREAD, WIP_VALUE } from '../../src/content_script/searchView/engine.ts'
 import { DIST, ensureBuilt, findChrome, installMock, launch, until } from './helpers.mjs'
 import { pressFacet, settled, viewDrawn } from './trackedPages.mjs'
 
@@ -17,8 +17,8 @@ const READINGS_URL = 'https://archiveofourown.org/users/me/readings?show=to-read
  * Three works, all on the Marked for Later list, with the ongoing mark already
  * carrying progress for two of them:
  *
- * - work 1: chapter 3 of 9 published — something to read, so **Ready**
- * - work 2: chapter 5 of 5 — nothing new, so **Caught up**
+ * - work 1: chapter 3 of 9 published, and complete — something to read, so **Ready**
+ * - work 2: chapter 5 of 5, a work in progress — nothing new, so **Caught up**
  * - work 3: no mark at all — an untracked to-read work is Ready by definition
  *
  * A wait-until date is deliberately not used for the *waiting* case: it would
@@ -73,7 +73,7 @@ const READINGS_HTML = `<!doctype html>
   <div id="main">
     <ul class="navigation actions"><li><span class="current">Marked for Later</span></li></ul>
     <ol class="reading work index group">
-      ${blurb(1, 'Still going', '<a href="/works/1/navigate">9</a>/23')}
+      ${blurb(1, 'Still going', '<a href="/works/1/navigate">9</a>/9')}
       ${blurb(2, 'All caught up', '<a href="/works/2/navigate">5</a>/?')}
       ${blurb(3, 'Never marked', '1/1')}
     </ol>
@@ -150,13 +150,13 @@ describe('the Status facet in the search view', { skip }, () => {
   test('the facet exists, listing every status present, with Ready alone selected', async () => {
     const rows = await statusRows()
     assert.notEqual(rows, null, 'no Status facet group was rendered')
-    // Works 1 and 2 carry the ongoing mark (one Ready, one Caught up); work 3
-    // carries nothing, so it is Unread and ready by definition. All three are on
-    // the Marked for Later list this page is, and the view writes that index
-    // before it renders.
+    // Works 1 and 2 carry the ongoing mark (one Ready, one Caught up and in
+    // progress); work 3 carries nothing, so it is Unread and ready by
+    // definition. All three are on the Marked for Later list this page is, and
+    // the view writes that index before it renders.
     assert.deepEqual(
       rows.map(r => r.value).sort(),
-      [READINESS_LABELS.caughtUp, 'Marked for later', 'Ongoing', READINESS_LABELS.ready, UNREAD].sort(),
+      [READINESS_LABELS.caughtUp, 'Marked for later', 'Ongoing', READINESS_LABELS.ready, UNREAD, WIP_VALUE].sort(),
     )
     assert.deepEqual(rows.filter(r => r.included).map(r => r.value), [READINESS_LABELS.ready])
   })

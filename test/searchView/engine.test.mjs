@@ -7,22 +7,22 @@ import {
   applyFilters,
   buildFacets,
   buildFilteredFacets,
-  CACHED,
   cloneFilterState,
   completionOf,
-  completionValue,
   computeView,
+  DELETED,
   emptyFilterState,
   FACET_KEYS,
   facetValueKey,
   facetValues,
   layoutStablePages,
   matches,
-  NOT_CACHED,
   orderFacetKeys,
   readerFilter,
+  selectCompletion,
   sortWorks,
   VIEW_ONLY_KEYS,
+  WIP_VALUE,
 } from '../../src/content_script/searchView/engine.ts'
 
 /** Minimal work-like object — the engine only reads plain fields, never `el`. */
@@ -71,10 +71,10 @@ describe('searchView in-memory engine', () => {
     const freeforms = Object.fromEntries(facets.freeforms.map(f => [f.value, f.count]))
     assert.equal(freeforms.Fluff, 2)
     assert.equal(freeforms.Angst, 2)
-    // Completion facet is derived from `complete`.
-    const completion = Object.fromEntries(facets.completion.map(f => [f.value, f.count]))
-    assert.equal(completion.Complete, 2)
-    assert.equal(completion['Work in Progress'], 1)
+    // An unstamped work's status is derived from `complete`.
+    const status = Object.fromEntries(facets.status.map(f => [f.value, f.count]))
+    assert.equal(status.Ready, 2)
+    assert.equal(status[WIP_VALUE], 1)
   })
 
   test('include facet is OR within a group', () => {
@@ -287,11 +287,16 @@ describe('searchView in-memory engine', () => {
 })
 
 describe('the status facet', () => {
-  test('an unstamped work reads as Ready', () => {
+  test('an unstamped work reads as Ready when it is complete', () => {
     // Untracked works — everything on a to-read list that isn't marked ongoing —
     // are ready to read by definition, and the fallback is also what keeps every
     // other test in this file (whose factory has no statuses field) honest.
     assert.deepEqual(facetValues(work(), 'status'), ['Ready'])
+  })
+
+  test('an unstamped work still says what it is: in progress, deleted', () => {
+    assert.deepEqual(facetValues(work({ complete: false }), 'status'), [WIP_VALUE])
+    assert.deepEqual(facetValues(work({ deleted: { at: 1 } }), 'status'), ['Ready', DELETED])
   })
 
   test('precomputed values are used as-is', () => {
@@ -334,13 +339,8 @@ describe('the status facet', () => {
   })
 })
 
-describe('the completion facet', () => {
-  test('reads the work’s own complete flag', () => {
-    assert.deepEqual(facetValues(work(), 'completion'), ['Complete'])
-    assert.deepEqual(facetValues(work({ complete: false }), 'completion'), ['Work in Progress'])
-  })
-
-  /** A completion selection from `{ include, exclude, require }` value lists. */
+describe('completion in the status facet', () => {
+  /** A status selection from `{ include, exclude, require }` value lists. */
   const sel = ({ include = [], exclude = [], require = [] } = {}) =>
     ({ include: new Set(include), exclude: new Set(exclude), require: new Set(require) })
 
@@ -348,21 +348,36 @@ describe('the completion facet', () => {
     assert.equal(completionOf(sel()), null)
   })
 
-  test('including one side, or excluding the other, narrows to it', () => {
-    assert.equal(completionOf(sel({ include: ['Complete'] })), 'complete')
-    assert.equal(completionOf(sel({ exclude: ['Work in Progress'] })), 'complete')
-    assert.equal(completionOf(sel({ require: ['Work in Progress'] })), 'incomplete')
-    assert.equal(completionOf(sel({ exclude: ['Complete'] })), 'incomplete')
+  test('excluding works in progress is complete only; including or requiring them alone is in progress only', () => {
+    assert.equal(completionOf(sel({ exclude: [WIP_VALUE] })), 'complete')
+    assert.equal(completionOf(sel({ exclude: [WIP_VALUE, 'Read'] })), 'complete')
+    assert.equal(completionOf(sel({ include: [WIP_VALUE] })), 'incomplete')
+    assert.equal(completionOf(sel({ require: [WIP_VALUE] })), 'incomplete')
+    assert.equal(completionOf(sel({ include: ['Unread'], require: [WIP_VALUE] })), 'incomplete')
   })
 
-  test('a selection admitting both sides, or neither, is no single choice', () => {
-    assert.equal(completionOf(sel({ include: ['Complete', 'Work in Progress'] })), null)
-    assert.equal(completionOf(sel({ exclude: ['Complete', 'Work in Progress'] })), null)
+  test('works in progress included beside another value, or both required and excluded, is no single choice', () => {
+    assert.equal(completionOf(sel({ include: [WIP_VALUE, 'Unread'] })), null)
+    assert.equal(completionOf(sel({ exclude: [WIP_VALUE], require: [WIP_VALUE] })), null)
+    assert.equal(completionOf(sel({ include: ['Ready'] })), null)
   })
 
-  test('each choice writes the value that reads back as it', () => {
-    for (const choice of ['complete', 'incomplete'])
-      assert.equal(completionOf(sel({ include: [completionValue(choice)] })), choice)
+  test('each choice writes a selection that reads back as it, and leaves the other values alone', () => {
+    for (const choice of ['complete', 'incomplete', null]) {
+      const selection = sel({ include: ['Unread', WIP_VALUE], exclude: ['Read'] })
+      selectCompletion(selection, choice)
+      assert.equal(completionOf(selection), choice)
+      assert.ok(selection.include.has('Unread'), 'other included values stay')
+      assert.ok(selection.exclude.has('Read'), 'other excluded values stay')
+    }
+  })
+
+  test('complete only lets complete works through', () => {
+    const state = emptyFilterState()
+    selectCompletion(state.facets.status, 'complete')
+    assert.deepEqual(applyFilters(works, state).map(w => w.workId), ['1', '3'])
+    selectCompletion(state.facets.status, 'incomplete')
+    assert.deepEqual(applyFilters(works, state).map(w => w.workId), ['2'])
   })
 })
 
@@ -373,22 +388,6 @@ describe('the list-source facet', () => {
     // out of the sidebar there: no values, no group.
     assert.deepEqual(facetValues(work(), 'source'), [])
     assert.deepEqual(buildFacets([work(), work()]).source, [])
-  })
-})
-
-describe('the offline-copy facet', () => {
-  test('reads whether the host stamped the work as cached, and is empty without it', () => {
-    assert.deepEqual(facetValues(work({ offline: CACHED }), 'offline'), [CACHED])
-    assert.deepEqual(facetValues(work({ offline: NOT_CACHED }), 'offline'), [NOT_CACHED])
-    // Only a site export knows which works it carries; everywhere else the group
-    // has no values, and so no place in the sidebar.
-    assert.deepEqual(facetValues(work(), 'offline'), [])
-    assert.deepEqual(buildFacets([work(), work()]).offline, [])
-  })
-
-  test('counts each side', () => {
-    const works = [work({ offline: CACHED }), work({ offline: CACHED }), work({ offline: NOT_CACHED })]
-    assert.deepEqual(buildFacets(works).offline.map(({ value, count }) => [value, count]).sort(), [[CACHED, 2], [NOT_CACHED, 1]])
   })
 })
 
@@ -406,7 +405,7 @@ describe('the saved facet order', () => {
   test('a key the saved order never heard of lands at its default position', () => {
     // What a reader who reordered their groups before `source` existed has
     // stored. It belongs between status and rating, as it does for everyone
-    // else — not at the bottom, under Completion Status.
+    // else — not at the bottom, under Language.
     const saved = FACET_KEYS.filter(key => key !== 'source')
     assert.deepEqual(orderFacetKeys(saved), FACET_KEYS)
 
@@ -417,11 +416,11 @@ describe('the saved facet order', () => {
   })
 
   test('a key with none of its predecessors saved goes to the front', () => {
-    assert.deepEqual(orderFacetKeys(['language']), ['status', 'source', 'offline', 'rating', 'warnings', 'categories', 'fandoms', 'relationships', 'characters', 'freeforms', 'language', 'completion'])
+    assert.deepEqual(orderFacetKeys(['language']), ['status', 'source', 'rating', 'warnings', 'categories', 'fandoms', 'relationships', 'characters', 'freeforms', 'language'])
   })
 
   test('every key comes back exactly once, whatever the saved order says', () => {
-    for (const saved of [['completion', 'completion', 'status'], ['freeforms'], [...FACET_KEYS].reverse()]) {
+    for (const saved of [['language', 'language', 'status'], ['freeforms'], [...FACET_KEYS].reverse()]) {
       const ordered = orderFacetKeys(saved)
       assert.deepEqual([...ordered].sort(), [...FACET_KEYS].sort())
     }
@@ -608,13 +607,17 @@ describe('the reader’s own filter', () => {
     assert.equal(own.facets.fandoms.exclude.size, 0)
   })
 
-  test('status, list source and offline copy are left out', () => {
-    assert.deepEqual([...VIEW_ONLY_KEYS].sort(), ['offline', 'source', 'status'])
-    const own = readerFilter(viewState(), auto, released)
-    for (const key of VIEW_ONLY_KEYS) {
-      const sel = own.facets[key]
-      assert.equal(sel.include.size + sel.exclude.size + sel.require.size, 0, key)
-    }
+  test('status and list source are left out, but for the status facet’s completion choice', () => {
+    assert.deepEqual([...VIEW_ONLY_KEYS].sort(), ['source', 'status'])
+    const state = viewState()
+    state.facets.status.include.add('Unread')
+    state.facets.status.exclude.add(WIP_VALUE)
+    state.facets.source.include.add('Alpha')
+    const own = readerFilter(state, auto, released)
+    assert.equal(own.facets.source.include.size, 0)
+    assert.deepEqual([...own.facets.status.exclude], [WIP_VALUE])
+    assert.equal(own.facets.status.include.size + own.facets.status.require.size, 0)
+    assert.equal(completionOf(own.facets.status), 'complete')
   })
 
   test('the text box and the word count come across as they are', () => {

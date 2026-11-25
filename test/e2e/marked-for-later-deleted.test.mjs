@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, test } from 'node:test'
 
+import { CACHED, DELETED } from '../../src/content_script/searchView/engine.ts'
+import { WORK_TEXT_INDEX_KEY, WORK_TEXT_VERSION } from '../../src/content_script/siteExport/workText.ts'
 import { ensureBuilt, findChrome, storedListIds, storedLists, until } from './helpers.mjs'
 import { archiveTab, blurb, DESCRIPTOR, HOUR, KEY, openToRead, shownTitles, storedClaim } from './markedForLater.mjs'
 import { launch } from './trackedPages.mjs'
@@ -60,6 +62,8 @@ function seed(ageMs, extra = {}) {
   }
 }
 
+const STATUS_ROWS = '.AO3E--search-view--group[data-ao3e-facet="status"] .AO3E--search-view--row'
+
 const stored = (tab, key) => tab.evaluate(async k => (await window.browser.storage.local.get(k))[k] ?? null, key)
 
 /** The titles of the shown works that carry the deleted badge. */
@@ -116,6 +120,32 @@ describe('Marked for Later: works AO3 deleted', { skip }, () => {
       assert.deepEqual(await shownTitles(tab), ['Work 1', 'Work 2', 'Work 3'])
       assert.deepEqual(await badged(tab), ['Work 2'])
       assert.deepEqual(asked, [], 'nothing was asked of AO3')
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
+  test('the Status facet says which works are deleted and which have their text cached', async () => {
+    const tab = await archiveTab(browser, seed(HOUR, {
+      'cache.deletedWorks': { 2: { at: Date.now() - HOUR, reading: READING } },
+      [WORK_TEXT_INDEX_KEY]: { 3: { size: 10, updatedAt: 0, chapters: 1, words: 10, fetchedAt: Date.now(), v: WORK_TEXT_VERSION } },
+    }), () => toReadPage([]))
+    try {
+      await openToRead(tab)
+      const rows = await tab.$$eval(STATUS_ROWS, els => els.map(el => [
+        el.querySelector('.AO3E--search-view--row-name').textContent,
+        el.querySelector('.AO3E--search-view--row-count').textContent.replace(/\D/g, ''),
+      ]))
+      assert.deepEqual(rows.filter(([name]) => name === DELETED || name === CACHED).sort(), [[CACHED, '1'], [DELETED, '1']])
+
+      await tab.evaluate((sel, value) => {
+        const row = [...document.querySelectorAll(sel)]
+          .find(el => el.querySelector('.AO3E--search-view--row-name').textContent === value)
+        row.querySelector('.AO3E--search-view--toggle-exclude').click()
+      }, STATUS_ROWS, DELETED)
+      await until('the deleted work to leave the results', async () => (await shownTitles(tab)).length === 2)
+      assert.deepEqual(await shownTitles(tab), ['Work 1', 'Work 3'])
     }
     finally {
       await tab.close()

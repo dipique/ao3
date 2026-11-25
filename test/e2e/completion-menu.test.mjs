@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { COMPLETION_LABELS } from '../../src/common/data.ts'
-import { COMPLETE_VALUE, WIP_VALUE } from '../../src/content_script/searchView/engine.ts'
+import { WIP_VALUE } from '../../src/content_script/searchView/engine.ts'
 import { mentions } from '../facts.mjs'
 import { DIST, ensureBuilt, findChrome, installMock, launch } from './helpers.mjs'
 import { menuClosed, menuGuardOver, menuRows, openMenu, pickRow, settled, viewDrawn } from './trackedPages.mjs'
@@ -240,6 +240,8 @@ describe('completion menu in the search view', { skip }, () => {
     await page.evaluateOnNewDocument(installMock, {
       'option.searchMarkedForLater': true,
       'option.completionToolbar': true,
+      // Opened on every work, rather than on Ready, which leaves works in progress out.
+      'cache.searchViewPrefs': { 'marked-for-later': { status: [] } },
     })
     await page.goto(READINGS_URL, { waitUntil: 'domcontentloaded' })
     await page.addStyleTag({ content: css })
@@ -258,18 +260,18 @@ describe('completion menu in the search view', { skip }, () => {
       .map(li => li.querySelector('h4.heading a').textContent)
       .sort())
 
-  /** The completion values whose facet row has its "include" toggle on. */
-  const included = () => page.evaluate(values =>
-    [...document.querySelectorAll('.AO3E--search-view--row')]
-      .filter(row => row.querySelector('.AO3E--search-view--toggle-include')?.getAttribute('aria-pressed') === 'true')
-      .map(row => row.querySelector('.AO3E--search-view--row-name').textContent)
-      .filter(name => values.includes(name)), [COMPLETE_VALUE, WIP_VALUE])
+  /** The toggles pressed on the Status facet's "Work in Progress" row. */
+  const wipPressed = () => page.evaluate(value =>
+    [...document.querySelectorAll('.AO3E--search-view--group[data-ao3e-facet="status"] .AO3E--search-view--row')]
+      .filter(row => row.querySelector('.AO3E--search-view--row-name').textContent === value)
+      .flatMap(row => ['require', 'include', 'exclude']
+        .filter(dir => row.querySelector(`.AO3E--search-view--toggle-${dir}`)?.getAttribute('aria-pressed') === 'true')), WIP_VALUE)
 
   const TOTAL = '.AO3E--search-view--results dd.chapters .AO3E--completion'
 
-  test('a pick drives the view\'s own Completion Status facet, not AO3, and clearing it brings the list back', async () => {
+  test('a pick drives the view\'s own Status facet, not AO3, and clearing it brings the list back', async () => {
     // What each choice selects, and what the selection reads back as, is the
-    // completion facet's business, tested case by case in
+    // engine's business, tested case by case in
     // `test/searchView/engine.test.mjs`; here, that the menu reaches the view's
     // filter and the list and its sidebar show the result.
     assert.deepEqual(await visibleTitles(), ['A finished one', 'An ongoing one', 'Another finished one'], 'the view opened with every work')
@@ -277,13 +279,13 @@ describe('completion menu in the search view', { skip }, () => {
     assert.deepEqual(rows.map(r => r.action), ['complete', 'incomplete'])
     await pick(page, 'incomplete')
     assert.deepEqual(await visibleTitles(), ['An ongoing one'])
-    assert.deepEqual(await included(), [WIP_VALUE], 'the facet sidebar shows the same filter')
+    assert.deepEqual(await wipPressed(), ['require'], 'the facet sidebar shows the same filter')
     assert.equal(page.url(), READINGS_URL)
 
     const again = await openMenuOn(page, TOTAL)
     assert.deepEqual(again.map(r => r.action), ['clear', 'complete', 'incomplete'])
     await pick(page, 'clear')
     assert.deepEqual(await visibleTitles(), ['A finished one', 'An ongoing one', 'Another finished one'])
-    assert.deepEqual(await included(), [])
+    assert.deepEqual(await wipPressed(), [])
   })
 })

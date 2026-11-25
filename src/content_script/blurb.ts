@@ -171,14 +171,15 @@ export interface Work {
   freeforms: string[]
   restricted: boolean
   /**
-   * What the reader has done with this work — the Status facet's values: the
-   * marks it carries, whether it's unread, how ready a progress-marked work is
-   * to be read on, and whether it's on the Marked for Later list. Deliberately
-   * never set by {@link parseWork}: they depend on the mark table, the Marked
-   * for Later index and today's date, none of which the parser can see, and the
-   * snapshot cache rehydrates through this same parser (so values baked in here
-   * would be a day stale on the next visit). The host fills them in a post-pass
-   * before handing the works to the view.
+   * Where the reader is with this work — the Status facet's values: the marks
+   * it carries, whether it's unread, how ready a progress-marked work is to be
+   * read on, whether it's on the Marked for Later list, and whether it is in
+   * progress, has its text cached or was deleted from AO3. Deliberately never
+   * set by {@link parseWork}: they depend on the mark table, the Marked for
+   * Later and cached-text indexes and today's date, none of which the parser can
+   * see, and the snapshot cache rehydrates through this same parser (so values
+   * baked in here would be a day stale on the next visit). The host fills them
+   * in a post-pass before handing the works to the view.
    */
   statuses?: string[]
   /**
@@ -193,13 +194,6 @@ export interface Work {
    * by it and the store's parse version has nothing to answer for.
    */
   sources?: string[]
-  /**
-   * Whether the site export this work is listed in carries its text — the
-   * "Offline copy" facet's one value. Stamped by the exported page, the only
-   * place that knows, and never by {@link parseWork}, for the same reasons as
-   * {@link Work.sources}.
-   */
-  offline?: string
   /**
    * AO3 has deleted this work, and the list keeps it (see `common/deletedWorks.ts`):
    * the view draws it with a "Deleted" badge. Stamped from the deleted-works
