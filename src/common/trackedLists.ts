@@ -2067,9 +2067,10 @@ export const PAGE_SIZE = 20
  * A dated list (`works-filter`, `text-search`, `tag-works`) is read **oldest
  * first from `from`**: `work_search[sort_column]=revised_at`,
  * `work_search[sort_direction]=asc` and `work_search[date_from]=from`, whatever
- * sort its URL had. There is never a `date_to`. The archive's date bounds are
- * inclusive whole UTC days, so a query from day X is everything filed on X or
- * later, and page 1's heading count is exactly how many that is.
+ * sort its URL had, and no `date_to` unless one is asked for
+ * ({@link PageUrlOptions.to}). The archive's date bounds are inclusive whole
+ * UTC days, so a query from day X is everything filed on X or later, and page
+ * 1's heading count is exactly how many that is.
  *
  * A `tag-works` entry becomes a works search by the tag's name
  * (`/works/search?work_search[other_tag_names]=NAME`): the tag page lists by
@@ -2107,10 +2108,10 @@ export function pageUrl(entry: Pick<TrackedList, 'kind' | 'url' | 'scan'>, from:
     case 'tag-works':
       if (entry.scan)
         return `${path}?page=${page}`
-      return datedUrl('/works/search', withExclusions([['work_search[other_tag_names]', tagName(path)]], options.exclude), from, page)
+      return datedUrl('/works/search', withExclusions([['work_search[other_tag_names]', tagName(path)]], options.exclude), from, page, options.to)
     default: {
       const params = [...new URLSearchParams(query)].filter(([name]) => !OVERRIDDEN_PARAMS.has(name) && !DROPPED_PARAMS.has(name))
-      return datedUrl(path, normalized.kind === 'text-search' ? withExclusions(params, options.exclude) : params, from, page)
+      return datedUrl(path, normalized.kind === 'text-search' ? withExclusions(params, options.exclude) : params, from, page, options.to)
     }
   }
 }
@@ -2129,6 +2130,12 @@ export interface PageUrlOptions {
    * series or a scanned tag page has no field to put it in.
    */
   exclude?: readonly string[]
+  /**
+   * The last day wanted, sent as `work_search[date_to]`: page 1's heading count
+   * is then how many works were filed from `from` through it. A series or a
+   * scanned tag page has no date field, and takes none.
+   */
+  to?: Day
 }
 
 /**
@@ -2195,12 +2202,13 @@ export function tagSearchUrl(entry: Pick<TrackedList, 'kind' | 'url'>): string |
   return withQuery('/works/search', [serializeParam(['work_search[other_tag_names]', tagName(path)])])
 }
 
-function datedUrl(path: string, params: [string, string][], from: Day, page: number): string {
+function datedUrl(path: string, params: [string, string][], from: Day, page: number, to?: Day): string {
   const all: [string, string][] = [
     ...params,
     ['work_search[sort_column]', 'revised_at'],
     ['work_search[sort_direction]', 'asc'],
     ['work_search[date_from]', isoDay(from)],
+    ...(to === undefined ? [] : [['work_search[date_to]', isoDay(to)] as [string, string]]),
     ['page', String(page)],
   ]
   return withQuery(path, all.map(serializeParam))

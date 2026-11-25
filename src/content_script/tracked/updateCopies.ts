@@ -3,9 +3,9 @@ import type { Work } from '#content_script/blurb.js'
 import type { RefreshHolder, RefreshOutcome } from '#content_script/searchView/listRefresh.ts'
 import type { Hold } from '#content_script/searchView/refreshClaim.ts'
 
-import { copyKeyOf, copyLabel, copyWanted, datedFor, dayOf, getArchiveLink, LIST_VERSION, MAX_REQUEST_ATTEMPTS, mergeDatedPage, nextRead, PAGE_SIZE, pageBase, pageUrl, sharedExclusions, sourceLabel, toShortId, unpackRows, utcToday } from '#common'
+import { checkPasses, checkThrough, copyKeyOf, copyLabel, copyWanted, datedFor, dayOf, getArchiveLink, LIST_VERSION, MAX_REQUEST_ATTEMPTS, mergeDatedPage, nextRead, PAGE_SIZE, pageBase, pageUrl, settleChecked, sharedExclusions, sourceLabel, toShortId, unpackOrderedIds, unpackRows, utcToday } from '#common'
 import { archiveWaitRemaining, onArchiveWait, waitForArchive } from '#content_script/archiveFetch.js'
-import { storeWorks } from '#content_script/searchView/blurbStore.ts'
+import { readParsed, storeWorks } from '#content_script/searchView/blurbStore.ts'
 import { readStoredLists, writeStoredList } from '#content_script/searchView/cache.ts'
 import { acquireRefresh } from '#content_script/searchView/refreshClaim.ts'
 import { collectWorks, DEFAULT_BLURB_SELECTOR, detectPageCount, detectResultCount, fetchPageDoc, isArchiveBusy, SERIES_BLURB_SELECTOR } from '#content_script/searchView/scrape.ts'
@@ -21,6 +21,10 @@ import { TAG_BLURB_SELECTOR } from '#content_script/tagPage.ts'
  * day after it is settled through — so a second run the same day reads only
  * today's tail, and a run the next day about a page per list. The copy read
  * least far is always read next, so the earliest unknown days come in first.
+ *
+ * A copy only ever read from its own page is first checked against the
+ * archive's count with one request ({@link checkThrough}), and trusted as far
+ * as that read when the archive agrees.
  *
  * After every page its works go to the blurb store and the copy is written,
  * so a run stopped by a rate limit, a closed tab or an abort loses at most the
@@ -131,6 +135,8 @@ interface CopyState extends PassState<DatedCopy> {
   over?: boolean
   /** How its claim is let go. */
   outcome: RefreshOutcome
+  /** The day its count check would settle it through, once its claim is taken; null when it gets none, or has had it. */
+  check?: Day | null
 }
 
 /** Whether a list is read whole rather than by date. */
@@ -342,6 +348,7 @@ export async function updateTrackedCopies(opts: UpdateOptions): Promise<UpdateOu
     state.stored = !!had
     state.copy = copy
     state.record = copy.dated!
+    state.check = checkThrough(copy, today, { scanned: state.scanned, full: !!opts.full })
     if (!readAnyway && !copyWanted(copy, state.lists, opts.through, today)) {
       await finish(state)
       return false
@@ -361,6 +368,108 @@ export async function updateTrackedCopies(opts: UpdateOptions): Promise<UpdateOu
     return fetchPageDoc(getArchiveLink(url), signal, opts.patience)
   }
 
+  /** A page `read` of a pass, as `want` asked for it, into `state`'s copy. */
+  const land = async (state: CopyState, read: PageLanded, want: NextRead): Promise<void> => {
+    const at = Date.now()
+    const merge = (copy: StoredList): StoredList => mergeDatedPage(copy, read.page, { readDay: utcToday(), scanned: state.scanned, at })
+    // Blurbs first, copy second, so a copy never names a blurb that isn't
+    // there; and only the blurbs of works the copy keeps.
+    const kept = new Set(unpackRows(merge(state.copy).dated!.rows).map(row => row.sid))
+    await storeWorks(read.works.filter(work => kept.has(toShortId(work.workId)!)))
+    if (!await write(state, merge, want.from))
+      return
+    state.pass = { from: want.from, page: want.page }
+    state.hold?.progress(want.page, read.of)
+    const of = read.of || byList.get(state.lists[0]!.id)!.of
+    if (read.page.reachedEnd || state.record.through >= opts.through)
+      await finish(state, { phase: 'done', page: want.page, of })
+    else
+      mark(state, { phase: 'queued', page: want.page, of })
+  }
+
+  /** Read the page `want` names into `state`'s copy. */
+  const readNext = async (state: CopyState, want: NextRead): Promise<void> => {
+    const read = await readPage({ list: state.reader, exclude: state.exclude, scanned: state.scanned }, want, get)
+    reading = null
+    if (!read)
+      return giveUp(state, 'signed-out')
+    await land(state, read, want)
+  }
+
+  /**
+   * `state`'s count check: the first page of its stretch through `through`,
+   * and the copy settled that far when the archive agrees with it. A page that
+   * doesn't is full only when the stretch goes on past it, and is then the
+   * first page of the read from the tracking day too, since both are sorted
+   * oldest first from there.
+   */
+  const check = async (state: CopyState, through: Day): Promise<void> => {
+    const want: NextRead = { listId: state.key, from: state.record.from, page: 1 }
+    const read = await readPage({ list: state.reader, exclude: state.exclude, scanned: false }, want, get, { to: through })
+    reading = null
+    if (!read)
+      return giveUp(state, 'signed-out')
+    state.check = null
+    const works = await copyWorks(state.copy)
+    if (checkPasses(works, { sids: read.page.rows.map(row => row.sid), count: read.count }, want.from, through)) {
+      if (!await write(state, copy => settleChecked(copy, works, through, today, Date.now()), null))
+        return
+      if (state.record.through >= opts.through)
+        await finish(state)
+      else
+        mark(state, { phase: 'queued' })
+      return
+    }
+    if (read.page.reachedEnd)
+      mark(state, { phase: 'queued' })
+    else
+      await land(state, { ...read, of: 0 }, want)
+  }
+
+  /**
+   * Make one request for `state` with `request`, and deal with how it fails: a
+   * rate limit is sat out within the run's patience, and a request that fails
+   * on its own account is tried again up to {@link MAX_REQUEST_ATTEMPTS}
+   * times, by `key`. False once the archive has stopped the run.
+   */
+  const attempt = async (state: CopyState, key: string, request: () => Promise<void>): Promise<boolean> => {
+    try {
+      await request()
+      refusedRounds = 0
+      attempts.delete(key)
+    }
+    catch (err) {
+      reading = null
+      if (signal?.aborted || (err as Error)?.name === 'AbortError')
+        throw err
+      if (isArchiveBusy(err)) {
+        // Looked at before committing to it: a blind refusal can run to the
+        // hour, and a budget only checked afterwards is one already blown.
+        const remaining = archiveWaitRemaining()
+        if (++refusedRounds > MAX_REFUSED_ROUNDS || waited + remaining > opts.waitBudget) {
+          blocked = true
+          return false
+        }
+        const before = Date.now()
+        await waitForArchive(signal)
+        waited += Date.now() - before
+        return true
+      }
+      const tries = (attempts.get(key) ?? 0) + 1
+      attempts.set(key, tries)
+      console.warn('[tracked] page fetch failed', err)
+      const error = err instanceof Error ? err.message : String(err)
+      if (tries >= MAX_REQUEST_ATTEMPTS) {
+        await giveUp(state, 'request', error)
+      }
+      else {
+        mark(state, { phase: 'retrying', attempt: tries, error })
+        report()
+      }
+    }
+    return true
+  }
+
   try {
     // A copy whose address isn't a page on the archive any more — one that
     // arrived through sync, or was edited by hand — can't be read at all.
@@ -378,66 +487,22 @@ export async function updateTrackedCopies(opts: UpdateOptions): Promise<UpdateOu
       const state = states.find(candidate => candidate.key === next.listId)!
       if (!await claim(state))
         continue
-      // The copy may have been read since the run began: the next page is the
-      // one its stored copy asks for.
-      const want = state.pass ? next : nextRead([state], today)!
-      const key = `${want.listId}\u0000${want.from}\u0000${want.page}`
       reading = ((wanted && state.lists.find(list => wanted.has(list.id))) || state.lists[0]!).id
-      mark(state, { phase: 'reading', page: want.page - 1 })
-      try {
-        const read = await readPage({ list: state.reader, exclude: state.exclude, scanned: state.scanned }, want, get)
-        reading = null
-        if (!read) {
-          await giveUp(state, 'signed-out')
-          continue
-        }
-        refusedRounds = 0
-        const at = Date.now()
-        const merge = (copy: StoredList): StoredList => mergeDatedPage(copy, read.page, { readDay: utcToday(), scanned: state.scanned, at })
-        // Blurbs first, copy second, so a copy never names a blurb that isn't
-        // there; and only the blurbs of works the copy keeps.
-        const kept = new Set(unpackRows(merge(state.copy).dated!.rows).map(row => row.sid))
-        await storeWorks(read.works.filter(work => kept.has(toShortId(work.workId)!)))
-        if (!await write(state, merge, want.from))
-          continue
-        state.pass = { from: want.from, page: want.page }
-        state.hold?.progress(want.page, read.of)
-        attempts.delete(key)
-        const of = read.of || byList.get(state.lists[0]!.id)!.of
-        if (read.page.reachedEnd || state.record.through >= opts.through)
-          await finish(state, { phase: 'done', page: want.page, of })
-        else
-          mark(state, { phase: 'queued', page: want.page, of })
+      let going: boolean
+      if (typeof state.check === 'number') {
+        const through = state.check
+        mark(state, { phase: 'reading', page: 0 })
+        going = await attempt(state, `${state.key}\u0000check`, () => check(state, through))
       }
-      catch (err) {
-        reading = null
-        if (signal?.aborted || (err as Error)?.name === 'AbortError')
-          throw err
-        if (isArchiveBusy(err)) {
-          // Looked at before committing to it: a blind refusal can run to the
-          // hour, and a budget only checked afterwards is one already blown.
-          const remaining = archiveWaitRemaining()
-          if (++refusedRounds > MAX_REFUSED_ROUNDS || waited + remaining > opts.waitBudget) {
-            blocked = true
-            break
-          }
-          const before = Date.now()
-          await waitForArchive(signal)
-          waited += Date.now() - before
-          continue
-        }
-        const tries = (attempts.get(key) ?? 0) + 1
-        attempts.set(key, tries)
-        console.warn('[tracked] page fetch failed', err)
-        const error = err instanceof Error ? err.message : String(err)
-        if (tries >= MAX_REQUEST_ATTEMPTS) {
-          await giveUp(state, 'request', error)
-        }
-        else {
-          mark(state, { phase: 'retrying', attempt: tries, error })
-          report()
-        }
+      else {
+        // The copy may have been read since the run began: the next page is the
+        // one its stored copy asks for.
+        const want = state.pass ? next : nextRead([state], today)!
+        mark(state, { phase: 'reading', page: want.page - 1 })
+        going = await attempt(state, `${want.listId}\u0000${want.from}\u0000${want.page}`, () => readNext(state, want))
       }
+      if (!going)
+        break
     }
   }
   finally {
@@ -455,6 +520,29 @@ export async function updateTrackedCopies(opts: UpdateOptions): Promise<UpdateOu
   return { blocked, failed, elsewhere, requests }
 }
 
+/** A page as {@link readPage} read it: its works, the page as the copy takes it, how many pages the query has, and its heading count (null for none). */
+export interface PageLanded {
+  works: Work[]
+  page: PageRead
+  of: number
+  count: number | null
+}
+
+/**
+ * The works of `copy`, each with its day: the day its dated part files it on,
+ * or else its stored blurb's.
+ */
+async function copyWorks(copy: StoredList): Promise<PageRead['rows']> {
+  const ids = unpackOrderedIds(copy.ids)
+  const dated = new Map(unpackRows(copy.dated?.rows ?? '').map(row => [row.sid, row.day]))
+  const blurbs = new Map((await readParsed(ids.filter(id => !dated.has(toShortId(id)!))))
+    .map(work => [toShortId(work.workId), dayOf(work.dateText)]))
+  return ids.flatMap((id) => {
+    const sid = toShortId(id)
+    return sid === null ? [] : [{ sid, blurbDay: dated.get(sid) ?? blurbs.get(sid) ?? Number.NaN }]
+  })
+}
+
 /**
  * Read the page `next` names, and hand back its works and what it says. Null
  * when the archive answered as though nobody were signed in. Throws for a page
@@ -465,14 +553,17 @@ export async function updateTrackedCopies(opts: UpdateOptions): Promise<UpdateOu
  * every page up to the cap, and past the cap the last few, since a series
  * appends. Nothing is handed back until all of them have landed, so a refusal
  * partway leaves the copy as it was rather than half-read.
+ *
+ * `to` bounds a list read by date to a last day as well.
  */
 export async function readPage(
   state: { list: TrackedList, exclude: string[], scanned: boolean },
   next: NextRead,
   get: (url: string) => Promise<Document>,
-): Promise<{ works: Work[], page: PageRead, of: number } | null> {
+  bounds: { to?: Day } = {},
+): Promise<PageLanded | null> {
   const urlFor = (page: number): string => {
-    const url = pageUrl(state.list, next.from, page, { exclude: state.exclude })
+    const url = pageUrl(state.list, next.from, page, { exclude: state.exclude, to: bounds.to })
     if (!url)
       throw new Error(`Not a page on the archive: ${state.list.url}`)
     return url
@@ -506,13 +597,14 @@ export async function readPage(
 
   let reachedEnd = true
   let of = 0
+  let count: number | null = null
   if (!state.scanned) {
-    const count = detectResultCount(first)
+    count = detectResultCount(first)
     if (count === null && listed === 0)
       throw new Error(`No listing on the page: ${urlFor(next.page)}`)
     reachedEnd = listed < PAGE_SIZE || (count !== null && next.page * PAGE_SIZE >= count)
     if (count !== null)
       of = Math.max(next.page, Math.ceil(count / PAGE_SIZE))
   }
-  return { works, page: { from: next.from, page: next.page, rows, reachedEnd }, of }
+  return { works, page: { from: next.from, page: next.page, rows, reachedEnd }, of, count }
 }

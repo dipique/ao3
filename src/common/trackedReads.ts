@@ -467,14 +467,18 @@ function copyIds(rows: string, ids: string): string {
 export function mergeWalk(copy: StoredList, rows: PageRead['rows'], lists: readonly (QueriedList & Pick<TrackedList, 'since'>)[], today: Day, at: number, read: WalkRead = { whole: false, from: null }): StoredList {
   const ready = datedFor(copy, lists, today)
   const merged = mergeDatedPage(ready, { from: ready.dated!.from, page: 1, rows, reachedEnd: false }, { readDay: today, scanned: true, at })
-  if (read.whole && (read.from === null || read.from <= ready.dated!.from)) {
-    const { failed: _failed, ...dated } = merged.dated!
-    return { ...merged, dated: { ...dated, through: Math.max(dated.through, today - 1), readAt: at } }
-  }
+  if (read.whole && (read.from === null || read.from <= ready.dated!.from))
+    return settledTo(merged, today - 1, at)
   // When the copy was last read by date, and why that read gave up, are the
   // reads by date's to say: a walk of the page is neither.
   const { readAt, failed } = ready.dated!
   return { ...merged, dated: { ...merged.dated!, readAt, ...(failed ? { failed } : {}) } }
+}
+
+/** `copy` settled through `through` (never back), read at `at`, its failure cleared. */
+function settledTo(copy: StoredList, through: Day, at: number): StoredList {
+  const { failed: _failed, ...dated } = copy.dated!
+  return { ...copy, dated: { ...dated, through: Math.max(dated.through, through), readAt: at } }
 }
 
 /** How a read of a tracked copy's own page went, for {@link mergeWalk}. */
@@ -483,6 +487,84 @@ export interface WalkRead {
   whole: boolean
   /** The first day the read's dates started on; null for no lower bound. */
   from: Day | null
+}
+
+// ---------------------------------------------------------------------------
+// The count check
+//
+// A copy only ever read from its own page — kept before the list was tracked,
+// or moved here from an older build — holds works the reader already paid
+// for, but says nothing about whether that read got every page: a first read
+// the archive cut short is stored as of the moment it was made, its oldest
+// works missing. Rather than read such a copy again from its tracking day, one
+// request asks the archive for its stretch up to the day before that read —
+// oldest first, bounded both ways — and the copy is trusted that far when
+// the archive agrees with it.
+//
+// A work's filing day only ever moves later, so every work the archive now
+// files inside that stretch was on the list, on that day, when the copy was
+// read: a whole copy holds them all. The page's works are the stretch's oldest,
+// which is the end a read cut short is missing, so each must be in the copy;
+// and the page's heading count must be no more than the copy's works dated
+// inside the stretch. Works updated out of the stretch since, or deleted, only
+// ever make the copy's side larger, so they can hide a gap as large as they
+// are; over the few days a copy is usually behind, that is rare.
+//
+
+/** What decides whether a copy gets the count check. */
+export interface CheckAsk {
+  /** Read whole rather than by date: every read of it is a read in full anyway. */
+  scanned: boolean
+  /** Full refresh: the reader asked for every page again. */
+  full: boolean
+}
+
+/**
+ * The day a count check would settle `copy` (ready to be read by date,
+ * {@link datedFor}) through: the day before the UTC day it was last read from
+ * its page, and never past yesterday. Null when it gets no check: it has been
+ * read by date (or in full from its page) since, it holds no works, it is read
+ * whole or fully refreshed, or the check would settle nothing new.
+ */
+export function checkThrough(copy: StoredList, today: Day, ask: CheckAsk): Day | null {
+  const dated = copy.dated
+  if (!dated || ask.scanned || ask.full || dated.readAt !== 0 || !copy.ids)
+    return null
+  const through = Math.min(today - 1, Math.floor(copy.scrapedAt / 86_400_000) - 1)
+  return through > dated.through && through >= dated.from ? through : null
+}
+
+/** The page a count check asked for: its works, and the heading count of everything in the stretch (null when it shows none). */
+export interface CheckedPage {
+  sids: readonly string[]
+  count: number | null
+}
+
+/**
+ * Whether the archive agrees with a copy holding `works` (each with its day,
+ * `NaN` for none) about the stretch `from`..`through`: every work on `page` is
+ * in the copy, and its count is no more than the copy's works dated inside the
+ * stretch.
+ */
+export function checkPasses(works: PageRead['rows'], page: CheckedPage, from: Day, through: Day): boolean {
+  if (page.count === null)
+    return false
+  const held = new Set(works.map(work => work.sid))
+  if (!page.sids.every(sid => held.has(sid)))
+    return false
+  const inStretch = works.filter(work => work.blurbDay >= from && work.blurbDay <= through).length
+  return page.count <= inStretch
+}
+
+/**
+ * `copy` as a passed count check leaves it: its `works` dated from its
+ * tracking day on, as {@link mergeWalk} dates them, and settled through
+ * `through`, checked at `at`. Its works are still as of the read that fetched
+ * them, and so is the copy.
+ */
+export function settleChecked(copy: StoredList, works: PageRead['rows'], through: Day, today: Day, at: number): StoredList {
+  const merged = mergeDatedPage(copy, { from: copy.dated!.from, page: 1, rows: works, reachedEnd: false }, { readDay: today, scanned: true, at })
+  return settledTo({ ...merged, scrapedAt: copy.scrapedAt }, through, at)
 }
 
 /** One list's view of the copy it shares: what {@link windowFromRecords} takes for it. */

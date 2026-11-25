@@ -7,7 +7,7 @@ import { formatDay } from '../../src/common/trackedLists.ts'
  * Everything the review reads is a works listing bounded by date: the reader's
  * own readings page for the entry point, and then each tracked list's query,
  * asked for oldest-first from a day, twenty works to a page. So the handler
- * here answers `work_search[date_from]` and `page` exactly as the archive does
+ * here answers `work_search[date_from]`, `work_search[date_to]` and `page` exactly as the archive does
  * — inclusive whole UTC days — and prints the heading count the fetcher reads
  * its boundaries off.
  */
@@ -226,8 +226,8 @@ export function dayOfIso(iso) {
 
 /**
  * The list requests {@link archiveRoutes} collected in `fetched`, as what each
- * asked for: which fixture (its key), from which day (null for none) and which
- * page — so a test can count requests per list and day.
+ * asked for: which fixture (its key), from which day and through which (null
+ * for none) and which page — so a test can count requests per list and day.
  */
 export function readsOf(fetched) {
   return fetched.map((path) => {
@@ -235,6 +235,7 @@ export function readsOf(fetched) {
     return {
       list: keyOf(url),
       from: dayOfIso(url.searchParams.get('work_search[date_from]')),
+      to: dayOfIso(url.searchParams.get('work_search[date_to]')),
       page: Number(url.searchParams.get('page') || '1'),
     }
   })
@@ -250,8 +251,9 @@ function listingPage(list, url) {
     return '<!DOCTYPE html><html><head><title>t</title></head><body class="logged-in"><div id="main"><p>Something went wrong.</p></div></body></html>'
   const page = Number(url.searchParams.get('page') || '1')
   const from = dayOfIso(url.searchParams.get('work_search[date_from]'))
+  const to = dayOfIso(url.searchParams.get('work_search[date_to]'))
   const scanned = list.layout === 'series'
-  const query = from === null || scanned ? list.works.slice() : list.works.filter(work => work.filed >= from)
+  const query = scanned ? list.works.slice() : list.works.filter(work => (from === null || work.filed >= from) && (to === null || work.filed <= to))
   if (!scanned)
     query.sort((a, b) => a.filed - b.filed || Number(a.id) - Number(b.id))
   const total = query.length

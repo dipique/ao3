@@ -5,7 +5,7 @@ import { copyKeyOf } from '../../src/common/listLinks.ts'
 import { copyQuery, packRows, unpackRows } from '../../src/common/trackedReads.ts'
 import { bundleForPage } from '../siteExport/helpers.mjs'
 import { findChrome, installMock, launch } from './helpers.mjs'
-import { archiveRoutes, CLOCK_BASE, installClock, listing, MS_PER_DAY, readsOf, resetWorkIds, search, series, TODAY } from './trackedReview.mjs'
+import { archiveRoutes, blurbHtml, CLOCK_BASE, installClock, listing, MS_PER_DAY, readsOf, resetWorkIds, search, series, TODAY } from './trackedReview.mjs'
 
 const chromePath = findChrome()
 const skip = chromePath ? false : 'Chrome not found (set CHROME_PATH to a Chrome/Chromium binary)'
@@ -414,5 +414,83 @@ describe('tracked lists: the copy updater', { skip }, () => {
     finally {
       await tab.close()
     }
+  })
+
+  describe('a copy only ever read from its own page is checked against AO3’s count first', () => {
+    /** The day the copy was last read from its page. */
+    const AS_OF = TODAY - 3
+    /** What the lists were asked for, with the last day each asked through. */
+    const askedTo = fetched => readsOf(fetched).filter(read => read.list !== '/favicon.ico').map(read => [read.list, read.from, read.to, read.page])
+
+    /**
+     * A store holding a copy of `fixture`'s list as a read of its page on
+     * {@link AS_OF} left it: `held` works, undated, their blurbs stored, never
+     * read by date.
+     */
+    function seedOf(fixture, held) {
+      const copy = { v: 3, scrapedAt: AS_OF * MS_PER_DAY + MS_PER_DAY / 2, ids: held.map(sid).join(','), descriptor: { sourceId: 'works-filter', label: fixture.entry.id, listUrl: `https://archiveofourown.org${fixture.key}` } }
+      return {
+        'cache.searchLists': { [copyKeyOf(fixture.entry)]: copy },
+        ...Object.fromEntries(held.map(work => [`blurb.${sid(work)}`, { html: blurbHtml(work) }])),
+      }
+    }
+
+    test('that agrees is complete through the day before it, and read on from there', async () => {
+      resetWorkIds(9600)
+      const alpha = listing('alpha', Array.from({ length: 10 }, (_, i) => [SINCE + i, 3]), { entry: { since: SINCE } })
+      const held = alpha.works.filter(work => work.filed < AS_OF)
+      const { tab, fetched } = await openTab([alpha], { seed: seedOf(alpha, held) })
+      try {
+        await run(tab, [alpha])
+        assert.deepEqual(askedTo(fetched), [
+          ['/tags/alpha/works', SINCE, AS_OF - 1, 1],
+          ['/tags/alpha/works', AS_OF, null, 1],
+        ])
+        const copy = await copyOf(tab, alpha)
+        assert.equal(copy.dated.through, TODAY - 1)
+        assert.equal(unpackRows(copy.dated.rows).length, alpha.works.length, 'the works it held are dated too')
+      }
+      finally {
+        await tab.close()
+      }
+    })
+
+    test('that a first read cut short fails is read from its tracking day, its first page taken from the check', async () => {
+      resetWorkIds(9700)
+      const alpha = listing('alpha', Array.from({ length: 10 }, (_, i) => [SINCE + i, 3]), { entry: { since: SINCE } })
+      const held = alpha.works.filter(work => work.filed >= SINCE + 2 && work.filed < AS_OF)
+      const { tab, fetched } = await openTab([alpha], { seed: seedOf(alpha, held) })
+      try {
+        await run(tab, [alpha])
+        assert.deepEqual(askedTo(fetched), [
+          ['/tags/alpha/works', SINCE, AS_OF - 1, 1],
+          ['/tags/alpha/works', SINCE, null, 2],
+        ])
+        const copy = await copyOf(tab, alpha)
+        assert.equal(copy.dated.through, TODAY - 1)
+        assert.equal(unpackRows(copy.dated.rows).length, alpha.works.length)
+      }
+      finally {
+        await tab.close()
+      }
+    })
+
+    test('that fails on a stretch shorter than a page is read from its tracking day in full', async () => {
+      resetWorkIds(9800)
+      const alpha = listing('alpha', Array.from({ length: 10 }, (_, i) => [SINCE + i, 1]), { entry: { since: SINCE } })
+      const held = alpha.works.filter(work => work.filed < AS_OF && work.filed !== SINCE + 3)
+      const { tab, fetched } = await openTab([alpha], { seed: seedOf(alpha, held) })
+      try {
+        await run(tab, [alpha])
+        assert.deepEqual(askedTo(fetched), [
+          ['/tags/alpha/works', SINCE, AS_OF - 1, 1],
+          ['/tags/alpha/works', SINCE, null, 1],
+        ])
+        assert.equal((await copyOf(tab, alpha)).dated.through, TODAY - 1)
+      }
+      finally {
+        await tab.close()
+      }
+    })
   })
 })

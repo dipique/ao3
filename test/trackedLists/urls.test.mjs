@@ -539,11 +539,30 @@ describe('pageUrl', () => {
     assert.deepEqual(params.getAll('work_search[sort_column]'), ['revised_at'])
   })
 
-  test('never sends a date_to, even when the stored URL carries one', () => {
+  test('drops the date bounds the stored URL carries', () => {
     const url = pageUrl({ kind: 'text-search', url: '/works/search?work_search[query]=bees&work_search[date_to]=2020-01-01&work_search[date_from]=2019-01-01' }, FROM, 1)
     const params = paramsOf(url)
     assert.equal(params.has('work_search[date_to]'), false)
     assert.deepEqual(params.getAll('work_search[date_from]'), ['2026-09-01'])
+  })
+
+  test('asked for a last day, bounds the query to it as well', () => {
+    const to = dayOf('15 Sep 2026')
+    for (const entry of [
+      { kind: 'text-search', url: '/works/search?work_search[query]=bees&work_search[date_to]=2020-01-01' },
+      { kind: 'works-filter', url: '/tags/Bees/works' },
+      { kind: 'tag-works', url: '/tags/Bees' },
+    ]) {
+      const params = paramsOf(pageUrl(entry, FROM, 1, { to }))
+      assert.deepEqual(params.getAll('work_search[date_to]'), ['2026-09-15'], entry.kind)
+      assert.equal(params.get('work_search[date_from]'), '2026-09-01')
+    }
+  })
+
+  test('a list read whole takes no last day', () => {
+    const to = dayOf('15 Sep 2026')
+    assert.equal(pageUrl({ kind: 'series-works', url: '/series/4232377' }, FROM, 1, { to }), '/series/4232377?page=1')
+    assert.equal(pageUrl({ kind: 'tag-works', url: '/tags/Bees', scan: true }, FROM, 1, { to }), '/tags/Bees?page=1')
   })
 
   test('keeps every criterion of a search', () => {
