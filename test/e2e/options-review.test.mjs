@@ -11,7 +11,7 @@ import { recordsLine, REVIEW_EMPTY, REVIEW_NAME, reviewedThroughLabel, START_OFF
 import { TRACK_OFF } from '../../src/options_ui/model/savedListRows.ts'
 import { DIST, installMock, storedLists } from './helpers.mjs'
 import { ARCHIVE, captureDownloads, mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
-import { archiveAnswers, archiveRoutes, CLOCK_BASE, installClock, listing, resetWorkIds, reviewDrawn, trackedOption } from './trackedReview.mjs'
+import { archiveAnswers, archiveRoutes, CLOCK_BASE, installClock, listing, NO_RESULTS, resetWorkIds, reviewDrawn, trackedOption } from './trackedReview.mjs'
 
 const TODAY = utcToday()
 const ROW = 'tracked-lists'
@@ -98,7 +98,7 @@ describe('options UI — the Review block', { skip }, () => {
         await stubArchive(p, async (url) => {
           // The tracked list, read by the review's refresh: nothing new on it.
           if (new URL(url).pathname === '/works/search')
-            return { body: '<!DOCTYPE html><html><body class="logged-in"><div id="main" class="works-search region"><h3 class="heading">0 Found</h3><ol class="work index group"></ol></div></body></html>' }
+            return { body: `<!DOCTYPE html><html><body class="logged-in"><div id="main" class="works-search region"><h2 class="heading">Search Results</h2><p>${NO_RESULTS}</p></div></body></html>` }
           const workId = /^\/works\/(\d+)$/.exec(new URL(url).pathname)?.[1]
           if (!workId)
             return { status: 404 }

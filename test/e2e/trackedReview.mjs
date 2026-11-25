@@ -14,6 +14,8 @@ import { formatDay } from '../../src/common/trackedLists.ts'
 
 export const MS_PER_DAY = 86_400_000
 const PER_PAGE = 20
+/** What the archive's works search prints in place of a count and a list when it matches nothing. */
+export const NO_RESULTS = 'No results found. You may want to edit your search to make it less specific.'
 
 /** The UTC day every fixture's days are counted from. */
 export const TODAY = Math.floor(Date.now() / MS_PER_DAY)
@@ -261,12 +263,15 @@ function listingPage(list, url) {
   const rows = query.slice((page - 1) * PER_PAGE, page * PER_PAGE)
   const blurbs = rows.map(blurbHtml).join('')
 
+  // A search that matches nothing prints neither a count nor a list.
+  const found = total
+    ? `<h3 class="heading">${total} Found</h3><ol class="work index group">${blurbs}</ol>${pagination(pages)}`
+    : `<p>${NO_RESULTS}</p>`
   const main = list.layout === 'series'
     ? `<div id="main" class="series-show region"><h2 class="heading">A Series</h2>`
     + `<ul class="series work index group">${blurbs}</ul>${pagination(pages)}</div>`
     : list.layout === 'search'
-      ? `<div id="main" class="works-search region"><h3 class="heading">${total} Found</h3>`
-      + `<ol class="work index group">${blurbs}</ol>${pagination(pages)}</div>`
+      ? `<div id="main" class="works-search region"><h2 class="heading">Search Results</h2><h4 class="heading">You searched for: ${list.key}</h4>${found}</div>`
       : `<div id="main" class="works-index region">`
         + `<h2 class="heading">${total ? `${(page - 1) * PER_PAGE + 1} - ${(page - 1) * PER_PAGE + rows.length} of ${total}` : '0'} Works in <a class="tag" href="/tags/x">X</a></h2>`
         + `<ol class="work index group">${blurbs}</ol>${pagination(pages)}</div>`

@@ -383,6 +383,23 @@ describe('tracked lists: the copy updater', { skip }, () => {
     }
   })
 
+  test('a search with nothing in the days asked for counts them complete', async () => {
+    resetWorkIds(9450)
+    const quiet = search('quiet', [[SINCE - 5, 2]], { entry: { since: SINCE } })
+    const { tab, fetched } = await openTab([quiet])
+    try {
+      const outcome = await run(tab, [quiet])
+      assert.deepEqual(outcome.failed, [])
+      assert.deepEqual(asked(fetched), [['quiet', SINCE, 1]])
+      const copy = await copyOf(tab, quiet)
+      assert.equal(copy.dated.through, TODAY - 1)
+      assert.equal('failed' in copy.dated, false)
+    }
+    finally {
+      await tab.close()
+    }
+  })
+
   test('a copy two lists share asks AO3 to leave out only the tags both exclude', async () => {
     resetWorkIds(9400)
     const excluding = (...names) => ({ facets: { freeforms: { ex: names } } })

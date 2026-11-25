@@ -52,10 +52,16 @@ const MAX_REFUSED_ROUNDS = 6
 export const MAX_SCANNED_PAGES = 500
 
 /**
- * The number in a works search's "427,247 Found" heading, or null when the page
- * printed none. The archive counts exactly what the query matched, date bounds
- * included, so this also answers "how many works does this search find from day
- * X on?" from page 1 alone.
+ * What a works search prints, in a bare paragraph, in place of its count and its
+ * list when it matches nothing: there is no "0 Found".
+ */
+const NO_RESULTS_RE = /^\s*No results found\b/
+
+/**
+ * The number in a works search's "427,247 Found" heading, or 0 for a search
+ * that found nothing, or null when the page printed neither. The archive counts
+ * exactly what the query matched, date bounds included, so this also answers
+ * "how many works does this search find from day X on?" from page 1 alone.
  */
 export function detectFoundCount(doc: Document | Element): number | null {
   for (const h3 of doc.querySelectorAll('#main.works-search h3.heading')) {
@@ -65,7 +71,9 @@ export function detectFoundCount(doc: Document | Element): number | null {
     const count = Number(match[1]!.replace(/\D/g, ''))
     return Number.isFinite(count) ? count : null
   }
-  return null
+  const empty = !doc.querySelector('#main.works-search ol.work')
+    && [...doc.querySelectorAll('#main.works-search p')].some(p => NO_RESULTS_RE.test(p.textContent ?? ''))
+  return empty ? 0 : null
 }
 
 /**

@@ -160,7 +160,7 @@ export interface RefreshResult {
  *   one the reader can delete and a list emptied by mistake is gone.
  *
  *   A read under a {@link RefreshOptions.dateFilter} whose page 1 counts no
- *   works at all (`0 Works`, `0 Found`) is told apart, and stored: nothing
+ *   works at all (`0 Works`, or a search's "No results found") is told apart, and stored: nothing
  *   updated since a tracked list's day is an everyday answer, and the count is
  *   the archive saying so, where a broken page has none.
  */
