@@ -536,6 +536,11 @@ export function copyOwner(join: SavedListJoin, copy: Pick<StoredListRef, 'listUr
   return at.find(one => one.entry) ?? at.find(one => trackedKey(one.list) === address) ?? at[0] ?? null
 }
 
+/** The key of every stored list that is a tracked list's copy, each once: the works the reader's tracked lists hold are theirs. */
+export function trackedCopyKeys(state: ListState, stored: readonly StoredListRef[]): string[] {
+  return [...new Set(joinSavedLists(state, stored).lists.filter(one => one.entry).flatMap(one => one.copyKeys))]
+}
+
 /**
  * Give list `id` a title, trimmed: on its record, and on its entry while it is
  * tracked, since the entry is what carries a title to the other browsers. It

@@ -14,6 +14,7 @@ import { settleSearchView } from './searchView/host.tsx'
 import { applySurfaceTheme } from './theme.ts'
 import { UNITS } from './units/index.ts'
 import { getTag } from './utils.tsx'
+import { workPageRedirect } from './workPageRedirect.ts'
 
 logBanner()
 
@@ -37,6 +38,9 @@ async function clean() {
 }
 
 let progress: RunProgress = NO_RUNS
+
+/** The page's address has been weighed against the work page defaults ({@link workPageRedirect}). */
+let redirectChecked = false
 
 /** Move the page's run progress on, and say where it stands on `<html>` ({@link runProgressMarks}). */
 function stepProgress(step: (progress: RunProgress) => RunProgress): void {
@@ -77,6 +81,19 @@ async function run() {
   }
 
   const opts = await options.get()
+  // Once per page, as it opens: an options change made while reading a work
+  // leaves the reader where they are.
+  if (!redirectChecked) {
+    redirectChecked = true
+    const target = workPageRedirect(location.href, { fullWork: opts.showFullWork, comments: opts.showComments })
+    if (target) {
+      const leaving = target.split('#')[0] !== location.href.split('#')[0]
+      location.replace(target)
+      // Only a new address is another page; a new fragment is this one, still to decorate.
+      if (leaving)
+        return
+    }
+  }
   // Before any unit can ask AO3 for anything.
   await impersonationFollowed
   // Before waiting on the page, so a skin switched on since the last page still

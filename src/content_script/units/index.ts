@@ -1,6 +1,7 @@
 import type { Unit } from '#content_script/Unit.js'
 
 import { AutoExcludeHidden } from './AutoExcludeHidden.ts'
+import { CacheWorkPage } from './CacheWorkPage.ts'
 import { CaptureMarkButtons } from './CaptureMarkButtons.ts'
 import { CollapsibleDashboard } from './CollapsibleDashboard.ts'
 import { CompletionToolbar } from './CompletionToolbar.tsx'
@@ -35,16 +36,20 @@ import { TagToolbar } from './TagToolbar.tsx'
 import { TextReplace } from './TextReplace.ts'
 import { TextReplaceTools } from './TextReplaceTools.tsx'
 import { Tools } from './Tools.tsx'
+import { UpdateWorkBlurb } from './UpdateWorkBlurb.ts'
 import { WordCountToolbar } from './WordCountToolbar.tsx'
 
 export const UNITS = [
+  // First: it copies the work's text as AO3 served it, before any unit decorates it.
+  CacheWorkPage,
   StyleTweaks,
   // After StyleTweaks so it takes over #workskin's width (its inline width wins
   // over StyleTweaks' stylesheet rule) and measures the resulting column width.
   ReaderMode,
   CollapsibleDashboard,
-  // Before TextReplace: it copies the work's summary as the author wrote it.
+  // Before TextReplace: these copy the work's summary as the author wrote it.
   KeepMarkedForLater,
+  UpdateWorkBlurb,
   TextReplace,
   // After TextReplace, whose spans are what its underlines and click-to-edit hang on.
   TextReplaceTools,

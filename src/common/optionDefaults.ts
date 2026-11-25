@@ -42,6 +42,8 @@ export const OPTION_DEFAULTS: Options = {
 
   pruneOrphanedBlurbs: false,
   cacheComments: false,
+  opportunisticCache: null,
+  opportunisticBlurbs: false,
 
   compressSearchUrls: false,
   tagToolbar: false,
@@ -76,6 +78,8 @@ export const OPTION_DEFAULTS: Options = {
   styleWidthEnabled: true,
   styleWidth: 40,
   readerMode: false,
+  showFullWork: false,
+  showComments: false,
   collapsibleDashboard: false,
   showStatsColumns: true,
   forceAlignment: null,

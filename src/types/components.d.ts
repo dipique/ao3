@@ -44,6 +44,7 @@ declare module 'vue' {
     OptionForceAlignment: typeof import('./../options_ui/components/options/OptionForceAlignment.vue')['default']
     OptionHideReason: typeof import('./../options_ui/components/options/OptionHideReason.vue')['default']
     OptionMasterGroup: typeof import('./../options_ui/components/OptionMasterGroup.vue')['default']
+    OptionOpportunisticCache: typeof import('./../options_ui/components/options/OptionOpportunisticCache.vue')['default']
     OptionRow: typeof import('./../options_ui/components/option_rows/OptionRow.vue')['default']
     OptionRowAutoExcludeHidden: typeof import('./../options_ui/components/option_rows/OptionRowAutoExcludeHidden.vue')['default']
     OptionRowCollapsable: typeof import('./../options_ui/components/option_rows/OptionRowCollapsable.vue')['default']

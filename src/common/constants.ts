@@ -67,3 +67,13 @@ export const RULE_TIMING_WINDOW_MS = 7 * 24 * 60 * 60_000
 
 /** How many ruleset evaluations are kept however old they are. */
 export const RULE_TIMING_MIN_KEPT = 100
+
+/**
+ * How long a work page's comments are given to arrive before they are looked
+ * for again, in milliseconds, when the page asked for them and holds none yet:
+ * AO3 loads them after the page, and not always quickly.
+ */
+export const COMMENT_LOAD_RETRY_MS = 3000
+
+/** How many times a work page's comments are looked for again before the page is left uncached. */
+export const COMMENT_LOAD_RETRIES = 3

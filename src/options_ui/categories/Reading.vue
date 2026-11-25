@@ -102,6 +102,20 @@
       >
         <OptionSwitch option-id="readerMode" />
       </OptionRow>
+      <OptionRow
+        anchor="show-full-work"
+        title="Show entire work by default"
+        subtitle="Open a work with every chapter on one page. Chapter links still open a single chapter."
+      >
+        <OptionSwitch option-id="showFullWork" />
+      </OptionRow>
+      <OptionRow
+        anchor="show-comments"
+        title="Show comments by default"
+        subtitle="Load a work's comments when you open it."
+      >
+        <OptionSwitch option-id="showComments" />
+      </OptionRow>
       <OptionRowNumberSlider
         anchor="style-width"
         title="Narrow the work text"

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { addressOf, aliasOf, copyDateFilterAt, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, moveKeys, planDateFilterSplit, planLetGo, planListingRefile, planRemoveList, planRetitle, planSaveBack, planSavedLists, planSetSince, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, splitDateFilter, storedListRefs } from '../../src/common/savedLists.ts'
+import { addressOf, aliasOf, copyDateFilterAt, copyOwner, createSavedListsReconciler, FILTERED_LISTING_SOURCE_ID, filteredListing, joinSavedLists, listCopies, moveKeys, planDateFilterSplit, planLetGo, planListingRefile, planRemoveList, planRetitle, planSaveBack, planSavedLists, planSetSince, planStopTracking, planTrack, planTrackCopy, planTrackSearch, planUndoSaveBack, savedListAt, savedListsOf, savedListsWrite, splitDateFilter, storedListRefs, trackedCopyKeys } from '../../src/common/savedLists.ts'
 import { normalizeTrackedUrl, refineLink, sameReading, trackedKey, withDateFilter } from '../../src/common/trackedLists.ts'
 
 const AO3 = 'https://archiveofourown.org'
@@ -1220,6 +1220,31 @@ describe('copyOwner', () => {
     assert.equal(owner(current([], [recordOf(entry('c', COFFEE))])), null)
     assert.equal(owner(current([], [recordOf(entry('b', BROKEN, { kind: 'tag-works' }))]), { key: 'x', listUrl: BROKEN, scrapedAt: 1 }), null)
     assert.equal(owner(current([], [recordOf(entry('c', COFFEE))]), { key: 'text-search:old', scrapedAt: 1 }), null)
+  })
+})
+
+describe('trackedCopyKeys', () => {
+  const byKudos = copy('text-search', 'by-kudos', { listUrl: `${AO3}${COFFEE_BY_KUDOS}`, scrapedAt: 2_000 })
+  const byDate = copy('text-search', 'by-date', { listUrl: `${AO3}${COFFEE}`, scrapedAt: 1_000 })
+  const tea = copy('text-search', 'tea', { listUrl: `${AO3}${TEA}` })
+
+  test('every copy at a tracked list\'s address, its older sort orders included', () => {
+    const tracked = entry('t', COFFEE, { alias: 'Coffee', filter: SLOW_BURN })
+    assert.deepEqual(trackedCopyKeys(current([tracked], [recordOf(tracked)]), [byDate, byKudos, tea]), [byKudos.key, byDate.key])
+  })
+
+  test('a copy shared by a tracked and a saved list is the tracked one\'s, once', () => {
+    const tracked = entry('t', COFFEE, { alias: 'Theirs' })
+    const saved = recordOf(entry('s', COFFEE_BY_KUDOS, { alias: 'Mine' }))
+    const other = entry('o', COFFEE, { alias: 'Also', filter: NO_DRACO })
+    assert.deepEqual(trackedCopyKeys(current([tracked, other], [recordOf(tracked), saved, recordOf(other)]), [byKudos]), [byKudos.key])
+  })
+
+  test('none for saved lists alone, or the reader\'s own lists and the review', () => {
+    const saved = recordOf(entry('s', TEA, { alias: 'Tea' }))
+    const marked = copy('marked-for-later', 'me', { listUrl: `${AO3}/users/me/readings?show=to-read` })
+    const review = copy('tracked-review', 'window', { key: 'tracked-review', listUrl: `${AO3}/users/me/readings#ao3e-tracked` })
+    assert.deepEqual(trackedCopyKeys(current([], [saved]), [tea, marked, review]), [])
   })
 })
 

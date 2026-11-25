@@ -49,6 +49,20 @@
         <OptionSwitch option-id="cacheComments" />
       </OptionRow>
       <OptionRow
+        anchor="opportunistic-cache"
+        title="Opportunistically cache work text"
+        subtitle="Cache a work's text when you open it, from the page itself, if it's in the chosen lists. Only a page showing the entire work counts — and, with comments saved, its comments."
+      >
+        <OptionOpportunisticCache />
+      </OptionRow>
+      <OptionRow
+        anchor="opportunistic-blurbs"
+        title="Opportunistically update blurbs"
+        subtitle="Bring a work's stored blurb up to date when you open the work."
+      >
+        <OptionSwitch option-id="opportunisticBlurbs" />
+      </OptionRow>
+      <OptionRow
         anchor="prune-orphaned-blurbs"
         title="Discard unneeded blurbs automatically"
         subtitle="When a refresh drops a work from a stored list, or a list is deleted, forget that work's blurb straight away if no other list holds it — instead of waiting for Discard orphans. Cached work text is never touched."

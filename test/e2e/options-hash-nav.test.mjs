@@ -422,11 +422,11 @@ describe('options UI — the rail marks the sub-section being read', { skip }, (
     try {
       await until('Instant search views to be marked', () => markedIs(options, 'instant-search-views'))
       await noteMarks(options)
-      await options.goTo('#chapter-statistics')
-      const { top, max } = await reach(options, 'chapter-statistics')
-      assert.ok(top > max, `Chapter statistics reaches the reading line at ${top} px, past the page's ${max} px`)
-      await until('Chapter statistics to be marked', () => markedIs(options, 'chapter-statistics'))
-      assert.deepEqual(await marks(options), ['chapter-statistics'], 'and nothing else on the way')
+      await options.goTo('#work-text')
+      const { top, max } = await reach(options, 'work-text')
+      assert.ok(top > max, `Work text reaches the reading line at ${top} px, past the page's ${max} px`)
+      await until('Work text to be marked', () => markedIs(options, 'work-text'))
+      assert.deepEqual(await marks(options), ['work-text'], 'and nothing else on the way')
     }
     finally {
       await options.close()

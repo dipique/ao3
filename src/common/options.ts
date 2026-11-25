@@ -114,6 +114,19 @@ export interface Options {
    * request for the work page. Off by default.
    */
   cacheComments: boolean
+  /**
+   * Which works a visit to their own page caches the text of, from the page
+   * itself rather than another request: works on the reader's Marked for Later
+   * list, works in any tracked list's stored copy, or none (`null`). Only a page
+   * holding the whole work — and, with {@link cacheComments}, its comments —
+   * is kept. Off by default.
+   */
+  opportunisticCache: null | 'markedForLater' | 'tracked'
+  /**
+   * A visit to a work's own page rewrites the work's stored blurb from the
+   * page, when one is stored. Off by default.
+   */
+  opportunisticBlurbs: boolean
 
   compressSearchUrls: boolean
   tagToolbar: boolean
@@ -307,6 +320,10 @@ export interface Options {
    * `ReaderMode`), so they never sync — this flag is only the on/off switch.
    */
   readerMode: boolean
+  /** Open a work's page as its entire work (`view_full_work=true`) unless the address says otherwise. */
+  showFullWork: boolean
+  /** Open a work's page at its comments (`#comments`) unless the address aims somewhere else. */
+  showComments: boolean
   /**
    * On your own dashboard pages, clicking the red band across the top of the
    * `#dashboard` sidebar folds it away, leaving a thin rail down the left edge
