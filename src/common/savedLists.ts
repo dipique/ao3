@@ -208,6 +208,16 @@ export function storedListMeta(url: string, label: string): TrackedMeta {
   return filled ? { type: filled.type ?? meta.type, entity: filled.entity ?? meta.entity } : meta
 }
 
+/** How far a stored list's dated part (`StoredList.dated`, as storage holds it) is complete; undefined when it has none, or a malformed one. */
+export function copySettled(dated: unknown): CopySettled | undefined {
+  if (!isObject(dated))
+    return undefined
+  const from = wholeNumber(dated.from)
+  const through = wholeNumber(dated.through)
+  const readAt = wholeNumber(dated.readAt)
+  return from !== null && through !== null && readAt !== null ? { from, through, readAt } : undefined
+}
+
 /**
  * The stored lists as the planner reads them, from `cache.searchLists` as
  * storage holds it: each one's key and when it was read, and its descriptor's
@@ -222,14 +232,9 @@ export function storedListRefs(searchLists: unknown): StoredListRef[] {
     if (!isObject(list))
       continue
     const ref: StoredListRef = { key, scrapedAt: typeof list.scrapedAt === 'number' ? list.scrapedAt : 0 }
-    const dated = list.dated
-    if (isObject(dated)) {
-      const from = wholeNumber(dated.from)
-      const through = wholeNumber(dated.through)
-      const readAt = wholeNumber(dated.readAt)
-      if (from !== null && through !== null && readAt !== null)
-        ref.settled = { from, through, readAt }
-    }
+    const settled = copySettled(list.dated)
+    if (settled)
+      ref.settled = settled
     const descriptor = list.descriptor
     if (isObject(descriptor)) {
       for (const field of ['sourceId', 'listUrl', 'label'] as const) {

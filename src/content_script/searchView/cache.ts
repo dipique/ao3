@@ -1,8 +1,9 @@
-import type { LegacySearchSnapshot, SnapshotDescriptor, StoredList } from '#common'
+import type { CopySettled, LegacySearchSnapshot, SnapshotDescriptor, StoredList } from '#common'
 import type { Work } from '#content_script/blurb.js'
 
 import {
   cache,
+  copySettled,
   dateFilterSpan,
   dayOf,
   droppedIds,
@@ -84,6 +85,8 @@ export interface SnapshotSummary {
   /** Of those, how many the blurb index says aren't stored — works a refresh would restore. */
   unstored: number
   descriptor?: SnapshotDescriptor
+  /** A tracked list's copy: how far it is complete ({@link copySettled}). */
+  settled?: CopySettled
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +184,7 @@ export async function listSnapshots(): Promise<SnapshotSummary[]> {
     if (!readable(list))
       continue
     const workIds = unpackOrderedIds(list.ids)
+    const settled = copySettled(list.dated)
     out.push({
       key,
       scrapedAt: list.scrapedAt,
@@ -188,6 +192,7 @@ export async function listSnapshots(): Promise<SnapshotSummary[]> {
       workIds,
       unstored: workIds.filter(id => !index.has(id)).length,
       descriptor: list.descriptor,
+      ...(settled ? { settled } : {}),
     })
   }
   for (const [key, entry] of Object.entries(legacy)) {

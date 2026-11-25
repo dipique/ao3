@@ -3,7 +3,7 @@ import { after, before, describe, test } from 'node:test'
 
 import { copyKeyOf } from '../../src/common/listLinks.ts'
 import { copyQuery, packRows } from '../../src/common/trackedReads.ts'
-import { SCAN_REFRESH_TIP } from '../../src/options_ui/model/savedListRows.ts'
+import { SCAN_REFRESH_TIP, settledWords } from '../../src/options_ui/model/savedListRows.ts'
 import { mentions, skip, startOptions, stubArchive, until } from './optionsPage.mjs'
 import { archiveAnswers, listing, readsOf, resetWorkIds, series, TODAY, trackedOption } from './trackedReview.mjs'
 
@@ -100,6 +100,18 @@ describe('options UI — a tracked list\'s Refresh list', { skip }, () => {
       await options.press(await options.action(row, 'refresh'))
       await until('a copy to be kept', async () => (await storedCopy(options))?.dated?.through === TODAY - 1)
       assert.equal((await storedCopy(options)).dated.from, since)
+    }
+    finally {
+      await options.close()
+    }
+  })
+
+  test('a tracked list\'s row says how far its stored copy is complete', async () => {
+    const options = await openWith({ 'cache.searchLists': { [key]: copy } })
+    try {
+      const row = await options.savedListDetails('alpha')
+      const offline = await row.$eval('[data-saved-list-part="details"] section', el => el.textContent)
+      assert.ok(mentions(offline, settledWords(copy.dated, Date.now())), offline)
     }
     finally {
       await options.close()

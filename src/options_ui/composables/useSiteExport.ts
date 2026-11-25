@@ -1,4 +1,4 @@
-import type { JoinedSavedList, SnapshotDescriptor, StoredListRef } from '#common'
+import type { CopySettled, JoinedSavedList, SnapshotDescriptor, StoredListRef } from '#common'
 import type { ListRefresh } from '#content_script/searchView/listRefresh.ts'
 import type { ChangeImportProgress, ChangeImportReport } from '#content_script/siteExport/importChanges.js'
 import type { ExportJobPhase, JobStatus } from '#content_script/siteExport/job.js'
@@ -71,6 +71,8 @@ export interface SiteExportListRow {
   unstored: number
   /** The read-out under the title, and the row's search haystack. */
   summary: string
+  /** A tracked list's copy: how far it is complete. */
+  settled?: CopySettled
 }
 
 /**
@@ -139,8 +141,9 @@ const userId = computed(() => useOption('user').userId?.value)
 
 /** A stored list as the saved-list join reads it. */
 function refOf(row: SiteExportListRow): StoredListRef {
-  const { key, descriptor, scrapedAt } = row
-  return descriptor ? { key, sourceId: descriptor.sourceId, listUrl: descriptor.listUrl, label: descriptor.label, scrapedAt } : { key, scrapedAt }
+  const { key, descriptor, scrapedAt, settled } = row
+  const stored: StoredListRef = descriptor ? { key, sourceId: descriptor.sourceId, listUrl: descriptor.listUrl, label: descriptor.label, scrapedAt } : { key, scrapedAt }
+  return settled ? { ...stored, settled } : stored
 }
 
 const joined = computed(() => joinSavedLists(savedLists.current(), rows.value.map(refOf), userId.value))
@@ -337,6 +340,7 @@ async function reload(): Promise<void> {
       bytes,
       unstored: snapshot.unstored,
       summary: '',
+      ...(snapshot.settled ? { settled: snapshot.settled } : {}),
     }
     row.summary = summarize(row)
     return row
