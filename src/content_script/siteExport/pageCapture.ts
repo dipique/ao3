@@ -10,7 +10,7 @@ import { COMMENT_LOAD_RETRIES } from '../../common/constants.ts'
  * A copy is the whole work, so every chapter has to be on the page: a
  * one-chapter work always is, and a longer one only as its entire work. With
  * comments saved alongside, a work that has any needs some of them shown, and
- * AO3 loads them after the page when it is asked for them (`#comments`), so the
+ * AO3 loads them after the page when it is asked for them (`show_comments=true`), so the
  * page is looked at again a few times before it is given up on. How many are
  * shown doesn't matter: a copy holding fewer than every page of them is stored
  * as not holding them all, and the next caching run fetches the rest.

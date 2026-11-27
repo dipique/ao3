@@ -13,13 +13,13 @@ describe('workPageRedirect', () => {
     assert.equal(workPageRedirect(`${AO3}/works/80538176`, FULL), `${AO3}/works/80538176?view_full_work=true`)
   })
 
-  test('a work opens at its comments, as a chapter or as the entire work', () => {
-    assert.equal(workPageRedirect(`${AO3}/works/80538176`, COMMENTS), `${AO3}/works/80538176#comments`)
-    assert.equal(workPageRedirect(`${AO3}/works/80538176?view_full_work=true`, COMMENTS), `${AO3}/works/80538176?view_full_work=true#comments`)
+  test('a work opens with its comments shown, as a chapter or as the entire work, without scrolling to them', () => {
+    assert.equal(workPageRedirect(`${AO3}/works/80538176`, COMMENTS), `${AO3}/works/80538176?show_comments=true`)
+    assert.equal(workPageRedirect(`${AO3}/works/80538176?view_full_work=true`, COMMENTS), `${AO3}/works/80538176?view_full_work=true&show_comments=true`)
   })
 
-  test('with both on, a work opens as its entire work at its comments, in one step', () => {
-    assert.equal(workPageRedirect(`${AO3}/works/80538176`, BOTH), `${AO3}/works/80538176?view_full_work=true#comments`)
+  test('with both on, a work opens as its entire work with its comments shown, in one step', () => {
+    assert.equal(workPageRedirect(`${AO3}/works/80538176`, BOTH), `${AO3}/works/80538176?view_full_work=true&show_comments=true`)
   })
 
   test('the work\'s other query parameters are kept as they were written', () => {
@@ -28,7 +28,7 @@ describe('workPageRedirect', () => {
   })
 
   test('a page already as asked for is left alone', () => {
-    assert.equal(workPageRedirect(`${AO3}/works/1?view_full_work=true#comments`, BOTH), null)
+    assert.equal(workPageRedirect(`${AO3}/works/1?view_full_work=true&show_comments=true`, BOTH), null)
   })
 
   test('a work asked for chapter by chapter stays that way', () => {
@@ -44,8 +44,12 @@ describe('workPageRedirect', () => {
     assert.equal(workPageRedirect(`${AO3}/works/1?show_comments=true`, COMMENTS), null)
   })
 
+  test('a page aimed at its comments without asking AO3 for them is asked for them', () => {
+    assert.equal(workPageRedirect(`${AO3}/works/1#comments`, COMMENTS), `${AO3}/works/1?show_comments=true#comments`)
+  })
+
   test('a work in a collection, and one with a trailing slash, are works too', () => {
-    assert.equal(workPageRedirect(`${AO3}/collections/fest/works/1`, BOTH), `${AO3}/collections/fest/works/1?view_full_work=true#comments`)
+    assert.equal(workPageRedirect(`${AO3}/collections/fest/works/1`, BOTH), `${AO3}/collections/fest/works/1?view_full_work=true&show_comments=true`)
     assert.equal(workPageRedirect(`${AO3}/works/1/`, FULL), `${AO3}/works/1/?view_full_work=true`)
   })
 

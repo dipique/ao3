@@ -87,11 +87,8 @@ async function run() {
     redirectChecked = true
     const target = workPageRedirect(location.href, { fullWork: opts.showFullWork, comments: opts.showComments })
     if (target) {
-      const leaving = target.split('#')[0] !== location.href.split('#')[0]
       location.replace(target)
-      // Only a new address is another page; a new fragment is this one, still to decorate.
-      if (leaving)
-        return
+      return
     }
   }
   // Before any unit can ask AO3 for anything.

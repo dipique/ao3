@@ -251,7 +251,7 @@ describe('work text and blurbs kept from the work page', { skip }, () => {
   })
 })
 
-/** A work's page opens as its entire work, at its comments, when the reader asked for that. */
+/** A work's page opens as its entire work, with its comments shown, when the reader asked for that. */
 describe('work page defaults', { skip }, () => {
   let browser
 
@@ -264,7 +264,7 @@ describe('work page defaults', { skip }, () => {
     await browser?.close()
   })
 
-  test('a work opens as its entire work, at its comments', async () => {
+  test('a work opens as its entire work, with its comments shown', async () => {
     const requests = []
     const tab = await openTab(browser, {
       seed: { 'option.showFullWork': true, 'option.showComments': true },
@@ -274,21 +274,24 @@ describe('work page defaults', { skip }, () => {
     try {
       await tab.goto(WORK_URL, { waitUntil: 'domcontentloaded' })
       await Promise.all([tab.waitForNavigation({ waitUntil: 'domcontentloaded' }), inject(tab).catch(() => {})])
-      assert.equal(tab.url(), `${FULL_URL}#comments`)
-      assert.deepEqual(requests.filter(url => url.includes('/works/')), [WORK_URL, FULL_URL])
+      const shown = `${FULL_URL}&show_comments=true`
+      assert.equal(tab.url(), shown)
+      assert.deepEqual(requests.filter(url => url.includes('/works/')), [WORK_URL, shown])
     }
     finally {
       await tab.close()
     }
   })
 
-  test('with only comments asked for, the page stays and goes to its comments', async () => {
+  test('with only comments asked for, AO3 is asked for the comments', async () => {
     const requests = []
     const tab = await openTab(browser, { seed: { 'option.showComments': true }, route: () => workPage(), requests })
     try {
-      await visit(tab, WORK_URL)
-      await until('the address names the comments', () => tab.url() === `${WORK_URL}#comments`)
-      assert.deepEqual(requests.filter(url => url.includes('/works/')), [WORK_URL])
+      await tab.goto(WORK_URL, { waitUntil: 'domcontentloaded' })
+      await Promise.all([tab.waitForNavigation({ waitUntil: 'domcontentloaded' }), inject(tab).catch(() => {})])
+      const shown = `${WORK_URL}?show_comments=true`
+      assert.equal(tab.url(), shown)
+      assert.deepEqual(requests.filter(url => url.includes('/works/')), [WORK_URL, shown])
     }
     finally {
       await tab.close()

@@ -322,7 +322,7 @@ export interface Options {
   readerMode: boolean
   /** Open a work's page as its entire work (`view_full_work=true`) unless the address says otherwise. */
   showFullWork: boolean
-  /** Open a work's page at its comments (`#comments`) unless the address aims somewhere else. */
+  /** Open a work's page with its comments shown (`show_comments=true`) unless the address aims somewhere else. */
   showComments: boolean
   /**
    * On your own dashboard pages, clicking the red band across the top of the
